@@ -18,6 +18,16 @@ public record DateRange
 
     public bool IsActive(DateTime date) => date >= Start && date <= End;
 
-    // Método de utilidad para extender la licencia
-    public DateRange Extend(DateTime newEnd) => new DateRange(Start, newEnd);
+    public DateRange Extend(DateTime newEnd)
+    {
+        if (newEnd <= End)
+            throw new DomainException("La nueva fecha de fin debe ser mayor a la actual para extender.");
+
+        return new DateRange(Start, newEnd);
+    }
+
+    public DateRange Renew(DateTime newStart, DateTime newEnd)
+    {
+        return new DateRange(newStart, newEnd);
+    }
 }

@@ -17,41 +17,59 @@ public class License : Entity
 
     private License() { }
 
-    // Crear licencia por Plantilla
-    public static License CreateTemplateLicense(Guid workspaceId, Guid templateId, DateTime startDate, DateTime endDate)
+    public static License CreateTemplateLicense(Guid workspaceId, Guid templateId, DateTime startDate, DateTime endDate, DateTime now)
     {
         return new License
         {
             WorkspaceId = workspaceId,
             Type = LicenseType.Template,
-            Status = LicenseStatus.Active,
+            Status = DetermineInitialStatus(startDate, endDate, now),
             ValidityPeriod = new DateRange(startDate, endDate),
             TemplateId = templateId
         };
     }
 
-    // Crear licencia Custom
-    public static License CreateCustomLicense(Guid workspaceId, DateTime startDate, DateTime endDate)
+    public static License CreateCustomLicense(Guid workspaceId, DateTime startDate, DateTime endDate, DateTime now)
     {
         return new License
         {
             WorkspaceId = workspaceId,
             Type = LicenseType.Custom,
-            Status = LicenseStatus.Active,
+            Status = DetermineInitialStatus(startDate, endDate, now),
             ValidityPeriod = new DateRange(startDate, endDate),
             TemplateId = null
         };
     }
 
-    // --- REGLAS DE NEGOCIO ---
+    private static LicenseStatus DetermineInitialStatus(DateTime start, DateTime end, DateTime now)
+    {
+        if (now < start) return LicenseStatus.Pending;
+        if (now > end) return LicenseStatus.Expired;
+        return LicenseStatus.Active;
+    }
 
-    public void Extend(DateTime newExpirationDate)
+    public bool IsValidAt(DateTime now)
+    {
+        return Status == LicenseStatus.Active && ValidityPeriod.IsActive(now);
+    }
+
+    public void Extend(DateTime newExpirationDate, DateTime now)
     {
         if (Status is LicenseStatus.Cancelled)
             throw new DomainException("No se puede extender una licencia cancelada.");
 
         ValidityPeriod = ValidityPeriod.Extend(newExpirationDate);
-        Status = ValidityPeriod.IsActive(DateTime.UtcNow) ? LicenseStatus.Active : Status;
+        Status = DetermineInitialStatus(ValidityPeriod.Start, ValidityPeriod.End, now);
+        UpdateTimestamp();
+    }
+
+    public void Renew(DateTime newStartDate, DateTime newEndDate, DateTime now)
+    {
+        if (Status is LicenseStatus.Cancelled)
+            throw new DomainException("No se puede renovar una licencia cancelada.");
+
+        ValidityPeriod = ValidityPeriod.Renew(newStartDate, newEndDate);
+        Status = DetermineInitialStatus(ValidityPeriod.Start, ValidityPeriod.End, now);
         UpdateTimestamp();
     }
 
@@ -61,15 +79,12 @@ public class License : Entity
         UpdateTimestamp();
     }
 
-    public void Reactivate()
+    public void Reactivate(DateTime now)
     {
-        if (Status is not LicenseStatus.Suspended and not LicenseStatus.Expired)
-            throw new DomainException("Solo se pueden reactivar licencias suspendidas o expiradas.");
+        if (Status is not LicenseStatus.Suspended)
+            throw new DomainException("Solo se pueden reactivar licencias suspendidas.");
 
-        if (!ValidityPeriod.IsActive(DateTime.UtcNow))
-            throw new DomainException("No se puede reactivar porque la fecha actual está fuera del periodo de validez. Extienda la licencia primero.");
-
-        Status = LicenseStatus.Active;
+        Status = DetermineInitialStatus(ValidityPeriod.Start, ValidityPeriod.End, now);
         UpdateTimestamp();
     }
 
@@ -80,5 +95,24 @@ public class License : Entity
 
         TemplateId = newTemplateId;
         UpdateTimestamp();
+    }
+
+    public void AddModule(Guid moduleId)
+    {
+        if (!_licenseModules.Any(m => m.ModuleId == moduleId))
+        {
+            _licenseModules.Add(new LicenseModule(Id, moduleId));
+            UpdateTimestamp();
+        }
+    }
+
+    public void RemoveModule(Guid moduleId)
+    {
+        var module = _licenseModules.FirstOrDefault(m => m.ModuleId == moduleId);
+        if (module != null)
+        {
+            _licenseModules.Remove(module);
+            UpdateTimestamp();
+        }
     }
 }

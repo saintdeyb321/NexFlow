@@ -10,7 +10,7 @@ public class User : Entity
     public string LastName { get; private set; } = null!;
     public UserStatus Status { get; private set; }
 
-    private User() { } // Para frameworks de persistencia
+    private User() { }
 
     public static User Create(Email email, string firstName, string lastName)
     {
@@ -26,6 +26,18 @@ public class User : Entity
     public void Suspend()
     {
         Status = UserStatus.Suspended;
+        UpdateTimestamp();
+    }
+
+    public void Activate()
+    {
+        Status = UserStatus.Active;
+        UpdateTimestamp();
+    }
+
+    public void Deactivate()
+    {
+        Status = UserStatus.Inactive;
         UpdateTimestamp();
     }
 }

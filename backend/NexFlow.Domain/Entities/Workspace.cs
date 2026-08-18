@@ -17,4 +17,28 @@ public class Workspace : Entity
             Status = WorkspaceStatus.Active
         };
     }
+
+    public void Rename(string newName)
+    {
+        Name = newName;
+        UpdateTimestamp();
+    }
+
+    public void Suspend()
+    {
+        Status = WorkspaceStatus.Suspended;
+        UpdateTimestamp();
+    }
+
+    public void Activate()
+    {
+        Status = WorkspaceStatus.Active;
+        UpdateTimestamp();
+    }
+
+    public void Archive()
+    {
+        Status = WorkspaceStatus.Archived;
+        UpdateTimestamp();
+    }
 }

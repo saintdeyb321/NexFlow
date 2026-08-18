@@ -12,11 +12,23 @@ public enum AuditAction
 {
     LicenseCreated,
     LicenseExtended,
+    LicenseRenewed,
     LicenseSuspended,
     LicenseReactivated,
+    LicenseCancelled,
+    TemplateCreated,
+    TemplateUpdated,
     TemplateChanged,
+    TemplateActivated,
+    TemplateDeactivated,
     ModuleAssigned,
+    ModuleRemoved,
     MemberAdded,
     MemberRemoved,
-    WorkspaceCreated
+    MemberRoleChanged,
+    WorkspaceCreated,
+    WorkspaceSuspended,
+    WorkspaceActivated,
+    UserCreated,
+    UserSuspended
 }
