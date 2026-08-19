@@ -15,6 +15,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
     public DbSet<Template> Templates => Set<Template>();
     public DbSet<TemplateModule> TemplateModules => Set<TemplateModule>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Reservation> Reservations { get; set; } = null!;
 
     public NexFlowDbContext(DbContextOptions<NexFlowDbContext> options) : base(options)
     {

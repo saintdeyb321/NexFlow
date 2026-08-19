@@ -28,10 +28,18 @@ public interface ILicenseRepository
     void Add(License license);
 }
 
+public interface IModuleRepository
+{
+    Task<Module?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
+    Task<Module?> GetByCodeAsync(string code, CancellationToken cancellationToken);
+    void Add(Module module);
+}
+
 public interface ITemplateRepository
 {
     Task<Template?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
-    Task<IEnumerable<TemplateModule>> GetTemplateModulesAsync(Guid templateId, CancellationToken cancellationToken);
+    // NUEVO: Devuelve únicamente los módulos que están asignados a la plantilla Y que tienen Status == Active
+    Task<IEnumerable<Module>> GetActiveModulesForTemplateAsync(Guid templateId, CancellationToken cancellationToken);
     void Add(Template template);
 }
 

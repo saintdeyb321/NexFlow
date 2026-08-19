@@ -1,6 +1,6 @@
 ﻿namespace NexFlow.Application.Abstractions;
 
-// Nos dice en qué negocio está operando el usuario en esta petición HTTP
+// Extraerá el WorkspaceId del header HTTP (ej. x-workspace-id) para asegurar el tenant
 public interface IWorkspaceContext
 {
     Guid CurrentWorkspaceId { get; }

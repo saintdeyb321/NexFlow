@@ -8,7 +8,7 @@ public class LicenseModuleConfiguration : IEntityTypeConfiguration<LicenseModule
 {
     public void Configure(EntityTypeBuilder<LicenseModule> builder)
     {
-        // Llave primaria compuesta porque es una tabla asociativa
+        // Llave primaria compuesta para la tabla intermedia
         builder.HasKey(lm => new { lm.LicenseId, lm.ModuleId });
     }
 }

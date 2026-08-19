@@ -1,95 +1,109 @@
 ﻿using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Common;
-using NexFlow.Application.DTOs.Conversations;
-using NexFlow.Application.Engines.AI;
-using NexFlow.Application.Engines.Intent;
-using NexFlow.Application.Engines.Knowledge;
+using NexFlow.Domain.Entities;
+using NexFlow.Domain.Enums;
+using NexFlow.Domain.ValueObjects;
 
-namespace NexFlow.Application.Features.Automation.ProcessMessage;
+namespace NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 
-public class ProcessIncomingMessageCommandHandler
+public class ProvisionClientCommandHandler
 {
-    private readonly IEntitlementService _entitlementService;
-    private readonly IIntentEngine _intentEngine;
-    private readonly IKnowledgeEngine _knowledgeEngine;
-    private readonly IAiRouter _aiRouter;
-    private readonly IConversationRepository _conversationRepository;
-    private readonly IMessageGateway _messageGateway;
+    private readonly IUserRepository _userRepository;
+    private readonly IWorkspaceRepository _workspaceRepository;
+    private readonly IMembershipRepository _membershipRepository;
+    private readonly ILicenseRepository _licenseRepository;
+    private readonly ITemplateRepository _templateRepository;
+    private readonly IAuditLogRepository _auditLogRepository;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
+    private readonly ICurrentUser _currentUser;
 
-    public ProcessIncomingMessageCommandHandler(
-        IEntitlementService entitlementService,
-        IIntentEngine intentEngine,
-        IKnowledgeEngine knowledgeEngine,
-        IAiRouter aiRouter,
-        IConversationRepository conversationRepository,
-        IMessageGateway messageGateway,
-        IClock clock)
+    public ProvisionClientCommandHandler(
+        IUserRepository userRepository,
+        IWorkspaceRepository workspaceRepository,
+        IMembershipRepository membershipRepository,
+        ILicenseRepository licenseRepository,
+        ITemplateRepository templateRepository,
+        IAuditLogRepository auditLogRepository,
+        IUnitOfWork unitOfWork,
+        IClock clock,
+        ICurrentUser currentUser)
     {
-        _entitlementService = entitlementService;
-        _intentEngine = intentEngine;
-        _knowledgeEngine = knowledgeEngine;
-        _aiRouter = aiRouter;
-        _conversationRepository = conversationRepository;
-        _messageGateway = messageGateway;
+        _userRepository = userRepository;
+        _workspaceRepository = workspaceRepository;
+        _membershipRepository = membershipRepository;
+        _licenseRepository = licenseRepository;
+        _templateRepository = templateRepository;
+        _auditLogRepository = auditLogRepository;
+        _unitOfWork = unitOfWork;
         _clock = clock;
+        _currentUser = currentUser;
     }
 
-    public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
+    public async Task<Result<Guid>> Handle(ProvisionClientCommand request, CancellationToken cancellationToken)
     {
-        // 1. Guardián: ¿La licencia está activa?
-        if (!await _entitlementService.IsLicenseValidAsync(request.WorkspaceId, cancellationToken))
+        var now = _clock.UtcNow;
+
+        if (request.ExpiresAt <= now)
         {
-            // Ignoramos el mensaje silenciosamente si no pagan, o podríamos mandar un mensaje fijo
-            return Result.Failure(new Error("License.Invalid", "El negocio no tiene licencia activa."));
+            return Result<Guid>.Failure(new Error("License.InvalidExpiration", "La fecha de expiración debe ser en el futuro."));
         }
 
-        // 2. Guardar mensaje entrante del usuario en la memoria
-        var userMessage = new MessageDto("USER", request.Message, _clock.UtcNow);
-        await _conversationRepository.SaveMessageAsync(request.WorkspaceId, request.CustomerIdentifier, userMessage, cancellationToken);
-
-        // 3. Entender la intención
-        var intentResult = await _intentEngine.AnalyzeAsync(request.Message, cancellationToken);
-
-        // 4. Construir contexto (Software decide y busca)
-        string systemContext = string.Empty;
-
-        // Validamos si tienen el módulo FAQ activo
-        bool hasFaqModule = await _entitlementService.HasModuleAccessAsync(request.WorkspaceId, "FAQ", cancellationToken);
-
-        if (intentResult.Intent == "FAQ" && hasFaqModule)
+        if (!_currentUser.IsAuthenticated)
         {
-            var faqs = await _knowledgeEngine.SearchRelevantFaqsAsync(request.WorkspaceId, request.Message, cancellationToken);
-            systemContext = $"FAQs Encontradas: {string.Join(" | ", faqs.Select(f => f.Question + ": " + f.Answer))}";
-        }
-        else if (intentResult.Intent == "CHECK_AVAILABILITY")
-        {
-            // Aquí llamaríamos al _reservationEngine.GetAvailabilityAsync...
-            // Por brevedad en el diseño, imaginamos que nos devuelve esto:
-            systemContext = "Horarios disponibles: 10:00 AM, 11:30 AM.";
+            return Result<Guid>.Failure(new Error("Auth.Unauthorized", "Operación no autorizada."));
         }
 
-        // Si no detectó nada claro, le pasamos la info general del negocio
-        if (string.IsNullOrEmpty(systemContext))
+        var email = new Email(request.Email);
+        var existingUser = await _userRepository.GetByEmailAsync(email, cancellationToken);
+        if (existingUser != null)
         {
-            systemContext = await _knowledgeEngine.GetBusinessContextAsStringAsync(request.WorkspaceId, cancellationToken);
+            return Result<Guid>.Failure(new Error("User.Exists", "El correo ya está registrado en el sistema."));
         }
 
-        // 5. Generar la respuesta (IA redacta con empatía usando la data dura del software)
-        var aiResponse = await _aiRouter.GenerateResponseAsync(
-            request.WorkspaceId,
-            intentResult,
-            systemContext,
-            cancellationToken);
+        var template = await _templateRepository.GetByIdAsync(request.TemplateId, cancellationToken);
+        if (template == null)
+        {
+            return Result<Guid>.Failure(new Error("Template.NotFound", "La plantilla especificada no existe."));
+        }
+        if (template.Status != TemplateStatus.Active)
+        {
+            return Result<Guid>.Failure(new Error("Template.Inactive", "La plantilla está inactiva y no puede ser comercializada."));
+        }
 
-        // 6. Enviar la respuesta vía WhatsApp (Evolution/n8n)
-        await _messageGateway.SendTextAsync(request.WorkspaceId, request.CustomerIdentifier, aiResponse, cancellationToken);
+        var activeModules = await _templateRepository.GetActiveModulesForTemplateAsync(template.Id, cancellationToken);
+        if (!activeModules.Any())
+        {
+            return Result<Guid>.Failure(new Error("Template.NoModules", "La plantilla no contiene módulos activos para asignar."));
+        }
 
-        // 7. Guardar mensaje saliente del asistente
-        var assistantMessage = new MessageDto("ASSISTANT", aiResponse, _clock.UtcNow);
-        await _conversationRepository.SaveMessageAsync(request.WorkspaceId, request.CustomerIdentifier, assistantMessage, cancellationToken);
+        var user = User.Create(email, request.FirstName, request.LastName);
+        _userRepository.Add(user);
 
-        return Result.Success();
+        var workspace = Workspace.Create(request.WorkspaceName);
+        _workspaceRepository.Add(workspace);
+
+        var membership = Membership.Create(user.Id, workspace.Id, MembershipRole.Owner);
+        _membershipRepository.Add(membership);
+
+        var license = License.CreateTemplateLicense(workspace.Id, template.Id, now, request.ExpiresAt, now);
+
+        foreach (var module in activeModules)
+        {
+            license.AddModule(module.Id);
+        }
+        _licenseRepository.Add(license);
+
+        var audit = AuditLog.Create(
+            workspaceId: workspace.Id,
+            userId: _currentUser.UserId,
+            action: AuditAction.WorkspaceCreated,
+            details: $"Workspace '{workspace.Name}' creado con plantilla '{template.Name}' hasta {request.ExpiresAt:yyyy-MM-dd} por SuperAdmin."
+        );
+        _auditLogRepository.Add(audit);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return Result<Guid>.Success(workspace.Id);
     }
 }

@@ -11,7 +11,6 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     {
         builder.HasKey(u => u.Id);
 
-        // Mapeamos el Value Object 'Email' a una columna string normal en la BD
         builder.Property(u => u.Email)
             .HasConversion(
                 email => email.Value,
@@ -19,10 +18,13 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .IsRequired()
             .HasMaxLength(255);
 
-        builder.HasIndex(u => u.Email).IsUnique(); // El email debe ser único en la tabla
+        // Constraint Real: Correo único
+        builder.HasIndex(u => u.Email).IsUnique();
 
         builder.Property(u => u.FirstName).IsRequired().HasMaxLength(100);
         builder.Property(u => u.LastName).IsRequired().HasMaxLength(100);
-        builder.Property(u => u.Status).HasConversion<string>().IsRequired(); // Guardar enum como string legible
+
+        // Guardar Enum como texto en PostgreSQL para que sea legible
+        builder.Property(u => u.Status).HasConversion<string>().IsRequired();
     }
 }

@@ -1,11 +1,12 @@
-﻿namespace NexFlow.Application.Features.SuperAdmin.ProvisionClient;
+﻿using System;
 
-// DTO de entrada. Usamos tipos primitivos (string, int) porque vienen del controlador/API.
+namespace NexFlow.Application.Features.SuperAdmin.ProvisionClient;
+
 public record ProvisionClientCommand(
     string Email,
     string FirstName,
     string LastName,
     string WorkspaceName,
     Guid TemplateId,
-    int DurationInMonths
+    DateTime ExpiresAt
 );
