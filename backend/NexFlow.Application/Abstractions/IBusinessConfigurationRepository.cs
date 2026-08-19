@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.DTOs.Business;
+﻿using NexFlow.Application.Features.Business;
 
 namespace NexFlow.Application.Abstractions;
 

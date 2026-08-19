@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.DTOs.Knowledge;
+﻿namespace NexFlow.Application.Features.Knowledge;
 
 public record FaqDto(
     string Id,

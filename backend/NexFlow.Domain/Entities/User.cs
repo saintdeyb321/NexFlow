@@ -23,21 +23,7 @@ public class User : Entity
         };
     }
 
-    public void Suspend()
-    {
-        Status = UserStatus.Suspended;
-        UpdateTimestamp();
-    }
-
-    public void Activate()
-    {
-        Status = UserStatus.Active;
-        UpdateTimestamp();
-    }
-
-    public void Deactivate()
-    {
-        Status = UserStatus.Inactive;
-        UpdateTimestamp();
-    }
+    public void Suspend() => Status = UserStatus.Suspended;
+    public void Activate() => Status = UserStatus.Active;
+    public void Deactivate() => Status = UserStatus.Inactive;
 }

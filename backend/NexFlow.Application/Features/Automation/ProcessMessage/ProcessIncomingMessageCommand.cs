@@ -1,10 +1,8 @@
-﻿using NexFlow.Application.Common;
+﻿namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
-namespace NexFlow.Application.Features.Automation.ProcessMessage;
-
-// Esto es lo que recibe la API desde el webhook de WhatsApp
+// Este comando representa un mensaje entrante (ej. de WhatsApp)
 public record ProcessIncomingMessageCommand(
-    Guid WorkspaceId,
-    string CustomerIdentifier, // El número de WhatsApp
-    string Message
+    string CustomerPhone,
+    string CustomerName,
+    string MessageText
 );

@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
-using NexFlow.Application.DTOs.Reservations;
+using NexFlow.Application.Features.Reservations;
 
 namespace NexFlow.Application.Engines.Reservation;
 
@@ -51,7 +51,7 @@ public class ReservationEngine : IReservationEngine
             reservation.ServiceId,
             reservation.CustomerIdentifier,
             reservation.StartTime,
-            reservation.Status);
+            reservation.Status.ToString());
 
         return Result<ReservationDto>.Success(dto);
     }

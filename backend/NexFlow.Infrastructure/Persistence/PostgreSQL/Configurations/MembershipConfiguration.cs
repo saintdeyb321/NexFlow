@@ -10,9 +10,9 @@ public class MembershipConfiguration : IEntityTypeConfiguration<Membership>
     {
         builder.HasKey(m => m.Id);
 
-        builder.Property(m => m.Role).HasConversion<string>().IsRequired();
-
-        // Constraint Real: Un usuario solo puede tener un registro de membresía por Workspace
+        // RESTRICCIÓN UNIQUE: Un usuario solo puede tener UNA membresía por Workspace
         builder.HasIndex(m => new { m.UserId, m.WorkspaceId }).IsUnique();
+
+        builder.Property(m => m.Role).IsRequired();
     }
 }

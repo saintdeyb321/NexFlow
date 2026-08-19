@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authorization;
 using NexFlow.Application.DependencyInjection;
 using NexFlow.Infrastructure.DependencyInjection;
 using NexFlow.Application.Abstractions;
 using NexFlow.API.Services;
+using NexFlow.API.Security; // <-- Nuestra nueva carpeta de seguridad
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,11 +34,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-// 4. Configurar Controladores y Swagger
+// --- NUEVA SEGURIDAD (MEGA-SPRINT D) ---
+// 4. Inyectar el Guardia de Seguridad
+builder.Services.AddScoped<IAuthorizationHandler, SuperAdminHandler>();
+
+// 5. Configurar las Políticas
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SuperAdmin", policy =>
+        policy.Requirements.Add(new SuperAdminRequirement()));
+});
+// ---------------------------------------
+
+// 6. Configurar Controladores y Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-
-// Swagger en su versión más pura, sin configuraciones visuales conflictivas
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();

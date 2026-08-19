@@ -23,6 +23,5 @@ public class Membership : Entity
     public void ChangeRole(MembershipRole newRole)
     {
         Role = newRole;
-        UpdateTimestamp();
     }
 }

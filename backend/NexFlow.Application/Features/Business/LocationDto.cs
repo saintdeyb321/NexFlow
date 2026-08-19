@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.DTOs.Business;
+﻿namespace NexFlow.Application.Features.Business;
 
 public record LocationDto(
     string Id, // ID del documento en Firestore

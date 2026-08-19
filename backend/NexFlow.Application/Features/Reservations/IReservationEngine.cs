@@ -1,7 +1,6 @@
 ﻿using NexFlow.Application.Common;
-using NexFlow.Application.DTOs.Reservations;
 
-namespace NexFlow.Application.Engines.Reservation;
+namespace NexFlow.Application.Features.Reservations;
 
 public interface IReservationEngine
 {

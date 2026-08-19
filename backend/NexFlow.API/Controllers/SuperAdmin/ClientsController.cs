@@ -1,10 +1,14 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization; // <-- Para usar [Authorize]
+using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 
 namespace NexFlow.API.Controllers.SuperAdmin;
 
 [ApiController]
 [Route("api/superadmin/clients")]
+[Authorize(Policy = "SuperAdmin")] // <-- Sin esto, cualquiera podría crear clientes
 public class ClientsController : ControllerBase
 {
     private readonly ProvisionClientCommandHandler _provisionHandler;

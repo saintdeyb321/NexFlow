@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.DTOs.Conversations;
+﻿using NexFlow.Application.Features.Automation.Conversations;
 
 namespace NexFlow.Application.Abstractions;
 

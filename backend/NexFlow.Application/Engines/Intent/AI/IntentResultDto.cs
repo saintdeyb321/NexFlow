@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.DTOs.AI;
+﻿namespace NexFlow.Application.Engines.Intent.AI;
 
 public record IntentResultDto(
     string Intent, // Ej: "CREATE_RESERVATION", "FAQ", "CANCEL_RESERVATION"

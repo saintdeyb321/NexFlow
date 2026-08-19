@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.DTOs.Business;
+﻿namespace NexFlow.Application.Features.Business;
 
 public record BusinessProfileDto(
     string CommercialName,

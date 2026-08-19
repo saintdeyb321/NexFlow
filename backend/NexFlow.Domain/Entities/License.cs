@@ -1,4 +1,6 @@
-﻿using NexFlow.Domain.Enums;
+﻿using System;
+using System.Collections.Generic;
+using NexFlow.Domain.Enums;
 using NexFlow.Domain.Exceptions;
 using NexFlow.Domain.ValueObjects;
 
@@ -15,104 +17,67 @@ public class License : Entity
     private readonly List<LicenseModule> _licenseModules = new();
     public IReadOnlyCollection<LicenseModule> LicenseModules => _licenseModules.AsReadOnly();
 
+    // Constructor privado estricto para EF Core
     private License() { }
 
-    public static License CreateTemplateLicense(Guid workspaceId, Guid templateId, DateTime startDate, DateTime endDate, DateTime now)
+    public static License CreateTemplateLicense(Guid workspaceId, Guid templateId, DateTime now, DateTime expiresAt)
     {
+        // 1. Invariante: La expiración debe tener sentido temporal
+        if (expiresAt <= now)
+        {
+            throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
+        }
+
+        // 2. Invariante: Una licencia de plantilla DEBE tener un TemplateId
+        if (templateId == Guid.Empty)
+        {
+            throw new DomainException("Una licencia basada en plantilla requiere un ID de plantilla válido.");
+        }
+
         return new License
         {
+            Id = Guid.NewGuid(),
             WorkspaceId = workspaceId,
             Type = LicenseType.Template,
-            Status = DetermineInitialStatus(startDate, endDate, now),
-            ValidityPeriod = new DateRange(startDate, endDate),
-            TemplateId = templateId
+            TemplateId = templateId,
+            Status = LicenseStatus.Active, // Estado administrativo
+            ValidityPeriod = new DateRange(now, expiresAt)
         };
     }
 
-    public static License CreateCustomLicense(Guid workspaceId, DateTime startDate, DateTime endDate, DateTime now)
+    public void AddModule(Guid moduleId)
     {
-        return new License
+        if (Status != LicenseStatus.Active)
         {
-            WorkspaceId = workspaceId,
-            Type = LicenseType.Custom,
-            Status = DetermineInitialStatus(startDate, endDate, now),
-            ValidityPeriod = new DateRange(startDate, endDate),
-            TemplateId = null
-        };
+            throw new DomainException("No se pueden agregar módulos a una licencia que no está activa.");
+        }
+
+        // Usamos el constructor internal en lugar de los inicializadores
+        _licenseModules.Add(new LicenseModule(this.Id, moduleId));
     }
 
-    private static LicenseStatus DetermineInitialStatus(DateTime start, DateTime end, DateTime now)
+    // 3. Método de Validación Dinámica (Requerido por la auditoría)
+    // La autorización debe llamar a este método, no leer el "Status" directamente.
+    public bool IsValidAt(DateTime currentDate)
     {
-        if (now < start) return LicenseStatus.Pending;
-        if (now > end) return LicenseStatus.Expired;
-        return LicenseStatus.Active;
-    }
-
-    public bool IsValidAt(DateTime now)
-    {
-        return Status == LicenseStatus.Active && ValidityPeriod.IsActive(now);
-    }
-
-    public void Extend(DateTime newExpirationDate, DateTime now)
-    {
-        if (Status is LicenseStatus.Cancelled)
-            throw new DomainException("No se puede extender una licencia cancelada.");
-
-        ValidityPeriod = ValidityPeriod.Extend(newExpirationDate);
-        Status = DetermineInitialStatus(ValidityPeriod.Start, ValidityPeriod.End, now);
-        UpdateTimestamp();
-    }
-
-    public void Renew(DateTime newStartDate, DateTime newEndDate, DateTime now)
-    {
-        if (Status is LicenseStatus.Cancelled)
-            throw new DomainException("No se puede renovar una licencia cancelada.");
-
-        ValidityPeriod = ValidityPeriod.Renew(newStartDate, newEndDate);
-        Status = DetermineInitialStatus(ValidityPeriod.Start, ValidityPeriod.End, now);
-        UpdateTimestamp();
+        return Status == LicenseStatus.Active &&
+               currentDate >= ValidityPeriod.Start &&
+               currentDate <= ValidityPeriod.End;
     }
 
     public void Suspend()
     {
         Status = LicenseStatus.Suspended;
-        UpdateTimestamp();
     }
 
-    public void Reactivate(DateTime now)
+    public void Renew(DateTime newStartDate, DateTime newEndDate, DateTime currentDate)
     {
-        if (Status is not LicenseStatus.Suspended)
-            throw new DomainException("Solo se pueden reactivar licencias suspendidas.");
-
-        Status = DetermineInitialStatus(ValidityPeriod.Start, ValidityPeriod.End, now);
-        UpdateTimestamp();
-    }
-
-    public void ChangeTemplate(Guid newTemplateId)
-    {
-        if (Type != LicenseType.Template)
-            throw new DomainException("Solo las licencias de tipo Template pueden cambiar de plantilla.");
-
-        TemplateId = newTemplateId;
-        UpdateTimestamp();
-    }
-
-    public void AddModule(Guid moduleId)
-    {
-        if (!_licenseModules.Any(m => m.ModuleId == moduleId))
+        if (newEndDate <= newStartDate)
         {
-            _licenseModules.Add(new LicenseModule(Id, moduleId));
-            UpdateTimestamp();
+            throw new DomainException("La nueva fecha de fin debe ser mayor a la fecha de inicio.");
         }
-    }
 
-    public void RemoveModule(Guid moduleId)
-    {
-        var module = _licenseModules.FirstOrDefault(m => m.ModuleId == moduleId);
-        if (module != null)
-        {
-            _licenseModules.Remove(module);
-            UpdateTimestamp();
-        }
+        ValidityPeriod = new DateRange(newStartDate, newEndDate);
+        Status = LicenseStatus.Active;
     }
 }

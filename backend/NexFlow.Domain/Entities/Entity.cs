@@ -1,26 +1,17 @@
-﻿using NexFlow.Domain.DomainEvents;
+﻿using System;
+using System.Collections.Generic;
+using NexFlow.Domain.DomainEvents;
 
 namespace NexFlow.Domain.Entities;
 
 public abstract class Entity
 {
-    public Guid Id { get; protected init; }
-    public DateTime CreatedAt { get; protected init; }
-    public DateTime? UpdatedAt { get; protected set; }
+    public Guid Id { get; protected init; } = Guid.NewGuid();
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
 
     private readonly List<IDomainEvent> _domainEvents = new();
     public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
-
-    protected Entity()
-    {
-        Id = Guid.NewGuid();
-        CreatedAt = DateTime.UtcNow;
-    }
-
-    protected void UpdateTimestamp()
-    {
-        UpdatedAt = DateTime.UtcNow;
-    }
 
     protected void AddDomainEvent(IDomainEvent domainEvent)
     {

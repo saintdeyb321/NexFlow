@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
-using NexFlow.Application.DTOs.AI;
 using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent;
+using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Infrastructure.Engines.Intent;
 

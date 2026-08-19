@@ -1,4 +1,5 @@
 ﻿using System;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Domain.Entities;
 
@@ -11,7 +12,9 @@ public class Reservation
     public string CustomerIdentifier { get; private set; } = null!;
     public DateTime StartTime { get; private set; }
     public DateTime EndTime { get; private set; }
-    public string Status { get; private set; } = null!;
+
+    // CAMBIO CLAVE: Ahora es un Enum estructurado, no un string propenso a errores
+    public ReservationStatus Status { get; private set; }
 
     private Reservation() { }
 
@@ -26,7 +29,7 @@ public class Reservation
             CustomerIdentifier = customerIdentifier,
             StartTime = startTime,
             EndTime = endTime,
-            Status = "CONFIRMED"
+            Status = ReservationStatus.Confirmed // Tipado fuerte
         };
     }
 }

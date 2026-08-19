@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.DTOs.Business;
+﻿namespace NexFlow.Application.Features.Business;
 
 public record BusinessHoursDto(
     int DayOfWeek, // 0 = Domingo, 1 = Lunes...

@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.DTOs.AI;
+﻿using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Application.Engines.Intent;
 

@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.DTOs.Conversations;
+﻿namespace NexFlow.Application.Features.Automation.Conversations;
 
 public record MessageDto(
     string Role, // "USER" o "ASSISTANT"

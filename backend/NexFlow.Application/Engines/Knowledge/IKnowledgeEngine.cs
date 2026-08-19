@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.DTOs.Knowledge;
+﻿using NexFlow.Application.Features.Knowledge;
 
 namespace NexFlow.Application.Engines.Knowledge;
 

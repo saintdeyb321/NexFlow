@@ -18,27 +18,11 @@ public class Workspace : Entity
         };
     }
 
-    public void Rename(string newName)
-    {
-        Name = newName;
-        UpdateTimestamp();
-    }
+    public void Rename(string newName) => Name = newName;
 
-    public void Suspend()
-    {
-        Status = WorkspaceStatus.Suspended;
-        UpdateTimestamp();
-    }
+    public void Suspend() => Status = WorkspaceStatus.Suspended;
 
-    public void Activate()
-    {
-        Status = WorkspaceStatus.Active;
-        UpdateTimestamp();
-    }
+    public void Activate() => Status = WorkspaceStatus.Active;
 
-    public void Archive()
-    {
-        Status = WorkspaceStatus.Archived;
-        UpdateTimestamp();
-    }
+    public void Archive() => Status = WorkspaceStatus.Archived;
 }
