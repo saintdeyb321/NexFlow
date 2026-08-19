@@ -9,9 +9,9 @@ public class Result
     protected Result(bool isSuccess, Error error)
     {
         if (isSuccess && error != Error.None)
-            throw new InvalidOperationException();
+            throw new InvalidOperationException("Un resultado exitoso no puede tener un error.");
         if (!isSuccess && error == Error.None)
-            throw new InvalidOperationException();
+            throw new InvalidOperationException("Un resultado fallido debe tener un error.");
 
         IsSuccess = isSuccess;
         Error = error;
@@ -24,7 +24,9 @@ public class Result
 public class Result<T> : Result
 {
     private readonly T? _value;
-    public T Value => IsSuccess ? _value! : throw new InvalidOperationException("El resultado es un error.");
+
+    // Si es exitoso devuelve el valor, si falla lanza excepción (debes revisar IsSuccess antes de llamar a Value)
+    public T Value => IsSuccess ? _value! : throw new InvalidOperationException("No se puede acceder al valor de un resultado fallido.");
 
     protected internal Result(T? value, bool isSuccess, Error error) : base(isSuccess, error)
     {
