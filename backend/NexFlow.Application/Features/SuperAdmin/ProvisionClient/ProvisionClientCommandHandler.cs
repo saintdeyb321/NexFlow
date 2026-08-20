@@ -52,7 +52,7 @@ public class ProvisionClientCommandHandler
         if (request.ExpiresAt <= now) return Result<Guid>.Failure(new Error("License.Invalid", "Fecha inválida."));
 
         var email = new Email(request.Email);
-        var existingUser = await _userRepository.GetByEmailAsync(email, cancellationToken);
+        var existingUser = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
         if (existingUser != null) return Result<Guid>.Failure(new Error("User.Exists", "El correo ya existe."));
 
         var template = await _templateRepository.GetByIdAsync(request.TemplateId, cancellationToken);

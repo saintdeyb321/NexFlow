@@ -1,11 +1,13 @@
-﻿using System;
+﻿using Google.Cloud.Firestore;
+using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Knowledge;
+using NexFlow.Application.Features.Reservations;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Google.Cloud.Firestore;
-using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Business;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -16,6 +18,62 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
     public FirestoreBusinessConfigurationRepository(FirestoreDb firestoreDb)
     {
         _firestoreDb = firestoreDb;
+    }
+
+    // --- IMPLEMENTACIÓN DE SERVICIOS ---
+    public async Task<IEnumerable<ServiceDto>> GetServicesAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services");
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+
+        return snapshot.Documents.Select(doc =>
+        {
+            var data = doc.ConvertTo<FirestoreService>();
+            return new ServiceDto(Guid.Parse(doc.Id), data.Name, data.DurationInMinutes);
+        });
+    }
+
+    public async Task SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
+    {
+        var docId = service.Id == Guid.Empty ? Guid.NewGuid().ToString() : service.Id.ToString();
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(docId);
+
+        var data = new FirestoreService { Name = service.Name, DurationInMinutes = service.DurationInMinutes };
+        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+    }
+
+    public async Task DeleteServiceAsync(Guid workspaceId, string serviceId, CancellationToken cancellationToken)
+    {
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(serviceId);
+        await docRef.DeleteAsync(Precondition.None, cancellationToken);
+    }
+
+    // --- IMPLEMENTACIÓN DE FAQS ---
+    public async Task<IEnumerable<FaqDto>> GetFaqsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs");
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+
+        return snapshot.Documents.Select(doc =>
+        {
+            var data = doc.ConvertTo<FirestoreFaq>();
+            return new FaqDto(doc.Id, data.Question, data.Answer, data.Category);
+        });
+    }
+
+    public async Task SaveFaqAsync(Guid workspaceId, FaqDto faq, CancellationToken cancellationToken)
+    {
+        var docId = string.IsNullOrEmpty(faq.Id) ? Guid.NewGuid().ToString() : faq.Id;
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs").Document(docId);
+
+        var data = new FirestoreFaq { Question = faq.Question, Answer = faq.Answer, Category = faq.Category };
+        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+    }
+
+    public async Task DeleteFaqAsync(Guid workspaceId, string faqId, CancellationToken cancellationToken)
+    {
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs").Document(faqId);
+        await docRef.DeleteAsync(Precondition.None, cancellationToken);
     }
 
     public async Task<BusinessProfileDto?> GetProfileAsync(Guid workspaceId, CancellationToken cancellationToken)
@@ -117,6 +175,22 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
     }
 
     // CLASES DE MAPEO ESTRICTO PARA FIRESTORE (Aíslan la lógica de Google Cloud)
+
+    [FirestoreData]
+    private class FirestoreService
+    {
+        [FirestoreProperty] public string Name { get; set; } = string.Empty;
+        [FirestoreProperty] public int DurationInMinutes { get; set; }
+    }
+
+    [FirestoreData]
+    private class FirestoreFaq
+    {
+        [FirestoreProperty] public string Question { get; set; } = string.Empty;
+        [FirestoreProperty] public string Answer { get; set; } = string.Empty;
+        [FirestoreProperty] public string Category { get; set; } = string.Empty;
+    }
+
     [FirestoreData]
     private class FirestoreBusinessProfile
     {

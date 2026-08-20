@@ -23,7 +23,8 @@ public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
         var emailClaim = context.User.FindFirst("email")?.Value;
         if (string.IsNullOrEmpty(emailClaim)) return;
 
-        var user = await _userRepository.GetByEmailAsync(new Email(emailClaim), System.Threading.CancellationToken.None);
+        // CORREGIDO: Pasamos el string directo (emailClaim) sin usar 'new Email()'
+        var user = await _userRepository.GetByEmailAsync(emailClaim, System.Threading.CancellationToken.None);
         if (user == null) return;
 
         // Clean Architecture respetada: La API le pregunta a Application, y Application a Infrastructure
