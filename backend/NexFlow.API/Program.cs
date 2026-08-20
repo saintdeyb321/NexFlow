@@ -64,6 +64,7 @@ if (app.Environment.IsDevelopment())
 }
 app.UseHttpsRedirection();
 app.UseAuthentication();
+app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

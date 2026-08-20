@@ -8,14 +8,13 @@ using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent;
-using NexFlow.Infrastructure.Cache; 
+using NexFlow.Infrastructure.Cache;
 using NexFlow.Infrastructure.Engines.AI;
 using NexFlow.Infrastructure.Engines.Intent;
 using NexFlow.Infrastructure.Gateways;
-using NexFlow.Infrastructure.Persistence.Firestore; 
+using NexFlow.Infrastructure.Persistence.Firestore;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
-using System;
 
 namespace NexFlow.Infrastructure.DependencyInjection;
 
@@ -23,14 +22,11 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        // 1. Configurar PostgreSQL
-        services.AddDbContext<NexFlowDbContext>(options =>
-            options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
-
-        // 2. Registrar IUnitOfWork
+        // 1. Base de Datos Relacional
+        services.AddDbContext<NexFlowDbContext>(options => options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
         services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<NexFlowDbContext>());
 
-        // 3. Registrar Repositorios de PostgreSQL
+        // 2. Repositorios
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ILicenseRepository, LicenseRepository>();
@@ -39,15 +35,13 @@ public static class DependencyInjection
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<ISystemAdministratorRepository, SystemAdministratorRepository>();
+        services.AddScoped<IModuleRepository, ModuleRepository>();
 
-        // 4. NUEVO: Configurar Redis Cache (Sprint 6)
-        services.AddStackExchangeRedisCache(options =>
-        {
-            options.Configuration = configuration.GetConnectionString("Redis");
-        });
+        // 3. Caché
+        services.AddStackExchangeRedisCache(options => { options.Configuration = configuration.GetConnectionString("Redis"); });
         services.AddScoped<IConversationCache, RedisConversationCache>();
 
-        // 5. NUEVO: Configurar Firestore (Sprint 5)
+        // 4. Base de Datos Documental
         var firebaseProjectId = configuration["Firebase:ProjectId"];
         if (!string.IsNullOrEmpty(firebaseProjectId))
         {
@@ -55,20 +49,18 @@ public static class DependencyInjection
             services.AddScoped<IBusinessConfigurationRepository, FirestoreBusinessConfigurationRepository>();
         }
 
-        // 6. Registrar IClock
+        // 5. Utilidades y Motores de IA
         services.AddSingleton<IClock, SystemClock>();
-
-        // 7. Configurar Motores de Inteligencia
         services.AddHttpClient<IAiProvider, GeminiAiProvider>();
         services.AddScoped<IIntentEngine, IntentEngine>();
-
         services.AddScoped<IAiRouter, AiRouter>();
+
+        // 6. Gateways Externos (Producción)
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();
+        services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>(); // <-- Nuevo Gateway n8n
+
         return services;
     }
 }
 
-public class SystemClock : IClock
-{
-    public DateTime UtcNow => DateTime.UtcNow;
-}
+public class SystemClock : IClock { public DateTime UtcNow => DateTime.UtcNow; }

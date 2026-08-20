@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NexFlow.Application.Abstractions;
@@ -12,26 +13,57 @@ namespace NexFlow.Application.Engines.Reservation;
 public class ReservationEngine : IReservationEngine
 {
     private readonly IReservationRepository _reservationRepository;
+    private readonly IBusinessConfigurationRepository _businessConfigRepository;
     private readonly IUnitOfWork _unitOfWork;
 
-    public ReservationEngine(IReservationRepository reservationRepository, IUnitOfWork unitOfWork)
+    public ReservationEngine(
+        IReservationRepository reservationRepository,
+        IBusinessConfigurationRepository businessConfigRepository,
+        IUnitOfWork unitOfWork)
     {
         _reservationRepository = reservationRepository;
+        _businessConfigRepository = businessConfigRepository;
         _unitOfWork = unitOfWork;
     }
 
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, Guid locationId, Guid serviceId, DateTime date, CancellationToken cancellationToken)
     {
-        // 1. Obtenemos todas las reservas de ese día para esa sede
-        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, date, cancellationToken);
+        // 1. Obtener horario de apertura de la sede desde Firestore
+        var businessHours = await _businessConfigRepository.GetBusinessHoursAsync(workspaceId, locationId.ToString(), cancellationToken);
+        var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)date.DayOfWeek);
 
+        // Si está cerrado ese día o no hay horarios, devolvemos lista vacía
+        if (todayHours == null || todayHours.IsClosed) return new List<TimeSlotDto>();
+
+        // 2. Parsear las horas de apertura y cierre
+        if (!TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
+        {
+            return new List<TimeSlotDto>(); // Error de formato en la BD
+        }
+
+        // 3. Obtener reservas actuales en PostgreSQL
+        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, date, cancellationToken);
         var availableSlots = new List<TimeSlotDto>();
 
-        // 2. Aquí en el futuro inyectaremos el IBusinessConfigurationRepository (Firestore)
-        // para cruzar los horarios de apertura del negocio con existingReservations.
-        // Por ahora, generamos un slot de ejemplo demostrando que el flujo estructural está listo.
-        var dummyStart = date.Date.AddHours(10);
-        availableSlots.Add(new TimeSlotDto(dummyStart, dummyStart.AddMinutes(30), true));
+        var currentSlotStart = date.Date.Add(openTime);
+        var endOfDay = date.Date.Add(closeTime);
+        var slotDuration = TimeSpan.FromMinutes(30); // Aquí en el futuro se leerá la duración del ServiceDto
+
+        // 4. Algoritmo de cruzamiento de disponibilidad
+        while (currentSlotStart.Add(slotDuration) <= endOfDay)
+        {
+            var currentSlotEnd = currentSlotStart.Add(slotDuration);
+
+            // Verificamos si este bloque de tiempo se cruza con alguna reserva existente
+            bool isOccupied = existingReservations.Any(r => r.StartTime < currentSlotEnd && r.EndTime > currentSlotStart);
+
+            if (!isOccupied)
+            {
+                availableSlots.Add(new TimeSlotDto(currentSlotStart, currentSlotEnd, true));
+            }
+
+            currentSlotStart = currentSlotEnd;
+        }
 
         return availableSlots;
     }
@@ -75,10 +107,7 @@ public class ReservationEngine : IReservationEngine
         if (reservation.Status == ReservationStatus.Cancelled)
             return Result.Failure(new Error("Reservation.AlreadyCancelled", "La reserva ya estaba cancelada."));
 
-        // Lógica pura de dominio
         reservation.Cancel();
-
-        // Impacto real en PostgreSQL
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Result.Success();

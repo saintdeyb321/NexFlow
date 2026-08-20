@@ -25,27 +25,22 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
 
         if (!snapshot.Exists) return null;
 
-        var data = snapshot.ToDictionary();
-        return new BusinessProfileDto(
-            data.GetValueOrDefault("CommercialName")?.ToString() ?? string.Empty,
-            data.GetValueOrDefault("TaxId")?.ToString() ?? string.Empty,
-            data.GetValueOrDefault("ContactEmail")?.ToString() ?? string.Empty,
-            data.GetValueOrDefault("WhatsAppNumber")?.ToString() ?? string.Empty,
-            data.GetValueOrDefault("Description")?.ToString() ?? string.Empty
-        );
+        // Mapeo fuertemente tipado
+        var data = snapshot.ConvertTo<FirestoreBusinessProfile>();
+        return new BusinessProfileDto(data.CommercialName, data.TaxId, data.ContactEmail, data.WhatsAppNumber, data.Description);
     }
 
     public async Task SaveProfileAsync(Guid workspaceId, BusinessProfileDto profile, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("business").Document("profile");
 
-        var data = new Dictionary<string, object>
+        var data = new FirestoreBusinessProfile
         {
-            { "CommercialName", profile.CommercialName },
-            { "TaxId", profile.TaxId },
-            { "ContactEmail", profile.ContactEmail },
-            { "WhatsAppNumber", profile.WhatsAppNumber },
-            { "Description", profile.Description }
+            CommercialName = profile.CommercialName,
+            TaxId = profile.TaxId,
+            ContactEmail = profile.ContactEmail,
+            WhatsAppNumber = profile.WhatsAppNumber,
+            Description = profile.Description
         };
 
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
@@ -58,14 +53,8 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
 
         return snapshot.Documents.Select(doc =>
         {
-            var data = doc.ToDictionary();
-            return new LocationDto(
-                doc.Id,
-                data.GetValueOrDefault("Name")?.ToString() ?? string.Empty,
-                data.GetValueOrDefault("Address")?.ToString() ?? string.Empty,
-                data.GetValueOrDefault("Reference")?.ToString() ?? string.Empty,
-                data.GetValueOrDefault("IsMain") is bool isMain && isMain
-            );
+            var data = doc.ConvertTo<FirestoreLocation>();
+            return new LocationDto(doc.Id, data.Name, data.Address, data.Reference, data.IsMain);
         });
     }
 
@@ -74,12 +63,12 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
         var docId = string.IsNullOrEmpty(location.Id) ? Guid.NewGuid().ToString() : location.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("locations").Document(docId);
 
-        var data = new Dictionary<string, object>
+        var data = new FirestoreLocation
         {
-            { "Name", location.Name },
-            { "Address", location.Address },
-            { "Reference", location.Reference },
-            { "IsMain", location.IsMain }
+            Name = location.Name,
+            Address = location.Address,
+            Reference = location.Reference,
+            IsMain = location.IsMain
         };
 
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
@@ -99,13 +88,8 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
 
         return snapshot.Documents.Select(doc =>
         {
-            var data = doc.ToDictionary();
-            return new BusinessHoursDto(
-                Convert.ToInt32(data.GetValueOrDefault("DayOfWeek") ?? 0),
-                data.GetValueOrDefault("OpenTime")?.ToString() ?? "00:00",
-                data.GetValueOrDefault("CloseTime")?.ToString() ?? "00:00",
-                data.GetValueOrDefault("IsClosed") is bool isClosed && isClosed
-            );
+            var data = doc.ConvertTo<FirestoreBusinessHours>();
+            return new BusinessHoursDto(data.DayOfWeek, data.OpenTime, data.CloseTime, data.IsClosed);
         });
     }
 
@@ -114,22 +98,50 @@ public class FirestoreBusinessConfigurationRepository : IBusinessConfigurationRe
         var docId = string.IsNullOrEmpty(locationId) ? "global" : locationId;
         var collectionRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("hours").Document(docId).Collection("schedule");
 
-        // Firebase recomienda usar un Batch para guardados múltiples simultáneos
         var batch = _firestoreDb.StartBatch();
 
         foreach (var hour in hours)
         {
             var docRef = collectionRef.Document(hour.DayOfWeek.ToString());
-            var data = new Dictionary<string, object>
+            var data = new FirestoreBusinessHours
             {
-                { "DayOfWeek", hour.DayOfWeek },
-                { "OpenTime", hour.OpenTime },
-                { "CloseTime", hour.CloseTime },
-                { "IsClosed", hour.IsClosed }
+                DayOfWeek = hour.DayOfWeek,
+                OpenTime = hour.OpenTime,
+                CloseTime = hour.CloseTime,
+                IsClosed = hour.IsClosed
             };
             batch.Set(docRef, data, SetOptions.MergeAll);
         }
 
         await batch.CommitAsync(cancellationToken);
+    }
+
+    // CLASES DE MAPEO ESTRICTO PARA FIRESTORE (Aíslan la lógica de Google Cloud)
+    [FirestoreData]
+    private class FirestoreBusinessProfile
+    {
+        [FirestoreProperty] public string CommercialName { get; set; } = string.Empty;
+        [FirestoreProperty] public string TaxId { get; set; } = string.Empty;
+        [FirestoreProperty] public string ContactEmail { get; set; } = string.Empty;
+        [FirestoreProperty] public string WhatsAppNumber { get; set; } = string.Empty;
+        [FirestoreProperty] public string Description { get; set; } = string.Empty;
+    }
+
+    [FirestoreData]
+    private class FirestoreLocation
+    {
+        [FirestoreProperty] public string Name { get; set; } = string.Empty;
+        [FirestoreProperty] public string Address { get; set; } = string.Empty;
+        [FirestoreProperty] public string Reference { get; set; } = string.Empty;
+        [FirestoreProperty] public bool IsMain { get; set; }
+    }
+
+    [FirestoreData]
+    private class FirestoreBusinessHours
+    {
+        [FirestoreProperty] public int DayOfWeek { get; set; }
+        [FirestoreProperty] public string OpenTime { get; set; } = string.Empty;
+        [FirestoreProperty] public string CloseTime { get; set; } = string.Empty;
+        [FirestoreProperty] public bool IsClosed { get; set; }
     }
 }
