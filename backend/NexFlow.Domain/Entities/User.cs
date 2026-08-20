@@ -9,6 +9,7 @@ public class User : Entity
     public string FirstName { get; private set; } = null!;
     public string LastName { get; private set; } = null!;
     public UserStatus Status { get; private set; }
+    public string? FirebaseUid { get; private set; }
 
     private User() { }
 
@@ -21,6 +22,10 @@ public class User : Entity
             LastName = lastName,
             Status = UserStatus.Active
         };
+    }
+    public void LinkFirebaseAccount(string firebaseUid)
+    {
+        FirebaseUid = firebaseUid;
     }
 
     public void Suspend() => Status = UserStatus.Suspended;

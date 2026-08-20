@@ -1,5 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.ValueObjects;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
@@ -22,5 +22,10 @@ public class UserRepository : IUserRepository
     public async Task<User?> GetByEmailAsync(Email email, CancellationToken cancellationToken)
     {
         return await _context.Users.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+    }
+
+    public async Task<User?> GetByFirebaseUidAsync(string firebaseUid, CancellationToken cancellationToken)
+    {
+        return await _context.Users.FirstOrDefaultAsync(u => u.FirebaseUid == firebaseUid, cancellationToken);
     }
 }

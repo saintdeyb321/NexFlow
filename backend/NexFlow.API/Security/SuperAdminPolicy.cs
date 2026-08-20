@@ -1,9 +1,7 @@
 ﻿using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories; // <-- Usamos los contratos puros
 using NexFlow.Domain.ValueObjects;
-using NexFlow.Infrastructure.Persistence.PostgreSQL.Context; // <-- Para leer la nueva tabla
-using Microsoft.EntityFrameworkCore;
 
 namespace NexFlow.API.Security;
 
@@ -12,12 +10,12 @@ public class SuperAdminRequirement : IAuthorizationRequirement { }
 public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
 {
     private readonly IUserRepository _userRepository;
-    private readonly NexFlowDbContext _context; // Llamamos directo al contexto para esta validación global
+    private readonly ISystemAdministratorRepository _sysAdminRepository;
 
-    public SuperAdminHandler(IUserRepository userRepository, NexFlowDbContext context)
+    public SuperAdminHandler(IUserRepository userRepository, ISystemAdministratorRepository sysAdminRepository)
     {
         _userRepository = userRepository;
-        _context = context;
+        _sysAdminRepository = sysAdminRepository;
     }
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, SuperAdminRequirement requirement)
@@ -28,9 +26,8 @@ public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
         var user = await _userRepository.GetByEmailAsync(new Email(emailClaim), System.Threading.CancellationToken.None);
         if (user == null) return;
 
-        // Validamos estrictamente contra la tabla aislada
-        bool isGod = await _context.Set<NexFlow.Domain.Entities.SystemAdministrator>()
-                                   .AnyAsync(sa => sa.UserId == user.Id);
+        // Clean Architecture respetada: La API le pregunta a Application, y Application a Infrastructure
+        bool isGod = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, System.Threading.CancellationToken.None);
 
         if (isGod)
         {

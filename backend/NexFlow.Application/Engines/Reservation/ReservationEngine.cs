@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Reservations;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Engines.Reservation;
 
@@ -21,18 +22,26 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, Guid locationId, Guid serviceId, DateTime date, CancellationToken cancellationToken)
     {
-        // TODO: En el siguiente paso implementaremos la lectura de horarios libres. 
-        // Por ahora devolvemos vacío para cumplir tu contrato y compilar.
-        return new List<TimeSlotDto>();
+        // 1. Obtenemos todas las reservas de ese día para esa sede
+        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, date, cancellationToken);
+
+        var availableSlots = new List<TimeSlotDto>();
+
+        // 2. Aquí en el futuro inyectaremos el IBusinessConfigurationRepository (Firestore)
+        // para cruzar los horarios de apertura del negocio con existingReservations.
+        // Por ahora, generamos un slot de ejemplo demostrando que el flujo estructural está listo.
+        var dummyStart = date.Date.AddHours(10);
+        availableSlots.Add(new TimeSlotDto(dummyStart, dummyStart.AddMinutes(30), true));
+
+        return availableSlots;
     }
 
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, Guid locationId, Guid serviceId, string customerIdentifier, DateTime dateTime, CancellationToken cancellationToken)
     {
-        // Asumimos 30 minutos de duración para la reserva por defecto (luego lo sacaremos del Service)
         var startTime = dateTime;
         var endTime = dateTime.AddMinutes(30);
 
-        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, startTime, endTime, cancellationToken);
+        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, serviceId, startTime, endTime, cancellationToken);
 
         if (!isAvailable)
         {
@@ -58,7 +67,20 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result> CancelReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
-        // TODO: Implementaremos el UPDATE en BD para cancelar
+        var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
+
+        if (reservation == null)
+            return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+
+        if (reservation.Status == ReservationStatus.Cancelled)
+            return Result.Failure(new Error("Reservation.AlreadyCancelled", "La reserva ya estaba cancelada."));
+
+        // Lógica pura de dominio
+        reservation.Cancel();
+
+        // Impacto real en PostgreSQL
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         return Result.Success();
     }
 }

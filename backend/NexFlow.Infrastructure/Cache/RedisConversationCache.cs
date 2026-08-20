@@ -1,12 +1,10 @@
-﻿using Microsoft.Extensions.Caching.Distributed;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Distributed;
+using NexFlow.Application.Abstractions.Cache;
 
 namespace NexFlow.Infrastructure.Cache;
-
-public interface IConversationCache
-{
-    Task SetLastIntentAsync(string customerPhone, string intent, CancellationToken cancellationToken);
-    Task<string?> GetLastIntentAsync(string customerPhone, CancellationToken cancellationToken);
-}
 
 public class RedisConversationCache : IConversationCache
 {
@@ -17,17 +15,21 @@ public class RedisConversationCache : IConversationCache
         _cache = cache;
     }
 
-    public async Task SetLastIntentAsync(string customerPhone, string intent, CancellationToken cancellationToken)
+    public async Task SetLastIntentAsync(Guid workspaceId, string customerPhone, string intent, CancellationToken cancellationToken)
     {
         var options = new DistributedCacheEntryOptions
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30) // La memoria dura 30 mins
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
         };
-        await _cache.SetStringAsync($"intent:{customerPhone}", intent, options, cancellationToken);
+
+        // Blindaje: La clave ahora pertenece exclusivamente a un negocio específico
+        var key = $"workspace:{workspaceId}:conversation:{customerPhone}";
+        await _cache.SetStringAsync(key, intent, options, cancellationToken);
     }
 
-    public async Task<string?> GetLastIntentAsync(string customerPhone, CancellationToken cancellationToken)
+    public async Task<string?> GetLastIntentAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
-        return await _cache.GetStringAsync($"intent:{customerPhone}", cancellationToken);
+        var key = $"workspace:{workspaceId}:conversation:{customerPhone}";
+        return await _cache.GetStringAsync(key, cancellationToken);
     }
 }

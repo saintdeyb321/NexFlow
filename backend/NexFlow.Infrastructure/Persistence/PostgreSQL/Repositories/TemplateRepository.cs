@@ -1,5 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;

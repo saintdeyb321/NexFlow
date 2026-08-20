@@ -1,11 +1,16 @@
-﻿using NexFlow.Application.Common;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using NexFlow.Application.Common;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
 using NexFlow.Domain.Entities;
 
 namespace NexFlow.Application.Features.SuperAdmin.Licenses;
 
-public record RenewLicenseCommand(Guid WorkspaceId, DateTime NewStartDate, int DurationInMonths);
+// 1. Ya no recibimos fecha de inicio manual, solo a qué cliente y por cuántos meses.
+public record RenewLicenseCommand(Guid WorkspaceId, int DurationInMonths);
 
 public class RenewLicenseCommandHandler
 {
@@ -36,16 +41,15 @@ public class RenewLicenseCommandHandler
             return Result.Failure(new Error("License.NotFound", "El workspace no tiene una licencia asignada."));
 
         var now = _clock.UtcNow;
-        var endDate = request.NewStartDate.AddMonths(request.DurationInMonths);
 
-        // Aquí usamos la regla de negocio pura de tu Dominio
-        license.Renew(request.NewStartDate, endDate, now);
+        // 2. El dominio hace el cálculo seguro. Solo pasamos los meses y la fecha actual.
+        license.Renew(request.DurationInMonths, now);
 
         var audit = AuditLog.Create(
             workspaceId: request.WorkspaceId,
             userId: _currentUser.UserId,
             action: AuditAction.LicenseRenewed,
-            details: $"Licencia renovada hasta {endDate:yyyy-MM-dd} por {_currentUser.Email}."
+            details: $"Licencia renovada por {request.DurationInMonths} meses por {_currentUser.Email}."
         );
         _auditLogRepository.Add(audit);
 

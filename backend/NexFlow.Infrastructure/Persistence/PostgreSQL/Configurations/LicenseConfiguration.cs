@@ -10,6 +10,9 @@ public class LicenseConfiguration : IEntityTypeConfiguration<License>
     {
         builder.HasKey(l => l.Id);
 
+        // NUEVO: RESTRICCIÓN DE HIERRO (1 Workspace = 1 Licencia)
+        builder.HasIndex(l => l.WorkspaceId).IsUnique();
+
         builder.Property(l => l.Type).HasConversion<string>().IsRequired();
         builder.Property(l => l.Status).HasConversion<string>().IsRequired();
 

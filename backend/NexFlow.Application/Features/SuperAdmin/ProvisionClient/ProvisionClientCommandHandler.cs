@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;

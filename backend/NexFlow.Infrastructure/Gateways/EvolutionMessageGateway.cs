@@ -1,12 +1,11 @@
-﻿using System.Net.Http.Json;
+﻿using System;
+using System.Net.Http.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
+using NexFlow.Application.Abstractions.Integrations; // <-- Contrato correcto
 
 namespace NexFlow.Infrastructure.Gateways;
-
-public interface IMessageGateway
-{
-    Task SendWhatsAppTextAsync(string phone, string message, CancellationToken cancellationToken);
-}
 
 public class EvolutionMessageGateway : IMessageGateway
 {
@@ -23,13 +22,14 @@ public class EvolutionMessageGateway : IMessageGateway
         _httpClient.DefaultRequestHeaders.Add("apikey", _apiKey);
     }
 
-    public async Task SendWhatsAppTextAsync(string phone, string message, CancellationToken cancellationToken)
+    // Firma exacta del contrato de Application
+    public async Task SendTextAsync(Guid workspaceId, string customerIdentifier, string message, CancellationToken cancellationToken)
     {
-        var url = $"{_baseUrl}/message/sendText/default"; // Asumiendo instancia 'default'
+        var url = $"{_baseUrl}/message/sendText/{workspaceId}"; // Asumimos que la instancia de Evolution se llama igual que el WorkspaceId
 
         var payload = new
         {
-            number = phone,
+            number = customerIdentifier, // El número de teléfono
             textMessage = new { text = message },
             options = new { delay = 1200, presence = "composing" }
         };

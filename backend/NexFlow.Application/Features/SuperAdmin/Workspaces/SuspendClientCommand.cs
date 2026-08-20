@@ -2,6 +2,7 @@
 using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Enums;
 using NexFlow.Domain.Entities;
+using NexFlow.Application.Abstractions.Repositories;
 
 namespace NexFlow.Application.Features.SuperAdmin.Workspaces;
 
