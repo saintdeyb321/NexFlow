@@ -9,4 +9,5 @@ public interface IMembershipRepository
 {
     Task<Membership?> GetUserMembershipAsync(Guid userId, Guid workspaceId, CancellationToken cancellationToken);
     void Add(Membership membership);
+    Task<IEnumerable<Membership>> GetMembershipsByUserIdAsync(Guid userId, CancellationToken cancellationToken);
 }

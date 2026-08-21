@@ -67,6 +67,18 @@ builder.Services.AddRateLimiter(options =>
 });
 // ------------------------------------
 
+//CONFIGURAR CORS PARA EL FRONTEND ---
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173") 
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+// -----------------------------------------------
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -83,9 +95,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// --- NUEVO: ACTIVAR EL ESCUDO DE RATE LIMITING ---
+app.UseCors("AllowFrontend");
+
 app.UseRateLimiter();
-// -------------------------------------------------
 
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();

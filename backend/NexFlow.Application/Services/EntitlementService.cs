@@ -66,4 +66,18 @@ public class EntitlementService : IEntitlementService
         var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
         return activeModules.Select(m => m.Id);
     }
+
+    public async Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return Enumerable.Empty<string>();
+
+        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var assignedModuleIds = license!.LicenseModules.Select(m => m.ModuleId).ToList();
+
+        if (!assignedModuleIds.Any()) return Enumerable.Empty<string>();
+
+        // Obtenemos los módulos y devolvemos su código en mayúsculas para React
+        var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
+        return activeModules.Select(m => m.Code.ToUpperInvariant());
+    }
 }

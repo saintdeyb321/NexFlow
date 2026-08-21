@@ -1,4 +1,7 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using System;
+using System.Linq;
+using Microsoft.AspNetCore.Http;
+using NexFlow.Application.Abstractions;
 
 namespace NexFlow.API.Services;
 
@@ -15,8 +18,13 @@ public class WorkspaceContext : IWorkspaceContext
     {
         get
         {
-            var header = _httpContextAccessor.HttpContext?.Request.Headers["x-workspace-id"].FirstOrDefault();
-            return Guid.TryParse(header, out var workspaceId) ? workspaceId : Guid.Empty;
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext == null) return Guid.Empty;
+
+            var routeValue = httpContext.Request.RouteValues["workspaceId"]?.ToString();
+            var headerValue = httpContext.Request.Headers["X-Workspace-Id"].FirstOrDefault();
+
+            return Guid.TryParse(routeValue ?? headerValue, out var workspaceId) ? workspaceId : Guid.Empty;
         }
     }
 

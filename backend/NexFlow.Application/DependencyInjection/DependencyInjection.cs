@@ -2,6 +2,7 @@
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Engines.Dispatcher;
 using NexFlow.Application.Features.Automation.ProcessMessage;
+using NexFlow.Application.Features.Identity.GetMe;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Application.Features.SuperAdmin.Licenses; // <-- Usings necesarios
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
@@ -26,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
+        services.AddScoped<GetMeQueryHandler>();
 
         return services;
     }

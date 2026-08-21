@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -7,10 +8,8 @@ using NexFlow.Application.Abstractions.Repositories;
 
 namespace NexFlow.API.Security;
 
-// 1. El Requisito
 public class WorkspaceMemberRequirement : IAuthorizationRequirement { }
 
-// 2. El Guardia (Validador Multi-Tenant)
 public class WorkspaceMemberHandler : AuthorizationHandler<WorkspaceMemberRequirement>
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -29,26 +28,28 @@ public class WorkspaceMemberHandler : AuthorizationHandler<WorkspaceMemberRequir
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, WorkspaceMemberRequirement requirement)
     {
-        // 1. Verificar si el usuario existe en nuestra BD (ID interno válido)
         var userId = _currentUser.UserId;
         if (userId == Guid.Empty) return;
 
-        // 2. Extraer el WorkspaceId que el cliente intenta acceder
         var httpContext = _httpContextAccessor.HttpContext;
         if (httpContext == null) return;
 
-        if (!httpContext.Request.Headers.TryGetValue("X-Workspace-Id", out var workspaceIdString) ||
-            !Guid.TryParse(workspaceIdString, out var workspaceId))
-        {
-            return; // Si no manda el header, se bloquea el acceso
-        }
+        // 1. Prioridad Absoluta: Leer el ID de la URL (Ruta RESTful)
+        var routeWorkspaceId = httpContext.Request.RouteValues["workspaceId"]?.ToString();
 
-        // 3. Clean Architecture: Consultamos si hay una relación real en la tabla Memberships
+        // 2. Fallback temporal al Header (por compatibilidad si algún endpoint aún no usa ruta)
+        var headerWorkspaceId = httpContext.Request.Headers["X-Workspace-Id"].FirstOrDefault();
+
+        var workspaceIdString = routeWorkspaceId ?? headerWorkspaceId;
+
+        if (string.IsNullOrEmpty(workspaceIdString) || !Guid.TryParse(workspaceIdString, out var workspaceId))
+            return;
+
+        // 3. Validación real en PostgreSQL
         var membership = await _membershipRepository.GetUserMembershipAsync(userId, workspaceId, System.Threading.CancellationToken.None);
 
         if (membership != null)
         {
-            // El usuario pertenece a este negocio. ¡Acceso concedido!
             context.Succeed(requirement);
         }
     }

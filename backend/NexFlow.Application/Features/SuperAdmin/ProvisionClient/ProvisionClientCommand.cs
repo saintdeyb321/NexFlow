@@ -8,5 +8,6 @@ public record ProvisionClientCommand(
     string LastName,
     string WorkspaceName,
     Guid TemplateId,
-    DateTime ExpiresAt
+    DateTime ExpiresAt,
+    List<string>? CustomModules
 );

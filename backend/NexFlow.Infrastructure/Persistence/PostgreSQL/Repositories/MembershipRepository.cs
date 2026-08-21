@@ -18,4 +18,11 @@ public class MembershipRepository : IMembershipRepository
         return await _context.Memberships
             .FirstOrDefaultAsync(m => m.UserId == userId && m.WorkspaceId == workspaceId, cancellationToken);
     }
+
+    public async Task<IEnumerable<Membership>> GetMembershipsByUserIdAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await _context.Memberships
+            .Where(m => m.UserId == userId)
+            .ToListAsync(cancellationToken);
+    }
 }
