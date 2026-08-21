@@ -1,13 +1,11 @@
-﻿using System;
-
-namespace NexFlow.Application.Features.SuperAdmin.ProvisionClient;
+﻿namespace NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 
 public record ProvisionClientCommand(
     string Email,
     string FirstName,
     string LastName,
     string WorkspaceName,
-    Guid TemplateId,
+    Guid? TemplateId, // ¡Ahora es anulable (opcional)!
     DateTime ExpiresAt,
-    List<string>? CustomModules
+    List<string>? CustomModules // Módulos a la carta (Ej: ["FAQ", "SERVICES"])
 );

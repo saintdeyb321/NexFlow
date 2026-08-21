@@ -46,7 +46,11 @@ public static class DependencyInjection
         if (!string.IsNullOrEmpty(firebaseProjectId))
         {
             services.AddSingleton(FirestoreDb.Create(firebaseProjectId));
-            services.AddScoped<IBusinessConfigurationRepository, FirestoreBusinessConfigurationRepository>();
+            services.AddScoped<IBusinessProfileRepository, FirestoreBusinessProfileRepository>();
+            services.AddScoped<ILocationRepository, FirestoreLocationRepository>();
+            services.AddScoped<IBusinessHoursRepository, FirestoreBusinessHoursRepository>();
+            services.AddScoped<IFaqRepository, FirestoreFaqRepository>();
+            services.AddScoped<IServiceRepository, FirestoreServiceRepository>();
         }
 
         // 5. Utilidades y Motores de IA
@@ -54,6 +58,7 @@ public static class DependencyInjection
         services.AddHttpClient<IAiProvider, GeminiAiProvider>();
         services.AddScoped<IIntentEngine, IntentEngine>();
         services.AddScoped<IAiRouter, AiRouter>();
+
 
         // 6. Gateways Externos (Producción)
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();

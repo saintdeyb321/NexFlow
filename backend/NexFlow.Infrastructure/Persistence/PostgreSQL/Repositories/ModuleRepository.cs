@@ -28,4 +28,13 @@ public class ModuleRepository : IModuleRepository
             .Where(m => moduleIds.Contains(m.Id) && m.Status == ModuleStatus.Active)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<List<Module>> GetByCodesAsync(IEnumerable<string> codes, CancellationToken cancellationToken)
+    {
+        var upperCodes = codes.Select(c => c.ToUpperInvariant()).ToList();
+
+        return await _context.Set<Module>()
+            .Where(m => upperCodes.Contains(m.Code) && m.Status == ModuleStatus.Active)
+            .ToListAsync(cancellationToken);
+    }
 }

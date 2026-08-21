@@ -10,11 +10,12 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
     {
         builder.HasKey(r => r.Id);
 
-        // Forzamos que el Enum se guarde como string para que sea legible en BD
         builder.Property(r => r.Status).HasConversion<string>().IsRequired();
 
-        // RESTRICCIÓN DE HIERRO: Evita duplicaciones exactas. 
-        // Nadie puede reservar el mismo recurso a la misma hora en la misma sede.
+        // Mapeo del Token de Concurrencia Optimista
+        builder.Property(r => r.RowVersion).IsRowVersion();
+
+        // RESTRICCIÓN DE HIERRO (Nivel BD): Evita doble reserva exacta al mismo tiempo
         builder.HasIndex(r => new { r.WorkspaceId, r.LocationId, r.ServiceId, r.StartTime }).IsUnique();
     }
 }

@@ -13,30 +13,31 @@ namespace NexFlow.Application.Engines.Reservation;
 public class ReservationEngine : IReservationEngine
 {
     private readonly IReservationRepository _reservationRepository;
-    private readonly IBusinessConfigurationRepository _businessConfigRepository;
+    private readonly IServiceRepository _serviceRepository;
+    private readonly IBusinessHoursRepository _hoursRepository;
     private readonly IUnitOfWork _unitOfWork;
 
     public ReservationEngine(
         IReservationRepository reservationRepository,
-        IBusinessConfigurationRepository businessConfigRepository,
+        IServiceRepository serviceRepository,
+        IBusinessHoursRepository hoursRepository,
         IUnitOfWork unitOfWork)
     {
         _reservationRepository = reservationRepository;
-        _businessConfigRepository = businessConfigRepository;
+        _serviceRepository = serviceRepository;
+        _hoursRepository = hoursRepository;
         _unitOfWork = unitOfWork;
     }
 
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, Guid locationId, Guid serviceId, DateTime date, CancellationToken cancellationToken)
     {
-        // 1. Validar Servicio y obtener su duración REAL
-        var services = await _businessConfigRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == serviceId);
-        if (targetService == null) return new List<TimeSlotDto>(); // El servicio no existe
+        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
+        var targetService = services.FirstOrDefault(s => s.Id == serviceId.ToString());
+        if (targetService == null) return new List<TimeSlotDto>();
 
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
 
-        // 2. Obtener horario de apertura de la sede desde Firestore
-        var businessHours = await _businessConfigRepository.GetBusinessHoursAsync(workspaceId, locationId.ToString(), cancellationToken);
+        var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId.ToString(), cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)date.DayOfWeek);
 
         if (todayHours == null || todayHours.IsClosed) return new List<TimeSlotDto>();
@@ -44,25 +45,21 @@ public class ReservationEngine : IReservationEngine
         if (!TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
             return new List<TimeSlotDto>();
 
-        // 3. Obtener reservas actuales
         var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, date, cancellationToken);
         var availableSlots = new List<TimeSlotDto>();
 
         var currentSlotStart = date.Date.Add(openTime);
         var endOfDay = date.Date.Add(closeTime);
 
-        // 4. Algoritmo dinámico
         while (currentSlotStart.Add(slotDuration) <= endOfDay)
         {
             var currentSlotEnd = currentSlotStart.Add(slotDuration);
-
             bool isOccupied = existingReservations.Any(r => r.StartTime < currentSlotEnd && r.EndTime > currentSlotStart);
 
             if (!isOccupied)
             {
                 availableSlots.Add(new TimeSlotDto(currentSlotStart, currentSlotEnd, true));
             }
-
             currentSlotStart = currentSlotEnd;
         }
 
@@ -71,23 +68,20 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, Guid locationId, Guid serviceId, string customerIdentifier, DateTime dateTime, CancellationToken cancellationToken)
     {
-        // 1. Obtener la duración real para calcular el EndTime
-        var services = await _businessConfigRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == serviceId);
+        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
+        var targetService = services.FirstOrDefault(s => s.Id == serviceId.ToString());
 
         if (targetService == null)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio solicitado no existe."));
 
         var startTime = dateTime;
-        var endTime = dateTime.AddMinutes(targetService.DurationInMinutes); // Adiós al "30" hardcodeado
+        var endTime = dateTime.AddMinutes(targetService.DurationInMinutes);
 
-        // 2. Validación de disponibilidad lógica
         var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, serviceId, startTime, endTime, cancellationToken);
 
         if (!isAvailable)
             return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario solicitado ya está ocupado."));
 
-        // 3. Persistencia
         var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, startTime, endTime);
         _reservationRepository.Add(reservation);
 

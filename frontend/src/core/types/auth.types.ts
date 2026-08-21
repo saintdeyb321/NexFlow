@@ -22,5 +22,5 @@ export interface MeResponse {
   user: User;
   workspace: Workspace | null;
   license: License | null;
-  entitlements: string[]; // Ej: ["FAQ", "RESERVATIONS"]
+  entitlements: string[]; 
 }

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Engines.AI;
+﻿using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Infrastructure.Engines.AI;
@@ -30,6 +27,6 @@ public class AiRouter : IAiRouter
 
         // El userMessage se pasa vacío o con parámetros clave dependiendo de la necesidad, 
         // por ahora dejamos a la IA armar la respuesta con el contexto.
-        return await _aiProvider.GenerateTextAsync(finalSystemPrompt, "Genera la respuesta al cliente.", cancellationToken);
+        return await _aiProvider.GenerateTextAsync(finalSystemPrompt, "Genera la respuesta al cliente.", useJsonMode: false, cancellationToken);
     }
 }

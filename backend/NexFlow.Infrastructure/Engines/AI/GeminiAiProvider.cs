@@ -1,9 +1,5 @@
-﻿using System;
-using System.Net.Http;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
@@ -21,24 +17,36 @@ public class GeminiAiProvider : IAiProvider
     {
         _httpClient = httpClient;
         _logger = logger;
-
         _apiKey = configuration["Gemini:ApiKey"] ?? throw new ArgumentNullException("Falta la API Key de Gemini");
-        _model = configuration["Gemini:Model"] ?? "gemini-1.5-flash"; // Fallback seguro
+        _model = configuration["Gemini:Model"] ?? "gemini-1.5-flash";
 
-        // Timeout dinámico para evitar que la app se congele si Google se cae
         var timeout = int.TryParse(configuration["Gemini:TimeoutSeconds"], out var t) ? t : 15;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
     }
 
-    public async Task<string> GenerateTextAsync(string systemPrompt, string userMessage, CancellationToken cancellationToken)
+    public async Task<string> GenerateTextAsync(string systemPrompt, string userMessage, bool useJsonMode = false, CancellationToken cancellationToken = default)
     {
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
 
-        var payload = new
+        // Construcción dinámica del payload (Strategy Pattern simplificado)
+        object payload;
+        if (useJsonMode)
         {
-            system_instruction = new { parts = new[] { new { text = systemPrompt } } },
-            contents = new[] { new { parts = new[] { new { text = userMessage } } } }
-        };
+            payload = new
+            {
+                system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+                contents = new[] { new { parts = new[] { new { text = userMessage } } } },
+                generationConfig = new { response_mime_type = "application/json" }
+            };
+        }
+        else
+        {
+            payload = new
+            {
+                system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+                contents = new[] { new { parts = new[] { new { text = userMessage } } } }
+            };
+        }
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
@@ -50,29 +58,25 @@ public class GeminiAiProvider : IAiProvider
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var jsonDocument = JsonDocument.Parse(responseString);
 
-            // NAVEGACIÓN SEGURA (Sin indexación directa que explote)
             if (jsonDocument.RootElement.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
             {
                 if (candidates[0].TryGetProperty("content", out var resContent) &&
                     resContent.TryGetProperty("parts", out var parts) && parts.GetArrayLength() > 0)
                 {
-                    var text = parts[0].GetProperty("text").GetString();
-                    return text ?? string.Empty;
+                    return parts[0].GetProperty("text").GetString() ?? string.Empty;
                 }
             }
-
-            _logger.LogWarning("Gemini devolvió un 200 OK, pero la estructura JSON no contenía texto válido.");
-            return "Lo siento, tuve un problema procesando la información. ¿Podrías reformularlo?";
+            return useJsonMode ? "{}" : string.Empty;
         }
         catch (TaskCanceledException)
         {
-            _logger.LogError("Timeout: Gemini tardó demasiado en responder.");
-            return "El servidor de inteligencia artificial está tardando demasiado. Por favor, intenta de nuevo en unos minutos.";
+            _logger.LogError("Timeout: Gemini tardó demasiado.");
+            return useJsonMode ? "{}" : "Lo siento, mi cerebro digital está tardando en procesar. ¿Puedes repetirlo?";
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fallo inesperado al comunicarse con Gemini.");
-            return "En este momento tenemos intermitencias. Por favor, inténtalo más tarde.";
+            return useJsonMode ? "{}" : "Tuve un error interno de conexión. Vuelve a intentarlo en unos segundos.";
         }
     }
 }

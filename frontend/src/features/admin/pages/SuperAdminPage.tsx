@@ -13,7 +13,10 @@ export const SuperAdminPage = () => {
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  // Fecha por defecto: 1 año a partir de hoy (Formato YYYY-MM-DD para el input de fecha)
+  // Selector de estrategia de licenciamiento
+  const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
+  const [customModulesStr, setCustomModulesStr] = useState('FAQ, RESERVATIONS');
+
   const defaultDate = new Date();
   defaultDate.setFullYear(defaultDate.getFullYear() + 1);
 
@@ -22,7 +25,7 @@ export const SuperAdminPage = () => {
     firstName: '',
     lastName: '',
     workspaceName: '',
-    templateId: '', // Debe ser un Guid válido de tu tabla Templates
+    templateId: '', 
     expiresAt: defaultDate.toISOString().split('T')[0]
   });
 
@@ -33,8 +36,6 @@ export const SuperAdminPage = () => {
 
   const loadWorkspaces = async () => {
     try {
-      // Si tu backend aún no tiene el GET /superadmin/clients, esto fallará silenciosamente,
-      // dejando la tabla vacía, lo cual está bien para poder probar el POST primero.
       const data = await getSystemWorkspaces().catch(() => []);
       setWorkspaces(data || []);
     } finally {
@@ -46,18 +47,26 @@ export const SuperAdminPage = () => {
     e.preventDefault();
     setIsProvisioning(true);
     try {
-      // Al enviar, convertimos la fecha al formato completo ISO que C# DateTime espera
-      const payload = {
-        ...newWorkspace,
+      // Armamos el payload dinámicamente según el modo seleccionado
+      const payload: ProvisionWorkspaceRequest = {
+        email: newWorkspace.email,
+        firstName: newWorkspace.firstName,
+        lastName: newWorkspace.lastName,
+        workspaceName: newWorkspace.workspaceName,
         expiresAt: new Date(newWorkspace.expiresAt).toISOString()
       };
+
+      if (provisionMode === 'template') {
+        payload.templateId = newWorkspace.templateId;
+      } else {
+        payload.customModules = customModulesStr.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+      }
       
       await provisionNewWorkspace(payload);
-      alert('¡Entorno aprovisionado con éxito! Revisa tu base de datos.');
+      alert('¡Entorno aprovisionado con éxito! Revisa tu base de datos PostgreSQL.');
       setShowModal(false);
       loadWorkspaces();
     } catch (error: any) {
-      // Capturamos el 400 Bad Request que armaste con tu patrón Result
       const errorMsg = error.response?.data?.message || 'Error aprovisionando el entorno';
       alert(`Fallo en el aprovisionamiento:\n${errorMsg}`);
     } finally {
@@ -128,10 +137,29 @@ export const SuperAdminPage = () => {
               
               <div><label className="block text-sm font-medium mb-1">Correo (Google Auth)</label><input type="email" value={newWorkspace.email} onChange={e => setNewWorkspace({...newWorkspace, email: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>
               
-              <div>
-                <label className="block text-sm font-medium mb-1">ID de Plantilla (UUID)</label>
-                <input type="text" placeholder="Ej: 550e8400-e29b-41d4-a716-446655440000" value={newWorkspace.templateId} onChange={e => setNewWorkspace({...newWorkspace, templateId: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm" required />
-                <p className="text-xs text-gray-500 mt-1">Debe ser un TemplateId válido en la base de datos.</p>
+              <div className="pt-2 border-t">
+                <label className="block text-sm font-bold mb-2">Modalidad de Licencia</label>
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center cursor-pointer">
+                    <input type="radio" name="mode" checked={provisionMode === 'template'} onChange={() => setProvisionMode('template')} className="mr-2" />
+                    Por Plantilla
+                  </label>
+                  <label className="flex items-center cursor-pointer">
+                    <input type="radio" name="mode" checked={provisionMode === 'custom'} onChange={() => setProvisionMode('custom')} className="mr-2" />
+                    A la carta
+                  </label>
+                </div>
+
+                {provisionMode === 'template' ? (
+                  <div>
+                    <input type="text" placeholder="Ej: 550e8400-e29b..." value={newWorkspace.templateId} onChange={e => setNewWorkspace({...newWorkspace, templateId: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm" required={provisionMode === 'template'} />
+                  </div>
+                ) : (
+                  <div>
+                    <input type="text" placeholder="Ej: FAQ, RESERVATIONS, INVENTORY" value={customModulesStr} onChange={e => setCustomModulesStr(e.target.value)} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-sm uppercase" required={provisionMode === 'custom'} />
+                    <p className="text-xs text-gray-500 mt-1">Separados por coma.</p>
+                  </div>
+                )}
               </div>
 
               <div><label className="block text-sm font-medium mb-1">Vencimiento de Licencia</label><input type="date" value={newWorkspace.expiresAt} onChange={e => setNewWorkspace({...newWorkspace, expiresAt: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>

@@ -2,5 +2,5 @@
 
 public interface IAiProvider
 {
-    Task<string> GenerateTextAsync(string systemPrompt, string userMessage, CancellationToken cancellationToken);
+    Task<string> GenerateTextAsync(string systemPrompt, string userMessage, bool useJsonMode = false, CancellationToken cancellationToken = default);
 }

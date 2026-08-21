@@ -45,7 +45,7 @@ public class EvolutionWebhookController : ControllerBase
             WorkspaceId: workspaceId,
             CustomerPhone: payload.Data.Key.RemoteJid.Replace("@s.whatsapp.net", ""),
             CustomerName: payload.Data.PushName ?? "Cliente",
-            MessageText: payload.Data.Message.Conversation ?? "",
+            MessageText: payload.Data.Message.GetRealText(), // <-- USAMOS EL MÉTODO BLINDADO
             MessageId: messageId
         );
 
@@ -87,4 +87,15 @@ public class EvolutionKey
 public class EvolutionMessage
 {
     public string Conversation { get; set; } = string.Empty;
+    public ExtendedTextMessage? ExtendedTextMessage { get; set; }
+
+    // Propiedad calculada para obtener el texto real, sea mensaje normal o respuesta (swipe)
+    public string GetRealText() =>
+        !string.IsNullOrEmpty(Conversation) ? Conversation :
+        ExtendedTextMessage?.Text ?? string.Empty;
+}
+
+public class ExtendedTextMessage
+{
+    public string Text { get; set; } = string.Empty;
 }

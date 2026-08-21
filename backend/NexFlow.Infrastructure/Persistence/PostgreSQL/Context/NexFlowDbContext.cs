@@ -17,6 +17,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Reservation> Reservations { get; set; } = null!;
     public DbSet<SystemAdministrator> SystemAdministrators { get; set; } = null!;
+    public DbSet<Service> Services => Set<Service>();
 
     public NexFlowDbContext(DbContextOptions<NexFlowDbContext> options) : base(options)
     {

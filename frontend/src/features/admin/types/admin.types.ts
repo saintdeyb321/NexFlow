@@ -3,8 +3,8 @@ export interface ProvisionWorkspaceRequest {
   firstName: string;
   lastName: string;
   workspaceName: string;
-  templateId?: string; // Opcional: Si se envía, usa la plantilla.
-  customModules?: string[]; // Opcional: Si no hay plantilla, usa estos módulos (Ej: ['FAQ', 'RESERVATIONS']).
+  templateId?: string; 
+  customModules?: string[]; 
   expiresAt: string;
 }
 
@@ -15,4 +15,3 @@ export interface WorkspaceSummaryDto {
   ownerEmail: string;
   createdAt: string;
 }
-

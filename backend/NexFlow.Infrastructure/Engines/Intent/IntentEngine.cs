@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent;
@@ -35,7 +31,8 @@ Formato:
 }";
         try
         {
-            var jsonResponse = await _aiProvider.GenerateTextAsync(systemPrompt, message, cancellationToken);
+            // Dentro de IntentEngine.cs
+            var jsonResponse = await _aiProvider.GenerateTextAsync(systemPrompt, message, useJsonMode: true, cancellationToken);
             jsonResponse = jsonResponse.Replace("```json", "").Replace("```", "").Trim();
 
             var rawResult = JsonSerializer.Deserialize<RawIntentDto>(jsonResponse, new JsonSerializerOptions

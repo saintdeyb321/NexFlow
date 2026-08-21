@@ -1,13 +1,13 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../core/store/useAuthStore';
-import { LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, ShieldAlert } from 'lucide-react'; // <- Añadido ShieldAlert
+import { LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, ShieldAlert } from 'lucide-react';
 
 export const WorkspaceLayout = () => {
   const { me, logout } = useAuthStore();
   const { pathname } = useLocation();
 
-  // REGLA DE ORO: El Frontend solo lee, nunca decide.
-  const entitlements = ['RESERVATIONS', 'FAQ'];
+  // 1. REGLA DE ORO: Leemos los módulos habilitados desde el backend
+  const entitlements = me?.entitlements || [];
   const isSuperAdmin = me?.user?.email === 'deyvidparionaramos@gmail.com';
 
   const navItemClass = (path: string) => 
@@ -31,7 +31,7 @@ export const WorkspaceLayout = () => {
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
           </Link>
 
-          {/* Renderizado Condicional Dictado por el Backend */}
+          {/* 2. RENDERIZADO MODULAR DICTADO POR EL BACKEND */}
           {entitlements.includes('RESERVATIONS') && (
             <Link to="/reservations" className={navItemClass('/reservations')}>
               <Calendar className="w-5 h-5 mr-3" /> Reservas
@@ -48,10 +48,12 @@ export const WorkspaceLayout = () => {
             Administración
           </div>
           
+          {/* Configuraciones globales del Workspace */}
           <Link to="/settings" className={navItemClass('/settings')}>
             <Settings className="w-5 h-5 mr-3" /> Negocio
           </Link>
           
+          {/* Servicios suele ser visible para configurar qué vendes */}
           <Link to="/services" className={navItemClass('/services')}>
             <Scissors className="w-5 h-5 mr-3" /> Servicios
           </Link>
@@ -61,10 +63,9 @@ export const WorkspaceLayout = () => {
         <div className="p-4 border-t border-gray-200 bg-gray-50">
           <div className="mb-3 px-2">
             <p className="text-sm font-semibold text-gray-800 truncate">{me?.workspace?.name || 'Configurando...'}</p>
-            <p className="text-xs text-gray-500 truncate">{me?.user.email}</p>
+            <p className="text-xs text-gray-500 truncate">{me?.user?.email}</p>
           </div>
           
-          {/* BOTÓN SUPERADMIN CORREGIDO (FUERA DEL BOTÓN DE LOGOUT) */}
           {isSuperAdmin && (
             <Link to="/superadmin" className="w-full flex items-center px-4 py-2 mb-2 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
               <ShieldAlert className="w-4 h-4 mr-2" /> Consola SuperAdmin
