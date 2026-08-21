@@ -6,8 +6,8 @@ namespace NexFlow.Domain.Entities;
 public class Reservation : Entity
 {
     public Guid WorkspaceId { get; private set; }
-    public Guid LocationId { get; private set; }
-    public Guid ServiceId { get; private set; }
+    public string LocationId { get; private set; } = null!; // Adaptado para Firestore
+    public string ServiceId { get; private set; } = null!; // Adaptado para Firestore
     public string CustomerIdentifier { get; private set; } = null!;
     public DateTime StartTime { get; private set; }
     public DateTime EndTime { get; private set; }
@@ -18,7 +18,7 @@ public class Reservation : Entity
 
     private Reservation() { }
 
-    public static Reservation Create(Guid workspaceId, Guid locationId, Guid serviceId, string customerIdentifier, DateTime startTime, DateTime endTime)
+    public static Reservation Create(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, DateTime startTime, DateTime endTime)
     {
         return new Reservation
         {

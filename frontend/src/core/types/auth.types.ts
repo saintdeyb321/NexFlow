@@ -3,6 +3,7 @@ export interface User {
   email: string;
   firstName: string;
   lastName: string;
+  isSuperAdmin: boolean; // <-- AÑADIDO: Autorización dictada por el backend
 }
 
 export interface Workspace {
@@ -17,7 +18,6 @@ export interface License {
   expiresAt: string | null;
 }
 
-// Este es el espejo exacto de tu MeDto de C#
 export interface MeResponse {
   user: User;
   workspace: Workspace | null;

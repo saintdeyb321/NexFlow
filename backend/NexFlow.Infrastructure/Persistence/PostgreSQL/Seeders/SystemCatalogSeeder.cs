@@ -11,67 +11,68 @@ public static class SystemCatalogSeeder
 {
     public static async Task SeedCatalogAsync(NexFlowDbContext context)
     {
-        // 1. Crear Módulos Core si no existen
-        if (!await context.Modules.AnyAsync())
+        // 1. Módulos Core (Inyección Idempotente usando Code)
+        var coreModules = new[]
         {
-            var modules = new List<Module>
-            {
-                Module.Create("BUSINESS_PROFILE", "Perfil del Negocio"),
-                Module.Create("LOCATIONS", "Gestión de Sedes"),
-                Module.Create("BUSINESS_HOURS", "Horarios de Atención"),
-                Module.Create("SERVICES", "Catálogo de Servicios"),
-                Module.Create("FAQ", "Base de Conocimiento"),
-                Module.Create("RESERVATIONS", "Motor de Reservas"),
-                Module.Create("CUSTOMERS", "Directorio de Clientes")
-            };
+            new { Code = "BUSINESS_PROFILE", Name = "Perfil del Negocio" },
+            new { Code = "LOCATIONS", Name = "Gestión de Sedes" },
+            new { Code = "BUSINESS_HOURS", Name = "Horarios de Atención" },
+            new { Code = "SERVICES", Name = "Catálogo de Servicios" },
+            new { Code = "FAQ", Name = "Base de Conocimiento" },
+            new { Code = "RESERVATIONS", Name = "Motor de Reservas" },
+            new { Code = "CUSTOMERS", Name = "Directorio de Clientes" }
+        };
 
-            await context.Modules.AddRangeAsync(modules);
-            await context.SaveChangesAsync();
-        }
-
-        // 2. Crear Plantillas Base si no existen
-        // 2. Crear Plantillas Base si no existen
-        if (!await context.Templates.AnyAsync())
+        var existingModules = await context.Modules.ToListAsync();
+        foreach (var m in coreModules)
         {
-            var secretaryTemplate = Template.Create("SECRETARY");
-            var receptionistTemplate = Template.Create("RECEPTIONIST");
-
-            await context.Templates.AddRangeAsync(secretaryTemplate, receptionistTemplate);
-            await context.SaveChangesAsync();
-
-            // 3. Relacionar Plantillas con Módulos (TemplateModules)
-            var allModules = await context.Modules.ToListAsync();
-
-            var secretaryModules = new[] { "BUSINESS_PROFILE", "FAQ", "SERVICES", "RESERVATIONS" };
-            var receptionistModules = new[] { "BUSINESS_PROFILE", "FAQ", "SERVICES", "RESERVATIONS", "CUSTOMERS" };
-
-            var templateModules = new List<TemplateModule>();
-
-            // Usamos FirstOrDefault y Trim() para ignorar espacios fantasma o problemas de formato en la BD
-            foreach (var modCode in secretaryModules)
+            if (!existingModules.Any(x => x.Code == m.Code))
             {
-                var mod = allModules.FirstOrDefault(m => m.Code != null && m.Code.Trim().ToUpper() == modCode);
-                if (mod != null)
-                {
-                    templateModules.Add(new TemplateModule(secretaryTemplate.Id, mod.Id));
-                }
-            }
-
-            foreach (var modCode in receptionistModules)
-            {
-                var mod = allModules.FirstOrDefault(m => m.Code != null && m.Code.Trim().ToUpper() == modCode);
-                if (mod != null)
-                {
-                    templateModules.Add(new TemplateModule(receptionistTemplate.Id, mod.Id));
-                }
-            }
-
-            // Solo guardamos si logramos armar las relaciones
-            if (templateModules.Any())
-            {
-                await context.TemplateModules.AddRangeAsync(templateModules);
-                await context.SaveChangesAsync();
+                context.Modules.Add(Module.Create(m.Code, m.Name));
             }
         }
+        await context.SaveChangesAsync();
+
+        // 2. Plantillas Base (Inyección Idempotente usando Name)
+        var templates = new[] { "SECRETARY", "RECEPTIONIST" };
+        var existingTemplates = await context.Templates.ToListAsync();
+
+        foreach (var t in templates)
+        {
+            // CORRECCIÓN AQUÍ: Usamos x.Name en lugar de x.Code para Template
+            if (!existingTemplates.Any(x => x.Name == t))
+            {
+                context.Templates.Add(Template.Create(t));
+            }
+        }
+        await context.SaveChangesAsync();
+
+        // 3. Relaciones TemplateModules (Inyección Idempotente)
+        existingModules = await context.Modules.ToListAsync();
+        existingTemplates = await context.Templates.ToListAsync();
+        var existingTemplateModules = await context.TemplateModules.ToListAsync();
+
+        var templateConfig = new Dictionary<string, string[]>
+        {
+            { "SECRETARY", new[] { "BUSINESS_PROFILE", "FAQ", "SERVICES", "RESERVATIONS" } },
+            { "RECEPTIONIST", new[] { "BUSINESS_PROFILE", "FAQ", "SERVICES", "RESERVATIONS", "CUSTOMERS" } }
+        };
+
+        foreach (var config in templateConfig)
+        {
+            // Usamos t.Name para buscar la plantilla
+            var template = existingTemplates.FirstOrDefault(t => t.Name == config.Key);
+            if (template == null) continue;
+
+            foreach (var modCode in config.Value)
+            {
+                var mod = existingModules.FirstOrDefault(m => m.Code == modCode);
+                if (mod != null && !existingTemplateModules.Any(tm => tm.TemplateId == template.Id && tm.ModuleId == mod.Id))
+                {
+                    context.TemplateModules.Add(new TemplateModule(template.Id, mod.Id));
+                }
+            }
+        }
+        await context.SaveChangesAsync();
     }
 }

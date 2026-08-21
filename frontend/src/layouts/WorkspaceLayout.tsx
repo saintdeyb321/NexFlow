@@ -6,9 +6,10 @@ export const WorkspaceLayout = () => {
   const { me, logout } = useAuthStore();
   const { pathname } = useLocation();
 
-  // 1. REGLA DE ORO: Leemos los módulos habilitados desde el backend
   const entitlements = me?.entitlements || [];
-  const isSuperAdmin = me?.user?.email === 'deyvidparionaramos@gmail.com';
+  
+  // CORRECCIÓN: Ahora la autorización viene firmada por el backend, cero correos estáticos.
+  const isSuperAdmin = me?.user?.isSuperAdmin === true;
 
   const navItemClass = (path: string) => 
     `flex items-center px-4 py-3 mb-1 rounded-lg transition-colors ${
@@ -31,7 +32,7 @@ export const WorkspaceLayout = () => {
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
           </Link>
 
-          {/* 2. RENDERIZADO MODULAR DICTADO POR EL BACKEND */}
+          {/* RENDERIZADO MODULAR DICTADO POR LA LICENCIA */}
           {entitlements.includes('RESERVATIONS') && (
             <Link to="/reservations" className={navItemClass('/reservations')}>
               <Calendar className="w-5 h-5 mr-3" /> Reservas
@@ -43,19 +44,21 @@ export const WorkspaceLayout = () => {
               <BookOpen className="w-5 h-5 mr-3" /> Conocimiento (FAQ)
             </Link>
           )}
+
+          {/* CORRECCIÓN: Servicios también es un módulo y debe estar protegido */}
+          {entitlements.includes('SERVICES') && (
+            <Link to="/services" className={navItemClass('/services')}>
+              <Scissors className="w-5 h-5 mr-3" /> Servicios
+            </Link>
+          )}
           
           <div className="mt-8 mb-2 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
             Administración
           </div>
           
-          {/* Configuraciones globales del Workspace */}
+          {/* Configuraciones globales del Workspace (Módulo Base) */}
           <Link to="/settings" className={navItemClass('/settings')}>
             <Settings className="w-5 h-5 mr-3" /> Negocio
-          </Link>
-          
-          {/* Servicios suele ser visible para configurar qué vendes */}
-          <Link to="/services" className={navItemClass('/services')}>
-            <Scissors className="w-5 h-5 mr-3" /> Servicios
           </Link>
         </nav>
 

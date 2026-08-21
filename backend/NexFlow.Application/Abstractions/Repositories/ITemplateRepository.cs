@@ -8,6 +8,8 @@ namespace NexFlow.Application.Abstractions.Repositories;
 
 public interface ITemplateRepository
 {
+    void Add(Template template);
     Task<Template?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
+    Task<Template?> GetByNameAsync(string name, CancellationToken cancellationToken);
     Task<IEnumerable<Module>> GetActiveModulesForTemplateAsync(Guid templateId, CancellationToken cancellationToken);
 }

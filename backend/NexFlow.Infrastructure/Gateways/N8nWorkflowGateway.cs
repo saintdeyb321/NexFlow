@@ -17,27 +17,25 @@ public class N8nWorkflowGateway : IWorkflowGateway
     public N8nWorkflowGateway(HttpClient httpClient, IConfiguration configuration, ILogger<N8nWorkflowGateway> logger)
     {
         _httpClient = httpClient;
-        // Asume el puerto de n8n por defecto si no está en appsettings
         _baseUrl = configuration["N8n:BaseUrl"] ?? "http://localhost:5678";
         _logger = logger;
     }
 
-    public async Task TriggerWorkflowAsync(Guid workspaceId, string workflowId, object payload, CancellationToken cancellationToken)
+    public async Task TriggerWorkflowAsync<T>(string workflowId, N8nEventPayload<T> payload, CancellationToken cancellationToken)
     {
-        // Los Webhooks de n8n siguen este formato
         var url = $"{_baseUrl}/webhook/{workflowId}";
 
         try
         {
-            // Envolvemos tu payload con el ID del negocio para asegurar el multi-tenant también en n8n
-            var n8nPayload = new { WorkspaceId = workspaceId, Data = payload };
-
-            var response = await _httpClient.PostAsJsonAsync(url, n8nPayload, cancellationToken);
+            // Ahora la petición viaja fuertemente tipada y blindada con multi-tenant
+            var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
             response.EnsureSuccessStatusCode();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fallo al disparar el flujo {WorkflowId} en n8n para el Workspace {WorkspaceId}", workflowId, workspaceId);
+            // Usamos Structured Logging para atrapar el CorrelationId
+            _logger.LogError(ex, "Fallo al disparar flujo {WorkflowId} en n8n para Workspace {WorkspaceId}. Correlation: {CorrelationId}",
+                workflowId, payload.WorkspaceId, payload.CorrelationId);
             throw;
         }
     }

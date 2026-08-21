@@ -72,10 +72,11 @@ public class ProvisionClientCommandHandler
         // 3. ESTRATEGIA DE LICENCIAMIENTO (Template vs Custom)
         License license;
 
-        if (request.TemplateId.HasValue && request.TemplateId != Guid.Empty)
+        if (!string.IsNullOrEmpty(request.TemplateName))
         {
-            // FLUJO A: Plantilla
-            var template = await _templateRepository.GetByIdAsync(request.TemplateId.Value, cancellationToken);
+            // FLUJO A: Plantilla (Busca por Nombre en lugar de ID)
+            var template = await _templateRepository.GetByNameAsync(request.TemplateName, cancellationToken);
+
             if (template == null || template.Status != TemplateStatus.Active)
                 return Result<Guid>.Failure(new Error("Template.Invalid", "Plantilla inactiva o no encontrada."));
 

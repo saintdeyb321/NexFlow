@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Abstractions;
+﻿using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Domain.Enums;
@@ -29,15 +24,15 @@ public class ReservationEngine : IReservationEngine
         _unitOfWork = unitOfWork;
     }
 
-    public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, Guid locationId, Guid serviceId, DateTime date, CancellationToken cancellationToken)
+    public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
     {
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == serviceId.ToString());
+        var targetService = services.FirstOrDefault(s => s.Id == serviceId);
         if (targetService == null) return new List<TimeSlotDto>();
 
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
 
-        var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId.ToString(), cancellationToken);
+        var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)date.DayOfWeek);
 
         if (todayHours == null || todayHours.IsClosed) return new List<TimeSlotDto>();
@@ -66,10 +61,10 @@ public class ReservationEngine : IReservationEngine
         return availableSlots;
     }
 
-    public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, Guid locationId, Guid serviceId, string customerIdentifier, DateTime dateTime, CancellationToken cancellationToken)
+    public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, DateTime dateTime, CancellationToken cancellationToken)
     {
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == serviceId.ToString());
+        var targetService = services.FirstOrDefault(s => s.Id == serviceId);
 
         if (targetService == null)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio solicitado no existe."));

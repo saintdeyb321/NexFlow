@@ -5,7 +5,7 @@ public record ProvisionClientCommand(
     string FirstName,
     string LastName,
     string WorkspaceName,
-    Guid? TemplateId, // ¡Ahora es anulable (opcional)!
+    string? TemplateName, // <-- Cambiado a string para recibir "SECRETARY"
     DateTime ExpiresAt,
-    List<string>? CustomModules // Módulos a la carta (Ej: ["FAQ", "SERVICES"])
-);
+    List<string>? CustomModules
+);  

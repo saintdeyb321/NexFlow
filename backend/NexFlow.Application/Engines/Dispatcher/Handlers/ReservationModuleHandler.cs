@@ -31,35 +31,71 @@ public class ReservationModuleHandler : IModuleHandler
 
     public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, IntentResultDto intent, CancellationToken cancellationToken)
     {
+        // 1. Extraer y Validar Fecha (Fallback a hoy)
         DateTime dateToSearch = DateTime.UtcNow.Date;
         if (intent.Parameters.TryGetValue("date", out var dateStr) && DateTime.TryParse(dateStr, out var parsedDate))
             dateToSearch = parsedDate.Date;
 
+        // 2. Extraer y Validar Sede
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         var mainLocation = locations.FirstOrDefault(l => l.IsMain) ?? locations.FirstOrDefault();
-        if (mainLocation == null || !Guid.TryParse(mainLocation.Id, out var locationGuid))
-            return "El sistema aún no tiene sedes configuradas.";
 
-        Guid targetServiceId = Guid.Empty;
+        if (mainLocation == null || string.IsNullOrWhiteSpace(mainLocation.Id))
+            return "SISTEMA: El negocio no tiene sedes configuradas. Dile al cliente que por el momento no pueden agendar.";
+
+        string targetLocationId = mainLocation.Id;
+        string? targetServiceId = null;
+
+        // 3. Extraer y Validar Servicio
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
 
         if (intent.Parameters.TryGetValue("service", out var serviceName))
         {
             var matchedService = services.FirstOrDefault(s => s.Name.Contains(serviceName, StringComparison.OrdinalIgnoreCase));
-            if (matchedService != null) Guid.TryParse(matchedService.Id, out targetServiceId);
+            if (matchedService != null)
+            {
+                targetServiceId = matchedService.Id;
+            }
         }
 
-        if (targetServiceId == Guid.Empty)
+        if (string.IsNullOrWhiteSpace(targetServiceId))
         {
             var serviceNames = string.Join(", ", services.Select(s => s.Name));
-            return $"Pregunta al cliente cuál de estos servicios desea: {serviceNames}";
+            return $"SISTEMA: Falta el servicio o no fue reconocido. Pide al cliente que elija uno de estos servicios: {serviceNames}";
         }
 
-        var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, locationGuid, targetServiceId, dateToSearch, cancellationToken);
+        // 4. ENRUTADOR DE CAPACIDADES (Capabilities Router)
+        if (intent.Intent == IntentType.CheckAvailability)
+        {
+            var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, targetLocationId, targetServiceId, dateToSearch, cancellationToken);
 
-        if (!slots.Any()) return $"NO hay horarios disponibles el {dateToSearch:yyyy-MM-dd}.";
+            if (!slots.Any())
+                return $"SISTEMA: NO hay horarios disponibles el {dateToSearch:yyyy-MM-dd}. Pídele amablemente al cliente que elija otro día.";
 
-        var slotsText = string.Join(", ", slots.Select(s => s.StartTime.ToString("HH:mm")));
-        return $"Horarios libres para {dateToSearch:yyyy-MM-dd}: {slotsText}.";
+            var slotsText = string.Join(", ", slots.Select(s => s.StartTime.ToString("HH:mm")));
+            return $"SISTEMA: Horarios libres para {dateToSearch:yyyy-MM-dd}: {slotsText}. Pregúntale al cliente qué horario prefiere.";
+        }
+
+        if (intent.Intent == IntentType.CreateReservation)
+        {
+            // Validamos que la IA haya extraído la hora
+            if (!intent.Parameters.TryGetValue("time", out var timeStr) || !TimeSpan.TryParse(timeStr, out var time))
+                return "SISTEMA: Falta la hora exacta para la reserva. Pídele al cliente que indique a qué hora desea su cita.";
+
+            var exactDateTime = dateToSearch.Add(time);
+
+            // TODO: En el Sprint V2.11 inyectaremos el número de teléfono real del cliente vía Evolution API. 
+            // Por ahora usamos un identificador seguro para que pase la creación.
+            string customerIdentifier = intent.Parameters.TryGetValue("phone", out var phone) ? phone : "WhatsApp_Customer";
+
+            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId, targetServiceId, customerIdentifier, exactDateTime, cancellationToken);
+
+            if (result.IsSuccess)
+                return $"SISTEMA: Reserva CREADA EXITOSAMENTE para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.";
+            else
+                return $"SISTEMA: Hubo un conflicto. {result.Error.Description}. Pide disculpas y ofrécele otros horarios.";
+        }
+
+        return "SISTEMA: La intención no es soportada por este módulo.";
     }
 }

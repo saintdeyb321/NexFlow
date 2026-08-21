@@ -1,4 +1,7 @@
-﻿using NexFlow.Application.Engines.AI;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Infrastructure.Engines.AI;
@@ -14,19 +17,22 @@ public class AiRouter : IAiRouter
 
     public async Task<string> GenerateResponseAsync(Guid workspaceId, IntentResultDto intent, string systemContext, CancellationToken cancellationToken)
     {
-        // Patron Strategy simplificado para decidir la personalidad de la IA según la intención
-        var basePrompt = intent.Intent switch
-        {
-            IntentType.Faq => "Eres un asistente de servicio al cliente. Responde la duda basándote ÚNICAMENTE en esta información: ",
-            IntentType.CheckAvailability => "Eres un recepcionista. Muestra estos horarios disponibles de forma amable: ",
-            IntentType.Unknown => "Eres un asistente. Dile al cliente amablemente que no le entendiste y ofrécele opciones (ej: reservar, preguntar).",
-            _ => "Eres un asistente virtual de reservas. Sé breve y amable. Contexto: "
-        };
+        // V2.10: Adiós al selector de personalidad básico.
+        // Ahora somos un motor determinista. El sistema dicta LA VERDAD, la IA solo redacta.
+        var systemInstruction = @"
+Eres el operador virtual de atención al cliente (NexFlow AI).
+Tu única tarea es comunicar el 'Resultado del Sistema' al cliente de manera natural, profesional y conversacional.
 
-        var finalSystemPrompt = $"{basePrompt} \n{systemContext}";
+REGLAS ESTRICTAS:
+1. NUNCA inventes información, precios, sedes ni horarios que no estén explícitamente en el Resultado del Sistema.
+2. NUNCA menciones que eres una Inteligencia Artificial ni hables de 'el sistema'. Háblale directamente al cliente como si fueras parte del negocio.
+3. Mantén la respuesta breve y cálida (máximo 2 o 3 oraciones cortas).
+4. Si el sistema te da una instrucción directa (Ej: 'Despídete' o 'Pregúntale qué horario prefiere'), CÚMPLELA AL PIE DE LA LETRA.
+";
 
-        // El userMessage se pasa vacío o con parámetros clave dependiendo de la necesidad, 
-        // por ahora dejamos a la IA armar la respuesta con el contexto.
-        return await _aiProvider.GenerateTextAsync(finalSystemPrompt, "Genera la respuesta al cliente.", useJsonMode: false, cancellationToken);
+        // Le pasamos el string que armó nuestro ModuleHandler (Ej: "SISTEMA: Horarios libres...")
+        var userPrompt = $"RESULTADO DEL SISTEMA:\n{systemContext}";
+
+        return await _aiProvider.GenerateTextAsync(systemInstruction, userPrompt, useJsonMode: false, cancellationToken);
     }
 }

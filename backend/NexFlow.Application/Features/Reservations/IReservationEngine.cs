@@ -7,16 +7,16 @@ public interface IReservationEngine
     // Devuelve los bloques de tiempo libres para un día específico
     Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(
         Guid workspaceId,
-        Guid locationId,
-        Guid serviceId,
+        string locationId,
+        string serviceId,
         DateTime date,
         CancellationToken cancellationToken);
 
     // Intenta crear la reserva. Falla si el horario ya se ocupó
     Task<Result<ReservationDto>> CreateReservationAsync(
         Guid workspaceId,
-        Guid locationId,
-        Guid serviceId,
+        string locationId,
+        string serviceId,
         string customerIdentifier,
         DateTime dateTime,
         CancellationToken cancellationToken);

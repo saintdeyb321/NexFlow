@@ -9,7 +9,8 @@ using NexFlow.Application.Common;
 namespace NexFlow.Application.Features.Identity.GetMe;
 
 public record MeDto(UserDto User, WorkspaceDto? Workspace, LicenseDto? License, string[] Entitlements);
-public record UserDto(Guid Id, string Email, string FirstName, string LastName);
+// CORRECCIÓN: Agregamos IsSuperAdmin al DTO
+public record UserDto(Guid Id, string Email, string FirstName, string LastName, bool IsSuperAdmin);
 public record WorkspaceDto(Guid Id, string Name, string Status);
 public record LicenseDto(string Type, string Status, DateTime? ExpiresAt);
 
@@ -21,13 +22,16 @@ public class GetMeQueryHandler
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly ILicenseRepository _licenseRepository;
     private readonly IEntitlementService _entitlementService;
+    private readonly ISystemAdministratorRepository _sysAdminRepository; // <-- Inyectamos el repo de admins
 
     public GetMeQueryHandler(
         ICurrentUser currentUser, IUserRepository userRepository, IMembershipRepository membershipRepository,
-        IWorkspaceRepository workspaceRepository, ILicenseRepository licenseRepository, IEntitlementService entitlementService)
+        IWorkspaceRepository workspaceRepository, ILicenseRepository licenseRepository,
+        IEntitlementService entitlementService, ISystemAdministratorRepository sysAdminRepository)
     {
         _currentUser = currentUser; _userRepository = userRepository; _membershipRepository = membershipRepository;
-        _workspaceRepository = workspaceRepository; _licenseRepository = licenseRepository; _entitlementService = entitlementService;
+        _workspaceRepository = workspaceRepository; _licenseRepository = licenseRepository;
+        _entitlementService = entitlementService; _sysAdminRepository = sysAdminRepository;
     }
 
     public async Task<Result<MeDto>> Handle(CancellationToken cancellationToken)
@@ -35,7 +39,10 @@ public class GetMeQueryHandler
         var user = await _userRepository.GetByIdAsync(_currentUser.UserId, cancellationToken);
         if (user == null) return Result<MeDto>.Failure(new Error("User.NotFound", "Usuario no encontrado."));
 
-        var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName);
+        // Validamos en la Base de Datos si el usuario existe en la tabla de SystemAdministrators
+        bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, cancellationToken);
+
+        var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName, isSuperAdmin);
 
         var memberships = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
         var activeMembership = memberships.FirstOrDefault();
@@ -43,7 +50,6 @@ public class GetMeQueryHandler
         if (activeMembership == null)
             return Result<MeDto>.Success(new MeDto(userDto, null, null, Array.Empty<string>()));
 
-        // BLINDAJE NULL: Verificamos que el workspace realmente exista
         var workspace = await _workspaceRepository.GetByIdAsync(activeMembership.WorkspaceId, cancellationToken);
         if (workspace == null)
             return Result<MeDto>.Success(new MeDto(userDto, null, null, Array.Empty<string>()));
@@ -53,7 +59,6 @@ public class GetMeQueryHandler
 
         var workspaceDto = new WorkspaceDto(workspace.Id, workspace.Name, workspace.Status.ToString());
 
-        // CORRECCIÓN: Accedemos al ValueObject ValidityPeriod.End
         var licenseDto = license != null
             ? new LicenseDto(license.Type.ToString(), license.Status.ToString(), license.ValidityPeriod.End)
             : null;

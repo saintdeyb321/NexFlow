@@ -3,7 +3,7 @@ export interface ProvisionWorkspaceRequest {
   firstName: string;
   lastName: string;
   workspaceName: string;
-  templateId?: string; 
+  templateName?: string; 
   customModules?: string[]; 
   expiresAt: string;
 }

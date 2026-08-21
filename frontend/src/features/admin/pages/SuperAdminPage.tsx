@@ -6,14 +6,14 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const SuperAdminPage = () => {
   const { me } = useAuthStore();
-  const isSuperAdmin = me?.user?.email === 'deyvidparionaramos@gmail.com';
+  // CORRECCIÓN: Validación dinámica basada en Backend
+  const isSuperAdmin = me?.user?.isSuperAdmin === true;
 
   const [workspaces, setWorkspaces] = useState<WorkspaceSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  // Selector de estrategia de licenciamiento
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
   const [customModulesStr, setCustomModulesStr] = useState('FAQ, RESERVATIONS');
 
@@ -25,7 +25,7 @@ export const SuperAdminPage = () => {
     firstName: '',
     lastName: '',
     workspaceName: '',
-    templateId: '', 
+    templateName: 'SECRETARY', // <-- Cambiado de templateId a templateName
     expiresAt: defaultDate.toISOString().split('T')[0]
   });
 
@@ -47,7 +47,6 @@ export const SuperAdminPage = () => {
     e.preventDefault();
     setIsProvisioning(true);
     try {
-      // Armamos el payload dinámicamente según el modo seleccionado
       const payload: ProvisionWorkspaceRequest = {
         email: newWorkspace.email,
         firstName: newWorkspace.firstName,
@@ -57,18 +56,17 @@ export const SuperAdminPage = () => {
       };
 
       if (provisionMode === 'template') {
-        payload.templateId = newWorkspace.templateId;
+        payload.templateName = newWorkspace.templateName; // Enviamos el Nombre
       } else {
         payload.customModules = customModulesStr.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
       }
       
       await provisionNewWorkspace(payload);
-      alert('¡Entorno aprovisionado con éxito! Revisa tu base de datos PostgreSQL.');
+      alert('¡Entorno aprovisionado con éxito!');
       setShowModal(false);
       loadWorkspaces();
     } catch (error: any) {
-      const errorMsg = error.response?.data?.message || 'Error aprovisionando el entorno';
-      alert(`Fallo en el aprovisionamiento:\n${errorMsg}`);
+      alert(`Fallo en el aprovisionamiento:\n${error.response?.data?.detail || 'Error interno'}`);
     } finally {
       setIsProvisioning(false);
     }
@@ -109,7 +107,7 @@ export const SuperAdminPage = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {workspaces.length === 0 ? (
-              <tr><td colSpan={3} className="px-6 py-8 text-center text-gray-500">No hay clientes o el endpoint GET aún no existe.</td></tr>
+              <tr><td colSpan={3} className="px-6 py-8 text-center text-gray-500">No hay clientes aprovisionados.</td></tr>
             ) : (
               workspaces.map((ws) => (
                 <tr key={ws.id}>
@@ -152,7 +150,15 @@ export const SuperAdminPage = () => {
 
                 {provisionMode === 'template' ? (
                   <div>
-                    <input type="text" placeholder="Ej: 550e8400-e29b..." value={newWorkspace.templateId} onChange={e => setNewWorkspace({...newWorkspace, templateId: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm" required={provisionMode === 'template'} />
+                    {/* UI UX MEJORADA: Dropdown en lugar de Input de UUID */}
+                    <select 
+                      value={newWorkspace.templateName} 
+                      onChange={e => setNewWorkspace({...newWorkspace, templateName: e.target.value})} 
+                      className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+                    >
+                      <option value="SECRETARY">Secretaria</option>
+                      <option value="RECEPTIONIST">Recepcionista</option>
+                    </select>
                   </div>
                 ) : (
                   <div>

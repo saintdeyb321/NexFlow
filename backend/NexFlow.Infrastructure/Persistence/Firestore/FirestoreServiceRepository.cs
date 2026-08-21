@@ -1,6 +1,6 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Business; // Importante: ServiceDto ahora vive aquí
+using NexFlow.Application.Features.Business;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,23 +23,43 @@ public class FirestoreServiceRepository : IServiceRepository
         {
             var data = doc.ConvertTo<FirestoreService>();
 
-            // Usamos inicialización de propiedades, el Id ya es un string nativo
             return new ServiceDto
             {
                 Id = doc.Id,
                 Name = data.Name,
-                DurationInMinutes = data.DurationInMinutes
+                Description = data.Description,
+                Category = data.Category,
+                DurationInMinutes = data.DurationInMinutes,
+                Price = (decimal)data.Price, // Casteamos de double (Firestore) a decimal (C#)
+                Currency = data.Currency,
+                RequiresReservation = data.RequiresReservation,
+                IsActive = data.IsActive,
+                AvailableAtLocations = data.AvailableAtLocations ?? new List<string>(),
+                Metadata = data.Metadata ?? new Dictionary<string, object>()
             };
         });
     }
 
     public async Task SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
     {
-        // Evaluamos el string (null o vacío) en lugar de Guid.Empty
         var docId = string.IsNullOrEmpty(service.Id) ? Guid.NewGuid().ToString() : service.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(docId);
 
-        var data = new FirestoreService { Name = service.Name, DurationInMinutes = service.DurationInMinutes };
+        var data = new FirestoreService
+        {
+            Name = service.Name,
+            Description = service.Description,
+            Category = service.Category,
+            DurationInMinutes = service.DurationInMinutes,
+            Price = (double)service.Price, // Firestore exige double
+            Currency = service.Currency,
+            RequiresReservation = service.RequiresReservation,
+            IsActive = service.IsActive,
+            AvailableAtLocations = service.AvailableAtLocations,
+            Metadata = service.Metadata
+        };
+
+        // MergeAll es vital aquí para no borrar campos si en el futuro agregas más cosas directamente desde Firestore
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
     }
 
@@ -53,6 +73,16 @@ public class FirestoreServiceRepository : IServiceRepository
     private class FirestoreService
     {
         [FirestoreProperty] public string Name { get; set; } = string.Empty;
+        [FirestoreProperty] public string? Description { get; set; }
+        [FirestoreProperty] public string? Category { get; set; }
         [FirestoreProperty] public int DurationInMinutes { get; set; }
+        [FirestoreProperty] public double Price { get; set; }
+        [FirestoreProperty] public string Currency { get; set; } = "PEN";
+        [FirestoreProperty] public bool RequiresReservation { get; set; } = true;
+        [FirestoreProperty] public bool IsActive { get; set; } = true;
+
+        // Soportan colecciones nativas de C#
+        [FirestoreProperty] public List<string> AvailableAtLocations { get; set; } = new();
+        [FirestoreProperty] public Dictionary<string, object> Metadata { get; set; } = new();
     }
 }

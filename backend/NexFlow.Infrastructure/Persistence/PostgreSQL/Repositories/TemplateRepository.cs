@@ -3,6 +3,11 @@ using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
 
@@ -19,9 +24,15 @@ public class TemplateRepository : ITemplateRepository
         return await _context.Templates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
     }
 
+    public async Task<Template?> GetByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        // Busca ignorando mayúsculas/minúsculas para mayor robustez
+        return await _context.Templates
+            .FirstOrDefaultAsync(t => t.Name.ToLower() == name.ToLower(), cancellationToken);
+    }
+
     public async Task<IEnumerable<Module>> GetActiveModulesForTemplateAsync(Guid templateId, CancellationToken cancellationToken)
     {
-        // Unimos TemplateModule con Module para devolver solo los módulos que están ACTIVOS
         return await _context.TemplateModules
             .Where(tm => tm.TemplateId == templateId)
             .Join(_context.Modules,

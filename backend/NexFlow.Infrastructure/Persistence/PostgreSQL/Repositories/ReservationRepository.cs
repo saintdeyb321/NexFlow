@@ -3,6 +3,11 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
 
@@ -20,7 +25,7 @@ public class ReservationRepository : IReservationRepository
             .FirstOrDefaultAsync(r => r.Id == reservationId && r.WorkspaceId == workspaceId, cancellationToken);
     }
 
-    public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, Guid locationId, DateTime date, CancellationToken cancellationToken)
+    public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime date, CancellationToken cancellationToken)
     {
         var startOfDay = date.Date;
         var endOfDay = startOfDay.AddDays(1).AddTicks(-1);
@@ -35,7 +40,7 @@ public class ReservationRepository : IReservationRepository
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, Guid locationId, Guid serviceId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken)
+    public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, string serviceId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken)
     {
         bool hasOverlap = await _context.Reservations
             .AnyAsync(r => r.WorkspaceId == workspaceId

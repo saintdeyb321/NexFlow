@@ -9,15 +9,20 @@ import { ReservationsPage } from '../../features/reservations/pages/Reservations
 import { SuperAdminPage } from '../../features/admin/pages/SuperAdminPage';
 import { useAuthStore } from '../../core/store/useAuthStore';
 
-// 1. GUARDIÁN DE MÓDULOS: Bloquea el acceso por URL si no tiene la licencia
+// 1. GUARDIÁN DE MÓDULOS: Bloquea si no tiene el módulo en su licencia
 const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, children: React.ReactNode }) => {
   const { me } = useAuthStore();
   const hasAccess = me?.entitlements?.includes(requiredModule);
   
-  if (!hasAccess) {
-    return <Navigate to="/" replace />;
-  }
+  if (!hasAccess) return <Navigate to="/" replace />;
+  return <>{children}</>;
+};
+
+// 2. GUARDIÁN DE SUPER ADMIN: Bloquea intrusos
+const SuperAdminGuard = ({ children }: { children: React.ReactNode }) => {
+  const { me } = useAuthStore();
   
+  if (!me?.user?.isSuperAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
@@ -38,28 +43,28 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <DashboardPlaceholder /> },
           
-          // 2. RUTAS MODULARES PROTEGIDAS
+          // RUTAS MODULARES PROTEGIDAS
           { 
             path: 'reservations', 
-            element: (
-              <ModuleGuard requiredModule="RESERVATIONS">
-                <ReservationsPage />
-              </ModuleGuard>
-            )
+            element: <ModuleGuard requiredModule="RESERVATIONS"><ReservationsPage /></ModuleGuard>
           },
           { 
             path: 'faqs', 
-            element: (
-              <ModuleGuard requiredModule="FAQ">
-                <FaqsPage/> 
-              </ModuleGuard>
-            )
+            element: <ModuleGuard requiredModule="FAQ"><FaqsPage/></ModuleGuard>
+          },
+          { 
+            path: 'services', 
+            element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard>
           },
           
-          // 3. RUTAS CORE (Disponibles para todos los Workspaces activos)
+          // RUTAS CORE GLOBALES
           { path: 'settings', element: <SettingsPage /> },
-          { path: 'services', element: <ServicesPage/> },
-          { path: 'superadmin', element: <SuperAdminPage /> },
+          
+          // RUTA SUPERADMIN PROTEGIDA
+          { 
+            path: 'superadmin', 
+            element: <SuperAdminGuard><SuperAdminPage /></SuperAdminGuard> 
+          },
         ],
       },
     ],

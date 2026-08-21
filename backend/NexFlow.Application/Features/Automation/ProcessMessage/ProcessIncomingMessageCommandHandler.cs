@@ -7,8 +7,6 @@ using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent;
 using NexFlow.Application.Engines.Intent.AI;
 using NexFlow.Application.Engines.Dispatcher;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
@@ -72,18 +70,24 @@ public class ProcessIncomingMessageCommandHandler
         var intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, cancellationToken);
         if (!intentResult.IsConfident()) intentResult = new IntentResultDto(IntentType.Unknown, 0, new());
 
-        // 2. Despachador: Extraer datos reales
+        // ---> V2.11 INYECCIÓN DEL FLUJO WHATSAPP E2E <---
+        // Inyectamos el teléfono real del cliente y el MessageId (Idempotencia) en los parámetros 
+        // para que los ModuleHandlers (como ReservationModuleHandler) puedan usar datos verídicos en PostgreSQL.
+        intentResult.Parameters["phone"] = request.CustomerPhone;
+        intentResult.Parameters["messageId"] = request.MessageId;
+
+        // 2. Despachador: Extraer datos reales de Postgres/Firestore (Aquí se usa el teléfono)
         var systemContext = await _moduleDispatcher.BuildSystemContextAsync(request.WorkspaceId, intentResult, cancellationToken);
 
-        // 3. Redis: Mantener la sesión viva (Ej: Expira en 15 mins si no hablan)
+        // 3. Redis: Mantener la sesión viva
         await _conversationCache.SetLastIntentAsync(request.WorkspaceId, request.CustomerPhone, intentResult.Intent.ToString(), cancellationToken);
 
-        // 4. IA: Generar respuesta humana
+        // 4. IA: Generar respuesta humana (Usando el nuevo AiRouter determinista)
         var finalResponse = await _aiRouter.GenerateResponseAsync(request.WorkspaceId, intentResult, systemContext, cancellationToken);
 
-        // 5. WhatsApp: Enviar respuesta
+        // 5. WhatsApp: Enviar respuesta por Evolution API
         await _messageGateway.SendTextAsync(request.WorkspaceId, request.CustomerPhone, finalResponse, cancellationToken);
 
         return Result.Success();
+        }
     }
-}
