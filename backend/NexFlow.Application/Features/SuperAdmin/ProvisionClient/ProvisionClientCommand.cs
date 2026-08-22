@@ -5,7 +5,7 @@ public record ProvisionClientCommand(
     string FirstName,
     string LastName,
     string WorkspaceName,
-    string? TemplateName, // <-- Cambiado a string para recibir "SECRETARY"
+    string? TemplateCode, 
     DateTime ExpiresAt,
     List<string>? CustomModules
 );  

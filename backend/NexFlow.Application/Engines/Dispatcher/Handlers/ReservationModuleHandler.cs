@@ -82,16 +82,21 @@ public class ReservationModuleHandler : IModuleHandler
             if (!request.Parameters.TryGetValue("time", out var timeStr) || !TimeSpan.TryParse(timeStr, out var time))
                 return "SISTEMA: Falta la hora exacta para la reserva. Pídele al cliente que indique a qué hora desea su cita.";
 
+            // CORRECCIÓN: Extracción y Validación del Nombre (El Candado de IA)
+            if (!request.Parameters.TryGetValue("name", out var customerName) || string.IsNullOrWhiteSpace(customerName))
+                return "SISTEMA: Falta el nombre del cliente. Dile que SÍ tienes disponibilidad a esa hora, pero necesitas que te indique su nombre para registrar y confirmar la cita.";
+
             var exactDateTime = dateToSearch.Add(time);
 
             // TODO: En el Sprint V2.11 inyectaremos el número de teléfono real del cliente vía Evolution API. 
             // Por ahora usamos un identificador seguro para que pase la creación.
             string customerIdentifier = request.Parameters.TryGetValue("phone", out var phone) ? phone : "WhatsApp_Customer";
 
-            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId, targetServiceId, customerIdentifier, exactDateTime, cancellationToken);
+            // Ahora 'customerName' sí existe y se pasa correctamente
+            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId, targetServiceId, customerIdentifier, customerName, exactDateTime, cancellationToken);
 
             if (result.IsSuccess)
-                return $"SISTEMA: Reserva CREADA EXITOSAMENTE para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.";
+                return $"SISTEMA: Reserva CREADA EXITOSAMENTE a nombre de {customerName} para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.";
             else
                 return $"SISTEMA: Hubo un conflicto. {result.Error.Description}. Pide disculpas y ofrécele otros horarios.";
         }

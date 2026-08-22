@@ -8,10 +8,11 @@ import { FaqsPage } from '../../features/business/pages/FaqsPage';
 import { ReservationsPage } from '../../features/reservations/pages/ReservationsPage';
 import { SuperAdminPage } from '../../features/admin/pages/SuperAdminPage';
 import { useAuthStore } from '../../core/store/useAuthStore';
-
-// IMPORTACIONES NUEVAS (Asegúrate de que las rutas sean correctas)
 import { DashboardPage } from '../../features/dashboard/pages/DashboardPage';
 import { OnboardingPage } from '../../features/business/pages/OnboardingPage';
+
+// IMPORTACIÓN NUEVA
+import { InboxPage } from '../../features/conversations/pages/InboxPage';
 
 // 1. GUARDIÁN DE MÓDULOS
 const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, children: React.ReactNode }) => {
@@ -47,16 +48,14 @@ const router = createBrowserRouter([
     element: <ProtectedRoute />,
     children: [
       {
-        // RUTA DE ONBOARDING REAL
         path: 'onboarding',
         element: <OnboardingPage />, 
       },
       {
-        // RUTAS DEL WORKSPACE
         path: '/',
         element: <OnboardingGuard><WorkspaceLayout /></OnboardingGuard>,
         children: [
-          { index: true, element: <DashboardPage /> }, // <-- DASHBOARD REAL
+          { index: true, element: <DashboardPage /> },
           
           { 
             path: 'reservations', 
@@ -69,6 +68,11 @@ const router = createBrowserRouter([
           { 
             path: 'services', 
             element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard>
+          },
+          { 
+            // NUEVA RUTA PARA EL SPRINT 4
+            path: 'inbox', 
+            element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard>
           },
           { path: 'settings', element: <SettingsPage /> },
           { 

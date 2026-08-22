@@ -44,3 +44,8 @@ export const getBusinessHours = async (): Promise<BusinessHoursDto[]> => {
 export const saveBusinessHours = async (hours: BusinessHoursDto[]): Promise<void> => {
   await axiosClient.put('/business/hours', hours);
 };
+
+// --- ONBOARDING ---
+export const completeBusinessOnboarding = async (): Promise<void> => {
+  await axiosClient.post('/business/complete-onboarding');
+};

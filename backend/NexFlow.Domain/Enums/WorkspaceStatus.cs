@@ -2,8 +2,9 @@
 
 public enum WorkspaceStatus
 {
-    Active,
-    Suspended,
-    Cancelled,
-    Archived
+    Pending = 0,   // Nuevo estado inicial
+    Active = 1,
+    Suspended = 2,
+    Cancelled = 3,
+    Archived = 4
 }

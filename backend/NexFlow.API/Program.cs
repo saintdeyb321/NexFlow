@@ -90,9 +90,15 @@ builder.Services.AddCors(options =>
 });
 
 // 8. HEALTH CHECKS (V2.13: Producción y Observabilidad)
-builder.Services.AddHealthChecks();
+var redisConnectionString = builder.Configuration.GetConnectionString("RedisConnection") ?? "localhost:6379";
 
+builder.Services.AddHealthChecks()
+    // Verifica que PostgreSQL responda
+    .AddDbContextCheck<NexFlowDbContext>(name: "PostgreSQL", tags: new[] { "db", "data" })
+    // Verifica que Redis esté vivo
+    .AddRedis(redisConnectionString, name: "Redis", tags: new[] { "cache", "locks" });
 builder.Services.AddControllers();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -117,7 +123,21 @@ app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();
 
 // Exponer el endpoint de vida para Docker/Nginx
-app.MapHealthChecks("/health");
+// Exponer el endpoint de vida para Docker/Nginx
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(e => new { component = e.Key, status = e.Value.Status.ToString(), description = e.Value.Description }),
+            duration = report.TotalDuration
+        };
+        await context.Response.WriteAsJsonAsync(response);
+    }
+});
 
 app.MapControllers();
 

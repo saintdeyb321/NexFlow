@@ -65,6 +65,8 @@ public static class DependencyInjection
         services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>();
         // Inyectamos el Resolver temporal
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
+        services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
+        services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
 
         // CORRECCIÓN 2: Conexión a Redis Resiliente y "Perezosa" (Lazy Connection)
         var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";

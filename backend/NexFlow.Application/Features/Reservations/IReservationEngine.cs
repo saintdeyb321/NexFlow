@@ -18,8 +18,10 @@ public interface IReservationEngine
         string locationId,
         string serviceId,
         string customerIdentifier,
+        string customerName,    
         DateTime dateTime,
         CancellationToken cancellationToken);
+
 
     // Cancela una reserva existente
     Task<Result> CancelReservationAsync(

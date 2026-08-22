@@ -14,15 +14,13 @@ public class Workspace : Entity
         return new Workspace
         {
             Name = name,
-            Status = WorkspaceStatus.Active
+            // CORRECCIÓN: Nace pendiente para forzar el Onboarding del negocio
+            Status = WorkspaceStatus.Pending
         };
     }
 
     public void Rename(string newName) => Name = newName;
-
     public void Suspend() => Status = WorkspaceStatus.Suspended;
-
     public void Activate() => Status = WorkspaceStatus.Active;
-
     public void Archive() => Status = WorkspaceStatus.Archived;
 }

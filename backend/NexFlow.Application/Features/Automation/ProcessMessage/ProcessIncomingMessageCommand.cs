@@ -5,5 +5,6 @@ public record ProcessIncomingMessageCommand(
     string CustomerPhone,
     string CustomerName,
     string MessageText,
-    string MessageId
+    string MessageId,
+    bool FromMe // <-- NUEVO
 );

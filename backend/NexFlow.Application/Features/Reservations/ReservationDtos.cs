@@ -7,7 +7,8 @@ public record ReservationDto(
     Guid WorkspaceId,
     string LocationId,
     string ServiceId,
-    string CustomerIdentifier, // Teléfono o WhatsApp
+    string CustomerIdentifier,
+    string CustomerName, // <--- Moverlo aquí para que coincida con el Engine
     DateTime StartTime,
-    string Status // Ej: "CONFIRMED", "CANCELLED"
+    string Status
 );

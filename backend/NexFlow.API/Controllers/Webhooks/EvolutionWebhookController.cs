@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Distributed;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 
 namespace NexFlow.API.Controllers.Webhooks;
@@ -16,27 +15,37 @@ public class EvolutionWebhookController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> ReceiveMessage([FromBody] EvolutionWebhookPayload payload, CancellationToken cancellationToken)
+    public async Task<IActionResult> ReceiveMessage(
+        [FromHeader(Name = "apikey")] string providedApiKey, // <-- NUEVO: Capturamos el Header
+        [FromBody] EvolutionWebhookPayload payload,
+        [FromServices] IConfiguration configuration,         // <-- NUEVO: Para leer el appsettings.json
+        CancellationToken cancellationToken)
     {
+        // 1. BLINDAJE DE SEGURIDAD
+        var expectedApiKey = configuration["Evolution:WebhookSecret"];
+        if (string.IsNullOrEmpty(expectedApiKey) || providedApiKey != expectedApiKey)
+        {
+            return Unauthorized(new { Error = "Acceso denegado. Webhook Secret inválido." });
+        }
+
+        // 2. PROCESAMIENTO
         if (payload?.Data?.Message == null || string.IsNullOrEmpty(payload.Data.Key.Id))
             return Ok();
 
         var command = new ProcessIncomingMessageCommand(
-            InstanceName: payload.Instance, // Pasamos el nombre de la instancia, NO un Guid
+            InstanceName: payload.Instance,
             CustomerPhone: payload.Data.Key.RemoteJid.Replace("@s.whatsapp.net", ""),
             CustomerName: payload.Data.PushName ?? "Cliente",
             MessageText: payload.Data.Message.GetRealText(),
-            MessageId: payload.Data.Key.Id
+            MessageId: payload.Data.Key.Id,
+            FromMe: payload.Data.Key.FromMe
         );
 
-        // Despachamos al Application Layer
         var result = await _handler.Handle(command, cancellationToken);
 
-        // Siempre devolvemos 200 OK para que Evolution no genere reintentos tóxicos
         return Ok();
     }
 
-    // DTOs básicos para mapear el JSON exacto que envía Evolution API
     public class EvolutionWebhookPayload
     {
         public string Event { get; set; } = string.Empty;
@@ -55,6 +64,7 @@ public class EvolutionWebhookController : ControllerBase
     {
         public string Id { get; set; } = string.Empty;
         public string RemoteJid { get; set; } = string.Empty;
+        public bool FromMe { get; set; } // <-- NUEVO
     }
 
     public class EvolutionMessage
@@ -62,7 +72,6 @@ public class EvolutionWebhookController : ControllerBase
         public string Conversation { get; set; } = string.Empty;
         public ExtendedTextMessage? ExtendedTextMessage { get; set; }
 
-        // Propiedad calculada para obtener el texto real, sea mensaje normal o respuesta (swipe)
         public string GetRealText() =>
             !string.IsNullOrEmpty(Conversation) ? Conversation :
             ExtendedTextMessage?.Text ?? string.Empty;

@@ -71,7 +71,8 @@ public class ReservationEngine : IReservationEngine
         return availableSlots;
     }
 
-    public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, DateTime dateTime, CancellationToken cancellationToken)
+    // Fíjate en el nuevo parámetro: string customerName
+    public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken)
     {
         var safeUtcDateTime = dateTime.Kind == DateTimeKind.Unspecified
             ? DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)
@@ -91,33 +92,30 @@ public class ReservationEngine : IReservationEngine
         if (!isAvailable)
             return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario solicitado ya está ocupado."));
 
-        var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, startTime, endTime);
+        // Inyectamos el customerName en la entidad
+        var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTime, endTime);
         _reservationRepository.Add(reservation);
 
-        // 1. PERSISTENCIA SEGURA
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString());
+        // Actualizamos el DTO (deberás añadir CustomerName a tu ReservationDto)
+        var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
 
-        // 2. DISPARADOR DE AUTOMATIZACIÓN (Aislado de fallos)
         try
         {
             var payload = new N8nEventPayload<ReservationDto>(
                 WorkspaceId: workspaceId,
                 EventType: "RESERVATION_CREATED",
-                CorrelationId: Guid.NewGuid().ToString(), // Trazabilidad única
-                IdempotencyKey: $"CREATE_{reservation.Id}", // n8n no procesará esto dos veces
+                CorrelationId: Guid.NewGuid().ToString(),
+                IdempotencyKey: $"CREATE_{reservation.Id}",
                 Timestamp: DateTime.UtcNow,
                 Data: dto
             );
-
-            // "nexflow-events" será el nombre de la URL de tu webhook en n8n
             await _workflowGateway.TriggerWorkflowAsync("nexflow-events", payload, cancellationToken);
         }
         catch (Exception ex)
         {
-            // Si n8n está caído, guardamos el error en consola/Serilog, pero retornamos éxito al Frontend.
-            _logger.LogError(ex, "Alerta: La reserva {ReservationId} se guardó, pero falló el envío del evento RESERVATION_CREATED a n8n.", reservation.Id);
+            _logger.LogError(ex, "Alerta: La reserva {ReservationId} se guardó, pero falló el envío del evento a n8n.", reservation.Id);
         }
 
         return Result<ReservationDto>.Success(dto);

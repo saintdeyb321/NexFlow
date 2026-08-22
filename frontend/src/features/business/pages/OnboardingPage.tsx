@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Clock, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import { updateBusinessProfile, saveBusinessHours } from '../services/business.service';
+import { updateBusinessProfile, saveBusinessHours, completeBusinessOnboarding } from '../services/business.service';
 import type { BusinessProfile, BusinessHoursDto } from '../types/business.types';
 
 const DAYS_OF_WEEK = [
@@ -44,8 +44,21 @@ export const OnboardingPage = () => {
   };
 
   const handleFinish = async () => {
-    await completeOnboarding();
-    navigate('/');
+    setIsSaving(true);
+    try {
+      // 1. Marcamos el workspace como 'Active' en la Base de Datos (PostgreSQL)
+      await completeBusinessOnboarding();
+      
+      // 2. Actualizamos el estado global en memoria (Zustand) para no requerir un refresh
+      await completeOnboarding(); 
+      
+      // 3. ¡Al Dashboard!
+      navigate('/');
+    } catch (e) {
+      alert('Hubo un error finalizando el onboarding. Por favor intenta de nuevo.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const updateHour = (day: number, field: keyof BusinessHoursDto, value: any) => {

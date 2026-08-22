@@ -26,9 +26,15 @@ public class TemplateRepository : ITemplateRepository
 
     public async Task<Template?> GetByNameAsync(string name, CancellationToken cancellationToken)
     {
-        // Busca ignorando mayúsculas/minúsculas para mayor robustez
         return await _context.Templates
             .FirstOrDefaultAsync(t => t.Name.ToLower() == name.ToLower(), cancellationToken);
+    }
+
+    // NUEVA IMPLEMENTACIÓN: Busca de forma exacta por el Code
+    public async Task<Template?> GetByCodeAsync(string templateCode, CancellationToken cancellationToken)
+    {
+        return await _context.Templates
+            .FirstOrDefaultAsync(t => t.Code == templateCode.ToUpper(), cancellationToken);
     }
 
     public async Task<IEnumerable<Module>> GetActiveModulesForTemplateAsync(Guid templateId, CancellationToken cancellationToken)

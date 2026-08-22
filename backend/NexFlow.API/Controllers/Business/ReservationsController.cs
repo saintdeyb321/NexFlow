@@ -1,7 +1,4 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Reservations;
@@ -50,7 +47,6 @@ public class ReservationsController : ControllerBase
         return Ok(slots);
     }
 
-    // 3. Crear Reserva (Desde el Frontend)
     [HttpPost]
     public async Task<IActionResult> CreateReservation([FromBody] CreateReservationRequest request, CancellationToken cancellationToken)
     {
@@ -59,7 +55,8 @@ public class ReservationsController : ControllerBase
             request.LocationId,
             request.ServiceId,
             request.CustomerIdentifier,
-            request.DateTime,
+            request.CustomerName, // <--- 1ro: EL NOMBRE
+            request.DateTime,     // <--- 2do: LA FECHA
             cancellationToken);
 
         if (result.IsFailure)
@@ -82,9 +79,11 @@ public class ReservationsController : ControllerBase
 }
 
 // DTO Auxiliar para recibir el POST del frontend
+// DTO Auxiliar para recibir el POST del frontend
 public record CreateReservationRequest(
     string LocationId,
     string ServiceId,
     string CustomerIdentifier,
+    string CustomerName, // <--- FALTABA AGREGARLO AQUÍ
     DateTime DateTime
 );

@@ -1,10 +1,7 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Knowledge;
 
@@ -21,6 +18,8 @@ public class BusinessController : ControllerBase
     private readonly ILocationRepository _locationRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
     private readonly IWorkspaceContext _workspaceContext;
+    private readonly IWorkspaceRepository _workspaceRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
     public BusinessController(
         IBusinessProfileRepository profileRepository,
@@ -28,7 +27,9 @@ public class BusinessController : ControllerBase
         IFaqRepository faqRepository,
         ILocationRepository locationRepository,
         IBusinessHoursRepository hoursRepository,
-        IWorkspaceContext workspaceContext)
+        IWorkspaceContext workspaceContext,
+        IWorkspaceRepository workspaceRepository,
+        IUnitOfWork unitOfWork)
     {
         _profileRepository = profileRepository;
         _serviceRepository = serviceRepository;
@@ -36,6 +37,8 @@ public class BusinessController : ControllerBase
         _locationRepository = locationRepository;
         _hoursRepository = hoursRepository;
         _workspaceContext = workspaceContext;
+        _workspaceRepository = workspaceRepository;
+        _unitOfWork = unitOfWork;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -136,5 +139,19 @@ public class BusinessController : ControllerBase
     {
         await _faqRepository.DeleteFaqAsync(WorkspaceId, faqId, cancellationToken);
         return NoContent();
+    }
+
+    [HttpPost("complete-onboarding")]
+    public async Task<IActionResult> CompleteOnboarding(CancellationToken cancellationToken)
+    {
+        var workspace = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);
+        if (workspace == null) return NotFound();
+
+        // Cambiamos el estado a Active en PostgreSQL
+        workspace.Activate();
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return Ok();
     }
 }
