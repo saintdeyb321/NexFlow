@@ -1,35 +1,40 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Caching.Distributed;
+using StackExchange.Redis;
 using NexFlow.Application.Abstractions.Cache;
 
 namespace NexFlow.Infrastructure.Cache;
 
 public class RedisConversationCache : IConversationCache
 {
-    private readonly IDistributedCache _cache;
+    private readonly IDatabase _redisDb;
 
-    public RedisConversationCache(IDistributedCache cache)
+    // Inyectamos el Multiplexer nativo para acceder a comandos atómicos
+    public RedisConversationCache(IConnectionMultiplexer redis)
     {
-        _cache = cache;
+        _redisDb = redis.GetDatabase();
     }
 
     public async Task SetLastIntentAsync(Guid workspaceId, string customerPhone, string intent, CancellationToken cancellationToken)
     {
-        var options = new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
-        };
-
-        // Blindaje: La clave ahora pertenece exclusivamente a un negocio específico
         var key = $"workspace:{workspaceId}:conversation:{customerPhone}";
-        await _cache.SetStringAsync(key, intent, options, cancellationToken);
+        await _redisDb.StringSetAsync(key, intent, TimeSpan.FromMinutes(30));
     }
 
     public async Task<string?> GetLastIntentAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
         var key = $"workspace:{workspaceId}:conversation:{customerPhone}";
-        return await _cache.GetStringAsync(key, cancellationToken);
+        var value = await _redisDb.StringGetAsync(key);
+        return value.HasValue ? value.ToString() : null;
+    }
+
+    public async Task<bool> TryAcquireMessageLockAsync(string messageId, CancellationToken cancellationToken)
+    {
+        var key = $"webhook:processed:{messageId}";
+
+        // When.NotExists equivale a SETNX en Redis. 
+        // Es 100% ATÓMICO. Si 100 peticiones llegan al mismo tiempo, solo 1 recibirá 'true'.
+        return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromHours(24), When.NotExists);
     }
 }

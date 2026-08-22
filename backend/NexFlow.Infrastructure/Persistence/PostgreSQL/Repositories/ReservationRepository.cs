@@ -17,6 +17,7 @@ public class ReservationRepository : IReservationRepository
 
     public ReservationRepository(NexFlowDbContext context) => _context = context;
 
+    // CORRECCIÓN: Volvemos a la normalidad, respetando la encapsulación de DDD.
     public void Add(Reservation reservation) => _context.Reservations.Add(reservation);
 
     public async Task<Reservation?> GetByIdAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
@@ -27,7 +28,11 @@ public class ReservationRepository : IReservationRepository
 
     public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime date, CancellationToken cancellationToken)
     {
-        var startOfDay = date.Date;
+        var utcDate = date.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(date, DateTimeKind.Utc)
+            : date.ToUniversalTime();
+
+        var startOfDay = DateTime.SpecifyKind(utcDate.Date, DateTimeKind.Utc);
         var endOfDay = startOfDay.AddDays(1).AddTicks(-1);
 
         return await _context.Reservations
@@ -42,13 +47,21 @@ public class ReservationRepository : IReservationRepository
 
     public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, string serviceId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken)
     {
+        var utcStartTime = startTime.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(startTime, DateTimeKind.Utc)
+            : startTime.ToUniversalTime();
+
+        var utcEndTime = endTime.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(endTime, DateTimeKind.Utc)
+            : endTime.ToUniversalTime();
+
         bool hasOverlap = await _context.Reservations
             .AnyAsync(r => r.WorkspaceId == workspaceId
                         && r.LocationId == locationId
                         && r.ServiceId == serviceId
                         && r.Status != ReservationStatus.Cancelled
-                        && r.StartTime < endTime
-                        && r.EndTime > startTime,
+                        && r.StartTime < utcEndTime
+                        && r.EndTime > utcStartTime,
                       cancellationToken);
 
         return !hasOverlap;

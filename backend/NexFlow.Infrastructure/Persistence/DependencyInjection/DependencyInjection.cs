@@ -15,6 +15,7 @@ using NexFlow.Infrastructure.Gateways;
 using NexFlow.Infrastructure.Persistence.Firestore;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
+using StackExchange.Redis;
 
 namespace NexFlow.Infrastructure.DependencyInjection;
 
@@ -59,10 +60,21 @@ public static class DependencyInjection
         services.AddScoped<IIntentEngine, IntentEngine>();
         services.AddScoped<IAiRouter, AiRouter>();
 
-
         // 6. Gateways Externos (Producción)
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();
-        services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>(); // <-- Nuevo Gateway n8n
+        services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>();
+        // Inyectamos el Resolver temporal
+        services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
+
+        // CORRECCIÓN 2: Conexión a Redis Resiliente y "Perezosa" (Lazy Connection)
+        var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";
+
+        services.AddSingleton<IConnectionMultiplexer>(sp =>
+        {
+            var options = ConfigurationOptions.Parse(redisConnString);
+            options.AbortOnConnectFail = false; // Evita que la API crashee si Redis tarda en levantar
+            return ConnectionMultiplexer.Connect(options);
+        });
 
         return services;
     }

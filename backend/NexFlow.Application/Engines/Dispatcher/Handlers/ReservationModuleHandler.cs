@@ -26,14 +26,14 @@ public class ReservationModuleHandler : IModuleHandler
         _reservationEngine = reservationEngine;
     }
 
-    public bool CanHandle(IntentType intent) =>
-        intent == IntentType.CheckAvailability || intent == IntentType.CreateReservation;
+    //public bool CanHandle(IntentType intent) => intent == IntentType.CheckAvailability || intent == IntentType.CreateReservation;
+    public string[] SupportedCapabilities => new[] { "CHECK_AVAILABILITY", "CREATE" };
 
-    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, IntentResultDto intent, CancellationToken cancellationToken)
+    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
         // 1. Extraer y Validar Fecha (Fallback a hoy)
         DateTime dateToSearch = DateTime.UtcNow.Date;
-        if (intent.Parameters.TryGetValue("date", out var dateStr) && DateTime.TryParse(dateStr, out var parsedDate))
+        if (request.Parameters.TryGetValue("date", out var dateStr) && DateTime.TryParse(dateStr, out var parsedDate))
             dateToSearch = parsedDate.Date;
 
         // 2. Extraer y Validar Sede
@@ -49,7 +49,7 @@ public class ReservationModuleHandler : IModuleHandler
         // 3. Extraer y Validar Servicio
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
 
-        if (intent.Parameters.TryGetValue("service", out var serviceName))
+        if (request.Parameters.TryGetValue("service", out var serviceName))
         {
             var matchedService = services.FirstOrDefault(s => s.Name.Contains(serviceName, StringComparison.OrdinalIgnoreCase));
             if (matchedService != null)
@@ -65,7 +65,7 @@ public class ReservationModuleHandler : IModuleHandler
         }
 
         // 4. ENRUTADOR DE CAPACIDADES (Capabilities Router)
-        if (intent.Intent == IntentType.CheckAvailability)
+        if (request.CapabilityCode == "CHECK_AVAILABILITY")
         {
             var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, targetLocationId, targetServiceId, dateToSearch, cancellationToken);
 
@@ -76,17 +76,17 @@ public class ReservationModuleHandler : IModuleHandler
             return $"SISTEMA: Horarios libres para {dateToSearch:yyyy-MM-dd}: {slotsText}. Pregúntale al cliente qué horario prefiere.";
         }
 
-        if (intent.Intent == IntentType.CreateReservation)
+        if (request.CapabilityCode == "CREATE")
         {
             // Validamos que la IA haya extraído la hora
-            if (!intent.Parameters.TryGetValue("time", out var timeStr) || !TimeSpan.TryParse(timeStr, out var time))
+            if (!request.Parameters.TryGetValue("time", out var timeStr) || !TimeSpan.TryParse(timeStr, out var time))
                 return "SISTEMA: Falta la hora exacta para la reserva. Pídele al cliente que indique a qué hora desea su cita.";
 
             var exactDateTime = dateToSearch.Add(time);
 
             // TODO: En el Sprint V2.11 inyectaremos el número de teléfono real del cliente vía Evolution API. 
             // Por ahora usamos un identificador seguro para que pase la creación.
-            string customerIdentifier = intent.Parameters.TryGetValue("phone", out var phone) ? phone : "WhatsApp_Customer";
+            string customerIdentifier = request.Parameters.TryGetValue("phone", out var phone) ? phone : "WhatsApp_Customer";
 
             var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId, targetServiceId, customerIdentifier, exactDateTime, cancellationToken);
 

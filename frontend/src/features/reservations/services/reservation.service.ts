@@ -1,13 +1,17 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { ReservationDto } from '../types/reservation.types';
 
-export const getReservations = async (workspaceId: string): Promise<ReservationDto[]> => {
-  // Asumimos que tu controlador de C# escuchará en esta ruta
-  const { data } = await axiosClient.get<ReservationDto[]>(`/workspaces/${workspaceId}/reservations`);
+// Ahora pasamos la sede y la fecha para consultar el calendario
+export const getReservations = async (locationId: string, date: string): Promise<ReservationDto[]> => {
+  const { data } = await axiosClient.get<ReservationDto[]>(`/reservations?locationId=${locationId}&date=${date}`);
   return data;
 };
 
-// Función para cancelar o confirmar (opcional para el MVP, pero buena práctica)
-export const updateReservationStatus = async (workspaceId: string, reservationId: string, status: string): Promise<void> => {
-  await axiosClient.patch(`/workspaces/${workspaceId}/reservations/${reservationId}/status`, { status });
+export const createReservation = async (payload: { locationId: string, serviceId: string, customerIdentifier: string, dateTime: string }): Promise<ReservationDto> => {
+  const { data } = await axiosClient.post<ReservationDto>(`/reservations`, payload);
+  return data;
+};
+
+export const cancelReservation = async (reservationId: string): Promise<void> => {
+  await axiosClient.delete(`/reservations/${reservationId}`);
 };

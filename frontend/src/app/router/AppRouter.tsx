@@ -9,24 +9,33 @@ import { ReservationsPage } from '../../features/reservations/pages/Reservations
 import { SuperAdminPage } from '../../features/admin/pages/SuperAdminPage';
 import { useAuthStore } from '../../core/store/useAuthStore';
 
-// 1. GUARDIÁN DE MÓDULOS: Bloquea si no tiene el módulo en su licencia
+// IMPORTACIONES NUEVAS (Asegúrate de que las rutas sean correctas)
+import { DashboardPage } from '../../features/dashboard/pages/DashboardPage';
+import { OnboardingPage } from '../../features/business/pages/OnboardingPage';
+
+// 1. GUARDIÁN DE MÓDULOS
 const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, children: React.ReactNode }) => {
   const { me } = useAuthStore();
   const hasAccess = me?.entitlements?.includes(requiredModule);
-  
   if (!hasAccess) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
-// 2. GUARDIÁN DE SUPER ADMIN: Bloquea intrusos
+// 2. GUARDIÁN DE SUPER ADMIN
 const SuperAdminGuard = ({ children }: { children: React.ReactNode }) => {
   const { me } = useAuthStore();
-  
   if (!me?.user?.isSuperAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
-const DashboardPlaceholder = () => <div className="text-2xl font-bold text-gray-800">Bienvenido al Dashboard</div>;
+// 3. GUARDIÁN DE ONBOARDING
+const OnboardingGuard = ({ children }: { children: React.ReactNode }) => {
+  const { me } = useAuthStore();
+  if (me?.workspace?.status === 'Pending') {
+    return <Navigate to="/onboarding" replace />;
+  }
+  return <>{children}</>;
+};
 
 const router = createBrowserRouter([
   {
@@ -35,15 +44,20 @@ const router = createBrowserRouter([
   },
   {
     path: '/',
-    element: <ProtectedRoute />, 
+    element: <ProtectedRoute />,
     children: [
       {
+        // RUTA DE ONBOARDING REAL
+        path: 'onboarding',
+        element: <OnboardingPage />, 
+      },
+      {
+        // RUTAS DEL WORKSPACE
         path: '/',
-        element: <WorkspaceLayout />,
+        element: <OnboardingGuard><WorkspaceLayout /></OnboardingGuard>,
         children: [
-          { index: true, element: <DashboardPlaceholder /> },
+          { index: true, element: <DashboardPage /> }, // <-- DASHBOARD REAL
           
-          // RUTAS MODULARES PROTEGIDAS
           { 
             path: 'reservations', 
             element: <ModuleGuard requiredModule="RESERVATIONS"><ReservationsPage /></ModuleGuard>
@@ -56,11 +70,7 @@ const router = createBrowserRouter([
             path: 'services', 
             element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard>
           },
-          
-          // RUTAS CORE GLOBALES
           { path: 'settings', element: <SettingsPage /> },
-          
-          // RUTA SUPERADMIN PROTEGIDA
           { 
             path: 'superadmin', 
             element: <SuperAdminGuard><SuperAdminPage /></SuperAdminGuard> 

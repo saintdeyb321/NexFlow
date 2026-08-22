@@ -3,29 +3,27 @@ import { axiosClient } from '../api/axiosClient';
 import type { MeResponse } from '../types/auth.types';
 import { auth } from '../../app/config/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth'; 
-import type { User} from 'firebase/auth';
+import type { User } from 'firebase/auth';
 
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   me: MeResponse | null;
   
-  // Acciones
   checkSession: () => Promise<void>;
   logout: () => Promise<void>;
+  completeOnboarding: () => Promise<void>; // <-- NUEVO
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
-  isLoading: true, // Empieza cargando para evitar destellos de pantalla
+  isLoading: true, 
   me: null,
 
   checkSession: async () => {
     set({ isLoading: true });
     try {
-      // Esperamos a que Firebase confirme si hay sesión local
       await new Promise<User | null>((resolve) => {
-        // FIX 2 y 3: Uso modular de Firebase y tipado explícito del parámetro "user"
         const unsubscribe = onAuthStateChanged(auth, (user: User | null) => {
           unsubscribe();
           resolve(user);
@@ -37,18 +35,11 @@ export const useAuthStore = create<AuthState>((set) => ({
         return;
       }
 
-      // Si hay sesión en Firebase, traemos la verdad absoluta del Backend
       const { data } = await axiosClient.get<MeResponse>('/me');
-      
-      set({ 
-        isAuthenticated: true, 
-        me: data, 
-        isLoading: false 
-      });
+      set({ isAuthenticated: true, me: data, isLoading: false });
 
     } catch (error) {
       console.error("Error validando sesión contra el backend:", error);
-      // Si el backend lo rechaza (ej. usuario suspendido), lo deslogueamos localmente
       await signOut(auth);
       set({ isAuthenticated: false, me: null, isLoading: false });
     }
@@ -57,5 +48,20 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await signOut(auth);
     set({ isAuthenticated: false, me: null, isLoading: false });
+  },
+
+  // Simula la activación del Workspace para que el Guardián deje pasar
+  completeOnboarding: async () => {
+    set((state) => {
+      if (state.me && state.me.workspace) {
+        return {
+          me: {
+            ...state.me,
+            workspace: { ...state.me.workspace, status: 'Active' }
+          }
+        };
+      }
+      return state;
+    });
   }
 }));

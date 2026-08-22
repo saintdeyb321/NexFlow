@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Application.Engines.Dispatcher.Handlers;
 
@@ -20,17 +19,21 @@ public class FaqModuleHandler : IModuleHandler
         _profileRepository = profileRepository;
     }
 
-    public bool CanHandle(IntentType intent) => intent == IntentType.Faq;
-
-    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, IntentResultDto intent, CancellationToken cancellationToken)
+    // CORRECCIÓN: La capacidad que este módulo exporta
+    public string[] SupportedCapabilities => new[] { "ANSWER_QUESTION" };
+    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
+        // Pequeño blindaje: validamos que la capacidad sea la correcta
+        if (request.CapabilityCode != "ANSWER_QUESTION")
+            return "SISTEMA: Capacidad no soportada por el módulo FAQ.";
+
         var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
         var faqs = await _faqRepository.GetFaqsAsync(workspaceId, cancellationToken);
 
         var faqsText = string.Join(" | ", faqs.Select(f => $"P: {f.Question} R: {f.Answer}"));
 
         return profile != null
-            ? $"Nombre negocio: {profile.CommercialName}. Descripción: {profile.Description}. FAQs: {faqsText}"
-            : "Contexto genérico.";
+            ? $"SISTEMA: Responde la duda del cliente basándote en esto. Nombre negocio: {profile.CommercialName}. Descripción: {profile.Description}. FAQs: {faqsText}"
+            : "SISTEMA: El negocio aún no ha configurado su información básica o preguntas frecuentes.";
     }
 }
