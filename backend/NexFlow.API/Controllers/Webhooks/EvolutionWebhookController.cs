@@ -16,22 +16,27 @@ public class EvolutionWebhookController : ControllerBase
 
     [HttpPost]
     public async Task<IActionResult> ReceiveMessage(
-        [FromHeader(Name = "apikey")] string providedApiKey, // <-- NUEVO: Capturamos el Header
+        [FromHeader(Name = "apikey")] string providedApiKey,
         [FromBody] EvolutionWebhookPayload payload,
-        [FromServices] IConfiguration configuration,         // <-- NUEVO: Para leer el appsettings.json
+        [FromServices] IConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        // 1. BLINDAJE DE SEGURIDAD
+        // 1. BLINDAJE DE SEGURIDAD (Secreto)
         var expectedApiKey = configuration["Evolution:WebhookSecret"];
         if (string.IsNullOrEmpty(expectedApiKey) || providedApiKey != expectedApiKey)
         {
             return Unauthorized(new { Error = "Acceso denegado. Webhook Secret inválido." });
         }
 
-        // 2. PROCESAMIENTO
+        // 2. FILTRO ANTI-BASURA (Fail-Fast)
         if (payload?.Data?.Message == null || string.IsNullOrEmpty(payload.Data.Key.Id))
+            return Ok(); // Siempre Ok a Evolution para que no reintente envíos de mensajes nulos
+
+        // BLINDAJE DE GRUPOS: Si es un grupo de WhatsApp, lo matamos aquí mismo y ahorramos CPU.
+        if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-"))
             return Ok();
 
+        // 3. PROCESAMIENTO
         var command = new ProcessIncomingMessageCommand(
             InstanceName: payload.Instance,
             CustomerPhone: payload.Data.Key.RemoteJid.Replace("@s.whatsapp.net", ""),
@@ -64,7 +69,7 @@ public class EvolutionWebhookController : ControllerBase
     {
         public string Id { get; set; } = string.Empty;
         public string RemoteJid { get; set; } = string.Empty;
-        public bool FromMe { get; set; } // <-- NUEVO
+        public bool FromMe { get; set; }
     }
 
     public class EvolutionMessage

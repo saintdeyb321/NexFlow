@@ -10,8 +10,7 @@ using System.Threading.Tasks;
 
 namespace NexFlow.Application.Features.SuperAdmin.Licenses;
 
-public record CreateCustomLicenseCommand(Guid WorkspaceId, int DurationInMonths, List<Guid> ModuleIds);
-
+public record CreateCustomLicenseCommand(Guid WorkspaceId, int DurationInMonths, List<Guid> ModuleIds, int MaxLocations = 1);
 public class CreateCustomLicenseCommandHandler
 {
     private readonly ILicenseRepository _licenseRepository;
@@ -48,7 +47,7 @@ public class CreateCustomLicenseCommandHandler
         var now = _clock.UtcNow;
         var expiration = now.AddMonths(request.DurationInMonths);
 
-        var customLicense = License.CreateCustomLicense(request.WorkspaceId, now, expiration);
+        var customLicense = License.CreateCustomLicense(request.WorkspaceId, now, expiration, request.MaxLocations);
 
         foreach (var moduleId in request.ModuleIds)
         {

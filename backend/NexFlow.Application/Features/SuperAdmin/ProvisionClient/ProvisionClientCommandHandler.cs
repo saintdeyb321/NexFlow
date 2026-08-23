@@ -78,13 +78,13 @@ public class ProvisionClientCommandHandler
             if (!activeModules.Any())
                 return Result<Guid>.Failure(new Error("Template.NoModules", "La plantilla no tiene módulos configurados."));
 
-            license = License.CreateTemplateLicense(workspace.Id, template.Id, now, request.ExpiresAt);
+            license = License.CreateTemplateLicense(workspace.Id, template.Id, now, request.ExpiresAt, request.MaxLocations);
             foreach (var module in activeModules) license.AddTemplateModule(module.Id);
         }
         else if (request.CustomModules != null && request.CustomModules.Any())
         {
             // FLUJO B: Custom (A la carta)
-            license = License.CreateCustomLicense(workspace.Id, now, request.ExpiresAt);
+            license = License.CreateCustomLicense(workspace.Id, now, request.ExpiresAt, request.MaxLocations);
 
             var systemModules = await _moduleRepository.GetByCodesAsync(request.CustomModules, cancellationToken);
 

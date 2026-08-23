@@ -9,9 +9,7 @@ using NexFlow.Application.Engines.Intent.AI;
 using NexFlow.Application.Engines.Dispatcher;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Domain.Enums;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
+
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
@@ -122,8 +120,6 @@ public class ProcessIncomingMessageCommandHandler
         intentResult.Parameters["messageId"] = request.MessageId;
 
         var systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
-        await _conversationCache.SetLastIntentAsync(workspaceId, request.CustomerPhone, intentResult.Intent.ToString(), cancellationToken);
-
         var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, intentResult, systemContext, cancellationToken);
 
         await _messageGateway.SendTextAsync(workspaceId, request.CustomerPhone, finalResponse, cancellationToken);

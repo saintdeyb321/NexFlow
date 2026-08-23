@@ -69,7 +69,6 @@ public class EntitlementService : IEntitlementService
         return activeModules.Select(m => m.Code.ToUpperInvariant());
     }
 
-    // NUEVO: La Muralla de Seguridad para la Inteligencia Artificial
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
@@ -83,7 +82,15 @@ public class EntitlementService : IEntitlementService
         var targetModule = activeModules.FirstOrDefault(m => m.Code == moduleCode.ToUpperInvariant());
         if (targetModule == null) return false;
 
-        // Comprobamos si el módulo posee esta capacidad explícita
         return targetModule.Capabilities.Any(c => c.Code == capabilityCode.ToUpperInvariant());
+    }
+
+    // NUEVO: Consultar el máximo de sedes permitidas por la licencia
+    public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return 0; // 0 sedes si está inactivo/expirado
+
+        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        return license?.MaxLocations ?? 0;
     }
 }

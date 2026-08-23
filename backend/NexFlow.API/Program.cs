@@ -51,7 +51,7 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("WorkspaceMember", policy => policy.Requirements.Add(new WorkspaceMemberRequirement()));
 });
 
-// 6. RATE LIMITING GLOBAL ENTERPRISE (Tenant-Aware)
+// 6. RATE LIMITING GLOBAL ENTERPRISE (Tenant & Webhook Aware)
 var rateLimitConfig = builder.Configuration.GetSection("RateLimiting");
 var permitLimit = rateLimitConfig.GetValue<int>("PermitLimit", 100);
 var windowMinutes = rateLimitConfig.GetValue<int>("WindowMinutes", 1);
@@ -61,12 +61,26 @@ builder.Services.AddRateLimiter(options =>
 {
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
+        // BLINDAJE 1: Autopista para Webhooks Internos (Evolution API)
+        if (context.Request.Headers.TryGetValue("apikey", out var apiKey))
+        {
+            // Evolution procesa múltiples negocios desde la misma IP. Le damos un límite altísimo.
+            return RateLimitPartition.GetFixedWindowLimiter(apiKey.ToString(),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    AutoReplenishment = true,
+                    PermitLimit = 2000,
+                    Window = TimeSpan.FromMinutes(1)
+                });
+        }
+
+        // BLINDAJE 2: Tráfico normal (Frontend, Postman, etc.)
         var partitionKey = context.User.Identity?.IsAuthenticated == true
             ? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown_user"
             : context.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
 
         return RateLimitPartition.GetFixedWindowLimiter(partitionKey,
-            factory: partition => new FixedWindowRateLimiterOptions
+            factory: _ => new FixedWindowRateLimiterOptions
             {
                 AutoReplenishment = true,
                 PermitLimit = permitLimit,

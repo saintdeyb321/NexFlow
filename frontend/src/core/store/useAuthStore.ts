@@ -12,7 +12,7 @@ interface AuthState {
   
   checkSession: () => Promise<void>;
   logout: () => Promise<void>;
-  completeOnboarding: () => Promise<void>; // <-- NUEVO
+  completeOnboarding: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -50,7 +50,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isAuthenticated: false, me: null, isLoading: false });
   },
 
-  // Simula la activación del Workspace para que el Guardián deje pasar
   completeOnboarding: async () => {
     set((state) => {
       if (state.me && state.me.workspace) {

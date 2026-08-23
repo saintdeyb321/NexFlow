@@ -6,7 +6,6 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const SuperAdminPage = () => {
   const { me } = useAuthStore();
-  // CORRECCIÓN: Validación dinámica basada en Backend
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
 
   const [workspaces, setWorkspaces] = useState<WorkspaceSummaryDto[]>([]);
@@ -15,18 +14,20 @@ export const SuperAdminPage = () => {
   const [showModal, setShowModal] = useState(false);
 
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
-  const [customModulesStr, setCustomModulesStr] = useState('FAQ, RESERVATIONS');
+  const [customModulesStr, setCustomModulesStr] = useState('FAQ, RESERVATIONS, SERVICES');
 
   const defaultDate = new Date();
   defaultDate.setFullYear(defaultDate.getFullYear() + 1);
 
-  const [newWorkspace, setNewWorkspace] = useState<ProvisionWorkspaceRequest>({
+  // NUEVO: Agregamos maxLocations y cambiamos el template base al nuevo catálogo
+  const [newWorkspace, setNewWorkspace] = useState<ProvisionWorkspaceRequest & { maxLocations: number }>({
     email: '',
     firstName: '',
     lastName: '',
     workspaceName: '',
-    templateName: 'SECRETARY', // <-- Cambiado de templateId a templateName
-    expiresAt: defaultDate.toISOString().split('T')[0]
+    templateName: 'BOOKING', 
+    expiresAt: defaultDate.toISOString().split('T')[0],
+    maxLocations: 1
   });
 
   useEffect(() => {
@@ -47,16 +48,17 @@ export const SuperAdminPage = () => {
     e.preventDefault();
     setIsProvisioning(true);
     try {
-      const payload: ProvisionWorkspaceRequest = {
+      const payload: any = {
         email: newWorkspace.email,
         firstName: newWorkspace.firstName,
         lastName: newWorkspace.lastName,
         workspaceName: newWorkspace.workspaceName,
-        expiresAt: new Date(newWorkspace.expiresAt).toISOString()
+        expiresAt: new Date(newWorkspace.expiresAt).toISOString(),
+        maxLocations: Number(newWorkspace.maxLocations) // <-- Enviamos el candado físico
       };
 
       if (provisionMode === 'template') {
-        payload.templateName = newWorkspace.templateName; // Enviamos el Nombre
+        payload.templateName = newWorkspace.templateName; 
       } else {
         payload.customModules = customModulesStr.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
       }
@@ -150,25 +152,37 @@ export const SuperAdminPage = () => {
 
                 {provisionMode === 'template' ? (
                   <div>
-                    {/* UI UX MEJORADA: Dropdown en lugar de Input de UUID */}
+                    {/* SPRINT 12: Las 5 plantillas maestras reales */}
                     <select 
                       value={newWorkspace.templateName} 
                       onChange={e => setNewWorkspace({...newWorkspace, templateName: e.target.value})} 
                       className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-sm"
                     >
-                      <option value="SECRETARY">Secretaria</option>
-                      <option value="RECEPTIONIST">Recepcionista</option>
+                      <option value="SUPPORT">Atención Básica (FAQ)</option>
+                      <option value="BOOKING">Asistente de Reservas</option>
+                      <option value="COMMERCIAL">Asistente Comercial (Catálogo)</option>
+                      <option value="REQUESTS">Asistente de Trámites</option>
+                      <option value="FULL">Operaciones Completas</option>
                     </select>
                   </div>
                 ) : (
                   <div>
-                    <input type="text" placeholder="Ej: FAQ, RESERVATIONS, INVENTORY" value={customModulesStr} onChange={e => setCustomModulesStr(e.target.value)} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-sm uppercase" required={provisionMode === 'custom'} />
+                    <input type="text" placeholder="Ej: FAQ, RESERVATIONS, CATALOG" value={customModulesStr} onChange={e => setCustomModulesStr(e.target.value)} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-sm uppercase" required={provisionMode === 'custom'} />
                     <p className="text-xs text-gray-500 mt-1">Separados por coma.</p>
                   </div>
                 )}
               </div>
-
-              <div><label className="block text-sm font-medium mb-1">Vencimiento de Licencia</label><input type="date" value={newWorkspace.expiresAt} onChange={e => setNewWorkspace({...newWorkspace, expiresAt: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>
+              
+              <div className="grid grid-cols-2 gap-4 border-t pt-2 mt-2">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Límite de Sedes</label>
+                  <input type="number" min="1" max="50" value={newWorkspace.maxLocations} onChange={e => setNewWorkspace({...newWorkspace, maxLocations: parseInt(e.target.value)})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Vencimiento</label>
+                  <input type="date" value={newWorkspace.expiresAt} onChange={e => setNewWorkspace({...newWorkspace, expiresAt: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required />
+                </div>
+              </div>
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>

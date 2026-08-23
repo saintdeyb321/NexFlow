@@ -1,14 +1,12 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../core/store/useAuthStore';
-import { LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, ShieldAlert, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, ShieldAlert, MessageCircle, Package, ClipboardList } from 'lucide-react';
 
 export const WorkspaceLayout = () => {
   const { me, logout } = useAuthStore();
   const { pathname } = useLocation();
 
   const entitlements = me?.entitlements || [];
-  
-  // CORRECCIÓN: Ahora la autorización viene firmada por el backend, cero correos estáticos.
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
 
   const navItemClass = (path: string) => 
@@ -47,18 +45,29 @@ export const WorkspaceLayout = () => {
 
           {entitlements.includes('FAQ') && (
             <Link to="/faqs" className={navItemClass('/faqs')}>
-              <BookOpen className="w-5 h-5 mr-3" /> Conocimiento (FAQ)
+              <BookOpen className="w-5 h-5 mr-3" /> Base (FAQ)
             </Link>
           )}
 
-          {/* CORRECCIÓN: Servicios también es un módulo y debe estar protegido */}
           {entitlements.includes('SERVICES') && (
             <Link to="/services" className={navItemClass('/services')}>
               <Scissors className="w-5 h-5 mr-3" /> Servicios
             </Link>
           )}
 
-          
+          {/* NUEVO: Módulo de Catálogo / Productos */}
+          {entitlements.includes('CATALOG') && (
+            <Link to="/catalog" className={navItemClass('/catalog')}>
+              <Package className="w-5 h-5 mr-3" /> Catálogo
+            </Link>
+          )}
+
+          {/* NUEVO: Módulo de Solicitudes (Requests) */}
+          {entitlements.includes('REQUESTS') && (
+            <Link to="/requests" className={navItemClass('/requests')}>
+              <ClipboardList className="w-5 h-5 mr-3" /> Solicitudes
+            </Link>
+          )}
           
           <div className="mt-8 mb-2 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
             Administración
