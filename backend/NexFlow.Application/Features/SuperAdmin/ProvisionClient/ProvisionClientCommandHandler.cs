@@ -79,7 +79,7 @@ public class ProvisionClientCommandHandler
                 return Result<Guid>.Failure(new Error("Template.NoModules", "La plantilla no tiene módulos configurados."));
 
             license = License.CreateTemplateLicense(workspace.Id, template.Id, now, request.ExpiresAt);
-            foreach (var module in activeModules) license.AddModule(module.Id);
+            foreach (var module in activeModules) license.AddTemplateModule(module.Id);
         }
         else if (request.CustomModules != null && request.CustomModules.Any())
         {
@@ -91,7 +91,7 @@ public class ProvisionClientCommandHandler
             if (systemModules.Count != request.CustomModules.Count)
                 return Result<Guid>.Failure(new Error("Modules.Invalid", "Uno o más módulos personalizados enviados no existen."));
 
-            foreach (var module in systemModules) license.AddModule(module.Id);
+            foreach (var module in systemModules) license.AddTemplateModule(module.Id);
         }
         else
         {

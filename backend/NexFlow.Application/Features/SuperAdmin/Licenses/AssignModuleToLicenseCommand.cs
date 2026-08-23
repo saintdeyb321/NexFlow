@@ -33,7 +33,7 @@ public class AssignModuleToLicenseCommandHandler
         if (license == null) return Result.Failure(new Error("License.NotFound", "Licencia no encontrada."));
 
         // Domain protege de duplicados internamente
-        license.AddModule(request.ModuleId);
+        license.AddTemplateModule(request.ModuleId);
 
         var audit = AuditLog.Create(
             workspaceId: request.WorkspaceId,

@@ -49,7 +49,7 @@ public class CreateCustomLicenseCommandHandler
 
         foreach (var moduleId in request.ModuleIds)
         {
-            customLicense.AddModule(moduleId);
+            customLicense.AddTemplateModule(moduleId);
         }
 
         _licenseRepository.Add(customLicense);

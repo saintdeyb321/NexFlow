@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Abstractions;
+﻿using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
 
@@ -13,7 +8,7 @@ public class EntitlementService : IEntitlementService
 {
     private readonly ILicenseRepository _licenseRepository;
     private readonly IWorkspaceRepository _workspaceRepository;
-    private readonly IModuleRepository _moduleRepository; // <-- Agregamos el repositorio
+    private readonly IModuleRepository _moduleRepository;
     private readonly IClock _clock;
 
     public EntitlementService(
@@ -34,21 +29,16 @@ public class EntitlementService : IEntitlementService
         if (workspace == null || workspace.Status != WorkspaceStatus.Active) return false;
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        if (license == null) return false;
-
-        return license.IsValidAt(_clock.UtcNow);
+        return license != null && license.IsValidAt(_clock.UtcNow);
     }
 
     public async Task<bool> HasModuleAccessAsync(Guid workspaceId, Guid moduleId, CancellationToken cancellationToken)
     {
-        // 1. Validar que la licencia global esté activa
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
 
-        // 2. Verificar que el cliente haya comprado/asignado este módulo
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (!license!.LicenseModules.Any(m => m.ModuleId == moduleId)) return false;
 
-        // 3. NUEVO: Verificar que el módulo en sí no haya sido dado de baja por SuperAdmin
         var module = await _moduleRepository.GetByIdAsync(moduleId, cancellationToken);
         return module != null && module.Status == ModuleStatus.Active;
     }
@@ -62,7 +52,6 @@ public class EntitlementService : IEntitlementService
 
         if (!assignedModuleIds.Any()) return Enumerable.Empty<Guid>();
 
-        // NUEVO: Filtramos la lista para devolver SÓLO los módulos que siguen activos en el sistema
         var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
         return activeModules.Select(m => m.Id);
     }
@@ -76,8 +65,25 @@ public class EntitlementService : IEntitlementService
 
         if (!assignedModuleIds.Any()) return Enumerable.Empty<string>();
 
-        // Obtenemos los módulos y devolvemos su código en mayúsculas para React
         var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
         return activeModules.Select(m => m.Code.ToUpperInvariant());
+    }
+
+    // NUEVO: La Muralla de Seguridad para la Inteligencia Artificial
+    public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
+    {
+        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
+
+        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        if (license == null || !license.LicenseModules.Any()) return false;
+
+        var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
+        var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
+
+        var targetModule = activeModules.FirstOrDefault(m => m.Code == moduleCode.ToUpperInvariant());
+        if (targetModule == null) return false;
+
+        // Comprobamos si el módulo posee esta capacidad explícita
+        return targetModule.Capabilities.Any(c => c.Code == capabilityCode.ToUpperInvariant());
     }
 }
