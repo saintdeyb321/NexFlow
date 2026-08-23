@@ -1,4 +1,8 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
@@ -20,6 +24,7 @@ public class BusinessController : ControllerBase
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IEntitlementService _entitlementService; // 🛡️ El Guardián
 
     public BusinessController(
         IBusinessProfileRepository profileRepository,
@@ -29,7 +34,8 @@ public class BusinessController : ControllerBase
         IBusinessHoursRepository hoursRepository,
         IWorkspaceContext workspaceContext,
         IWorkspaceRepository workspaceRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IEntitlementService entitlementService)
     {
         _profileRepository = profileRepository;
         _serviceRepository = serviceRepository;
@@ -39,14 +45,23 @@ public class BusinessController : ControllerBase
         _workspaceContext = workspaceContext;
         _workspaceRepository = workspaceRepository;
         _unitOfWork = unitOfWork;
+        _entitlementService = entitlementService;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
+
+    // 🛡️ VALIDADOR CENTRAL DE MÓDULOS (Entitlements Enforcement)
+    private async Task<bool> HasAccessTo(string moduleCode, CancellationToken ct)
+    {
+        var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
+        return activeModules.Contains(moduleCode.ToUpperInvariant());
+    }
 
     // --- PROFILE ---
     [HttpGet("profile")]
     public async Task<IActionResult> GetProfile(CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
         var profile = await _profileRepository.GetProfileAsync(WorkspaceId, cancellationToken);
         return profile != null ? Ok(profile) : NotFound();
     }
@@ -54,14 +69,16 @@ public class BusinessController : ControllerBase
     [HttpPut("profile")]
     public async Task<IActionResult> SaveProfile([FromBody] BusinessProfileDto profile, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
         await _profileRepository.SaveProfileAsync(WorkspaceId, profile, cancellationToken);
         return NoContent();
     }
 
-    // --- LOCATIONS (NUEVO - Soluciona el 404) ---
+    // --- LOCATIONS ---
     [HttpGet("locations")]
     public async Task<IActionResult> GetLocations(CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
         var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         return Ok(locations);
     }
@@ -69,15 +86,16 @@ public class BusinessController : ControllerBase
     [HttpPost("locations")]
     public async Task<IActionResult> SaveLocation([FromBody] LocationDto location, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
         await _locationRepository.SaveLocationAsync(WorkspaceId, location, cancellationToken);
         return Ok();
     }
 
-    // --- HOURS (NUEVO - Soluciona el 404) ---
+    // --- HOURS ---
     [HttpGet("hours")]
     public async Task<IActionResult> GetHours(CancellationToken cancellationToken)
     {
-        // Obtenemos la sede principal para consultar sus horarios
+        if (!await HasAccessTo("BUSINESS_HOURS", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_HOURS no contratado.");
         var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         var mainLoc = locations.FirstOrDefault(l => l.IsMain) ?? locations.FirstOrDefault();
         var locationId = mainLoc?.Id ?? "default";
@@ -89,6 +107,7 @@ public class BusinessController : ControllerBase
     [HttpPut("hours")]
     public async Task<IActionResult> SaveHours([FromBody] BusinessHoursDto[] hours, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("BUSINESS_HOURS", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_HOURS no contratado.");
         var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         var mainLoc = locations.FirstOrDefault(l => l.IsMain) ?? locations.FirstOrDefault();
         var locationId = mainLoc?.Id ?? "default";
@@ -101,6 +120,7 @@ public class BusinessController : ControllerBase
     [HttpGet("services")]
     public async Task<IActionResult> GetServices(CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
         var services = await _serviceRepository.GetServicesAsync(WorkspaceId, cancellationToken);
         return Ok(services);
     }
@@ -108,6 +128,7 @@ public class BusinessController : ControllerBase
     [HttpPost("services")]
     public async Task<IActionResult> SaveService([FromBody] ServiceDto service, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
         await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
         return Ok();
     }
@@ -115,6 +136,7 @@ public class BusinessController : ControllerBase
     [HttpDelete("services/{serviceId}")]
     public async Task<IActionResult> DeleteService(string serviceId, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
         await _serviceRepository.DeleteServiceAsync(WorkspaceId, serviceId, cancellationToken);
         return NoContent();
     }
@@ -123,6 +145,7 @@ public class BusinessController : ControllerBase
     [HttpGet("faqs")]
     public async Task<IActionResult> GetFaqs(CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         var faqs = await _faqRepository.GetFaqsAsync(WorkspaceId, cancellationToken);
         return Ok(faqs);
     }
@@ -130,6 +153,7 @@ public class BusinessController : ControllerBase
     [HttpPost("faqs")]
     public async Task<IActionResult> SaveFaq([FromBody] FaqDto faq, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
         return Ok();
     }
@@ -137,6 +161,7 @@ public class BusinessController : ControllerBase
     [HttpDelete("faqs/{faqId}")]
     public async Task<IActionResult> DeleteFaq(string faqId, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         await _faqRepository.DeleteFaqAsync(WorkspaceId, faqId, cancellationToken);
         return NoContent();
     }
@@ -147,9 +172,7 @@ public class BusinessController : ControllerBase
         var workspace = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);
         if (workspace == null) return NotFound();
 
-        // Cambiamos el estado a Active en PostgreSQL
         workspace.Activate();
-
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok();

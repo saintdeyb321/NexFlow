@@ -19,21 +19,23 @@ public class FaqModuleHandler : IModuleHandler
         _profileRepository = profileRepository;
     }
 
-    // CORRECCIÓN: La capacidad que este módulo exporta
-    public string[] SupportedCapabilities => new[] { "ANSWER_QUESTION" };
+    // 🛡️ AHORA RESPETA LA CAPACIDAD INYECTADA EN EL SEEDER
+    public string[] SupportedCapabilities => new[] { "READ" };
+
     public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
-        // Pequeño blindaje: validamos que la capacidad sea la correcta
-        if (request.CapabilityCode != "ANSWER_QUESTION")
+        if (request.CapabilityCode != "READ")
             return "SISTEMA: Capacidad no soportada por el módulo FAQ.";
 
         var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
         var faqs = await _faqRepository.GetFaqsAsync(workspaceId, cancellationToken);
 
-        var faqsText = string.Join(" | ", faqs.Select(f => $"P: {f.Question} R: {f.Answer}"));
+        var faqsText = faqs.Any()
+            ? string.Join(" | ", faqs.Select(f => $"P: {f.Question} R: {f.Answer}"))
+            : "Actualmente no hay preguntas frecuentes configuradas.";
 
         return profile != null
-            ? $"SISTEMA: Responde la duda del cliente basándote en esto. Nombre negocio: {profile.CommercialName}. Descripción: {profile.Description}. FAQs: {faqsText}"
-            : "SISTEMA: El negocio aún no ha configurado su información básica o preguntas frecuentes.";
+            ? $"SISTEMA: Responde la duda del cliente basándote en esta información. Nombre negocio: {profile.CommercialName}. FAQs: {faqsText}"
+            : $"SISTEMA: Responde la duda del cliente basándote en esta información. FAQs: {faqsText}";
     }
 }

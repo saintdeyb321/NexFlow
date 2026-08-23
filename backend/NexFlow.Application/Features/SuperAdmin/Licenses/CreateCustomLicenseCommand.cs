@@ -3,6 +3,10 @@ using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Application.Features.SuperAdmin.Licenses;
 
@@ -44,12 +48,12 @@ public class CreateCustomLicenseCommandHandler
         var now = _clock.UtcNow;
         var expiration = now.AddMonths(request.DurationInMonths);
 
-        // Usamos el método blindado de tu Entidad Dominio
         var customLicense = License.CreateCustomLicense(request.WorkspaceId, now, expiration);
 
         foreach (var moduleId in request.ModuleIds)
         {
-            customLicense.AddTemplateModule(moduleId);
+            // 🐛 BUG SOLUCIONADO: Ahora llama correctamente al método de licencias a la carta
+            customLicense.AddCustomModule(moduleId);
         }
 
         _licenseRepository.Add(customLicense);

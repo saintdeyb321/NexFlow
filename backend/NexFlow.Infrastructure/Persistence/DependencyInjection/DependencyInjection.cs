@@ -7,6 +7,8 @@ using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Engines.AI;
+using NexFlow.Application.Engines.Dispatcher;
+using NexFlow.Application.Engines.Dispatcher.Handlers;
 using NexFlow.Application.Engines.Intent;
 using NexFlow.Infrastructure.Cache;
 using NexFlow.Infrastructure.Engines.AI;
@@ -52,6 +54,7 @@ public static class DependencyInjection
             services.AddScoped<IBusinessHoursRepository, FirestoreBusinessHoursRepository>();
             services.AddScoped<IFaqRepository, FirestoreFaqRepository>();
             services.AddScoped<IServiceRepository, FirestoreServiceRepository>();
+            services.AddScoped<ICatalogRepository, FirestoreCatalogRepository>();
         }
 
         // 5. Utilidades y Motores de IA
@@ -67,6 +70,7 @@ public static class DependencyInjection
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
         services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
         services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
+
 
         // CORRECCIÓN 2: Conexión a Redis Resiliente y "Perezosa" (Lazy Connection)
         var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";

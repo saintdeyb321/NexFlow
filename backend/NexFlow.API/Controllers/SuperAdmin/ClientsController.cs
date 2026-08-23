@@ -1,51 +1,37 @@
-﻿using System.Linq;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
-using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using NexFlow.Application.Features.SuperAdmin.Workspaces; // Aseguramos el namespace del Query Handler
 
 namespace NexFlow.API.Controllers.SuperAdmin;
 
 [ApiController]
 [Route("api/superadmin/clients")]
-// ⚠️ HACK DE DESARROLLO: Comentamos la política estricta temporalmente.
-// En producción, descomenta esto para que los clientes normales no puedan crear otros negocios.
-// [Authorize(Policy = "SuperAdmin")] 
-[Authorize] // <- Ahora solo exigimos estar logueados para poder probar
+[Authorize(Policy = "SuperAdmin")] // 🛡️ ESCUDO ACTIVADO: Cero accesos de clientes normales
 public class ClientsController : ControllerBase
 {
     private readonly ProvisionClientCommandHandler _provisionHandler;
-    private readonly NexFlowDbContext _context;
+    private readonly GetSystemWorkspacesQueryHandler _getWorkspacesHandler;
 
-    // Inyectamos el DBContext directo para hacer una lectura rápida (Patrón CQRS simplificado)
-    public ClientsController(ProvisionClientCommandHandler provisionHandler, NexFlowDbContext context)
+    public ClientsController(
+        ProvisionClientCommandHandler provisionHandler,
+        GetSystemWorkspacesQueryHandler getWorkspacesHandler)
     {
         _provisionHandler = provisionHandler;
-        _context = context;
+        _getWorkspacesHandler = getWorkspacesHandler;
     }
 
-    // 1. SOLUCIÓN AL 404: Endpoint para listar todos los clientes en la UI del SuperAdmin
     [HttpGet]
     public async Task<IActionResult> GetSystemWorkspaces(CancellationToken cancellationToken)
     {
-        var workspaces = await _context.Workspaces
-            .Select(w => new
-            {
-                Id = w.Id,
-                Name = w.Name ?? "Negocio Sin Nombre",
-                Status = w.Status.ToString(),
-                CreatedAt = w.CreatedAt
-            })
-            .OrderByDescending(w => w.CreatedAt)
-            .ToListAsync(cancellationToken);
-
+        // 🛡️ CLEAN ARCHITECTURE: Adiós al DbContext. Delegamos la lectura a la capa Application.
+        // Nota: Si tu handler exige un objeto Query vacío, pásale 'new GetSystemWorkspacesQuery()'
+        var workspaces = await _getWorkspacesHandler.Handle(cancellationToken);
         return Ok(workspaces);
     }
 
-    // 2. SOLUCIÓN AL 403: Como bajamos el escudo a [Authorize], ahora el POST pasará con éxito
     [HttpPost("provision")]
     public async Task<IActionResult> ProvisionClient([FromBody] ProvisionClientCommand command, CancellationToken cancellationToken)
     {

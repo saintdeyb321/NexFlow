@@ -29,10 +29,12 @@ public static class DependencyInjection
         services.AddScoped<CreateCustomLicenseCommandHandler>();
         services.AddScoped<GetMeQueryHandler>();
 
-        // 3. Registrar el Framework Genérico de Módulos (V2)
+        services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, ReservationModuleHandler>();
         services.AddScoped<IModuleHandler, FaqModuleHandler>();
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
+        services.AddScoped<IModuleHandler, CatalogModuleHandler>();
+        services.AddScoped<IModuleHandler, ServiceModuleHandler>();
 
         return services;
     }

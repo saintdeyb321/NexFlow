@@ -91,7 +91,7 @@ public class ProvisionClientCommandHandler
             if (systemModules.Count != request.CustomModules.Count)
                 return Result<Guid>.Failure(new Error("Modules.Invalid", "Uno o más módulos personalizados enviados no existen."));
 
-            foreach (var module in systemModules) license.AddTemplateModule(module.Id);
+            foreach (var module in systemModules) license.AddCustomModule(module.Id);
         }
         else
         {

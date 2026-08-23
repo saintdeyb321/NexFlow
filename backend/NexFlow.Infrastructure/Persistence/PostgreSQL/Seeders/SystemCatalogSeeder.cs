@@ -1,7 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using NexFlow.Domain.Entities;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 
@@ -17,8 +14,11 @@ public static class SystemCatalogSeeder
             new { Code = "BUSINESS_PROFILE", Name = "Perfil del Negocio", Desc = "Configuración general.", Caps = new[] { new { Code = "READ", Desc = "Leer perfil" } } },
             new { Code = "LOCATIONS", Name = "Gestión de Sedes", Desc = "Administración de locales.", Caps = new[] { new { Code = "READ", Desc = "Leer sedes" } } },
             new { Code = "BUSINESS_HOURS", Name = "Horarios de Atención", Desc = "Control de disponibilidad.", Caps = new[] { new { Code = "READ", Desc = "Leer horarios" } } },
-            new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar catálogo" } } },
             new { Code = "FAQ", Name = "Base de Conocimiento", Desc = "Preguntas frecuentes para la IA.", Caps = new[] { new { Code = "READ", Desc = "Consultar FAQs" } } },
+            
+            // Módulos Transaccionales
+            new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar servicios" } } },
+            new { Code = "CATALOG", Name = "Catálogo de Productos", Desc = "Productos físicos o consumibles.", Caps = new[] { new { Code = "READ", Desc = "Consultar productos" } } },
 
             new { Code = "RESERVATIONS", Name = "Motor de Reservas", Desc = "Gestión de citas.", Caps = new[] {
                 new { Code = "CHECK_AVAILABILITY", Desc = "Consultar horarios libres" },
@@ -26,21 +26,21 @@ public static class SystemCatalogSeeder
                 new { Code = "CANCEL", Desc = "Cancelar reserva" }
             } },
 
+            new { Code = "REQUESTS", Name = "Solicitudes", Desc = "Gestión de trámites y afiliaciones.", Caps = new[] {
+                new { Code = "CREATE", Desc = "Crear solicitud" },
+                new { Code = "UPDATE_STATUS", Desc = "Actualizar estado" }
+            } },
+
+            new { Code = "NOTIFICATIONS", Name = "Alertas", Desc = "Centro de avisos para el negocio.", Caps = new[] { new { Code = "READ", Desc = "Ver alertas" } } },
             new { Code = "CUSTOMERS", Name = "Contactos", Desc = "Identidad de consumidores.", Caps = new[] { new { Code = "READ", Desc = "Ver contactos" } } },
 
             new { Code = "CONVERSATIONS", Name = "Bandeja de Entrada", Desc = "Inbox y control de chats.", Caps = new[] {
                 new { Code = "READ", Desc = "Leer chats" },
                 new { Code = "SEND_MESSAGE", Desc = "Enviar mensaje manual" },
                 new { Code = "TAKEOVER", Desc = "Asumir control humano" }
-            } },
-
-            new { Code = "REQUESTS", Name = "Solicitudes", Desc = "Gestión de procesos operativos.", Caps = new[] {
-                new { Code = "CREATE", Desc = "Crear solicitud" },
-                new { Code = "UPDATE_STATUS", Desc = "Actualizar estado" }
             } }
         };
 
-        // NUEVO: Incluimos las capacidades al consultar para no duplicarlas
         var existingModules = await context.Modules.Include(m => m.Capabilities).ToListAsync();
 
         foreach (var m in coreModules)
@@ -52,7 +52,6 @@ public static class SystemCatalogSeeder
                 context.Modules.Add(module);
             }
 
-            // Inyectamos las capacidades mediante la entidad (que ya valida duplicados internamente)
             foreach (var cap in m.Caps)
             {
                 module.AddCapability(cap.Code, cap.Desc);
@@ -60,14 +59,14 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 2. Las 5 Plantillas Estratégicas del MVP (Se mantiene intacto)
+        // 2. Las 5 Plantillas Estratégicas (Basadas en Capacidades, NO en industrias)
         var templates = new[]
         {
-            new { Code = "SECRETARY", Name = "Secretaria / Agenda", Desc = "Ideal para consultorios y profesionales." },
-            new { Code = "RECEPTIONIST", Name = "Recepción", Desc = "Ideal para hoteles y centros médicos." },
-            new { Code = "COMMERCIAL", Name = "Atención Comercial", Desc = "Para agencias, distribuidores y talleres." },
-            new { Code = "SERVICE_REQUEST", Name = "Solicitud / Trámite", Desc = "Procesos para incorporar unidades o recursos." },
-            new { Code = "OPERATIONS", Name = "Operaciones", Desc = "Para servicios de mantenimiento y alquileres." }
+            new { Code = "SUPPORT", Name = "Atención Básica", Desc = "Respuestas automáticas e información general." },
+            new { Code = "BOOKING", Name = "Asistente de Reservas", Desc = "Ideal para consultorios, spas y salones." },
+            new { Code = "COMMERCIAL", Name = "Asistente Comercial", Desc = "Ideal para pastelerías, tiendas y retail." },
+            new { Code = "REQUESTS", Name = "Asistente de Trámites", Desc = "Gestión de afiliaciones, soporte o solicitudes." },
+            new { Code = "FULL", Name = "Operaciones Completas", Desc = "Todas las capacidades operativas del sistema." }
         };
 
         var existingTemplates = await context.Templates.ToListAsync();
@@ -77,18 +76,18 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 3. Relaciones Template-Modules (Se mantiene intacto)
         existingModules = await context.Modules.ToListAsync();
         existingTemplates = await context.Templates.ToListAsync();
         var existingTemplateModules = await context.TemplateModules.ToListAsync();
 
+        // 3. El Armado Final de los Bloques de Lego
         var templateConfig = new Dictionary<string, string[]>
         {
-            { "SECRETARY", new[] { "BUSINESS_PROFILE", "FAQ", "SERVICES", "CUSTOMERS", "RESERVATIONS", "CONVERSATIONS" } },
-            { "RECEPTIONIST", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "SERVICES", "CUSTOMERS", "RESERVATIONS", "FAQ", "CONVERSATIONS" } },
-            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "SERVICES", "FAQ", "CUSTOMERS", "CONVERSATIONS" } },
-            { "SERVICE_REQUEST", new[] { "BUSINESS_PROFILE", "SERVICES", "FAQ", "CUSTOMERS", "CONVERSATIONS", "REQUESTS" } },
-            { "OPERATIONS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "SERVICES", "CUSTOMERS", "RESERVATIONS", "FAQ", "CONVERSATIONS" } }
+            { "SUPPORT", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CONVERSATIONS", "CUSTOMERS" } },
+            { "BOOKING", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "RESERVATIONS", "CONVERSATIONS", "CUSTOMERS" } },
+            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "CONVERSATIONS", "CUSTOMERS" } },
+            { "REQUESTS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "REQUESTS", "CONVERSATIONS", "CUSTOMERS", "NOTIFICATIONS" } },
+            { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "RESERVATIONS", "REQUESTS", "CONVERSATIONS", "CUSTOMERS", "NOTIFICATIONS" } }
         };
 
         foreach (var config in templateConfig)
