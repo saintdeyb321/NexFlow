@@ -1,8 +1,12 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Knowledge;
 
 namespace NexFlow.API.Controllers.Business;
@@ -20,7 +24,7 @@ public class BusinessController : ControllerBase
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IEntitlementService _entitlementService; // 🛡️ El Guardián
+    private readonly IEntitlementService _entitlementService;
 
     public BusinessController(
         IBusinessProfileRepository profileRepository,
@@ -46,31 +50,11 @@ public class BusinessController : ControllerBase
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
 
-    // 🛡️ VALIDADOR CENTRAL DE MÓDULOS (Entitlements Enforcement)
     private async Task<bool> HasAccessTo(string moduleCode, CancellationToken ct)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
         return activeModules.Contains(moduleCode.ToUpperInvariant());
     }
-
-    // --- PROFILE ---
-    [HttpGet("profile")]
-    public async Task<IActionResult> GetProfile(CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
-        var profile = await _profileRepository.GetProfileAsync(WorkspaceId, cancellationToken);
-        return profile != null ? Ok(profile) : NotFound();
-    }
-
-    [HttpPut("profile")]
-    public async Task<IActionResult> SaveProfile([FromBody] BusinessProfileDto profile, CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
-        await _profileRepository.SaveProfileAsync(WorkspaceId, profile, cancellationToken);
-        return NoContent();
-    }
-
-    // --- LOCATIONS ---
     [HttpGet("locations")]
     public async Task<IActionResult> GetLocations(CancellationToken cancellationToken)
     {
@@ -78,32 +62,22 @@ public class BusinessController : ControllerBase
         var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         return Ok(locations);
     }
-
-    // 🔥 SPRINT 2: CANDADO DE SEDES (MaxLocations)
+    // 🔥 SPRINT 4: El controlador ya no maneja reglas de negocio. Delega la orden.
     [HttpPost("locations")]
-    public async Task<IActionResult> SaveLocation([FromBody] LocationDto location, CancellationToken cancellationToken)
+    public async Task<IActionResult> SaveLocation(
+        [FromBody] LocationDto location,
+        [FromServices] SaveLocationCommandHandler handler,
+        CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        var existingLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
+        var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
 
-        // Verificamos si la sede es nueva (no tiene ID o el ID no está en Firestore)
-        bool isNewLocation = string.IsNullOrEmpty(location.Id) || !existingLocations.Any(l => l.Id == location.Id);
+        if (result.IsFailure) return StatusCode(403, result.Error);
 
-        if (isNewLocation)
-        {
-            int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
-            if (existingLocations.Count() >= maxLocations)
-            {
-                return StatusCode(403, $"Límite alcanzado. Tu licencia actual solo permite un máximo de {maxLocations} sede(s).");
-            }
-        }
-
-        await _locationRepository.SaveLocationAsync(WorkspaceId, location, cancellationToken);
         return Ok();
     }
 
-    // 🔥 SPRINT 2: HORARIOS INDIVIDUALES POR SEDE
     [HttpGet("locations/{locationId}/hours")]
     public async Task<IActionResult> GetHours(string locationId, CancellationToken cancellationToken)
     {

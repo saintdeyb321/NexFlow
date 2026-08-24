@@ -3,6 +3,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Engines.Dispatcher;
 using NexFlow.Application.Engines.Dispatcher.Handlers;
 using NexFlow.Application.Features.Automation.ProcessMessage;
+using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Identity.GetMe;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Application.Features.SuperAdmin.Licenses;
@@ -28,6 +29,7 @@ public static class DependencyInjection
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();
         services.AddScoped<GetMeQueryHandler>();
+        services.AddScoped<SaveLocationCommandHandler>();
 
         // 3. Registrar Handlers del Motor Conversacional (Module Dispatcher)
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
@@ -36,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();
         services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
+
 
         return services;
     }

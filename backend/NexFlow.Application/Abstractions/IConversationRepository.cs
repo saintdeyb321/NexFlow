@@ -24,6 +24,7 @@ public interface IConversationRepository
     // Para el Inbox Empresarial (FrontEnd)
     Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken);
     Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken);
+    Task<ConversationRecord?> GetConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
 }
 
 public interface IConsumerIdentityRepository

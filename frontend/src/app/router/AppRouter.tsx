@@ -10,9 +10,9 @@ import { SuperAdminPage } from '../../features/admin/pages/SuperAdminPage';
 import { useAuthStore } from '../../core/store/useAuthStore';
 import { DashboardPage } from '../../features/dashboard/pages/DashboardPage';
 import { OnboardingPage } from '../../features/business/pages/OnboardingPage';
-
-// IMPORTACIÓN NUEVA
 import { InboxPage } from '../../features/conversations/pages/InboxPage';
+import { RequestsPage } from '../../features/requests/pages/RequestsPage';
+import { CatalogPage } from '../../features/catalog/pages/CatalogPage';
 
 // 1. GUARDIÁN DE MÓDULOS
 const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, children: React.ReactNode }) => {
@@ -70,9 +70,17 @@ const router = createBrowserRouter([
             element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard>
           },
           { 
-            // NUEVA RUTA PARA EL SPRINT 4
             path: 'inbox', 
             element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard>
+          },
+          // 🔥 BLOQUE B: NUEVAS RUTAS COMERCIALES Y OPERATIVAS
+          { 
+            path: 'requests', 
+            element: <ModuleGuard requiredModule="REQUESTS"><RequestsPage/></ModuleGuard>
+          },
+          { 
+            path: 'catalog', 
+            element: <ModuleGuard requiredModule="CATALOG"><CatalogPage/></ModuleGuard>
           },
           { path: 'settings', element: <SettingsPage /> },
           { 

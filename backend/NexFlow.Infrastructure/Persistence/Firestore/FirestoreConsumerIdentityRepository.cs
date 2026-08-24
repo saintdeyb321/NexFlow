@@ -40,10 +40,14 @@ public class FirestoreConsumerIdentityRepository : IConsumerIdentityRepository
     {
         var docRef = GetCollection(workspaceId).Document(consumer.Phone);
 
+        // 🔥 CORRECCIÓN SPRINT 6: Caducidad a 90 días desde la última interacción
+        var expiresAt = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(90), DateTimeKind.Utc);
+
         var data = new Dictionary<string, object>
         {
             { "phone", consumer.Phone },
-            { "lastInteractionAt", DateTime.SpecifyKind(consumer.LastInteractionAt, DateTimeKind.Utc) }
+            { "lastInteractionAt", DateTime.SpecifyKind(consumer.LastInteractionAt, DateTimeKind.Utc) },
+            { "expiresAt", expiresAt } // Inyectamos el TTL rotativo
         };
 
         // Solo actualizamos el nombre si no es nulo

@@ -139,4 +139,14 @@ public class FirestoreConversationRepository : IConversationRepository
             LastMessageAt = doc.GetValue<Timestamp>("lastMessageAt").ToDateTime()
         };
     }
+
+    public async Task<ConversationRecord?> GetConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
+    {
+        var docRef = GetCollection(workspaceId).Document(conversationId);
+        var snapshot = await docRef.GetSnapshotAsync(cancellationToken);
+
+        if (!snapshot.Exists) return null;
+
+        return MapToConversation(snapshot);
+    }
 }

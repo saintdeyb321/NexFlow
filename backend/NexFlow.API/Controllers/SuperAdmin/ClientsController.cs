@@ -1,15 +1,17 @@
-﻿using System.Threading;
+﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
-using NexFlow.Application.Features.SuperAdmin.Workspaces; // Aseguramos el namespace del Query Handler
+using NexFlow.Application.Features.SuperAdmin.Workspaces;
+using NexFlow.Application.Features.SuperAdmin.Licenses; // 🔥 Inyectamos el namespace de los comandos
 
 namespace NexFlow.API.Controllers.SuperAdmin;
 
 [ApiController]
 [Route("api/superadmin/clients")]
-[Authorize(Policy = "SuperAdmin")] // 🛡️ ESCUDO ACTIVADO: Cero accesos de clientes normales
+[Authorize(Policy = "SuperAdmin")]
 public class ClientsController : ControllerBase
 {
     private readonly ProvisionClientCommandHandler _provisionHandler;
@@ -26,8 +28,6 @@ public class ClientsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetSystemWorkspaces(CancellationToken cancellationToken)
     {
-        // 🛡️ CLEAN ARCHITECTURE: Adiós al DbContext. Delegamos la lectura a la capa Application.
-        // Nota: Si tu handler exige un objeto Query vacío, pásale 'new GetSystemWorkspacesQuery()'
         var workspaces = await _getWorkspacesHandler.Handle(cancellationToken);
         return Ok(workspaces);
     }
@@ -43,5 +43,40 @@ public class ClientsController : ControllerBase
         }
 
         return Created($"/api/workspaces/{result.Value}", new { WorkspaceId = result.Value });
+    }
+
+    // 🔥 BLOQUE C: Ciclo de vida de Licencias (Módulos a la carta, Suspensión y Renovación)
+
+    [HttpPost("assign-module")]
+    public async Task<IActionResult> AssignModule(
+        [FromBody] AssignModuleToLicenseCommand command,
+        [FromServices] AssignModuleToLicenseCommandHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.Handle(command, cancellationToken);
+        if (result.IsFailure) return BadRequest(result.Error.Description);
+        return Ok();
+    }
+
+    [HttpPost("renew")]
+    public async Task<IActionResult> RenewLicense(
+        [FromBody] RenewLicenseCommand command,
+        [FromServices] RenewLicenseCommandHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.Handle(command, cancellationToken);
+        if (result.IsFailure) return BadRequest(result.Error.Description);
+        return Ok();
+    }
+
+    [HttpPost("suspend")]
+    public async Task<IActionResult> SuspendClient(
+        [FromBody] SuspendClientCommand command,
+        [FromServices] SuspendClientCommandHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.Handle(command, cancellationToken);
+        if (result.IsFailure) return BadRequest(result.Error.Description);
+        return Ok();
     }
 }

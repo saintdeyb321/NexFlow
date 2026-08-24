@@ -22,7 +22,7 @@ public class RedisConversationCache : IConversationCache
         context.LastUpdated = DateTime.UtcNow;
 
         var json = JsonSerializer.Serialize(context);
-        await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30)); // TTL: 30 minutos
+        await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30));
     }
 
     public async Task<ConversationContextDto?> GetContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
@@ -38,13 +38,16 @@ public class RedisConversationCache : IConversationCache
         }
         catch
         {
-            return null; // Si por alguna razón el JSON anterior era inválido/string viejo, reiniciamos.
+            return null;
         }
     }
 
     public async Task<bool> TryAcquireMessageLockAsync(string messageId, CancellationToken cancellationToken)
     {
         var key = $"webhook:processed:{messageId}";
-        return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromHours(24), When.NotExists);
+        // 🔥 CORRECCIÓN HARDENING: Reducimos el TTL de 24 horas a 2 minutos. 
+        // Esto bloquea los webhooks duplicados instantáneos, pero libera el candado 
+        // rápidamente por si nuestra API falla y n8n/Evolution necesita reintentar.
+        return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromMinutes(2), When.NotExists);
     }
 }
