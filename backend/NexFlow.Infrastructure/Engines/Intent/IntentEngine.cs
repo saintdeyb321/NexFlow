@@ -3,10 +3,6 @@ using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent;
 using NexFlow.Application.Engines.Intent.AI;
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Engines.Intent;
 
@@ -23,23 +19,26 @@ public class IntentEngine : IIntentEngine
 
     public async Task<IntentResultDto> AnalyzeAsync(string message, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 9: Fronteras Estrictas y Prevención de Cruce de Módulos
         var systemPrompt = @"
-Eres el motor de clasificación (Intent Engine) de NexFlow. Tu única tarea es leer el mensaje del usuario y clasificarlo estrictamente en una de las siguientes intenciones (usa los nombres exactos):
+Eres el motor de clasificación (Intent Engine) de NexFlow. Tu única tarea es leer el mensaje del usuario y clasificarlo estrictamente en una de las siguientes intenciones (usa los nombres exactos).
+
+REGLA DE ORO: Evita el cruce de fronteras. Usa las intenciones comerciales (Services/Catalog) por encima de las generales (Faq).
 
 - CreateReservation: Quiere agendar, separar o crear una cita/reserva.
 - CheckAvailability: Pregunta qué fechas u horas hay disponibles.
-- CancelReservation: Desea anular una cita existente.
+- CancelReservation: Desea anular una cita o reserva existente.
 - CreateRequest: Quiere iniciar un trámite, solicitar una afiliación, enviar documentos o pedir soporte.
 - CheckRequestStatus: Pregunta por el estado de su trámite o afiliación.
-- ServiceInformation: Pregunta qué servicios brindan, en qué consisten o cuánto cuestan (ej. cortes, consultas, mantenimientos).
-- ProductInformation: Pregunta por el catálogo de productos físicos o alimentos (ej. tortas, repuestos).
-- FaqQuery: Dudas generales o preguntas frecuentes (ej. requisitos, métodos de pago, si hay delivery).
-- BusinessProfileQuery: Pregunta quiénes son, historia del negocio o redes sociales.
-- LocationQuery: Pregunta dónde están ubicados, dirección o cómo llegar.
+- ServiceInformation: EXCLUSIVO PARA SERVICIOS. Usa esto si preguntan precios, tarifas, tipos de servicio o qué hacen (ej. cortes, mantenimientos, consultas). NUNCA uses FaqQuery para esto.
+- ProductInformation: EXCLUSIVO PARA PRODUCTOS. Usa esto si preguntan por catálogo, stock o precios de productos físicos/alimentos (ej. tortas, repuestos).
+- FaqQuery: PREGUNTAS GENERALES. Dudas operativas (ej. requisitos, métodos de pago, zonas de cobertura). PROHIBIDO usarlo si el usuario pregunta por un servicio, un producto o una reserva.
+- BusinessProfileQuery: Pregunta quiénes son, historia del negocio, ruc o redes sociales.
+- LocationQuery: Pregunta dónde están ubicados, dirección o cómo llegar a una sede.
 - BusinessHoursQuery: Pregunta a qué hora abren, cierran o si atienden feriados/domingos.
-- HumanHandoffRequest: El cliente está enojado, tiene un problema muy complejo, o pide explícitamente hablar con un humano/asesor.
+- HumanHandoffRequest: El cliente está enojado, tiene un problema muy complejo, o pide explícitamente hablar con un humano/asesor/operador.
 - GeneralGreeting: Saludos simples ('Hola', 'Buenos días') sin otra pregunta.
-- Unknown: Mensajes incomprensibles, insultos, o intenciones que no encajan en las anteriores.
+- Unknown: Respuestas extremadamente cortas (ej: 'El Tambo', 'A las 3', 'Juan', 'Sí'), mensajes incomprensibles, o intenciones que no encajan en las anteriores.
 
 Devuelve UNICAMENTE un JSON válido con este formato exacto:
 {

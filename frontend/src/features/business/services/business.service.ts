@@ -36,13 +36,12 @@ export const saveLocation = async (location: LocationDto): Promise<void> => {
 };
 
 // --- HOURS ---
-export const getBusinessHours = async (): Promise<BusinessHoursDto[]> => {
-  const { data } = await axiosClient.get<BusinessHoursDto[]>('/business/hours');
+export const getBusinessHours = async (locationId: string): Promise<BusinessHoursDto[]> => {
+  const { data } = await axiosClient.get(`/business/locations/${locationId}/hours`);
   return data;
 };
-
-export const saveBusinessHours = async (hours: BusinessHoursDto[]): Promise<void> => {
-  await axiosClient.put('/business/hours', hours);
+export const saveBusinessHours = async (locationId: string, hours: BusinessHoursDto[]): Promise<void> => {
+  await axiosClient.put(`/business/locations/${locationId}/hours`, hours);
 };
 
 // --- ONBOARDING ---

@@ -5,8 +5,9 @@ export interface BusinessProfile {
   whatsAppNumber: string;
   description: string;
 }
+
 export interface ServiceDto {
-  id: string; // Usamos string para los Guid en frontend
+  id: string; 
   name: string;
   durationInMinutes: number;
 }
@@ -19,7 +20,7 @@ export interface FaqDto {
 }
 
 export interface LocationDto {
-  id: string;
+  id?: string; // Opcional para la creación
   name: string;
   address: string;
   reference: string;
@@ -27,8 +28,8 @@ export interface LocationDto {
 }
 
 export interface BusinessHoursDto {
-  dayOfWeek: number; // 0 = Domingo, 1 = Lunes...
-  openTime: string; // "08:00"
-  closeTime: string; // "18:00"
-  isClosed: boolean; // true si está cerrado ese día
+  dayOfWeek: number; 
+  openTime: string; 
+  closeTime: string; 
+  isClosed: boolean; 
 }

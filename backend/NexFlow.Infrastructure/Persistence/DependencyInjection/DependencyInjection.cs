@@ -29,7 +29,7 @@ public static class DependencyInjection
         services.AddDbContext<NexFlowDbContext>(options => options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
         services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<NexFlowDbContext>());
 
-        // 2. Repositorios
+        // 2. Repositorios (PostgreSQL)
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ILicenseRepository, LicenseRepository>();
@@ -44,7 +44,7 @@ public static class DependencyInjection
         services.AddStackExchangeRedisCache(options => { options.Configuration = configuration.GetConnectionString("Redis"); });
         services.AddScoped<IConversationCache, RedisConversationCache>();
 
-        // 4. Base de Datos Documental
+        // 4. Base de Datos Documental (Firestore)
         var firebaseProjectId = configuration["Firebase:ProjectId"];
         if (!string.IsNullOrEmpty(firebaseProjectId))
         {
@@ -55,6 +55,11 @@ public static class DependencyInjection
             services.AddScoped<IFaqRepository, FirestoreFaqRepository>();
             services.AddScoped<IServiceRepository, FirestoreServiceRepository>();
             services.AddScoped<ICatalogRepository, FirestoreCatalogRepository>();
+            services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
+            services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
+
+            // 🔥 SPRINT 4: Repositorio de Solicitudes
+            services.AddScoped<IRequestRepository, FirestoreRequestRepository>();
         }
 
         // 5. Utilidades y Motores de IA
@@ -63,22 +68,17 @@ public static class DependencyInjection
         services.AddScoped<IIntentEngine, IntentEngine>();
         services.AddScoped<IAiRouter, AiRouter>();
 
-        // 6. Gateways Externos (Producción)
+        // 6. Gateways Externos
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();
         services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>();
-        // Inyectamos el Resolver temporal
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
-        services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
-        services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
 
-
-        // CORRECCIÓN 2: Conexión a Redis Resiliente y "Perezosa" (Lazy Connection)
+        // 7. Conexión a Redis Resiliente
         var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";
-
         services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
             var options = ConfigurationOptions.Parse(redisConnString);
-            options.AbortOnConnectFail = false; // Evita que la API crashee si Redis tarda en levantar
+            options.AbortOnConnectFail = false;
             return ConnectionMultiplexer.Connect(options);
         });
 

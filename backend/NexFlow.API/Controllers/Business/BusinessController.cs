@@ -1,8 +1,4 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
@@ -83,35 +79,43 @@ public class BusinessController : ControllerBase
         return Ok(locations);
     }
 
+    // 🔥 SPRINT 2: CANDADO DE SEDES (MaxLocations)
     [HttpPost("locations")]
     public async Task<IActionResult> SaveLocation([FromBody] LocationDto location, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        var existingLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
+
+        // Verificamos si la sede es nueva (no tiene ID o el ID no está en Firestore)
+        bool isNewLocation = string.IsNullOrEmpty(location.Id) || !existingLocations.Any(l => l.Id == location.Id);
+
+        if (isNewLocation)
+        {
+            int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
+            if (existingLocations.Count() >= maxLocations)
+            {
+                return StatusCode(403, $"Límite alcanzado. Tu licencia actual solo permite un máximo de {maxLocations} sede(s).");
+            }
+        }
+
         await _locationRepository.SaveLocationAsync(WorkspaceId, location, cancellationToken);
         return Ok();
     }
 
-    // --- HOURS ---
-    [HttpGet("hours")]
-    public async Task<IActionResult> GetHours(CancellationToken cancellationToken)
+    // 🔥 SPRINT 2: HORARIOS INDIVIDUALES POR SEDE
+    [HttpGet("locations/{locationId}/hours")]
+    public async Task<IActionResult> GetHours(string locationId, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("BUSINESS_HOURS", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_HOURS no contratado.");
-        var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
-        var mainLoc = locations.FirstOrDefault(l => l.IsMain) ?? locations.FirstOrDefault();
-        var locationId = mainLoc?.Id ?? "default";
-
         var hours = await _hoursRepository.GetBusinessHoursAsync(WorkspaceId, locationId, cancellationToken);
         return Ok(hours);
     }
 
-    [HttpPut("hours")]
-    public async Task<IActionResult> SaveHours([FromBody] BusinessHoursDto[] hours, CancellationToken cancellationToken)
+    [HttpPut("locations/{locationId}/hours")]
+    public async Task<IActionResult> SaveHours(string locationId, [FromBody] BusinessHoursDto[] hours, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("BUSINESS_HOURS", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_HOURS no contratado.");
-        var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
-        var mainLoc = locations.FirstOrDefault(l => l.IsMain) ?? locations.FirstOrDefault();
-        var locationId = mainLoc?.Id ?? "default";
-
         await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, hours, cancellationToken);
         return NoContent();
     }

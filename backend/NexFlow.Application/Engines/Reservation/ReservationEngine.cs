@@ -13,8 +13,6 @@ public class ReservationEngine : IReservationEngine
     private readonly IServiceRepository _serviceRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
     private readonly IUnitOfWork _unitOfWork;
-
-    // NUEVO: Dependencias para Automatización y Observabilidad
     private readonly IWorkflowGateway _workflowGateway;
     private readonly ILogger<ReservationEngine> _logger;
 
@@ -41,9 +39,13 @@ public class ReservationEngine : IReservationEngine
         if (targetService == null) return new List<TimeSlotDto>();
 
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
-
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
-        var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)date.DayOfWeek);
+
+        // 🔥 CORRECCIÓN SPRINT 6: Ajuste al Huso Horario UTC-5 para evitar bloqueos nocturnos
+        var regionalOffset = TimeSpan.FromHours(-5);
+        var localDate = date.Kind == DateTimeKind.Utc ? date.Add(regionalOffset) : date;
+
+        var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDate.DayOfWeek);
 
         if (todayHours == null || todayHours.IsClosed) return new List<TimeSlotDto>();
 
@@ -53,15 +55,19 @@ public class ReservationEngine : IReservationEngine
         var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, date, cancellationToken);
         var availableSlots = new List<TimeSlotDto>();
 
-        var currentSlotStart = date.Date.Add(openTime);
-        var endOfDay = date.Date.Add(closeTime);
+        var currentSlotStart = localDate.Date.Add(openTime);
+        var endOfDay = localDate.Date.Add(closeTime);
+        var localNow = DateTime.UtcNow.Add(regionalOffset);
 
         while (currentSlotStart.Add(slotDuration) <= endOfDay)
         {
             var currentSlotEnd = currentSlotStart.Add(slotDuration);
-            bool isOccupied = existingReservations.Any(r => r.StartTime < currentSlotEnd && r.EndTime > currentSlotStart);
 
-            if (!isOccupied)
+            // Evaluar ocupación con el offset aplicado y descartar horarios que ya pasaron hoy
+            bool isOccupied = existingReservations.Any(r => r.StartTime.Add(regionalOffset) < currentSlotEnd && r.EndTime.Add(regionalOffset) > currentSlotStart);
+            bool isPast = localDate.Date == localNow.Date && currentSlotStart <= localNow;
+
+            if (!isOccupied && !isPast)
             {
                 availableSlots.Add(new TimeSlotDto(currentSlotStart, currentSlotEnd, true));
             }
@@ -71,7 +77,6 @@ public class ReservationEngine : IReservationEngine
         return availableSlots;
     }
 
-    // Fíjate en el nuevo parámetro: string customerName
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken)
     {
         var safeUtcDateTime = dateTime.Kind == DateTimeKind.Unspecified
@@ -92,13 +97,11 @@ public class ReservationEngine : IReservationEngine
         if (!isAvailable)
             return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario solicitado ya está ocupado."));
 
-        // Inyectamos el customerName en la entidad
         var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTime, endTime);
         _reservationRepository.Add(reservation);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // Actualizamos el DTO (deberás añadir CustomerName a tu ReservationDto)
         var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
 
         try
@@ -129,10 +132,8 @@ public class ReservationEngine : IReservationEngine
 
         reservation.Cancel();
 
-        // 1. PERSISTENCIA SEGURA
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // 2. DISPARADOR DE AUTOMATIZACIÓN (Cancelación)
         try
         {
             var payload = new N8nEventPayload<object>(

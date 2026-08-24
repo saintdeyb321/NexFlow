@@ -11,6 +11,9 @@ public class EntitlementService : IEntitlementService
     private readonly IModuleRepository _moduleRepository;
     private readonly IClock _clock;
 
+    // 🔥 SPRINT 3: Módulos Base Inquebrantables
+    private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS" };
+
     public EntitlementService(
         ILicenseRepository licenseRepository,
         IWorkspaceRepository workspaceRepository,
@@ -63,15 +66,23 @@ public class EntitlementService : IEntitlementService
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var assignedModuleIds = license!.LicenseModules.Select(m => m.ModuleId).ToList();
 
-        if (!assignedModuleIds.Any()) return Enumerable.Empty<string>();
+        var activeModules = assignedModuleIds.Any()
+            ? await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken)
+            : Enumerable.Empty<Domain.Entities.Module>();
 
-        var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
-        return activeModules.Select(m => m.Code.ToUpperInvariant());
+        var codes = activeModules.Select(m => m.Code.ToUpperInvariant()).ToList();
+
+        // CORRECCIÓN SPRINT 3: Sumamos los módulos base al listado disponible
+        codes.AddRange(_baseModules);
+        return codes.Distinct();
     }
 
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
+
+        // CORRECCIÓN SPRINT 3: Si es un módulo de configuración base, se aprueba la capacidad
+        if (_baseModules.Contains(moduleCode.ToUpperInvariant())) return true;
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (license == null || !license.LicenseModules.Any()) return false;
@@ -85,10 +96,9 @@ public class EntitlementService : IEntitlementService
         return targetModule.Capabilities.Any(c => c.Code == capabilityCode.ToUpperInvariant());
     }
 
-    // NUEVO: Consultar el máximo de sedes permitidas por la licencia
     public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return 0; // 0 sedes si está inactivo/expirado
+        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return 0;
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         return license?.MaxLocations ?? 0;
