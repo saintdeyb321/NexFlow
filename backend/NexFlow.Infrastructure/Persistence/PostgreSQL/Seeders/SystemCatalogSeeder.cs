@@ -1,6 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using NexFlow.Domain.Entities;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders;
 
@@ -46,15 +49,29 @@ public static class SystemCatalogSeeder
         foreach (var m in coreModules)
         {
             var module = existingModules.FirstOrDefault(x => x.Code == m.Code);
+
+            // Si el módulo no existe, lo creamos y le añadimos todas sus capacidades
             if (module == null)
             {
                 module = Module.Create(m.Code, m.Name, m.Desc);
+
+                foreach (var cap in m.Caps)
+                {
+                    module.AddCapability(cap.Code, cap.Desc);
+                }
+
                 context.Modules.Add(module);
             }
-
-            foreach (var cap in m.Caps)
+            else
             {
-                module.AddCapability(cap.Code, cap.Desc);
+                // 🔥 CORRECCIÓN IDEMPOTENCIA: Si el módulo ya existe, solo añadimos las capacidades que le falten
+                foreach (var cap in m.Caps)
+                {
+                    if (!module.Capabilities.Any(c => c.Code == cap.Code))
+                    {
+                        module.AddCapability(cap.Code, cap.Desc);
+                    }
+                }
             }
         }
         await context.SaveChangesAsync();
@@ -72,7 +89,10 @@ public static class SystemCatalogSeeder
         var existingTemplates = await context.Templates.ToListAsync();
         foreach (var t in templates)
         {
-            if (!existingTemplates.Any(x => x.Code == t.Code)) context.Templates.Add(Template.Create(t.Code, t.Name, t.Desc));
+            if (!existingTemplates.Any(x => x.Code == t.Code))
+            {
+                context.Templates.Add(Template.Create(t.Code, t.Name, t.Desc));
+            }
         }
         await context.SaveChangesAsync();
 

@@ -38,10 +38,15 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data } = await axiosClient.get<MeResponse>('/me');
       set({ isAuthenticated: true, me: data, isLoading: false });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error validando sesión contra el backend:", error);
       await signOut(auth);
       set({ isAuthenticated: false, me: null, isLoading: false });
+      
+      // 🔥 NUEVO: Mostrar alerta si el backend rechaza al usuario
+      if (error.response?.status === 401 || error.response?.status === 403) {
+          alert("⛔ Acceso denegado: Tu cuenta de Google no está registrada en el sistema o no tienes permisos para ingresar.");
+      }
     }
   },
 
@@ -51,16 +56,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   completeOnboarding: async () => {
-    set((state) => {
-      if (state.me && state.me.workspace) {
-        return {
-          me: {
-            ...state.me,
-            workspace: { ...state.me.workspace, status: 'Active' }
-          }
-        };
-      }
-      return state;
-    });
+    // 🔥 SPRINT 9: Sincronización Real con Backend
+    // Ya no falsificamos el estado. Solicitamos la confirmación oficial del servidor.
+    try {
+      const { data } = await axiosClient.get<MeResponse>('/me');
+      set({ me: data });
+    } catch (error) {
+      console.error("Error al sincronizar la sesión post-onboarding:", error);
+    }
   }
 }));

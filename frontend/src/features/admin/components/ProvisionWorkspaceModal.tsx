@@ -36,7 +36,7 @@ export const ProvisionWorkspaceModal = ({ onClose, onProvision, isProvisioning }
     };
 
     if (provisionMode === 'template') {
-      payload.templateName = newWorkspace.templateName; 
+      payload.templateCode = newWorkspace.templateName; // 🔥 CORREGIDO: Ahora manda "templateCode" como exige C#
     } else {
       payload.customModules = customModulesStr.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
     }

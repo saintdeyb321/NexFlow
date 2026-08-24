@@ -1,5 +1,6 @@
 ﻿using System;
 using NexFlow.Domain.Enums;
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Domain.Entities;
 
@@ -19,6 +20,9 @@ public class Reservation : Entity
 
     public static Reservation Create(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime startTime, DateTime endTime)
     {
+        if (endTime <= startTime)
+            throw new DomainException("La fecha de finalización debe ser estrictamente posterior a la fecha de inicio.");
+
         return new Reservation
         {
             Id = Guid.NewGuid(),
@@ -33,13 +37,25 @@ public class Reservation : Entity
         };
     }
 
-    public void Cancel() => Status = ReservationStatus.Cancelled;
+    public void Cancel()
+    {
+        if (Status == ReservationStatus.Completed || Status == ReservationStatus.NoShow)
+            throw new DomainException("No es posible cancelar una reserva que ya ha finalizado su ciclo.");
 
-    // 🔥 SPRINT 6: Capacidad de Reagendamiento
+        Status = ReservationStatus.Cancelled;
+    }
+
+    // 🔥 SPRINT 3: Reagendamiento con validaciones de Dominio estrictas
     public void Reschedule(DateTime newStartTime, DateTime newEndTime)
     {
         if (Status == ReservationStatus.Cancelled)
-            throw new InvalidOperationException("No se puede reagendar una reserva cancelada.");
+            throw new DomainException("Operación denegada: No se puede reagendar una reserva previamente cancelada.");
+
+        if (Status == ReservationStatus.Completed)
+            throw new DomainException("Operación denegada: No se puede reagendar una reserva que ya fue completada.");
+
+        if (newEndTime <= newStartTime)
+            throw new DomainException("La nueva fecha de finalización debe ser estrictamente posterior a la de inicio.");
 
         StartTime = newStartTime;
         EndTime = newEndTime;

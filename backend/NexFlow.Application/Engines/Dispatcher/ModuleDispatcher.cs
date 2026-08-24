@@ -1,4 +1,9 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Engines.Intent.AI;
 
@@ -26,25 +31,22 @@ public class ModuleDispatcher : IModuleDispatcher
         var customerPhone = intentResult.Parameters.ContainsKey("phone") ? intentResult.Parameters["phone"] : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, customerPhone, cancellationToken) ?? new ConversationContextDto();
 
-        // 2. FUSIÓN DE CONTEXTO (El escudo contra respuestas cortas)
+        // 2. FUSIÓN DE CONTEXTO (El escudo contra respuestas cortas de clientes)
         if (!string.IsNullOrEmpty(context.PendingAction) && intentResult.Intent == IntentType.Unknown)
         {
-            // El cliente respondió algo muy corto como "El Tambo" o "A las 3". 
-            // Rescatamos la intención anterior para no romper el flujo de la reserva/solicitud.
             if (Enum.TryParse<IntentType>(context.CurrentIntent, true, out var previousIntent))
             {
+                // 🔥 SPRINT 4: Conservamos la intención original y pasamos el nuevo parámetro extraído (ej: "El Tambo")
                 intentResult = new IntentResultDto(previousIntent, 1.0, intentResult.Parameters);
             }
         }
         else if (intentResult.Intent != IntentType.Unknown)
         {
-            // Si el cliente cambió de tema drásticamente (ej: estaba reservando pero preguntó "¿Dónde están?"),
-            // actualizamos la intención base y borramos acciones pendientes.
+            // El cliente cambió de tema. Reseteamos la memoria de la acción.
             context.CurrentIntent = intentResult.Intent.ToString();
             context.PendingAction = null;
         }
 
-        // Guardamos el contexto actualizado (por si los Handlers quieren leerlo/modificarlo después)
         await _conversationCache.SetContextAsync(workspaceId, customerPhone, context, cancellationToken);
 
         // 3. TRADUCCIÓN: De Intención a Capacidad
@@ -67,7 +69,7 @@ public class ModuleDispatcher : IModuleDispatcher
         if (handler == null || !handler.SupportedCapabilities.Contains(capabilityRequest.CapabilityCode))
             return $"SISTEMA: Error interno. El módulo {capabilityRequest.ModuleCode} no está configurado para manejar la acción {capabilityRequest.CapabilityCode}.";
 
-        // 6. EJECUCIÓN (Aquí pasaremos el contexto a los Handlers en el futuro para operaciones complejas)
+        // 6. EJECUCIÓN
         return await handler.ExecuteCapabilityAsync(workspaceId, capabilityRequest, cancellationToken);
     }
 
@@ -86,6 +88,11 @@ public class ModuleDispatcher : IModuleDispatcher
             IntentType.BusinessProfileQuery => new CapabilityRequest("BUSINESS_PROFILE", "READ", intentResult.Parameters),
             IntentType.LocationQuery => new CapabilityRequest("LOCATIONS", "READ", intentResult.Parameters),
             IntentType.BusinessHoursQuery => new CapabilityRequest("BUSINESS_HOURS", "READ", intentResult.Parameters),
+
+            // 🔥 SPRINT 2: Cierre de Intenciones Base (Evitamos los nulls)
+            IntentType.GeneralGreeting => new CapabilityRequest("BUSINESS_PROFILE", "READ", intentResult.Parameters),
+            IntentType.HumanHandoffRequest => new CapabilityRequest("CONVERSATIONS", "TAKEOVER", intentResult.Parameters),
+
             _ => null
         };
     }

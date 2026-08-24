@@ -30,7 +30,10 @@ public class CurrentUser : ICurrentUser
         }
     }
 
-    public string Email => _httpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? string.Empty;
+    // 🔥 CORRECCIÓN: Prevención contra el mapeo de Claims de ASP.NET Core
+    public string Email => _httpContextAccessor.HttpContext?.User.FindFirst("email")?.Value
+                        ?? _httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.Email)?.Value
+                        ?? string.Empty;
 
     public bool IsAuthenticated => _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
 }

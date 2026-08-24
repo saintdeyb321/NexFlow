@@ -38,6 +38,8 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();
         services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
+        services.AddScoped<ProvisionClientCommandHandler>();
+        services.AddScoped<GetSystemWorkspacesQueryHandler>();
 
 
         return services;

@@ -1,4 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using System.Threading;
+using System.Threading.Tasks;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 
 namespace NexFlow.API.Controllers.Webhooks;
@@ -28,15 +31,19 @@ public class EvolutionWebhookController : ControllerBase
             return Unauthorized(new { Error = "Acceso denegado. Webhook Secret inválido." });
         }
 
-        // 2. FILTRO ANTI-BASURA (Fail-Fast)
-        if (payload?.Data?.Message == null || string.IsNullOrEmpty(payload.Data.Key.Id))
-            return Ok(); // Siempre Ok a Evolution para que no reintente envíos de mensajes nulos
-
-        // BLINDAJE DE GRUPOS: Si es un grupo de WhatsApp, lo matamos aquí mismo y ahorramos CPU.
-        if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-"))
+        // 🔥 SPRINT 9: FILTRO DE EVENTOS (Solo procesamos mensajes nuevos entrantes/salientes)
+        if (payload.Event != "messages.upsert")
             return Ok();
 
-        // 3. PROCESAMIENTO
+        // 2. FILTRO ANTI-BASURA (Fail-Fast)
+        if (payload?.Data?.Message == null || string.IsNullOrEmpty(payload.Data.Key.Id))
+            return Ok();
+
+        // BLINDAJE DE GRUPOS Y ESTADOS: Si es un grupo o un "estado" de WhatsApp, lo matamos aquí mismo.
+        if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-") || payload.Data.Key.RemoteJid == "status@broadcast")
+            return Ok();
+
+        // 3. PROCESAMIENTO SEGURO
         var command = new ProcessIncomingMessageCommand(
             InstanceName: payload.Instance,
             CustomerPhone: payload.Data.Key.RemoteJid.Replace("@s.whatsapp.net", ""),

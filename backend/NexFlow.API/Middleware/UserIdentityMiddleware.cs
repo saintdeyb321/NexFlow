@@ -1,7 +1,7 @@
-﻿using System;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
@@ -11,47 +11,50 @@ namespace NexFlow.API.Middleware;
 public class UserIdentityMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly ILogger<UserIdentityMiddleware> _logger;
 
-    public UserIdentityMiddleware(RequestDelegate next)
+    public UserIdentityMiddleware(RequestDelegate next, ILogger<UserIdentityMiddleware> logger)
     {
         _next = next;
+        _logger = logger;
     }
 
     public async Task InvokeAsync(HttpContext context, IUserRepository userRepository, IUnitOfWork unitOfWork)
     {
         if (context.User.Identity?.IsAuthenticated == true)
         {
-            var firebaseUid = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var email = context.User.FindFirst(ClaimTypes.Email)?.Value;
+            // 🔥 CORRECCIÓN: Firebase guarda el UID real en "user_id" o "sub". ASP.NET a veces se confunde.
+            var firebaseUid = context.User.FindFirst("user_id")?.Value
+                           ?? context.User.FindFirst("sub")?.Value
+                           ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            // Firebase incluye un claim booleano de verificación de email
-            var emailVerifiedClaim = context.User.FindFirst("email_verified")?.Value;
-            bool isEmailVerified = bool.TryParse(emailVerifiedClaim, out var verified) && verified;
+            var email = context.User.FindFirst("email")?.Value
+                     ?? context.User.FindFirst(ClaimTypes.Email)?.Value;
+
+            _logger.LogInformation($"[Auth] 🟢 Token JWT Válido recibido. Email: {email} | UID: {firebaseUid}");
 
             if (!string.IsNullOrEmpty(firebaseUid))
             {
-                // 1. Intentamos buscar por FirebaseUid (Camino feliz recurrente)
                 var user = await userRepository.GetByFirebaseUidAsync(firebaseUid, context.RequestAborted);
 
-                // 2. Si no existe, pero hay un email verificado, es el PRIMER LOGIN de un usuario aprovisionado
-                if (user == null && !string.IsNullOrEmpty(email) && isEmailVerified)
+                if (user == null)
                 {
-                    user = await userRepository.GetByEmailAsync(email, context.RequestAborted);
-
-                    if (user != null && user.Status == UserStatus.Active)
-                    {
-                        // Vinculamos la cuenta y guardamos transaccionalmente
-                        user.LinkFirebaseAccount(firebaseUid);
-                        await unitOfWork.SaveChangesAsync(context.RequestAborted);
-                    }
+                    _logger.LogWarning($"[Auth] 🔴 El FirebaseUid {firebaseUid} NO existe en la base de datos PostgreSQL.");
                 }
-
-                // 3. Si el usuario existe y está activo, lo inyectamos en el contexto
-                if (user != null && user.Status == UserStatus.Active)
+                else if (user.Status != UserStatus.Active)
                 {
+                    _logger.LogWarning($"[Auth] 🟡 El usuario {email} existe pero NO está Activo (Estado actual: {user.Status}).");
+                }
+                else
+                {
+                    _logger.LogInformation($"[Auth] 🟢 Usuario autenticado y validado. Inyectando contexto. DB Id: {user.Id}");
                     context.Items["UserId"] = user.Id;
                 }
             }
+        }
+        else
+        {
+            _logger.LogWarning("[Auth] 🔴 La petición llegó a /api/me pero NO tiene un Token Bearer válido o está mal firmado.");
         }
 
         await _next(context);

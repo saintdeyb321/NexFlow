@@ -1,7 +1,7 @@
-﻿using System.Threading.Tasks;
+﻿using System.Security.Claims;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using NexFlow.Application.Abstractions.Repositories; // <-- Usamos los contratos puros
-using NexFlow.Domain.ValueObjects;
+using NexFlow.Application.Abstractions.Repositories;
 
 namespace NexFlow.API.Security;
 
@@ -20,10 +20,12 @@ public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, SuperAdminRequirement requirement)
     {
-        var emailClaim = context.User.FindFirst("email")?.Value;
+        // 🔥 CORRECCIÓN: Leemos tanto la llave pura de Firebase como el mapeo automático de ASP.NET Core
+        var emailClaim = context.User.FindFirst("email")?.Value
+                      ?? context.User.FindFirst(ClaimTypes.Email)?.Value;
+
         if (string.IsNullOrEmpty(emailClaim)) return;
 
-        // CORREGIDO: Pasamos el string directo (emailClaim) sin usar 'new Email()'
         var user = await _userRepository.GetByEmailAsync(emailClaim, System.Threading.CancellationToken.None);
         if (user == null) return;
 
