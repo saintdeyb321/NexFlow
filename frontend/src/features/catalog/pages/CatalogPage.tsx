@@ -7,7 +7,17 @@ export const CatalogPage = () => {
   const [products, setProducts] = useState<ProductDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [newProduct, setNewProduct] = useState<ProductDto>({ name: '', description: '', price: 0, isActive: true });
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // 🔥 CORRECCIÓN: Estado inicial con Categoría y Moneda por defecto
+  const [newProduct, setNewProduct] = useState<ProductDto>({ 
+    name: '', 
+    description: '', 
+    category: 'General',
+    price: 0, 
+    currency: 'PEN',
+    isActive: true 
+  });
 
   useEffect(() => {
     loadProducts();
@@ -17,8 +27,9 @@ export const CatalogPage = () => {
     try {
       const data = await getProducts();
       setProducts(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al cargar productos", error);
+      // Opcional: mostrar error en UI si falla la carga
     } finally {
       setIsLoading(false);
     }
@@ -26,13 +37,17 @@ export const CatalogPage = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     try {
       await saveProduct(newProduct);
       setShowModal(false);
-      setNewProduct({ name: '', description: '', price: 0, isActive: true });
+      setNewProduct({ name: '', description: '', category: 'General', price: 0, currency: 'PEN', isActive: true });
       loadProducts();
-    } catch (error) {
-      alert("Error guardando el producto");
+    } catch (error: any) {
+      // 🔥 CORRECCIÓN: Mostramos el error real del backend (Ej: "Módulo no incluido en la licencia")
+      alert(`Error al guardar: ${error.message || 'Error desconocido'}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -41,8 +56,9 @@ export const CatalogPage = () => {
     try {
       await deleteProduct(id);
       setProducts(products.filter(p => p.id !== id));
-    } catch (error) {
-      alert("Error al eliminar");
+    } catch (error: any) {
+      // 🔥 CORRECCIÓN: Manejo de error limpio
+      alert(`Error al eliminar: ${error.message || 'El producto no pudo ser eliminado'}`);
     }
   };
 
@@ -57,7 +73,7 @@ export const CatalogPage = () => {
           </h1>
           <p className="mt-1 text-sm text-gray-500">Administra los productos físicos que la IA ofrecerá a tus clientes.</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700">
+        <button onClick={() => setShowModal(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
           <Plus className="w-4 h-4 mr-2" /> Agregar Producto
         </button>
       </div>
@@ -71,12 +87,15 @@ export const CatalogPage = () => {
           products.map((prod) => (
             <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative">
               <div className="flex justify-between items-start mb-2">
-                <h3 className="font-bold text-gray-900 text-lg">{prod.name}</h3>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-lg leading-tight">{prod.name}</h3>
+                  <span className="text-xs text-gray-500">{prod.category}</span>
+                </div>
                 <span className="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-1 rounded-lg">
-                  S/ {prod.price.toFixed(2)}
+                  {prod.currency} {prod.price.toFixed(2)}
                 </span>
               </div>
-              <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden">{prod.description}</p>
+              <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden text-ellipsis line-clamp-2">{prod.description}</p>
               <div className="flex justify-between items-center pt-3 border-t border-gray-100">
                 <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>
                   {prod.isActive ? 'Disponible' : 'Agotado'}
@@ -99,17 +118,31 @@ export const CatalogPage = () => {
                 <label className="block text-sm font-medium mb-1">Nombre</label>
                 <input type="text" value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
               </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Categoría</label>
+                  <input type="text" placeholder="Ej: Bebidas" value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Precio</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-2 text-sm">{newProduct.currency}</span>
+                    <input type="number" step="0.10" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: parseFloat(e.target.value)})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium mb-1">Descripción</label>
-                <textarea value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                <textarea rows={3} value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Precio (S/)</label>
-                <input type="number" step="0.10" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: parseFloat(e.target.value)})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
-              </div>
-              <div className="flex justify-end space-x-3 pt-4">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Guardar</button>
+              
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium">Cancelar</button>
+                <button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium">
+                  {isSaving ? 'Guardando...' : 'Guardar'}
+                </button>
               </div>
             </form>
           </div>

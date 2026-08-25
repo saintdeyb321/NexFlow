@@ -1,30 +1,30 @@
 import { useState, useEffect } from 'react';
 import { Clock, Plus, Trash2, Scissors } from 'lucide-react';
-import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getServices, saveService, deleteService } from '../services/business.service';
 import type { ServiceDto } from '../types/business.types';
 
 export const ServicesPage = () => {
-  const { me } = useAuthStore();
-  const workspaceId = me?.workspace?.id;
-
   const [services, setServices] = useState<ServiceDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Estado para el formulario de nuevo servicio
+  // 🔥 CORRECCIÓN: Agregamos las banderas por defecto que el nuevo DTO exige
   const [newService, setNewService] = useState<Partial<ServiceDto>>({
     name: '',
-    durationInMinutes: 30
+    durationInMinutes: 30,
+    requiresReservation: true,
+    isActive: true
   });
 
+  // 🔥 CORRECCIÓN: Cargamos directamente sin depender de leer el workspaceId manualmente
   useEffect(() => {
-    if (workspaceId) loadServices();
-  }, [workspaceId]);
+    loadServices();
+  }, []);
 
   const loadServices = async () => {
     try {
-      const data = await getServices(workspaceId!);
+      // 🔥 CORRECCIÓN: El servicio ya no pide workspaceId
+      const data = await getServices();
       setServices(data || []);
     } catch (error) {
       console.error("Error cargando servicios:", error);
@@ -39,16 +39,18 @@ export const ServicesPage = () => {
 
     setIsSaving(true);
     try {
-      // Generamos un ID temporal (Guid) en el frontend, o puedes hacer que tu backend lo genere
       const serviceToSave: ServiceDto = {
         id: crypto.randomUUID(), 
         name: newService.name,
-        durationInMinutes: newService.durationInMinutes
+        durationInMinutes: newService.durationInMinutes,
+        requiresReservation: newService.requiresReservation ?? true,
+        isActive: newService.isActive ?? true
       };
       
-      await saveService(workspaceId!, serviceToSave);
+      // 🔥 CORRECCIÓN: El servicio ya no pide workspaceId
+      await saveService(serviceToSave);
       setServices([...services, serviceToSave]);
-      setNewService({ name: '', durationInMinutes: 30 }); // Reset
+      setNewService({ name: '', durationInMinutes: 30, requiresReservation: true, isActive: true }); 
     } catch (error) {
       console.error("Error guardando servicio", error);
     } finally {
@@ -59,7 +61,8 @@ export const ServicesPage = () => {
   const handleDelete = async (serviceId: string) => {
     if (!window.confirm("¿Seguro que deseas eliminar este servicio?")) return;
     try {
-      await deleteService(workspaceId!, serviceId);
+      // 🔥 CORRECCIÓN: El servicio ya no pide workspaceId
+      await deleteService(serviceId);
       setServices(services.filter(s => s.id !== serviceId));
     } catch (error) {
       console.error("Error eliminando servicio", error);
@@ -79,7 +82,6 @@ export const ServicesPage = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Formulario de Creación */}
         <div className="lg:col-span-1">
           <form onSubmit={handleAddService} className="bg-white shadow-sm border border-gray-200 rounded-xl p-5 sticky top-6">
             <h3 className="font-semibold text-gray-900 mb-4">Añadir Servicio</h3>
@@ -120,7 +122,6 @@ export const ServicesPage = () => {
           </form>
         </div>
 
-        {/* Lista de Servicios */}
         <div className="lg:col-span-2 space-y-3">
           {services.length === 0 ? (
             <div className="text-center p-8 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-gray-500">

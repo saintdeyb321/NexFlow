@@ -7,9 +7,16 @@ export interface BusinessProfile {
 }
 
 export interface ServiceDto {
-  id: string; 
+  id: string;
   name: string;
+  description?: string;
+  category?: string;
+  price?: number;
+  currency?: string;
   durationInMinutes: number;
+  requiresReservation: boolean;
+  isActive: boolean;
+  availableAtLocations?: string[]; // IDs de las sedes
 }
 
 export interface FaqDto {

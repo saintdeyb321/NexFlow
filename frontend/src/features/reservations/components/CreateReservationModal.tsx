@@ -17,6 +17,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
   const [formData, setFormData] = useState({
     locationId: locations.length > 0 ? (locations.find(l => l.isMain)?.id || locations[0].id) : '',
     serviceId: services.length > 0 ? services[0].id : '',
+    customerName: '', // 🔥 NUEVO: Obligatorio para el backend
     customerIdentifier: '',
     date: new Date().toISOString().split('T')[0],
     time: '10:00'
@@ -26,26 +27,25 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.locationId || !formData.serviceId || !formData.customerIdentifier) {
+    if (!formData.locationId || !formData.serviceId || !formData.customerIdentifier || !formData.customerName) {
       alert("Por favor, completa todos los campos.");
       return;
     }
 
     setIsSaving(true);
     try {
-      // Ensamblamos la fecha y hora en formato ISO 8601 (Ej: 2026-08-25T10:00:00Z)
-      // Nota: En producción real, manejaríamos las zonas horarias con librerías como date-fns
       const exactDateTime = new Date(`${formData.date}T${formData.time}:00`).toISOString();
 
       await createReservation({
         locationId: formData.locationId,
         serviceId: formData.serviceId,
+        customerName: formData.customerName, // 🔥 CORRECCIÓN: Añadido al payload
         customerIdentifier: formData.customerIdentifier,
         dateTime: exactDateTime
       });
 
-      onSuccess(); // Refresca la tabla del padre
-      onClose();   // Cierra el modal
+      onSuccess(); 
+      onClose();   
     } catch (error: any) {
       alert(`Error al crear la reserva: ${error.response?.data?.error || 'Conflicto de horario'}`);
     } finally {
@@ -86,13 +86,26 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
             </select>
           </div>
 
+          {/* 🔥 CORRECCIÓN: Separamos el Nombre del Teléfono */}
           <div>
-            <label className="block text-sm font-medium mb-1">Cliente (Teléfono o Nombre)</label>
+            <label className="block text-sm font-medium mb-1">Nombre del Cliente</label>
+            <input 
+              type="text" 
+              value={formData.customerName} 
+              onChange={e => setFormData({...formData, customerName: e.target.value})}
+              placeholder="Ej: Juan Pérez"
+              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Teléfono (WhatsApp)</label>
             <input 
               type="text" 
               value={formData.customerIdentifier} 
               onChange={e => setFormData({...formData, customerIdentifier: e.target.value})}
-              placeholder="Ej: 987654321 o Juan Pérez"
+              placeholder="Ej: +51987654321"
               className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               required
             />

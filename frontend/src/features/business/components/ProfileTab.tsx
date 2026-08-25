@@ -17,8 +17,8 @@ export const ProfileTab = ({ showMessage }: { showMessage: (msg: string, type: '
     try {
       const data = await getBusinessProfile();
       if (data) setProfile(data);
-    } catch (error) {
-      console.error("No se pudo cargar el perfil", error);
+    } catch (error: any) {
+      showMessage(error.message || 'No se pudo cargar el perfil del negocio', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -30,8 +30,8 @@ export const ProfileTab = ({ showMessage }: { showMessage: (msg: string, type: '
     try {
       await updateBusinessProfile(profile);
       showMessage('Perfil guardado correctamente', 'success');
-    } catch { 
-      showMessage('Error al guardar el perfil', 'error'); 
+    } catch (error: any) { 
+      showMessage(error.message || 'Error al guardar el perfil', 'error'); 
     } finally { 
       setIsSaving(false); 
     }

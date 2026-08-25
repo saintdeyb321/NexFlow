@@ -27,8 +27,8 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
       const locs = await getLocations();
       setLocations(locs);
       if (locs.length > 0) setSelectedLocationId(locs[0].id!);
-    } catch (error) {
-      showMessage('Error al cargar las sedes.', 'error');
+    } catch (error: any) {
+      showMessage(error.message || 'Error al cargar las sedes.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -42,8 +42,8 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
       } else {
         setHours(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
       }
-    } catch (error) {
-      showMessage('Error al cargar los horarios.', 'error');
+    } catch (error: any) {
+      showMessage(error.message || 'Error al cargar los horarios.', 'error');
     }
   };
 
@@ -56,8 +56,8 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
     try {
       await saveBusinessHours(selectedLocationId, hours);
       showMessage('Horarios actualizados correctamente', 'success');
-    } catch {
-      showMessage('Error guardando horarios', 'error');
+    } catch (error: any) {
+      showMessage(error.message || 'Error guardando horarios', 'error');
     } finally {
       setIsSaving(false);
     }

@@ -16,8 +16,8 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
     try {
       const data = await getLocations();
       setLocations(data);
-    } catch (error) {
-      console.error("Error al cargar sedes", error);
+    } catch (error: any) {
+      showMessage(error.message || 'Error al cargar las sedes registradas', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -35,9 +35,8 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
       setLocations(updatedLocs);
       setNewLocation({ name: '', address: '', reference: '', isMain: false });
     } catch (error: any) { 
-      // Mostramos el mensaje de error que viene del backend (Ej: "Límite de sedes alcanzado")
-      const errorMsg = error.response?.data?.detail || error.response?.data || 'Error guardando la sede';
-      showMessage(typeof errorMsg === 'string' ? errorMsg : 'Error guardando la sede', 'error'); 
+      // 🔥 CORRECCIÓN: El interceptor de Axios ya procesó el mensaje, lo usamos directo.
+      showMessage(error.message || 'Error guardando la sede', 'error'); 
     } finally { 
       setIsSaving(false); 
     }

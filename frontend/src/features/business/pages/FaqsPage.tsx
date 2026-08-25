@@ -1,13 +1,9 @@
 import { useState, useEffect } from 'react';
 import { BookOpen, Plus, Trash2 } from 'lucide-react';
-import { useAuthStore } from '../../../core/store/useAuthStore';
-import { axiosClient } from '../../../core/api/axiosClient';
 import type { FaqDto } from '../types/business.types';
+import { faqService } from '../services/faq.service'; // 🔥 NUEVO: Importamos la única fuente de verdad
 
 export const FaqsPage = () => {
-  const { me } = useAuthStore();
-  const workspaceId = me?.workspace?.id;
-
   const [faqs, setFaqs] = useState<FaqDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -18,13 +14,15 @@ export const FaqsPage = () => {
     category: 'General'
   });
 
+  // 🔥 CORRECCIÓN: Cargamos directamente al montar el componente, sin depender del workspaceId manual
   useEffect(() => {
-    if (workspaceId) loadFaqs();
-  }, [workspaceId]);
+    loadFaqs();
+  }, []);
 
   const loadFaqs = async () => {
     try {
-      const { data } = await axiosClient.get<FaqDto[]>(`/workspaces/${workspaceId}/business/faqs`);
+      // 🔥 CORRECCIÓN: Usamos el servicio centralizado
+      const data = await faqService.getFaqs();
       setFaqs(data || []);
     } catch (error) {
       console.error("Error cargando FAQs:", error);
@@ -39,15 +37,20 @@ export const FaqsPage = () => {
 
     setIsSaving(true);
     try {
-      const faqToSave: FaqDto = {
-        id: crypto.randomUUID(), 
+      const faqToSave: Partial<FaqDto> = {
         question: newFaq.question,
         answer: newFaq.answer,
         category: newFaq.category!
       };
       
-      await axiosClient.post(`/workspaces/${workspaceId}/business/faqs`, faqToSave);
-      setFaqs([...faqs, faqToSave]);
+      // 🔥 CORRECCIÓN: El backend devolverá el objeto ya creado (idealmente con su ID real)
+      const savedFaq = await faqService.saveFaq(faqToSave);
+      
+      // Si el backend no te devuelve el objeto completo, puedes usar la lógica anterior:
+      // const fakeIdFaq = { ...faqToSave, id: crypto.randomUUID() } as FaqDto;
+      // setFaqs([...faqs, fakeIdFaq]);
+      
+      setFaqs([...faqs, savedFaq]);
       setNewFaq({ question: '', answer: '', category: 'General' }); 
     } catch (error) {
       console.error("Error guardando FAQ", error);
@@ -59,7 +62,8 @@ export const FaqsPage = () => {
   const handleDelete = async (faqId: string) => {
     if (!window.confirm("¿Eliminar esta pregunta?")) return;
     try {
-      await axiosClient.delete(`/workspaces/${workspaceId}/business/faqs/${faqId}`);
+      // 🔥 CORRECCIÓN: Usamos el servicio centralizado
+      await faqService.deleteFaq(faqId);
       setFaqs(faqs.filter(f => f.id !== faqId));
     } catch (error) {
       console.error("Error eliminando FAQ", error);

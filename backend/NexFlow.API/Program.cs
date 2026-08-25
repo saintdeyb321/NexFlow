@@ -61,15 +61,15 @@ builder.Services.AddRateLimiter(options =>
 {
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
-        // BLINDAJE 1: Autopista para Webhooks Internos (Evolution API)
-        if (context.Request.Headers.TryGetValue("apikey", out var apiKey))
+        // 🔥 CORRECCIÓN BLINDAJE 1: Identificamos el Webhook por su ruta oficial, no por un header falsificable.
+        // La validación de la contraseña ocurre después, dentro del controlador.
+        if (context.Request.Path.StartsWithSegments("/api/webhooks/evolution"))
         {
-            // Evolution procesa múltiples negocios desde la misma IP. Le damos un límite altísimo.
-            return RateLimitPartition.GetFixedWindowLimiter(apiKey.ToString(),
+            return RateLimitPartition.GetFixedWindowLimiter("evolution_webhook_limiter",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     AutoReplenishment = true,
-                    PermitLimit = 2000,
+                    PermitLimit = 2000, // Alto límite para soportar la ráfaga de mensajes de WhatsApp
                     Window = TimeSpan.FromMinutes(1)
                 });
         }

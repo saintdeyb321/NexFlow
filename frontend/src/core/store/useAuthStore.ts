@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { axiosClient } from '../api/axiosClient';
+import { axiosClient, setWorkspaceHeader } from '../api/axiosClient'; // 🔥 Importamos el inyector
 import type { MeResponse } from '../types/auth.types';
 import { auth } from '../../app/config/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth'; 
@@ -31,35 +31,38 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
 
       if (!auth.currentUser) {
+        setWorkspaceHeader(null); // Limpiamos Axios
         set({ isAuthenticated: false, me: null, isLoading: false });
         return;
       }
 
       const { data } = await axiosClient.get<MeResponse>('/me');
+      
+      setWorkspaceHeader(data.workspace?.id || null); // 🔥 Inyectamos el Tenant a Axios
       set({ isAuthenticated: true, me: data, isLoading: false });
 
     } catch (error: any) {
       console.error("Error validando sesión contra el backend:", error);
       await signOut(auth);
+      setWorkspaceHeader(null);
       set({ isAuthenticated: false, me: null, isLoading: false });
       
-      // 🔥 NUEVO: Mostrar alerta si el backend rechaza al usuario
       if (error.response?.status === 401 || error.response?.status === 403) {
-          alert("⛔ Acceso denegado: Tu cuenta de Google no está registrada en el sistema o no tienes permisos para ingresar.");
+          alert("⛔ Acceso denegado: Tu cuenta de Google no está registrada o no tienes permisos.");
       }
     }
   },
 
   logout: async () => {
     await signOut(auth);
+    setWorkspaceHeader(null);
     set({ isAuthenticated: false, me: null, isLoading: false });
   },
 
   completeOnboarding: async () => {
-    // 🔥 SPRINT 9: Sincronización Real con Backend
-    // Ya no falsificamos el estado. Solicitamos la confirmación oficial del servidor.
     try {
       const { data } = await axiosClient.get<MeResponse>('/me');
+      setWorkspaceHeader(data.workspace?.id || null);
       set({ me: data });
     } catch (error) {
       console.error("Error al sincronizar la sesión post-onboarding:", error);

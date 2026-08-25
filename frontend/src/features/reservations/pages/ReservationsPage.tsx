@@ -15,30 +15,32 @@ export const ReservationsPage = () => {
   
   const [isLoading, setIsLoading] = useState(true);
 
-  // 1. Cargar las sedes al montar el componente
   useEffect(() => {
     loadInitialData();
   }, []);
 
-  // 2. Cargar reservas cada vez que cambie la sede o la fecha
   useEffect(() => {
-    if (selectedLocation && selectedDate) {
+    // Solo cargamos si hay una sede real seleccionada (no el fallback 'global')
+    if (selectedLocation && selectedLocation !== 'global') {
       loadReservations();
     }
   }, [selectedLocation, selectedDate]);
 
   const loadInitialData = async () => {
     try {
-      const locs = await getLocations().catch(() => []);
+      // 🔥 CORRECCIÓN: Quitamos el .catch(() => []) y usamos el try/catch real (Sprint 2)
+      const locs = await getLocations();
       setLocations(locs);
       
-      // Seleccionar la sede principal por defecto
       if (locs.length > 0) {
         const mainLoc = locs.find(l => l.isMain) || locs[0];
-        setSelectedLocation(mainLoc.id);
+        // 🔥 CORRECCIÓN TS 2345: Nos aseguramos de pasar un string válido o 'global' si el id es undefined
+        setSelectedLocation(mainLoc.id ?? 'global');
       } else {
-        setSelectedLocation('global'); // Fallback de seguridad
+        setSelectedLocation('global'); 
       }
+    } catch (error: any) {
+      console.error("Error al cargar sedes:", error.message);
     } finally {
       setIsLoading(false);
     }
@@ -48,10 +50,11 @@ export const ReservationsPage = () => {
     setIsLoading(true);
     try {
       const data = await getReservations(selectedLocation, selectedDate);
-      const sorted = (data || []).sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+      // 🔥 CORRECCIÓN TS 2339: Ahora ordenamos usando 'dateTime' según nuestro DTO oficial
+      const sorted = (data || []).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
       setReservations(sorted);
-    } catch (error) {
-      console.error("Error cargando reservas:", error);
+    } catch (error: any) {
+      alert(`Error cargando reservas: ${error.message || 'Error desconocido'}`);
     } finally {
       setIsLoading(false);
     }
@@ -61,11 +64,10 @@ export const ReservationsPage = () => {
     if (!confirm('¿Estás seguro de cancelar esta reserva?')) return;
     
     try {
-      // CORRECCIÓN: Usamos el método específico de cancelación
       await cancelReservation(id);
       setReservations(reservations.map(r => r.id === id ? { ...r, status: 'Cancelled' } : r));
-    } catch (error) {
-      alert("Error al cancelar la reserva. Es posible que ya esté cancelada.");
+    } catch (error: any) {
+      alert(`Error al cancelar: ${error.message || 'Es posible que ya esté cancelada.'}`);
     }
   };
 
@@ -137,13 +139,15 @@ export const ReservationsPage = () => {
                       </div>
                       
                       <div>
+                        {/* 🔥 NUEVO: Mostramos el Nombre del Cliente que agregamos en el Sprint 1 */}
                         <h4 className="text-lg font-semibold text-gray-900">
-                          ID Servicio: <span className="text-sm font-normal text-gray-500">{res.serviceId.substring(0,8)}</span>
+                          {res.customerName} <span className="text-sm font-normal text-gray-500">(Servicio: {res.serviceId.substring(0,8)})</span>
                         </h4>
                         
                         <div className="mt-1 flex items-center space-x-4 text-sm text-gray-500">
                           <span className="flex items-center text-blue-600 font-medium">
-                            <Clock className="w-4 h-4 mr-1" /> {formatTime(res.startTime)}
+                            {/* 🔥 CORRECCIÓN TS 2339: res.dateTime */}
+                            <Clock className="w-4 h-4 mr-1" /> {formatTime(res.dateTime)}
                           </span>
                           <span className="flex items-center">
                             <Phone className="w-4 h-4 mr-1" /> {res.customerIdentifier}

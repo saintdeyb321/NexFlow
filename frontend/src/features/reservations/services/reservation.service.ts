@@ -1,14 +1,15 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { ReservationDto } from '../types/reservation.types';
+import type { CreateReservationRequest, ReservationDto } from '../types/reservation.types';
 
-// Ahora pasamos la sede y la fecha para consultar el calendario
+// 🔥 CORRECCIÓN: Volvemos a pedir LocationId y Date porque la API los necesita para filtrar
 export const getReservations = async (locationId: string, date: string): Promise<ReservationDto[]> => {
+  // Ajusta la URL según cómo la espera tu backend (query params o path params)
   const { data } = await axiosClient.get<ReservationDto[]>(`/reservations?locationId=${locationId}&date=${date}`);
   return data;
 };
 
-export const createReservation = async (payload: { locationId: string, serviceId: string, customerIdentifier: string, dateTime: string }): Promise<ReservationDto> => {
-  const { data } = await axiosClient.post<ReservationDto>(`/reservations`, payload);
+export const createReservation = async (request: CreateReservationRequest): Promise<ReservationDto> => {
+  const { data } = await axiosClient.post<ReservationDto>('/reservations', request);
   return data;
 };
 
