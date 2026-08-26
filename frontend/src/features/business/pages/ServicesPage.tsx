@@ -1,19 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Clock, Plus, Trash2, Scissors } from 'lucide-react';
-import { getServices, saveService, deleteService } from '../services/business.service';
+import { Plus, Pencil, Tag } from 'lucide-react';
+import { getServices, saveService } from '../services/business.service';
 import type { ServiceDto } from '../types/business.types';
+import { ServiceModal } from '../components/ServiceModal';
 
 export const ServicesPage = () => {
   const [services, setServices] = useState<ServiceDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   
-  const [newService, setNewService] = useState<Partial<ServiceDto>>({
-    name: '',
-    durationInMinutes: 30,
-    requiresReservation: true,
-    isActive: true
-  });
+  // Estado para controlar el Modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [serviceToEdit, setServiceToEdit] = useState<ServiceDto | null>(null);
 
   useEffect(() => {
     loadServices();
@@ -24,126 +21,114 @@ export const ServicesPage = () => {
       const data = await getServices();
       setServices(data || []);
     } catch (error: any) {
-      alert(`Error cargando servicios: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
+      alert(`Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAddService = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newService.name || !newService.durationInMinutes) return;
-
-    setIsSaving(true);
-    try {
-      const serviceToSave: ServiceDto = {
-        id: crypto.randomUUID(), 
-        name: newService.name,
-        durationInMinutes: newService.durationInMinutes,
-        requiresReservation: newService.requiresReservation ?? true,
-        isActive: newService.isActive ?? true
-      };
-      
-      await saveService(serviceToSave);
-      setServices([...services, serviceToSave]);
-      setNewService({ name: '', durationInMinutes: 30, requiresReservation: true, isActive: true }); 
-    } catch (error: any) {
-      // 🔥 CORRECCIÓN: Feedback visual si falla
-      alert(`No se pudo guardar el servicio: ${error.response?.data?.error || error.message || 'Inténtalo de nuevo.'}`);
-    } finally {
-      setIsSaving(false);
-    }
+  const handleOpenNew = () => {
+    setServiceToEdit(null);
+    setIsModalOpen(true);
   };
 
-  const handleDelete = async (serviceId: string) => {
-    if (!window.confirm("¿Seguro que deseas eliminar este servicio?")) return;
+  const handleOpenEdit = (service: ServiceDto) => {
+    setServiceToEdit(service);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveService = async (service: ServiceDto) => {
     try {
-      await deleteService(serviceId);
-      setServices(services.filter(s => s.id !== serviceId));
+      await saveService(service);
+      
+      // Actualizamos la lista localmente
+      setServices(prev => {
+        const exists = prev.find(s => s.id === service.id);
+        if (exists) return prev.map(s => s.id === service.id ? service : s);
+        return [...prev, service];
+      });
     } catch (error: any) {
-      alert(`Error al eliminar: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
+      alert(`Error al guardar: ${error.response?.data?.error || error.message}`);
+      throw error; // Lanzar para que el modal no se cierre
     }
   };
 
   if (isLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
 
   return (
-    <div className="max-w-4xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-          <Scissors className="w-6 h-6 mr-3 text-blue-600" />
-          Servicios Ofrecidos
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">Define los servicios y su duración. La IA usará estos tiempos para calcular la disponibilidad en la agenda.</p>
+    <div className="max-w-5xl">
+      
+      {/* Cabecera Estilo MigaPOS */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div className="flex items-center">
+          <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center mr-4">
+             <Tag className="w-5 h-5 text-yellow-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900">Servicios</h1>
+        </div>
+        
+        <button 
+          onClick={handleOpenNew}
+          className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          Nuevo Servicio
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1">
-          <form onSubmit={handleAddService} className="bg-white shadow-sm border border-gray-200 rounded-xl p-5 sticky top-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Añadir Servicio</h3>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Servicio</label>
-              <input
-                type="text"
-                value={newService.name}
-                onChange={(e) => setNewService({ ...newService, name: e.target.value })}
-                placeholder="Ej: Corte de cabello"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                required
-              />
-            </div>
-            
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Duración (Minutos)</label>
-              <input
-                type="number"
-                min="5"
-                step="5"
-                value={newService.durationInMinutes}
-                onChange={(e) => setNewService({ ...newService, durationInMinutes: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              {isSaving ? 'Guardando...' : 'Añadir a la lista'}
-            </button>
-          </form>
-        </div>
-
-        <div className="lg:col-span-2 space-y-3">
+      {/* Lista de Tarjetas Estilo MigaPOS */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
+          Lista de Servicios ({services.length})
+        </h3>
+        
+        <div className="space-y-3">
           {services.length === 0 ? (
-            <div className="text-center p-8 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-gray-500">
-              No hay servicios registrados. Empieza creando uno.
-            </div>
+            <div className="text-center py-10 text-gray-500">Aún no tienes servicios registrados.</div>
           ) : (
             services.map((service) => (
-              <div key={service.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow">
-                <div>
-                  <h4 className="font-medium text-gray-900">{service.name}</h4>
-                  <div className="flex items-center text-sm text-gray-500 mt-1">
-                    <Clock className="w-4 h-4 mr-1" />
-                    {service.durationInMinutes} minutos
+              <div 
+                key={service.id} 
+                className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all"
+              >
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center mr-4">
+                    <Tag className="w-5 h-5 text-blue-500" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-900 text-sm md:text-base">{service.name}</h4>
+                    <div className="flex items-center mt-1">
+                      {service.isActive ? (
+                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">● ACTIVO</span>
+                      ) : (
+                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">INACTIVO</span>
+                      )}
+                      <span className="ml-3 text-xs text-gray-500 border-l border-gray-200 pl-3">
+                        {service.durationInMinutes} min • S/ {service.price?.toFixed(2) || '0.00'}
+                      </span>
+                    </div>
                   </div>
                 </div>
+
                 <button
-                  onClick={() => handleDelete(service.id)}
-                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  onClick={() => handleOpenEdit(service)}
+                  className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  <Pencil className="w-4 h-4" />
                 </button>
               </div>
             ))
           )}
         </div>
       </div>
+
+      {/* Modal Inyectado */}
+      <ServiceModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleSaveService}
+        initialData={serviceToEdit}
+      />
     </div>
   );
 };

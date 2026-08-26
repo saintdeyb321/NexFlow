@@ -32,7 +32,7 @@ public class SuspendClientCommandHandler
 
     public async Task<Result> Handle(SuspendClientCommand request, CancellationToken cancellationToken)
     {
-        var workspace = await _workspaceRepository.GetByIdAsync(request.WorkspaceId, cancellationToken);
+        var workspace = await _workspaceRepository.GetByIdForSuperAdminAsync(request.WorkspaceId, cancellationToken);
         if (workspace == null) return Result.Failure(new Error("Workspace.NotFound", "Workspace no encontrado."));
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(request.WorkspaceId, cancellationToken);

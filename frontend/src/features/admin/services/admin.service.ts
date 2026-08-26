@@ -9,3 +9,16 @@ export const getSystemWorkspaces = async (): Promise<WorkspaceSummaryDto[]> => {
 export const provisionNewWorkspace = async (request: ProvisionWorkspaceRequest): Promise<void> => {
   await axiosClient.post('/superadmin/clients/provision', request);
 };
+
+// 🔥 NUEVAS ACCIONES DE GESTIÓN
+export const suspendWorkspace = async (workspaceId: string): Promise<void> => {
+  await axiosClient.post('/superadmin/clients/suspend', { workspaceId });
+};
+
+export const reactivateWorkspace = async (workspaceId: string): Promise<void> => {
+  await axiosClient.post('/superadmin/clients/reactivate', { workspaceId });
+};
+
+export const deleteWorkspace = async (workspaceId: string): Promise<void> => {
+  await axiosClient.delete(`/superadmin/clients/${workspaceId}`);
+};

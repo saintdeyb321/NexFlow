@@ -1,47 +1,20 @@
 import { useState, useEffect } from 'react';
 import { ShieldAlert, Plus, Server } from 'lucide-react';
-import { getSystemWorkspaces, provisionNewWorkspace } from '../services/admin.service';
-import type { WorkspaceSummaryDto } from '../types/admin.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import { WorkspaceTable } from '../components/WorkspaceTable';
+import { useSuperAdmin } from '../hooks/useSuperAdmin';
+import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ProvisionWorkspaceModal } from '../components/ProvisionWorkspaceModal';
 
 export const SuperAdminPage = () => {
   const { me } = useAuthStore();
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
-
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummaryDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isProvisioning, setIsProvisioning] = useState(false);
+  
   const [showModal, setShowModal] = useState(false);
+  const { workspaces, isLoading, isProvisioning, loadWorkspaces, handleProvision, handleToggleStatus, handleDelete } = useSuperAdmin();
 
   useEffect(() => {
     if (isSuperAdmin) loadWorkspaces();
-    else setIsLoading(false);
-  }, [isSuperAdmin]);
-
-  const loadWorkspaces = async () => {
-    try {
-      const data = await getSystemWorkspaces().catch(() => []);
-      setWorkspaces(data || []);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleProvision = async (payload: any) => {
-    setIsProvisioning(true);
-    try {
-      await provisionNewWorkspace(payload);
-      alert('¡Entorno aprovisionado con éxito!');
-      setShowModal(false);
-      loadWorkspaces();
-    } catch (error: any) {
-      alert(`Fallo en el aprovisionamiento:\n${error.response?.data?.detail || 'Error interno'}`);
-    } finally {
-      setIsProvisioning(false);
-    }
-  };
+  }, [isSuperAdmin, loadWorkspaces]);
 
   if (!isSuperAdmin) {
     return (
@@ -57,7 +30,9 @@ export const SuperAdminPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2">
-      <div className="mb-8 flex justify-between items-end">
+      
+      {/* Cabecera */}
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
             <Server className="w-6 h-6 mr-3 text-purple-600" /> Consola SuperAdmin
@@ -66,21 +41,42 @@ export const SuperAdminPage = () => {
         </div>
         <button 
           onClick={() => setShowModal(true)} 
-          className="flex items-center px-4 py-2.5 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+          className="flex items-center px-5 py-2.5 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4 mr-2" /> Aprovisionar Cliente
         </button>
       </div>
 
-      <WorkspaceTable workspaces={workspaces} />
+      {/* Listado */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
+          Negocios Registrados ({workspaces.length})
+        </h3>
+        
+        <div className="space-y-3">
+          {workspaces.length === 0 ? (
+            <div className="text-center py-10 text-gray-500">No hay negocios registrados en el sistema.</div>
+          ) : (
+            workspaces.map(ws => (
+              <WorkspaceCard 
+                key={ws.id} 
+                workspace={ws} 
+                onToggleStatus={handleToggleStatus} 
+                onDelete={handleDelete} 
+              />
+            ))
+          )}
+        </div>
+      </div>
 
-      {showModal && (
-        <ProvisionWorkspaceModal 
-          onClose={() => setShowModal(false)} 
-          onProvision={handleProvision} 
-          isProvisioning={isProvisioning} 
-        />
-      )}
+      {/* Modal Desacoplado */}
+      <ProvisionWorkspaceModal 
+        isOpen={showModal}
+        onClose={() => setShowModal(false)} 
+        onProvision={handleProvision} 
+        isProvisioning={isProvisioning} 
+      />
+      
     </div>
   );
 };

@@ -27,10 +27,11 @@ export interface FaqDto {
 }
 
 export interface LocationDto {
-  id?: string; // Opcional para la creación
+  id?: string; 
   name: string;
   address: string;
-  reference: string;
+  reference?: string;  // 🔥 CORRECCIÓN: Ahora es opcional en el front
+  mapUrl?: string;     // 🔥 NUEVO: Link de Google Maps
   isMain: boolean;
 }
 

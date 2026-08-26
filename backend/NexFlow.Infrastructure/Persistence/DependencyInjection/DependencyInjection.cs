@@ -60,6 +60,7 @@ public static class DependencyInjection
 
             // 🔥 SPRINT 4: Repositorio de Solicitudes
             services.AddScoped<IRequestRepository, FirestoreRequestRepository>();
+            services.AddScoped<ITenantCleanupService, FirestoreTenantCleanupService>();
         }
 
         // 5. Utilidades y Motores de IA

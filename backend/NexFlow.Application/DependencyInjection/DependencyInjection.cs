@@ -40,7 +40,8 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
         services.AddScoped<ProvisionClientCommandHandler>();
         services.AddScoped<GetSystemWorkspacesQueryHandler>();
-
+        services.AddScoped<ReactivateClientCommandHandler>();
+        services.AddScoped<DeleteClientCommandHandler>();
 
         return services;
     }

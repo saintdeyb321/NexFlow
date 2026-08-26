@@ -3,9 +3,10 @@ export interface ProvisionWorkspaceRequest {
   firstName: string;
   lastName: string;
   workspaceName: string;
-  templateName?: string; 
+  templateCode?: string; // 🔥 Exactamente como lo pide C#
   customModules?: string[]; 
   expiresAt: string;
+  maxLocations: number; // 🔥 Confirmado que C# lo espera
 }
 
 export interface WorkspaceSummaryDto {

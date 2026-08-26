@@ -128,6 +128,16 @@ export const OnboardingPage = () => {
                 <div><label className="block text-sm font-medium mb-1">Nombre de la Sede *</label><input type="text" value={location.name} onChange={e => setLocation({...location, name: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>
                 <div><label className="block text-sm font-medium mb-1">Dirección Exacta *</label><input type="text" value={location.address} onChange={e => setLocation({...location, address: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>
                 <div><label className="block text-sm font-medium mb-1">Referencia</label><input type="text" value={location.reference} onChange={e => setLocation({...location, reference: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" /></div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Enlace de Google Maps (Opcional)</label>
+                  <input 
+                    type="url" 
+                    value={location.mapUrl || ''} 
+                    onChange={e => setLocation({...location, mapUrl: e.target.value})} 
+                    placeholder="https://maps.app.goo.gl/..."
+                    className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" 
+                  />
+                </div>
               </div>
             </div>
           )}

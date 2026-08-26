@@ -1,18 +1,16 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, Plus, Trash2, Pencil, MessageSquare } from 'lucide-react';
+import { faqService } from '../services/faq.service';
 import type { FaqDto } from '../types/business.types';
-import { faqService } from '../services/faq.service'; 
+import { FaqModal } from '../components/FaqModal';
 
 export const FaqsPage = () => {
   const [faqs, setFaqs] = useState<FaqDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   
-  const [newFaq, setNewFaq] = useState<Partial<FaqDto>>({
-    question: '',
-    answer: '',
-    category: 'General'
-  });
+  // Estado para el Modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [faqToEdit, setFaqToEdit] = useState<FaqDto | null>(null);
 
   useEffect(() => {
     loadFaqs();
@@ -23,46 +21,55 @@ export const FaqsPage = () => {
       const data = await faqService.getFaqs();
       setFaqs(data || []);
     } catch (error: any) {
-      alert(`Error cargando FAQs: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
+      alert(`Error cargando FAQs: ${error.message || 'Error desconocido'}`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAddFaq = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFaq.question || !newFaq.answer) return;
+  const handleOpenNew = () => {
+    setFaqToEdit(null);
+    setIsModalOpen(true);
+  };
 
-    setIsSaving(true);
+  const handleOpenEdit = (faq: FaqDto) => {
+    setFaqToEdit(faq);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveFaq = async (faq: FaqDto) => {
     try {
-      const faqToSave: Partial<FaqDto> = {
-        question: newFaq.question,
-        answer: newFaq.answer,
-        category: newFaq.category!
-      };
+      await faqService.saveFaq(faq);
       
-      const savedFaq = await faqService.saveFaq(faqToSave);
-      
-      // Si el backend no devuelve el DTO con ID, creamos uno localmente para la UI
-      const newFaqForUI = savedFaq && savedFaq.id ? savedFaq : { ...faqToSave, id: crypto.randomUUID() } as FaqDto;
-      
-      setFaqs([...faqs, newFaqForUI]);
-      setNewFaq({ question: '', answer: '', category: 'General' }); 
+      // Actualización optimista en la lista
+      setFaqs(prev => {
+        const exists = prev.find(f => f.id === faq.id);
+        if (exists) return prev.map(f => f.id === faq.id ? faq : f);
+        return [...prev, faq];
+      });
     } catch (error: any) {
-      // 🔥 CORRECCIÓN: Aquí es donde mostramos el error de las "30 FAQs permitidas"
-      alert(`No se pudo guardar: ${error.response?.data?.error || error.message || 'Inténtalo de nuevo.'}`);
-    } finally {
-      setIsSaving(false);
+      alert(`No se pudo guardar: ${error.response?.data?.error || error.message}`);
+      throw error; // Lanzamos el error para que el modal no se cierre automáticamente
     }
   };
 
   const handleDelete = async (faqId: string) => {
-    if (!window.confirm("¿Eliminar esta pregunta?")) return;
+    if (!window.confirm("¿Seguro que deseas eliminar esta pregunta de la IA?")) return;
     try {
       await faqService.deleteFaq(faqId);
       setFaqs(faqs.filter(f => f.id !== faqId));
     } catch (error: any) {
-      alert(`Error al eliminar: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
+      alert(`Error al eliminar: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  // Función auxiliar para darle color a la etiqueta según la categoría
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'Pagos': return 'bg-green-100 text-green-700';
+      case 'Cómo llegar': return 'bg-orange-100 text-orange-700';
+      case 'Políticas': return 'bg-red-100 text-red-700';
+      default: return 'bg-blue-100 text-blue-700';
     }
   };
 
@@ -70,89 +77,92 @@ export const FaqsPage = () => {
 
   return (
     <div className="max-w-5xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-          <BookOpen className="w-6 h-6 mr-3 text-blue-600" />
-          Base de Conocimiento (IA)
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">Agrega las preguntas frecuentes de tus clientes. Tu Asistente IA usará esta información para responder automáticamente en WhatsApp.</p>
+      
+      {/* Cabecera Estilo MigaPOS */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div className="flex items-center">
+          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
+             <BookOpen className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Base de Conocimiento</h1>
+            <p className="text-sm text-gray-500 mt-0.5">La información que tu IA usará para responder.</p>
+          </div>
+        </div>
+        
+        <button 
+          onClick={handleOpenNew}
+          className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          Nueva Pregunta
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Formulario */}
-        <div className="lg:col-span-1">
-          <form onSubmit={handleAddFaq} className="bg-white shadow-sm border border-gray-200 rounded-xl p-5 sticky top-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Nueva Pregunta</h3>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
-              <select 
-                value={newFaq.category}
-                onChange={(e) => setNewFaq({ ...newFaq, category: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                <option value="General">General</option>
-                <option value="Pagos">Pagos</option>
-                <option value="Ubicación">Ubicación</option>
-                <option value="Políticas">Políticas</option>
-              </select>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Pregunta (Usuario)</label>
-              <textarea
-                rows={2}
-                value={newFaq.question}
-                onChange={(e) => setNewFaq({ ...newFaq, question: e.target.value })}
-                placeholder="Ej: ¿Tienen parqueo?"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-            
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Respuesta (Asistente IA)</label>
-              <textarea
-                rows={4}
-                value={newFaq.answer}
-                onChange={(e) => setNewFaq({ ...newFaq, answer: e.target.value })}
-                placeholder="Ej: Sí, contamos con parqueo gratuito en el sótano."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            <button type="submit" disabled={isSaving} className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-              <Plus className="w-4 h-4 mr-2" />
-              {isSaving ? 'Guardando...' : 'Añadir a la IA'}
-            </button>
-          </form>
+      {/* Lista de Tarjetas */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex justify-between items-center border-b border-gray-100 mb-4 pb-2">
+          <h3 className="text-sm font-semibold text-gray-700">
+            Preguntas Activas ({faqs.length}/30)
+          </h3>
         </div>
-
-        {/* Lista de FAQs */}
-        <div className="lg:col-span-2 space-y-4">
+        
+        <div className="space-y-3">
           {faqs.length === 0 ? (
-            <div className="text-center p-8 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-gray-500">
-              Tu IA aún no tiene conocimientos específicos de tu negocio.
+            <div className="text-center py-10 text-gray-500 flex flex-col items-center">
+              <MessageSquare className="w-12 h-12 text-gray-200 mb-3" />
+              <p>Tu IA aún no tiene conocimientos específicos.</p>
+              <p className="text-sm mt-1">Haz clic en "Nueva Pregunta" para entrenarla.</p>
             </div>
           ) : (
             faqs.map((faq) => (
-              <div key={faq.id} className="p-5 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="inline-block px-2 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded">
-                    {faq.category}
-                  </span>
-                  <button onClick={() => handleDelete(faq.id!)} className="text-gray-400 hover:text-red-600 transition-colors p-1">
+              <div 
+                key={faq.id} 
+                className="flex flex-col md:flex-row md:items-start justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all gap-4"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${getCategoryColor(faq.category)}`}>
+                      {faq.category}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-gray-900 text-sm md:text-base mb-1">
+                    P: {faq.question}
+                  </h4>
+                  <p className="text-sm text-gray-600 line-clamp-2 md:line-clamp-none">
+                    <span className="font-semibold text-gray-800">R:</span> {faq.answer}
+                  </p>
+                </div>
+
+                <div className="flex items-center space-x-2 md:self-start">
+                  <button
+                    onClick={() => handleOpenEdit(faq)}
+                    className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors"
+                    title="Editar"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(faq.id!)}
+                    className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
+                    title="Eliminar"
+                  >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-                <h4 className="font-semibold text-gray-900 mb-1">Q: {faq.question}</h4>
-                <p className="text-gray-600 text-sm">A: {faq.answer}</p>
               </div>
             ))
           )}
         </div>
       </div>
+
+      {/* Modal Inyectado */}
+      <FaqModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleSaveFaq}
+        initialData={faqToEdit}
+      />
     </div>
   );
 };

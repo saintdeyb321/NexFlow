@@ -1,7 +1,6 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { BusinessHoursDto, BusinessProfile, LocationDto, ServiceDto } from '../types/business.types';
 
-// --- BUSINESS PROFILE ---
 export const getBusinessProfile = async (): Promise<BusinessProfile> => {
   const { data } = await axiosClient.get<BusinessProfile>('/business/profile');
   return data;
@@ -35,16 +34,16 @@ export const saveLocation = async (location: LocationDto): Promise<void> => {
   await axiosClient.post('/business/locations', location);
 };
 
-// --- HOURS ---
+// --- HOURS & ONBOARDING ---
 export const getBusinessHours = async (locationId: string): Promise<BusinessHoursDto[]> => {
   const { data } = await axiosClient.get(`/business/locations/${locationId}/hours`);
   return data;
 };
+
 export const saveBusinessHours = async (locationId: string, hours: BusinessHoursDto[]): Promise<void> => {
   await axiosClient.put(`/business/locations/${locationId}/hours`, hours);
 };
 
-// --- ONBOARDING ---
 export const completeBusinessOnboarding = async (): Promise<void> => {
   await axiosClient.post('/business/complete-onboarding');
 };

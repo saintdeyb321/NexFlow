@@ -29,7 +29,11 @@ public class EntitlementService : IEntitlementService
     public async Task<bool> IsLicenseValidAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
-        if (workspace == null || workspace.Status != WorkspaceStatus.Active) return false;
+
+        // 🔥 CORRECCIÓN: Permitimos que las licencias funcionen si el Workspace está 'Activo' o 'Pendiente' (Onboarding).
+        // Solo bloqueamos si está Suspendido o Archivado.
+        if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
+            return false;
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         return license != null && license.IsValidAt(_clock.UtcNow);
@@ -61,6 +65,7 @@ public class EntitlementService : IEntitlementService
 
     public async Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
+        // Si el estado no es Activo/Pendiente, retorna vacío
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return Enumerable.Empty<string>();
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
@@ -72,7 +77,7 @@ public class EntitlementService : IEntitlementService
 
         var codes = activeModules.Select(m => m.Code.ToUpperInvariant()).ToList();
 
-        // CORRECCIÓN SPRINT 3: Sumamos los módulos base al listado disponible
+        // Sumamos los módulos base al listado disponible (obligatorio para Onboarding)
         codes.AddRange(_baseModules);
         return codes.Distinct();
     }
@@ -81,7 +86,6 @@ public class EntitlementService : IEntitlementService
     {
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
 
-        // CORRECCIÓN SPRINT 3: Si es un módulo de configuración base, se aprueba la capacidad
         if (_baseModules.Contains(moduleCode.ToUpperInvariant())) return true;
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
