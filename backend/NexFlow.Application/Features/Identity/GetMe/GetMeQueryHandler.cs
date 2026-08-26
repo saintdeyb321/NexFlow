@@ -9,7 +9,6 @@ using NexFlow.Application.Common;
 namespace NexFlow.Application.Features.Identity.GetMe;
 
 public record MeDto(UserDto User, WorkspaceDto? Workspace, LicenseDto? License, string[] Entitlements);
-// CORRECCIÓN: Agregamos IsSuperAdmin al DTO
 public record UserDto(Guid Id, string Email, string FirstName, string LastName, bool IsSuperAdmin);
 public record WorkspaceDto(Guid Id, string Name, string Status);
 public record LicenseDto(string Type, string Status, DateTime? ExpiresAt);
@@ -22,7 +21,7 @@ public class GetMeQueryHandler
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly ILicenseRepository _licenseRepository;
     private readonly IEntitlementService _entitlementService;
-    private readonly ISystemAdministratorRepository _sysAdminRepository; // <-- Inyectamos el repo de admins
+    private readonly ISystemAdministratorRepository _sysAdminRepository;
 
     public GetMeQueryHandler(
         ICurrentUser currentUser, IUserRepository userRepository, IMembershipRepository membershipRepository,
@@ -39,11 +38,10 @@ public class GetMeQueryHandler
         var user = await _userRepository.GetByIdAsync(_currentUser.UserId, cancellationToken);
         if (user == null) return Result<MeDto>.Failure(new Error("User.NotFound", "Usuario no encontrado."));
 
-        // Validamos en la Base de Datos si el usuario existe en la tabla de SystemAdministrators
         bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, cancellationToken);
-
         var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName, isSuperAdmin);
 
+        // 🔥 Gracias al Seeder, si eres SuperAdmin ahora SIEMPRE tendrás una membresía activa aquí
         var memberships = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
         var activeMembership = memberships.FirstOrDefault();
 
@@ -58,10 +56,7 @@ public class GetMeQueryHandler
         var entitlements = await _entitlementService.GetAvailableModuleCodesAsync(workspace.Id, cancellationToken);
 
         var workspaceDto = new WorkspaceDto(workspace.Id, workspace.Name, workspace.Status.ToString());
-
-        var licenseDto = license != null
-            ? new LicenseDto(license.Type.ToString(), license.Status.ToString(), license.ValidityPeriod.End)
-            : null;
+        var licenseDto = license != null ? new LicenseDto(license.Type.ToString(), license.Status.ToString(), license.ValidityPeriod.End) : null;
 
         return Result<MeDto>.Success(new MeDto(userDto, workspaceDto, licenseDto, entitlements.ToArray()));
     }

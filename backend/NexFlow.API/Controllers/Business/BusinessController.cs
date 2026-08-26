@@ -55,6 +55,28 @@ public class BusinessController : ControllerBase
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
         return activeModules.Contains(moduleCode.ToUpperInvariant());
     }
+
+    // 🔥 NUEVO: Endpoints de Profile para solucionar el 404 del Onboarding (Fallo Crítico #3)
+    [HttpGet("profile")]
+    public async Task<IActionResult> GetProfile(CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
+        var profile = await _profileRepository.GetProfileAsync(WorkspaceId, cancellationToken);
+
+        // 🔥 CORRECCIÓN: El constructor de BusinessProfileDto exige los 5 campos obligatorios. 
+        // Los enviamos vacíos para que el frontend inicie el formulario en blanco.
+        return Ok(profile ?? new BusinessProfileDto(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty));
+    }
+
+    [HttpPut("profile")]
+    public async Task<IActionResult> SaveProfile([FromBody] BusinessProfileDto profile, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
+        await _profileRepository.SaveProfileAsync(WorkspaceId, profile, cancellationToken);
+        return NoContent();
+    }
+
+    // --- LOCATIONS ---
     [HttpGet("locations")]
     public async Task<IActionResult> GetLocations(CancellationToken cancellationToken)
     {
@@ -62,7 +84,7 @@ public class BusinessController : ControllerBase
         var locations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         return Ok(locations);
     }
-    // 🔥 SPRINT 4: El controlador ya no maneja reglas de negocio. Delega la orden.
+
     [HttpPost("locations")]
     public async Task<IActionResult> SaveLocation(
         [FromBody] LocationDto location,
@@ -70,14 +92,12 @@ public class BusinessController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
-
         var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
-
         if (result.IsFailure) return StatusCode(403, result.Error);
-
         return Ok();
     }
 
+    // --- HOURS ---
     [HttpGet("locations/{locationId}/hours")]
     public async Task<IActionResult> GetHours(string locationId, CancellationToken cancellationToken)
     {
@@ -144,6 +164,7 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
+    // --- ONBOARDING ---
     [HttpPost("complete-onboarding")]
     public async Task<IActionResult> CompleteOnboarding(CancellationToken cancellationToken)
     {

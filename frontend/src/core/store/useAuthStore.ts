@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { axiosClient, setWorkspaceHeader } from '../api/axiosClient'; // 🔥 Importamos el inyector
+import { axiosClient, setWorkspaceHeader, ApiError } from '../api/axiosClient'; // Importamos ApiError
 import type { MeResponse } from '../types/auth.types';
 import { auth } from '../../app/config/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth'; 
@@ -8,6 +8,7 @@ import type { User } from 'firebase/auth';
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
+  isBootstrapping: boolean; // 🔥 NUEVO: Estado explícito para el arranque de la App
   me: MeResponse | null;
   
   checkSession: () => Promise<void>;
@@ -15,13 +16,20 @@ interface AuthState {
   completeOnboarding: () => Promise<void>;
 }
 
+let isCheckingSession = false; // Candado para evitar doble ejecución
+
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: true, 
+  isBootstrapping: true,
   me: null,
 
   checkSession: async () => {
+    if (isCheckingSession) return;
+    isCheckingSession = true;
+    
     set({ isLoading: true });
+    
     try {
       await new Promise<User | null>((resolve) => {
         const unsubscribe = onAuthStateChanged(auth, (user: User | null) => {
@@ -31,32 +39,38 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
 
       if (!auth.currentUser) {
-        setWorkspaceHeader(null); // Limpiamos Axios
-        set({ isAuthenticated: false, me: null, isLoading: false });
+        setWorkspaceHeader(null);
+        set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
+        isCheckingSession = false;
         return;
       }
 
       const { data } = await axiosClient.get<MeResponse>('/me');
       
-      setWorkspaceHeader(data.workspace?.id || null); // 🔥 Inyectamos el Tenant a Axios
-      set({ isAuthenticated: true, me: data, isLoading: false });
+      setWorkspaceHeader(data.workspace?.id || null);
+      set({ isAuthenticated: true, me: data, isLoading: false, isBootstrapping: false });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error validando sesión contra el backend:", error);
       await signOut(auth);
       setWorkspaceHeader(null);
-      set({ isAuthenticated: false, me: null, isLoading: false });
+      set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
       
-      if (error.response?.status === 401 || error.response?.status === 403) {
-          alert("⛔ Acceso denegado: Tu cuenta de Google no está registrada o no tienes permisos.");
+      // 🔥 CORRECCIÓN (Fallo #19): Ahora evaluamos el error correctamente usando ApiError
+      if (error instanceof ApiError) {
+        if (error.status === 401 || error.status === 403) {
+           console.warn("⛔ Sesión rechazada: Tu cuenta no está registrada o no tienes permisos.");
+        }
       }
+    } finally {
+      isCheckingSession = false;
     }
   },
 
   logout: async () => {
     await signOut(auth);
     setWorkspaceHeader(null);
-    set({ isAuthenticated: false, me: null, isLoading: false });
+    set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
   },
 
   completeOnboarding: async () => {

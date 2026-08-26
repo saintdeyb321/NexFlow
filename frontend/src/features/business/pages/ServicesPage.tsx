@@ -8,7 +8,6 @@ export const ServicesPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   
-  // 🔥 CORRECCIÓN: Agregamos las banderas por defecto que el nuevo DTO exige
   const [newService, setNewService] = useState<Partial<ServiceDto>>({
     name: '',
     durationInMinutes: 30,
@@ -16,18 +15,16 @@ export const ServicesPage = () => {
     isActive: true
   });
 
-  // 🔥 CORRECCIÓN: Cargamos directamente sin depender de leer el workspaceId manualmente
   useEffect(() => {
     loadServices();
   }, []);
 
   const loadServices = async () => {
     try {
-      // 🔥 CORRECCIÓN: El servicio ya no pide workspaceId
       const data = await getServices();
       setServices(data || []);
-    } catch (error) {
-      console.error("Error cargando servicios:", error);
+    } catch (error: any) {
+      alert(`Error cargando servicios: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
     } finally {
       setIsLoading(false);
     }
@@ -47,12 +44,12 @@ export const ServicesPage = () => {
         isActive: newService.isActive ?? true
       };
       
-      // 🔥 CORRECCIÓN: El servicio ya no pide workspaceId
       await saveService(serviceToSave);
       setServices([...services, serviceToSave]);
       setNewService({ name: '', durationInMinutes: 30, requiresReservation: true, isActive: true }); 
-    } catch (error) {
-      console.error("Error guardando servicio", error);
+    } catch (error: any) {
+      // 🔥 CORRECCIÓN: Feedback visual si falla
+      alert(`No se pudo guardar el servicio: ${error.response?.data?.error || error.message || 'Inténtalo de nuevo.'}`);
     } finally {
       setIsSaving(false);
     }
@@ -61,11 +58,10 @@ export const ServicesPage = () => {
   const handleDelete = async (serviceId: string) => {
     if (!window.confirm("¿Seguro que deseas eliminar este servicio?")) return;
     try {
-      // 🔥 CORRECCIÓN: El servicio ya no pide workspaceId
       await deleteService(serviceId);
       setServices(services.filter(s => s.id !== serviceId));
-    } catch (error) {
-      console.error("Error eliminando servicio", error);
+    } catch (error: any) {
+      alert(`Error al eliminar: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
     }
   };
 
@@ -114,7 +110,7 @@ export const ServicesPage = () => {
             <button
               type="submit"
               disabled={isSaving}
-              className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               <Plus className="w-4 h-4 mr-2" />
               {isSaving ? 'Guardando...' : 'Añadir a la lista'}

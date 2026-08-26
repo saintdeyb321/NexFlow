@@ -1,6 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using NexFlow.Domain.Entities;
+using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -50,21 +52,17 @@ public static class SystemCatalogSeeder
         {
             var module = existingModules.FirstOrDefault(x => x.Code == m.Code);
 
-            // Si el módulo no existe, lo creamos y le añadimos todas sus capacidades
             if (module == null)
             {
                 module = Module.Create(m.Code, m.Name, m.Desc);
-
                 foreach (var cap in m.Caps)
                 {
                     module.AddCapability(cap.Code, cap.Desc);
                 }
-
                 context.Modules.Add(module);
             }
             else
             {
-                // 🔥 CORRECCIÓN IDEMPOTENCIA: Si el módulo ya existe, solo añadimos las capacidades que le falten
                 foreach (var cap in m.Caps)
                 {
                     if (!module.Capabilities.Any(c => c.Code == cap.Code))
@@ -76,7 +74,7 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 2. Las 5 Plantillas Estratégicas (Basadas en Capacidades, NO en industrias)
+        // 2. Las 5 Plantillas Estratégicas
         var templates = new[]
         {
             new { Code = "SUPPORT", Name = "Atención Básica", Desc = "Respuestas automáticas e información general." },
@@ -122,6 +120,48 @@ public static class SystemCatalogSeeder
                 {
                     context.TemplateModules.Add(new TemplateModule(template.Id, mod.Id));
                 }
+            }
+        }
+        await context.SaveChangesAsync();
+
+        // 🔥 4. SPRINT 3: CREACIÓN DEL WORKSPACE INTERNO PARA SUPERADMINS (Fallo Crítico #2)
+        var internalWorkspace = await context.Workspaces.FirstOrDefaultAsync(w => w.Name == "NexFlow Internal");
+        if (internalWorkspace == null)
+        {
+            // Usamos tu método estático y lo activamos
+            internalWorkspace = Workspace.Create("NexFlow Internal");
+            internalWorkspace.Activate();
+            context.Workspaces.Add(internalWorkspace);
+            await context.SaveChangesAsync();
+
+            // Creamos una licencia Custom Infinita usando tu método exacto
+            var license = License.CreateCustomLicense(
+                internalWorkspace.Id,
+                DateTime.UtcNow,
+                DateTime.UtcNow.AddYears(10),
+                999
+            );
+
+            // Asignamos TODOS los módulos existentes usando el método de Dominio
+            foreach (var mod in existingModules)
+            {
+                license.AddCustomModule(mod.Id);
+            }
+
+            context.Licenses.Add(license);
+            await context.SaveChangesAsync();
+        }
+
+        // 🔥 5. Vincular a los SuperAdmins
+        var sysAdmins = await context.SystemAdministrators.ToListAsync();
+        foreach (var admin in sysAdmins)
+        {
+            var isMember = await context.Memberships.AnyAsync(m => m.UserId == admin.UserId && m.WorkspaceId == internalWorkspace.Id);
+            if (!isMember)
+            {
+                // Usamos el método fábrica de Membership
+                var membership = Membership.Create(admin.UserId, internalWorkspace.Id, MembershipRole.Owner);
+                context.Memberships.Add(membership);
             }
         }
         await context.SaveChangesAsync();

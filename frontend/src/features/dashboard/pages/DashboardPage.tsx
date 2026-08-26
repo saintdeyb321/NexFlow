@@ -9,28 +9,36 @@ export const DashboardPage = () => {
   const [stats, setStats] = useState({ services: 0, todayReservations: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
+  // Extraemos los permisos (módulos) de la sesión
+  const entitlements = me?.entitlements || [];
+
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
         const today = new Date().toISOString().split('T')[0];
         
-        // 1. Cargamos Servicios y Sedes Reales
-        const [services, locs] = await Promise.all([
-          getServices().catch(() => []),
-          getLocations().catch(() => [])
-        ]);
+        let servicesCount = 0;
+        let reservationsCount = 0;
 
-        // 2. Extraemos el ID real de la sede principal (o la primera que exista)
-        const mainLocId = locs.find(l => l.isMain)?.id || locs[0]?.id;
+        // 🔥 CORRECCIÓN (Fase 2): Solo llamamos a los endpoints si la licencia lo permite
+        if (entitlements.includes('SERVICES')) {
+          const services = await getServices().catch(() => []);
+          servicesCount = services.length;
+        }
 
-        // 3. Consultamos las reservas reales basándonos en la sede verídica
-        const reservations = mainLocId 
-          ? await getReservations(mainLocId, today).catch(() => [])
-          : [];
+        if (entitlements.includes('RESERVATIONS')) {
+          const locs = await getLocations().catch(() => []);
+          const mainLocId = locs.find(l => l.isMain)?.id || locs[0]?.id;
+          
+          if (mainLocId) {
+            const reservations = await getReservations(mainLocId, today).catch(() => []);
+            reservationsCount = reservations.length;
+          }
+        }
 
         setStats({
-          services: services.length,
-          todayReservations: reservations.length
+          services: servicesCount,
+          todayReservations: reservationsCount
         });
       } finally {
         setIsLoading(false);
@@ -38,7 +46,7 @@ export const DashboardPage = () => {
     };
 
     loadDashboardData();
-  }, []);
+  }, [entitlements]);
 
   if (isLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando métricas...</div>;
 
@@ -51,25 +59,29 @@ export const DashboardPage = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center">
-          <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mr-4">
-            <Calendar className="w-6 h-6" />
+        {entitlements.includes('RESERVATIONS') && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center">
+            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mr-4">
+              <Calendar className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Citas Hoy</p>
+              <h3 className="text-2xl font-bold text-gray-900">{stats.todayReservations}</h3>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-gray-500 font-medium">Citas Hoy</p>
-            <h3 className="text-2xl font-bold text-gray-900">{stats.todayReservations}</h3>
-          </div>
-        </div>
+        )}
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center">
-          <div className="w-12 h-12 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center mr-4">
-            <Zap className="w-6 h-6" />
+        {entitlements.includes('SERVICES') && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center">
+            <div className="w-12 h-12 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center mr-4">
+              <Zap className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium">Servicios Activos</p>
+              <h3 className="text-2xl font-bold text-gray-900">{stats.services}</h3>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-gray-500 font-medium">Servicios Activos</p>
-            <h3 className="text-2xl font-bold text-gray-900">{stats.services}</h3>
-          </div>
-        </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center">
           <div className="w-12 h-12 rounded-full bg-green-50 text-green-600 flex items-center justify-center mr-4">

@@ -5,6 +5,8 @@ using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
+// Descomenta la siguiente línea si tu IUserRepository.GetByEmailAsync exige un Value Object Email:
+// using NexFlow.Domain.ValueObjects;
 
 namespace NexFlow.API.Middleware;
 
@@ -35,20 +37,44 @@ public class UserIdentityMiddleware
 
             if (!string.IsNullOrEmpty(firebaseUid))
             {
+                // 1. Intentamos buscar por Firebase UID (Login recurrente normal)
                 var user = await userRepository.GetByFirebaseUidAsync(firebaseUid, context.RequestAborted);
 
-                if (user == null)
+                // 2. 🔥 SOLUCIÓN FALLO CRÍTICO #1: Si no existe el UID, pero tenemos correo, es el PRIMER LOGIN
+                if (user == null && !string.IsNullOrEmpty(email))
                 {
-                    _logger.LogWarning($"[Auth] 🔴 El FirebaseUid {firebaseUid} NO existe en la base de datos PostgreSQL.");
+                    _logger.LogWarning($"[Auth] 🟡 El FirebaseUid {firebaseUid} NO existe. Buscando por email ({email}) para realizar el enlace...");
+
+                    // (Si tu repositorio pide un ValueObject, cambia 'email' por 'new Email(email)')
+                    user = await userRepository.GetByEmailAsync(email, context.RequestAborted);
+
+                    if (user != null)
+                    {
+                        _logger.LogInformation($"[Auth] 🟢 Usuario encontrado por email. Enlazando cuenta de Firebase...");
+
+                        user.LinkFirebaseAccount(firebaseUid);
+                        await unitOfWork.SaveChangesAsync(context.RequestAborted);
+
+                        _logger.LogInformation($"[Auth] ✅ Enlace completado exitosamente para el usuario DB Id: {user.Id}");
+                    }
+                    else
+                    {
+                        _logger.LogError($"[Auth] 🔴 El correo {email} NO ha sido provisionado por el SuperAdmin. Acceso denegado.");
+                    }
                 }
-                else if (user.Status != UserStatus.Active)
+
+                // 3. Validar estado e inyectar el UserId al contexto si el usuario existe
+                if (user != null)
                 {
-                    _logger.LogWarning($"[Auth] 🟡 El usuario {email} existe pero NO está Activo (Estado actual: {user.Status}).");
-                }
-                else
-                {
-                    _logger.LogInformation($"[Auth] 🟢 Usuario autenticado y validado. Inyectando contexto. DB Id: {user.Id}");
-                    context.Items["UserId"] = user.Id;
+                    if (user.Status != UserStatus.Active)
+                    {
+                        _logger.LogWarning($"[Auth] 🟡 El usuario {email} existe pero NO está Activo (Estado actual: {user.Status}).");
+                    }
+                    else
+                    {
+                        _logger.LogInformation($"[Auth] 🟢 Usuario autenticado y validado. Inyectando contexto. DB Id: {user.Id}");
+                        context.Items["UserId"] = user.Id;
+                    }
                 }
             }
         }

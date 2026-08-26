@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Clock, CheckCircle, MapPin } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import { updateBusinessProfile, saveLocation, getLocations, saveBusinessHours, completeBusinessOnboarding } from '../services/business.service';
+import { getBusinessProfile, updateBusinessProfile, saveLocation, getLocations, saveBusinessHours, completeBusinessOnboarding } from '../services/business.service';
 import type { BusinessProfile, BusinessHoursDto, LocationDto } from '../types/business.types';
 
 const DAYS_OF_WEEK = [
@@ -15,11 +15,29 @@ export const OnboardingPage = () => {
   const { completeOnboarding } = useAuthStore();
   const [step, setStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [mainLocationId, setMainLocationId] = useState<string>('');
 
   const [profile, setProfile] = useState<BusinessProfile>({ commercialName: '', taxId: '', contactEmail: '', whatsAppNumber: '', description: '' });
   const [location, setLocation] = useState<LocationDto>({ name: 'Sede Principal', address: '', reference: '', isMain: true });
   const [hours, setHours] = useState<BusinessHoursDto[]>(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
+
+  // 🔥 CORRECCIÓN: Cargamos el perfil inicial para no empezar en blanco si ya había un borrador
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const data = await getBusinessProfile();
+        if (data && data.commercialName) {
+          setProfile(data);
+        }
+      } catch (error) {
+        console.warn("No se pudo cargar el perfil base.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchProfile();
+  }, []);
 
   const handleNext = async () => {
     setIsSaving(true);
@@ -31,9 +49,10 @@ export const OnboardingPage = () => {
       } 
       else if (step === 2) {
         if (!location.name || !location.address) return alert('El nombre y la dirección de la sede son obligatorios.');
+        
         await saveLocation(location);
         
-        // Recuperamos el ID que Firestore le asignó a la sede recién creada
+        // Recuperamos el ID que Firestore le asignó a la sede
         const locs = await getLocations();
         const mainLoc = locs.find(l => l.isMain) || locs[0];
         setMainLocationId(mainLoc.id!);
@@ -43,8 +62,9 @@ export const OnboardingPage = () => {
         await saveBusinessHours(mainLocationId, hours);
         setStep(4);
       }
-    } catch (e) {
-      alert('Error al guardar los datos. Revisa la consola.');
+    } catch (e: any) {
+      // 🔥 CORRECCIÓN: Mostrar error real si excede límite de sedes o hay fallo de red
+      alert(`Error al guardar: ${e.response?.data?.error || e.message || 'Error desconocido'}`);
       console.error(e);
     } finally {
       setIsSaving(false);
@@ -65,6 +85,8 @@ export const OnboardingPage = () => {
     setHours(hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h));
   };
 
+  if (isLoading) return <div className="h-screen flex items-center justify-center text-gray-500">Cargando Onboarding...</div>;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center py-10 px-4">
       <div className="max-w-3xl w-full bg-white rounded-2xl shadow-xl overflow-hidden">
@@ -81,7 +103,7 @@ export const OnboardingPage = () => {
           </div>
         </div>
 
-        <div className="p-8">
+        <div className="p-8 min-h-[400px]">
           {step === 1 && (
             <div className="animate-in fade-in">
               <div className="flex items-center mb-6">
@@ -146,11 +168,11 @@ export const OnboardingPage = () => {
 
         <div className="px-8 py-5 bg-gray-50 border-t flex justify-end">
           {step < 4 ? (
-            <button onClick={handleNext} disabled={isSaving} className="px-6 py-2 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50">
+            <button onClick={handleNext} disabled={isSaving} className="px-6 py-2 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors">
               {isSaving ? 'Guardando...' : 'Siguiente'}
             </button>
           ) : (
-            <button onClick={handleFinish} disabled={isSaving} className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700">
+            <button onClick={handleFinish} disabled={isSaving} className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors">
               Ir al Dashboard
             </button>
           )}

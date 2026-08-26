@@ -20,5 +20,5 @@ public interface IConversationCache
     Task SetContextAsync(Guid workspaceId, string customerPhone, ConversationContextDto context, CancellationToken cancellationToken);
     Task<ConversationContextDto?> GetContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken);
 
-    Task<bool> TryAcquireMessageLockAsync(string messageId, CancellationToken cancellationToken);
+    Task<bool> TryAcquireMessageLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken);
 }

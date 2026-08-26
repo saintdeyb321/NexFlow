@@ -14,13 +14,14 @@ export class ApiError extends Error {
 }
 
 export const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5068/api',
+  // Fallo #4 de la auditoría: Asegurarnos de usar HTTPS si el backend lo fuerza, o usar la variable de entorno
+  baseURL: import.meta.env.VITE_API_URL || 'https://localhost:7182/api',
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// 🔥 BUENA PRÁCTICA: Función inyectora para evitar dependencias circulares con Zustand
+// Función inyectora para evitar dependencias circulares con Zustand
 export const setWorkspaceHeader = (workspaceId: string | null) => {
   if (workspaceId) {
     axiosClient.defaults.headers.common['X-Workspace-Id'] = workspaceId;
@@ -29,7 +30,7 @@ export const setWorkspaceHeader = (workspaceId: string | null) => {
   }
 };
 
-// Interceptor solo para el Token de Google (Auth siempre está disponible)
+// Interceptor solo para el Token de Google
 axiosClient.interceptors.request.use(
   async (config) => {
     const user = auth.currentUser;
@@ -42,7 +43,7 @@ axiosClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Interceptor de Errores Global (ApiError)
+// 🔥 CORRECCIÓN (Fallo #20): Interceptor silencioso y estructurado.
 axiosClient.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -52,14 +53,14 @@ axiosClient.interceptors.response.use(
       const message = data?.message || data?.error || 'Error desconocido en el servidor';
       const code = data?.code || 'UNKNOWN_ERROR';
 
-      if (status === 401) console.error("⛔ [401] Sesión expirada o inválida");
-      else if (status === 403) alert(`🔒 Acceso Denegado: Licencia o permisos insuficientes.\nDetalle: ${message}`);
-      else if (status === 404) console.error(`🔍 [404] Endpoint no encontrado: ${error.config.url}`);
-      else if (status >= 500) alert(`🔥 Error del Servidor (500): Algo falló en el backend.`);
+      // Logueamos silenciosamente para debugging, sin interrumpir la UI
+      if (status === 401) console.warn("⛔ [401] Sesión expirada o inválida");
+      else if (status === 403) console.warn(`🔒 [403] Acceso Denegado: ${message}`);
+      else if (status === 404) console.warn(`🔍 [404] Endpoint no encontrado: ${error.config.url}`);
+      else if (status >= 500) console.error(`🔥 [500] Error del Servidor Backend`);
 
       return Promise.reject(new ApiError(status, code, message));
     } else if (error.request) {
-      alert("🌐 Error de red: No se pudo conectar con el servidor.");
       return Promise.reject(new ApiError(0, 'NETWORK_ERROR', 'Sin conexión al servidor'));
     }
     return Promise.reject(error);

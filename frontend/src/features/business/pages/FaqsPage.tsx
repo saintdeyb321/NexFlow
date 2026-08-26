@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BookOpen, Plus, Trash2 } from 'lucide-react';
 import type { FaqDto } from '../types/business.types';
-import { faqService } from '../services/faq.service'; // 🔥 NUEVO: Importamos la única fuente de verdad
+import { faqService } from '../services/faq.service'; 
 
 export const FaqsPage = () => {
   const [faqs, setFaqs] = useState<FaqDto[]>([]);
@@ -14,18 +14,16 @@ export const FaqsPage = () => {
     category: 'General'
   });
 
-  // 🔥 CORRECCIÓN: Cargamos directamente al montar el componente, sin depender del workspaceId manual
   useEffect(() => {
     loadFaqs();
   }, []);
 
   const loadFaqs = async () => {
     try {
-      // 🔥 CORRECCIÓN: Usamos el servicio centralizado
       const data = await faqService.getFaqs();
       setFaqs(data || []);
-    } catch (error) {
-      console.error("Error cargando FAQs:", error);
+    } catch (error: any) {
+      alert(`Error cargando FAQs: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
     } finally {
       setIsLoading(false);
     }
@@ -43,17 +41,16 @@ export const FaqsPage = () => {
         category: newFaq.category!
       };
       
-      // 🔥 CORRECCIÓN: El backend devolverá el objeto ya creado (idealmente con su ID real)
       const savedFaq = await faqService.saveFaq(faqToSave);
       
-      // Si el backend no te devuelve el objeto completo, puedes usar la lógica anterior:
-      // const fakeIdFaq = { ...faqToSave, id: crypto.randomUUID() } as FaqDto;
-      // setFaqs([...faqs, fakeIdFaq]);
+      // Si el backend no devuelve el DTO con ID, creamos uno localmente para la UI
+      const newFaqForUI = savedFaq && savedFaq.id ? savedFaq : { ...faqToSave, id: crypto.randomUUID() } as FaqDto;
       
-      setFaqs([...faqs, savedFaq]);
+      setFaqs([...faqs, newFaqForUI]);
       setNewFaq({ question: '', answer: '', category: 'General' }); 
-    } catch (error) {
-      console.error("Error guardando FAQ", error);
+    } catch (error: any) {
+      // 🔥 CORRECCIÓN: Aquí es donde mostramos el error de las "30 FAQs permitidas"
+      alert(`No se pudo guardar: ${error.response?.data?.error || error.message || 'Inténtalo de nuevo.'}`);
     } finally {
       setIsSaving(false);
     }
@@ -62,11 +59,10 @@ export const FaqsPage = () => {
   const handleDelete = async (faqId: string) => {
     if (!window.confirm("¿Eliminar esta pregunta?")) return;
     try {
-      // 🔥 CORRECCIÓN: Usamos el servicio centralizado
       await faqService.deleteFaq(faqId);
       setFaqs(faqs.filter(f => f.id !== faqId));
-    } catch (error) {
-      console.error("Error eliminando FAQ", error);
+    } catch (error: any) {
+      alert(`Error al eliminar: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
     }
   };
 
@@ -93,7 +89,7 @@ export const FaqsPage = () => {
               <select 
                 value={newFaq.category}
                 onChange={(e) => setNewFaq({ ...newFaq, category: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 <option value="General">General</option>
                 <option value="Pagos">Pagos</option>
@@ -126,7 +122,7 @@ export const FaqsPage = () => {
               />
             </div>
 
-            <button type="submit" disabled={isSaving} className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            <button type="submit" disabled={isSaving} className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
               <Plus className="w-4 h-4 mr-2" />
               {isSaving ? 'Guardando...' : 'Añadir a la IA'}
             </button>
@@ -141,12 +137,12 @@ export const FaqsPage = () => {
             </div>
           ) : (
             faqs.map((faq) => (
-              <div key={faq.id} className="p-5 bg-white border border-gray-200 rounded-xl hover:shadow-sm">
+              <div key={faq.id} className="p-5 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow">
                 <div className="flex justify-between items-start mb-2">
                   <span className="inline-block px-2 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded">
                     {faq.category}
                   </span>
-                  <button onClick={() => handleDelete(faq.id)} className="text-gray-400 hover:text-red-600 transition-colors">
+                  <button onClick={() => handleDelete(faq.id!)} className="text-gray-400 hover:text-red-600 transition-colors p-1">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

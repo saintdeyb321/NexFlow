@@ -42,12 +42,11 @@ public class RedisConversationCache : IConversationCache
         }
     }
 
-    public async Task<bool> TryAcquireMessageLockAsync(string messageId, CancellationToken cancellationToken)
+    // 🔥 CORRECCIÓN (Aislamiento Multitenant): Forzamos la recepción del WorkspaceId en el candado
+    public async Task<bool> TryAcquireMessageLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
-        var key = $"webhook:processed:{messageId}";
-        // 🔥 CORRECCIÓN HARDENING: Reducimos el TTL de 24 horas a 2 minutos. 
-        // Esto bloquea los webhooks duplicados instantáneos, pero libera el candado 
-        // rápidamente por si nuestra API falla y n8n/Evolution necesita reintentar.
+        var key = $"workspace:{workspaceId}:webhook:processed:{messageId}";
+
         return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromMinutes(2), When.NotExists);
     }
 }

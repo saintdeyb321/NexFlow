@@ -19,10 +19,10 @@ export const releaseConversation = async (conversationId: string): Promise<void>
   await axiosClient.post(`/conversations/${conversationId}/release`);
 };
 
-// --- NUEVO: Enviar Mensaje ---
-export const sendManualMessage = async (conversationId: string, consumerPhone: string, content: string): Promise<Message> => {
+// 🔥 CORRECCIÓN (Fallo #18): Eliminado el parámetro redundante `consumerPhone`. 
+// La responsabilidad de saber a quién enviar el mensaje recae en el ID de la conversación.
+export const sendManualMessage = async (conversationId: string, content: string): Promise<Message> => {
   const { data } = await axiosClient.post<Message>(`/conversations/${conversationId}/messages`, {
-    consumerPhone,
     content
   });
   return data;

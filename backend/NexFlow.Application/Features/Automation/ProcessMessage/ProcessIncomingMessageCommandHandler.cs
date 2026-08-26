@@ -49,7 +49,7 @@ public class ProcessIncomingMessageCommandHandler
         // 2. IDEMPOTENCIA BLINDADA (WorkspaceId + ExternalMessageId)
         // 🔥 CORRECCIÓN: La llave ahora es absolutamente única por inquilino.
         string idempotencyKey = $"{workspaceId}_{request.MessageId}";
-        bool isFirstTime = await _conversationCache.TryAcquireMessageLockAsync(idempotencyKey, cancellationToken);
+        bool isFirstTime = await _conversationCache.TryAcquireMessageLockAsync(workspaceId, idempotencyKey, cancellationToken);
 
         if (!isFirstTime)
         {

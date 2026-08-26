@@ -9,9 +9,13 @@ export const ReservationsPage = () => {
   const [reservations, setReservations] = useState<ReservationDto[]>([]);
   const [locations, setLocations] = useState<LocationDto[]>([]);
   
-  // Filtros del Calendario
+  // 🔥 CORRECCIÓN (Fallo #22): Forzar que la fecha base sea la local (Perú) y no la UTC del navegador
   const [selectedLocation, setSelectedLocation] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]); // Hoy
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    const today = new Date();
+    today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+    return today.toISOString().split('T')[0];
+  });
   
   const [isLoading, setIsLoading] = useState(true);
 
@@ -20,7 +24,6 @@ export const ReservationsPage = () => {
   }, []);
 
   useEffect(() => {
-    // Solo cargamos si hay una sede real seleccionada (no el fallback 'global')
     if (selectedLocation && selectedLocation !== 'global') {
       loadReservations();
     }
@@ -28,13 +31,11 @@ export const ReservationsPage = () => {
 
   const loadInitialData = async () => {
     try {
-      // 🔥 CORRECCIÓN: Quitamos el .catch(() => []) y usamos el try/catch real (Sprint 2)
       const locs = await getLocations();
       setLocations(locs);
       
       if (locs.length > 0) {
         const mainLoc = locs.find(l => l.isMain) || locs[0];
-        // 🔥 CORRECCIÓN TS 2345: Nos aseguramos de pasar un string válido o 'global' si el id es undefined
         setSelectedLocation(mainLoc.id ?? 'global');
       } else {
         setSelectedLocation('global'); 
@@ -50,11 +51,10 @@ export const ReservationsPage = () => {
     setIsLoading(true);
     try {
       const data = await getReservations(selectedLocation, selectedDate);
-      // 🔥 CORRECCIÓN TS 2339: Ahora ordenamos usando 'dateTime' según nuestro DTO oficial
       const sorted = (data || []).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
       setReservations(sorted);
     } catch (error: any) {
-      alert(`Error cargando reservas: ${error.message || 'Error desconocido'}`);
+      alert(`Error cargando reservas: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
     } finally {
       setIsLoading(false);
     }
@@ -67,15 +67,15 @@ export const ReservationsPage = () => {
       await cancelReservation(id);
       setReservations(reservations.map(r => r.id === id ? { ...r, status: 'Cancelled' } : r));
     } catch (error: any) {
-      alert(`Error al cancelar: ${error.message || 'Es posible que ya esté cancelada.'}`);
+      alert(`Error al cancelar: ${error.response?.data?.error || error.message || 'Es posible que ya esté cancelada.'}`);
     }
   };
 
-  // Formateador para mostrar solo la hora
+  // 🔥 CORRECCIÓN: Parseo explícito para la UI (America/Lima)
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return new Intl.DateTimeFormat('es-PE', {
-      hour: '2-digit', minute: '2-digit'
+      hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima'
     }).format(date);
   };
 
@@ -89,7 +89,6 @@ export const ReservationsPage = () => {
           <p className="mt-1 text-sm text-gray-500">Citas agendadas por la IA o manualmente.</p>
         </div>
         
-        {/* BARRA DE HERRAMIENTAS (Filtros) */}
         <div className="flex flex-col sm:flex-row items-center gap-3">
           <div className="flex items-center bg-white border rounded-lg px-3 py-2 shadow-sm">
             <MapPin className="w-4 h-4 text-gray-400 mr-2" />
@@ -131,22 +130,18 @@ export const ReservationsPage = () => {
               {reservations.map((res) => (
                 <li key={res.id} className="p-5 hover:bg-gray-50 transition-colors">
                   <div className="flex items-center justify-between">
-                    
-                    {/* Info Izquierda */}
                     <div className="flex items-start space-x-4">
                       <div className={`p-3 rounded-full ${res.status.toUpperCase() === 'CONFIRMED' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
                         {res.status.toUpperCase() === 'CONFIRMED' ? <CheckCircle className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
                       </div>
                       
                       <div>
-                        {/* 🔥 NUEVO: Mostramos el Nombre del Cliente que agregamos en el Sprint 1 */}
                         <h4 className="text-lg font-semibold text-gray-900">
                           {res.customerName} <span className="text-sm font-normal text-gray-500">(Servicio: {res.serviceId.substring(0,8)})</span>
                         </h4>
                         
                         <div className="mt-1 flex items-center space-x-4 text-sm text-gray-500">
                           <span className="flex items-center text-blue-600 font-medium">
-                            {/* 🔥 CORRECCIÓN TS 2339: res.dateTime */}
                             <Clock className="w-4 h-4 mr-1" /> {formatTime(res.dateTime)}
                           </span>
                           <span className="flex items-center">
@@ -156,7 +151,6 @@ export const ReservationsPage = () => {
                       </div>
                     </div>
 
-                    {/* Botones Derecha */}
                     <div className="flex space-x-2">
                       {res.status.toUpperCase() !== 'CANCELLED' && (
                         <button 
@@ -167,7 +161,6 @@ export const ReservationsPage = () => {
                         </button>
                       )}
                     </div>
-
                   </div>
                 </li>
               ))}

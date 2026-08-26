@@ -13,33 +13,43 @@ public class ReservationsController : ControllerBase
     private readonly IReservationEngine _reservationEngine;
     private readonly IReservationRepository _reservationRepository;
     private readonly IWorkspaceContext _workspaceContext;
+    private readonly IEntitlementService _entitlementService;
 
     public ReservationsController(
         IReservationEngine reservationEngine,
         IReservationRepository reservationRepository,
-        IWorkspaceContext workspaceContext)
+        IWorkspaceContext workspaceContext,
+        IEntitlementService entitlementService)
     {
         _reservationEngine = reservationEngine;
         _reservationRepository = reservationRepository;
         _workspaceContext = workspaceContext;
+        _entitlementService = entitlementService;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
 
-    // 1. Obtener Reservas para pintar el Calendario de React
+    private async Task<bool> HasAccessTo(string moduleCode, CancellationToken ct)
+    {
+        var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
+        return activeModules.Contains(moduleCode.ToUpperInvariant());
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetReservations([FromQuery] string locationId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
+        // 🔥 CORRECCIÓN (Fallo #9): El Guardia de Seguridad de la Licencia
+        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
         if (string.IsNullOrEmpty(locationId)) return BadRequest("LocationId es requerido");
 
         var reservations = await _reservationRepository.GetReservationsForDateAsync(WorkspaceId, locationId, date, cancellationToken);
         return Ok(reservations);
     }
 
-    // 2. Consultar Disponibilidad Manual (Si la secretaria quiere agendar a alguien en persona)
     [HttpGet("availability")]
     public async Task<IActionResult> GetAvailability([FromQuery] string locationId, [FromQuery] string serviceId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
         if (string.IsNullOrEmpty(locationId) || string.IsNullOrEmpty(serviceId))
             return BadRequest("LocationId y ServiceId son requeridos");
 
@@ -50,13 +60,15 @@ public class ReservationsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateReservation([FromBody] CreateReservationRequest request, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
+
         var result = await _reservationEngine.CreateReservationAsync(
             WorkspaceId,
             request.LocationId,
             request.ServiceId,
             request.CustomerIdentifier,
-            request.CustomerName, // <--- 1ro: EL NOMBRE
-            request.DateTime,     // <--- 2do: LA FECHA
+            request.CustomerName,
+            request.DateTime,
             cancellationToken);
 
         if (result.IsFailure)
@@ -65,10 +77,11 @@ public class ReservationsController : ControllerBase
         return Ok(result.Value);
     }
 
-    // 4. Cancelar Reserva
     [HttpDelete("{id}")]
     public async Task<IActionResult> CancelReservation(Guid id, CancellationToken cancellationToken)
     {
+        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
+
         var result = await _reservationEngine.CancelReservationAsync(WorkspaceId, id, cancellationToken);
 
         if (result.IsFailure)
@@ -78,12 +91,10 @@ public class ReservationsController : ControllerBase
     }
 }
 
-// DTO Auxiliar para recibir el POST del frontend
-// DTO Auxiliar para recibir el POST del frontend
 public record CreateReservationRequest(
     string LocationId,
     string ServiceId,
     string CustomerIdentifier,
-    string CustomerName, // <--- FALTABA AGREGARLO AQUÍ
+    string CustomerName,
     DateTime DateTime
 );
