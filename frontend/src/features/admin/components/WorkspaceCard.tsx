@@ -5,7 +5,6 @@ interface WorkspaceCardProps {
   workspace: WorkspaceSummaryDto;
   onToggleStatus: (ws: WorkspaceSummaryDto) => void;
   onDelete: (ws: WorkspaceSummaryDto) => void;
-  // 🔥 NUEVOS PROPS
   onRenew?: (ws: WorkspaceSummaryDto) => void;
   onAssignModule?: (ws: WorkspaceSummaryDto) => void;
 }
@@ -39,14 +38,12 @@ export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete, onRenew, on
         
         <div className="flex items-center space-x-1 border-l border-gray-200 pl-4">
           
-          {/* 🔥 BOTÓN ASIGNAR MÓDULO */}
           {onAssignModule && (
              <button onClick={() => onAssignModule(workspace)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Asignar Módulo Extra">
                <Puzzle className="w-5 h-5" />
              </button>
           )}
 
-          {/* 🔥 BOTÓN RENOVAR */}
           {onRenew && (
              <button onClick={() => onRenew(workspace)} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors" title="Renovar Licencia">
                <CalendarClock className="w-5 h-5" />

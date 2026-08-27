@@ -3,29 +3,17 @@ import { BookOpen, Plus, Trash2, Pencil, MessageSquare } from 'lucide-react';
 import { faqService } from '../services/faq.service';
 import type { FaqDto } from '../types/business.types';
 import { FaqModal } from '../components/FaqModal';
+import { useCacheStore } from '../../../core/store/useCacheStore';
 
 export const FaqsPage = () => {
-  const [faqs, setFaqs] = useState<FaqDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { faqs, isFaqsLoading, fetchFaqs, setFaqs } = useCacheStore();
   
-  // Estado para el Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [faqToEdit, setFaqToEdit] = useState<FaqDto | null>(null);
 
   useEffect(() => {
-    loadFaqs();
+    fetchFaqs();
   }, []);
-
-  const loadFaqs = async () => {
-    try {
-      const data = await faqService.getFaqs();
-      setFaqs(data || []);
-    } catch (error: any) {
-      alert(`Error cargando FAQs: ${error.message || 'Error desconocido'}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleOpenNew = () => {
     setFaqToEdit(null);
@@ -41,15 +29,17 @@ export const FaqsPage = () => {
     try {
       await faqService.saveFaq(faq);
       
-      // Actualización optimista en la lista
-      setFaqs(prev => {
-        const exists = prev.find(f => f.id === faq.id);
-        if (exists) return prev.map(f => f.id === faq.id ? faq : f);
-        return [...prev, faq];
-      });
+      const currentFaqs = faqs || [];
+      const exists = currentFaqs.find(f => f.id === faq.id);
+      
+      if (exists) {
+        setFaqs(currentFaqs.map(f => f.id === faq.id ? faq : f));
+      } else {
+        setFaqs([...currentFaqs, faq]);
+      }
     } catch (error: any) {
       alert(`No se pudo guardar: ${error.response?.data?.error || error.message}`);
-      throw error; // Lanzamos el error para que el modal no se cierre automáticamente
+      throw error; 
     }
   };
 
@@ -57,13 +47,13 @@ export const FaqsPage = () => {
     if (!window.confirm("¿Seguro que deseas eliminar esta pregunta de la IA?")) return;
     try {
       await faqService.deleteFaq(faqId);
-      setFaqs(faqs.filter(f => f.id !== faqId));
+      // 🔥 Actualización optimista en caché
+      setFaqs((faqs || []).filter(f => f.id !== faqId));
     } catch (error: any) {
       alert(`Error al eliminar: ${error.response?.data?.error || error.message}`);
     }
   };
 
-  // Función auxiliar para darle color a la etiqueta según la categoría
   const getCategoryColor = (category: string) => {
     switch (category) {
       case 'Pagos': return 'bg-green-100 text-green-700';
@@ -73,12 +63,12 @@ export const FaqsPage = () => {
     }
   };
 
-  if (isLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando base de conocimiento...</div>;
+  if (isFaqsLoading && !faqs) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando base de conocimiento...</div>;
+
+  const displayFaqs = faqs || [];
 
   return (
     <div className="max-w-5xl">
-      
-      {/* Cabecera Estilo MigaPOS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
@@ -99,30 +89,29 @@ export const FaqsPage = () => {
         </button>
       </div>
 
-      {/* Lista de Tarjetas */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex justify-between items-center border-b border-gray-100 mb-4 pb-2">
           <h3 className="text-sm font-semibold text-gray-700">
-            Preguntas Activas ({faqs.length}/30)
+            Preguntas Activas ({displayFaqs.length}/30)
           </h3>
         </div>
         
         <div className="space-y-3">
-          {faqs.length === 0 ? (
+          {displayFaqs.length === 0 ? (
             <div className="text-center py-10 text-gray-500 flex flex-col items-center">
               <MessageSquare className="w-12 h-12 text-gray-200 mb-3" />
               <p>Tu IA aún no tiene conocimientos específicos.</p>
               <p className="text-sm mt-1">Haz clic en "Nueva Pregunta" para entrenarla.</p>
             </div>
           ) : (
-            faqs.map((faq) => (
+            displayFaqs.map((faq) => (
               <div 
                 key={faq.id} 
                 className="flex flex-col md:flex-row md:items-start justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all gap-4"
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${getCategoryColor(faq.category)}`}>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${getCategoryColor(faq.category || '')}`}>
                       {faq.category}
                     </span>
                   </div>
@@ -156,7 +145,6 @@ export const FaqsPage = () => {
         </div>
       </div>
 
-      {/* Modal Inyectado */}
       <FaqModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}

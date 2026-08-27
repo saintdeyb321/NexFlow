@@ -2,10 +2,7 @@
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders;
 

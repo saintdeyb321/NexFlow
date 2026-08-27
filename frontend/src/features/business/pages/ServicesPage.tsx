@@ -1,32 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, Tag, Trash2 } from 'lucide-react';
-import { getServices, saveService } from '../services/business.service';
+import { saveService, deleteService } from '../services/business.service';
 import type { ServiceDto } from '../types/business.types';
 import { ServiceModal } from '../components/ServiceModal';
-// 🔥 Necesitamos importar axiosClient para la eliminación directa
-import { axiosClient } from '../../../core/api/axiosClient';
+import { useCacheStore } from '../../../core/store/useCacheStore';
 
 export const ServicesPage = () => {
-  const [services, setServices] = useState<ServiceDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { services, isServicesLoading, fetchServices, setServices } = useCacheStore();
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState<ServiceDto | null>(null);
 
   useEffect(() => {
-    loadServices();
+    fetchServices(); 
   }, []);
-
-  const loadServices = async () => {
-    try {
-      const data = await getServices();
-      setServices(data || []);
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleOpenNew = () => {
     setServiceToEdit(null);
@@ -38,13 +25,12 @@ export const ServicesPage = () => {
     setIsModalOpen(true);
   };
 
-  // 🔥 NUEVO: Función para eliminar
   const handleDelete = async (serviceId: string) => {
     if (!window.confirm('¿Estás seguro de que deseas eliminar este servicio?')) return;
     
     try {
-      await axiosClient.delete(`/business/services/${serviceId}`);
-      setServices(prev => prev.filter(s => s.id !== serviceId));
+      await deleteService(serviceId);
+      setServices((services || []).filter(s => s.id !== serviceId));
     } catch (error: any) {
       alert(`Error al eliminar: ${error.message}`);
     }
@@ -52,19 +38,24 @@ export const ServicesPage = () => {
 
   const handleSaveService = async (service: ServiceDto) => {
     try {
-      await saveService(service);
-      setServices(prev => {
-        const exists = prev.find(s => s.id === service.id);
-        if (exists) return prev.map(s => s.id === service.id ? service : s);
-        return [...prev, service];
-      });
+      const savedService = await saveService(service);
+      const currentServices = services || [];
+      const exists = currentServices.find(s => s.id === savedService.id);
+      
+      if (exists) {
+        setServices(currentServices.map(s => s.id === savedService.id ? savedService : s));
+      } else {
+        setServices([...currentServices, savedService]);
+      }
     } catch (error: any) {
       alert(`Error al guardar: ${error.message}`);
       throw error; 
     }
   };
 
-  if (isLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
+  if (isServicesLoading && !services) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
+
+  const displayServices = services || [];
 
   return (
     <div className="max-w-5xl">
@@ -87,14 +78,14 @@ export const ServicesPage = () => {
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
-          Lista de Servicios ({services.length})
+          Lista de Servicios ({displayServices.length})
         </h3>
         
         <div className="space-y-3">
-          {services.length === 0 ? (
+          {displayServices.length === 0 ? (
             <div className="text-center py-10 text-gray-500">Aún no tienes servicios registrados.</div>
           ) : (
-            services.map((service) => (
+            displayServices.map((service) => (
               <div 
                 key={service.id} 
                 className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all"
@@ -126,7 +117,6 @@ export const ServicesPage = () => {
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
-                  {/* 🔥 BOTÓN ELIMINAR */}
                   <button
                     onClick={() => handleDelete(service.id!)}
                     className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"

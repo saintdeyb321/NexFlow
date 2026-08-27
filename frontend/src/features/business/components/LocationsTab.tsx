@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import { Trash2 } from 'lucide-react';
 import { getLocations, saveLocation } from '../services/business.service';
 import type { LocationDto } from '../types/business.types';
+import { axiosClient } from '../../../core/api/axiosClient';
 
 export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
   const [locations, setLocations] = useState<LocationDto[]>([]);
@@ -35,10 +37,22 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
       setLocations(updatedLocs);
       setNewLocation({ name: '', address: '', reference: '', isMain: false });
     } catch (error: any) { 
-      // 🔥 CORRECCIÓN: El interceptor de Axios ya procesó el mensaje, lo usamos directo.
       showMessage(error.message || 'Error guardando la sede', 'error'); 
     } finally { 
       setIsSaving(false); 
+    }
+  };
+
+  // 🔥 SOLUCIÓN (Fallo #24): Función para eliminar sede
+  const handleDeleteLocation = async (locationId: string) => {
+    if (!window.confirm('¿Estás seguro de que deseas eliminar esta sede? Perderás los horarios asociados a ella.')) return;
+    
+    try {
+      await axiosClient.delete(`/business/locations/${locationId}`);
+      showMessage('Sede eliminada correctamente', 'success');
+      setLocations(prev => prev.filter(l => l.id !== locationId));
+    } catch (error: any) {
+      showMessage(error.message || 'Error al eliminar la sede', 'error');
     }
   };
 
@@ -76,7 +90,7 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
         ) : (
           <ul className="divide-y divide-gray-100">
             {locations.map(loc => (
-              <li key={loc.id} className="py-3 flex justify-between items-start">
+              <li key={loc.id} className="py-3 flex justify-between items-center group">
                 <div>
                   <h4 className="font-medium text-gray-900 flex items-center">
                     {loc.name} {loc.isMain && <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sede Principal</span>}
@@ -84,6 +98,14 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
                   <p className="text-sm text-gray-500 mt-1">{loc.address}</p>
                   {loc.reference && <p className="text-xs text-gray-400 mt-0.5">Ref: {loc.reference}</p>}
                 </div>
+                {/* 🔥 BOTÓN ELIMINAR SEDE */}
+                <button
+                  onClick={() => handleDeleteLocation(loc.id!)}
+                  className="p-2 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                  title="Eliminar Sede"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
               </li>
             ))}
           </ul>

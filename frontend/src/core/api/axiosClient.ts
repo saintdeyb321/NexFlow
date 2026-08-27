@@ -16,7 +16,8 @@ export class ApiError extends Error {
 }
 
 export const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'https://localhost:7182/api',
+  // 🔥 SPRINT 8: Cero localhosts hardcodeados, entorno estricto
+  baseURL: import.meta.env.VITE_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -49,7 +50,6 @@ axiosClient.interceptors.response.use(
       const status = error.response.status;
       const data = error.response.data;
 
-      // 🛡️ CONTRATO UNIFICADO: Solo lee lo que manda el GlobalExceptionMiddleware
       const message = data?.message || data?.detail || 'Error desconocido en el servidor';
       const code = data?.code || data?.title || 'UNKNOWN_ERROR';
       const correlationId = data?.correlationId;

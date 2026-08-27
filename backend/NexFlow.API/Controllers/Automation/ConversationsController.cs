@@ -4,9 +4,6 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Conversations;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace NexFlow.API.Controllers.Automation;
 
@@ -46,17 +43,16 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> TakeOverConversation(string conversationId, CancellationToken cancellationToken)
     {
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Human, cancellationToken);
-        return Ok(new { Message = "Control humano asumido. La IA ha sido silenciada temporalmente.", Mode = ConversationMode.Human.ToString() });
+        return Ok(new { message = "Control humano asumido. La IA ha sido silenciada temporalmente.", mode = ConversationMode.Human.ToString() });
     }
 
     [HttpPost("{conversationId}/release")]
     public async Task<IActionResult> ReleaseConversation(string conversationId, CancellationToken cancellationToken)
     {
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Automatic, cancellationToken);
-        return Ok(new { Message = "Chat liberado. La Inteligencia Artificial vuelve a tomar el control.", Mode = ConversationMode.Automatic.ToString() });
+        return Ok(new { message = "Chat liberado. La Inteligencia Artificial vuelve a tomar el control.", mode = ConversationMode.Automatic.ToString() });
     }
 
-    // 🔥 CORRECCIÓN SPRINT 8: Apuntando estrictamente a conversationId
     [HttpPost("{conversationId}/messages")]
     public async Task<IActionResult> SendManualMessage(
         string conversationId,
@@ -64,14 +60,12 @@ public class ConversationsController : ControllerBase
         [FromServices] IMessageGateway messageGateway,
         CancellationToken cancellationToken)
     {
-        // 1. Buscamos la conversación EXACTA, no la genérica por teléfono.
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
-        if (conversation == null) return NotFound("Conversación no encontrada.");
+        if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        // 2. Enviar a Evolution API / WhatsApp
+        // Enviar a Evolution API / WhatsApp
         await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, cancellationToken);
 
-        // 3. Guardar en Firestore como "BusinessUser" (Tú)
         var messageRecord = new MessageRecord
         {
             Id = Guid.NewGuid().ToString(),
@@ -84,7 +78,6 @@ public class ConversationsController : ControllerBase
 
         await _conversationRepository.AddMessageAsync(WorkspaceId, conversation.Id, messageRecord, cancellationToken);
 
-        // 4. Asumimos el control humano automáticamente
         if (conversation.Mode != ConversationMode.Human)
         {
             await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
@@ -94,4 +87,4 @@ public class ConversationsController : ControllerBase
     }
 }
 
-public record SendManualMessageRequest(string ConsumerPhone, string Content);
+public record SendManualMessageRequest(string Content);

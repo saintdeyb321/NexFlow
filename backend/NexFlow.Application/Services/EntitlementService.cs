@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using Microsoft.Extensions.Caching.Memory;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
 
@@ -11,96 +12,117 @@ public class EntitlementService : IEntitlementService
     private readonly IModuleRepository _moduleRepository;
     private readonly IClock _clock;
 
-    // 🔥 SPRINT 3: Módulos Base Inquebrantables
+    // 🔥 SPRINT 6: Inyectamos Memoria Caché para no asfixiar a PostgreSQL
+    private readonly IMemoryCache _cache;
+
     private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS" };
 
     public EntitlementService(
         ILicenseRepository licenseRepository,
         IWorkspaceRepository workspaceRepository,
         IModuleRepository moduleRepository,
-        IClock clock)
+        IClock clock,
+        IMemoryCache cache)
     {
         _licenseRepository = licenseRepository;
         _workspaceRepository = workspaceRepository;
         _moduleRepository = moduleRepository;
         _clock = clock;
+        _cache = cache;
+    }
+
+    private async Task<EntitlementSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        if (workspaceId == Guid.Empty) return new EntitlementSnapshot();
+        string cacheKey = $"entitlement_{workspaceId}";
+        var result = await _cache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+            var snapshot = new EntitlementSnapshot();
+            var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
+            if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
+                return snapshot;
+            var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+            if (license == null || !license.IsValidAt(_clock.UtcNow))
+                return snapshot;
+            snapshot.IsValid = true;
+            snapshot.MaxLocations = license.MaxLocations;
+            var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
+            if (assignedModuleIds.Any())
+            {
+                var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
+                foreach (var mod in activeModules)
+                {
+                    var code = mod.Code.ToUpperInvariant();
+                    snapshot.ActiveModuleCodes.Add(code);
+                    snapshot.ActiveModuleIds.Add(mod.Id);
+                    snapshot.ModuleCapabilities[code] = mod.Capabilities.Select(c => c.Code.ToUpperInvariant()).ToHashSet();
+                }
+            }
+
+            foreach (var baseMod in _baseModules)
+            {
+                snapshot.ActiveModuleCodes.Add(baseMod);
+            }
+
+            return snapshot;
+        });
+        return result ?? new EntitlementSnapshot();
     }
 
     public async Task<bool> IsLicenseValidAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (workspaceId == Guid.Empty) return false; // 🛡️ Escudo de seguridad
-
-        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
-
-        if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
-            return false;
-
-        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        return license != null && license.IsValidAt(_clock.UtcNow);
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        return snapshot.IsValid;
     }
 
     public async Task<bool> HasModuleAccessAsync(Guid workspaceId, Guid moduleId, CancellationToken cancellationToken)
     {
-        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
-
-        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        if (!license!.LicenseModules.Any(m => m.ModuleId == moduleId)) return false;
-
-        var module = await _moduleRepository.GetByIdAsync(moduleId, cancellationToken);
-        return module != null && module.Status == ModuleStatus.Active;
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        return snapshot.IsValid && snapshot.ActiveModuleIds.Contains(moduleId);
     }
 
     public async Task<IEnumerable<Guid>> GetAvailableModulesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return Enumerable.Empty<Guid>();
-
-        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        var assignedModuleIds = license!.LicenseModules.Select(m => m.ModuleId).ToList();
-
-        if (!assignedModuleIds.Any()) return Enumerable.Empty<Guid>();
-
-        var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
-        return activeModules.Select(m => m.Id);
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        return snapshot.ActiveModuleIds;
     }
 
     public async Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return Enumerable.Empty<string>();
-
-        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        var assignedModuleIds = license!.LicenseModules.Select(m => m.ModuleId).ToList();
-
-        var activeModules = assignedModuleIds.Any()
-            ? await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken)
-            : Enumerable.Empty<Domain.Entities.Module>();
-
-        var codes = activeModules.Select(m => m.Code.ToUpperInvariant()).ToList();
-        codes.AddRange(_baseModules);
-        return codes.Distinct();
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        return snapshot.ActiveModuleCodes;
     }
 
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
-        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
-        if (_baseModules.Contains(moduleCode.ToUpperInvariant())) return true;
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        if (!snapshot.IsValid) return false;
 
-        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        if (license == null || !license.LicenseModules.Any()) return false;
+        var code = moduleCode.ToUpperInvariant();
+        if (_baseModules.Contains(code)) return true;
 
-        var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
-        var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
+        if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
+        {
+            return caps.Contains(capabilityCode.ToUpperInvariant());
+        }
 
-        var targetModule = activeModules.FirstOrDefault(m => m.Code == moduleCode.ToUpperInvariant());
-        if (targetModule == null) return false;
-
-        return targetModule.Capabilities.Any(c => c.Code == capabilityCode.ToUpperInvariant());
+        return false;
     }
 
     public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return 0;
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        return snapshot.MaxLocations;
+    }
 
-        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        return license?.MaxLocations ?? 0;
+    // Objeto interno para transportar los datos cacheados
+    private class EntitlementSnapshot
+    {
+        public bool IsValid { get; set; }
+        public int MaxLocations { get; set; }
+        public HashSet<string> ActiveModuleCodes { get; set; } = new();
+        public HashSet<Guid> ActiveModuleIds { get; set; } = new();
+        public Dictionary<string, HashSet<string>> ModuleCapabilities { get; set; } = new();
     }
 }

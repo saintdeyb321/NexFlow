@@ -1,9 +1,11 @@
+export type RequestStatus = 'Pending' | 'InReview' | 'Approved' | 'Rejected' | 'Completed' | 'Cancelled';
+
 export interface RequestRecord {
   id: string;
   consumerPhone: string;
   title: string;
   description: string;
-  status: string; // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+  status: RequestStatus; 
   createdAt: string;
   updatedAt: string;
 }

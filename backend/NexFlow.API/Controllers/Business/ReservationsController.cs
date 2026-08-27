@@ -2,9 +2,6 @@
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Reservations;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace NexFlow.API.Controllers.Reservations;
 
@@ -38,17 +35,18 @@ public class ReservationsController : ControllerBase
     public async Task<IActionResult> GetReservations([FromQuery] string locationId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
-        if (string.IsNullOrEmpty(locationId)) return BadRequest("LocationId es requerido");
+        if (string.IsNullOrEmpty(locationId)) return BadRequest(new { code = "Validation.Error", message = "LocationId es requerido" });
 
         var reservations = await _reservationRepository.GetReservationsForDateAsync(WorkspaceId, locationId, date, cancellationToken);
         return Ok(reservations);
     }
 
+    // 🔥 CORRECCIÓN: Endpoint expuesto para consultar espacios libres
     [HttpGet("availability")]
     public async Task<IActionResult> GetAvailability([FromQuery] string locationId, [FromQuery] string serviceId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
-        if (string.IsNullOrEmpty(locationId) || string.IsNullOrEmpty(serviceId)) return BadRequest("LocationId y ServiceId son requeridos");
+        if (string.IsNullOrEmpty(locationId) || string.IsNullOrEmpty(serviceId)) return BadRequest(new { code = "Validation.Error", message = "LocationId y ServiceId son requeridos" });
 
         var slots = await _reservationEngine.GetAvailabilityAsync(WorkspaceId, locationId, serviceId, date, cancellationToken);
         return Ok(slots);
@@ -66,7 +64,7 @@ public class ReservationsController : ControllerBase
         return Ok(result.Value);
     }
 
-    // 🛡️ CORRECCIÓN (Fallo #45): Endpoint para Editar/Reagendar
+    // 🔥 CORRECCIÓN (Fallo #45): Endpoint para Editar/Reagendar
     [HttpPut("{id}")]
     public async Task<IActionResult> EditReservation(Guid id, [FromBody] EditReservationRequest request, CancellationToken cancellationToken)
     {
@@ -91,6 +89,4 @@ public class ReservationsController : ControllerBase
 }
 
 public record CreateReservationRequest(string LocationId, string ServiceId, string CustomerIdentifier, string CustomerName, DateTime DateTime);
-
-// El nuevo Request para editar
 public record EditReservationRequest(DateTime NewDateTime);

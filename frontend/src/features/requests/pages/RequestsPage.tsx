@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ClipboardList, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { ClipboardList, Clock, CheckCircle, XCircle, Loader2, ThumbsUp, Ban } from 'lucide-react';
 import { getRequests, updateRequestStatus } from '../services/request.service';
-import type { RequestRecord } from '../types/request.types';
+import type { RequestRecord, RequestStatus } from '../types/request.types';
 
 export const RequestsPage = () => {
   const [requests, setRequests] = useState<RequestRecord[]>([]);
@@ -25,18 +25,21 @@ export const RequestsPage = () => {
   const handleStatusChange = async (id: string, newStatus: string) => {
     try {
       await updateRequestStatus(id, newStatus);
-      setRequests(requests.map(r => r.id === id ? { ...r, status: newStatus } : r));
-    } catch (error) {
-      alert("Error actualizando el estado");
+      setRequests(requests.map(r => r.id === id ? { ...r, status: newStatus as RequestStatus } : r));
+    } catch (error: any) {
+      alert(`Error actualizando el estado: ${error.message || 'Error desconocido'}`);
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  // 🔥 CORRECCIÓN: Badges mapeados exactamente al Enum de C#
+  const getStatusBadge = (status: RequestStatus | string) => {
     switch (status) {
-      case 'PENDING': return <span className="flex items-center px-2.5 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium"><Clock className="w-3 h-3 mr-1" /> Pendiente</span>;
-      case 'IN_PROGRESS': return <span className="flex items-center px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> En Proceso</span>;
-      case 'COMPLETED': return <span className="flex items-center px-2.5 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"><CheckCircle className="w-3 h-3 mr-1" /> Completado</span>;
-      case 'CANCELLED': return <span className="flex items-center px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"><XCircle className="w-3 h-3 mr-1" /> Cancelado</span>;
+      case 'Pending': return <span className="flex items-center px-2.5 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium"><Clock className="w-3 h-3 mr-1" /> Pendiente</span>;
+      case 'InReview': return <span className="flex items-center px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> En Revisión</span>;
+      case 'Approved': return <span className="flex items-center px-2.5 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-medium"><ThumbsUp className="w-3 h-3 mr-1" /> Aprobado</span>;
+      case 'Rejected': return <span className="flex items-center px-2.5 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium"><Ban className="w-3 h-3 mr-1" /> Rechazado</span>;
+      case 'Completed': return <span className="flex items-center px-2.5 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"><CheckCircle className="w-3 h-3 mr-1" /> Completado</span>;
+      case 'Cancelled': return <span className="flex items-center px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"><XCircle className="w-3 h-3 mr-1" /> Cancelado</span>;
       default: return <span>{status}</span>;
     }
   };
@@ -79,10 +82,12 @@ export const RequestsPage = () => {
                       onChange={(e) => handleStatusChange(req.id, e.target.value)}
                       className="text-sm border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="PENDING">Pendiente</option>
-                      <option value="IN_PROGRESS">En Proceso</option>
-                      <option value="COMPLETED">Completado</option>
-                      <option value="CANCELLED">Cancelar</option>
+                      <option value="Pending">Pendiente</option>
+                      <option value="InReview">En Revisión</option>
+                      <option value="Approved">Aprobado</option>
+                      <option value="Rejected">Rechazado</option>
+                      <option value="Completed">Completado</option>
+                      <option value="Cancelled">Cancelar</option>
                     </select>
                   </td>
                 </tr>

@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 using NexFlow.Application.Features.SuperAdmin.Workspaces;
 using NexFlow.Application.Features.SuperAdmin.Licenses;
-using NexFlow.Application.Abstractions.Repositories; // 🔥 Necesario para los catálogos
+using NexFlow.Application.Abstractions.Repositories;
 
 namespace NexFlow.API.Controllers.SuperAdmin;
 
@@ -30,20 +30,16 @@ public class ClientsController : ControllerBase
         return Ok(workspaces);
     }
 
-    // 🔥 SOLUCIÓN FALLO #41: Exponer las Plantillas reales
     [HttpGet("templates")]
     public async Task<IActionResult> GetTemplates([FromServices] ITemplateRepository templateRepository, CancellationToken cancellationToken)
     {
-        // Asumiendo que tienes un GetAllAsync o similar. Si se llama distinto en tu repo, ajusta el nombre.
         var templates = await templateRepository.GetAllAsync(cancellationToken);
         return Ok(templates);
     }
 
-    // 🔥 SOLUCIÓN FALLO #41: Exponer los Módulos reales
     [HttpGet("modules")]
     public async Task<IActionResult> GetModules([FromServices] IModuleRepository moduleRepository, CancellationToken cancellationToken)
     {
-        // Asumiendo que tienes un GetAllAsync o similar.
         var modules = await moduleRepository.GetAllAsync(cancellationToken);
         return Ok(modules);
     }
@@ -52,7 +48,7 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> ProvisionClient([FromBody] ProvisionClientCommand command, CancellationToken cancellationToken)
     {
         var result = await _provisionHandler.Handle(command, cancellationToken);
-        if (result.IsFailure) return BadRequest(new { Error = result.Error.Code, Message = result.Error.Description });
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Created($"/api/workspaces/{result.Value}", new { WorkspaceId = result.Value });
     }
 
@@ -60,7 +56,7 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> AssignModule([FromBody] AssignModuleToLicenseCommand command, [FromServices] AssignModuleToLicenseCommandHandler handler, CancellationToken cancellationToken)
     {
         var result = await handler.Handle(command, cancellationToken);
-        if (result.IsFailure) return BadRequest(result.Error.Description);
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Ok();
     }
 
@@ -68,7 +64,7 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> RenewLicense([FromBody] RenewLicenseCommand command, [FromServices] RenewLicenseCommandHandler handler, CancellationToken cancellationToken)
     {
         var result = await handler.Handle(command, cancellationToken);
-        if (result.IsFailure) return BadRequest(result.Error.Description);
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Ok();
     }
 
@@ -76,7 +72,7 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> SuspendClient([FromBody] SuspendClientCommand command, [FromServices] SuspendClientCommandHandler handler, CancellationToken cancellationToken)
     {
         var result = await handler.Handle(command, cancellationToken);
-        if (result.IsFailure) return BadRequest(result.Error.Description);
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Ok();
     }
 
@@ -84,7 +80,7 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> ReactivateClient([FromBody] ReactivateClientCommand command, [FromServices] ReactivateClientCommandHandler handler, CancellationToken cancellationToken)
     {
         var result = await handler.Handle(command, cancellationToken);
-        if (result.IsFailure) return BadRequest(result.Error.Description);
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Ok();
     }
 
@@ -92,7 +88,7 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> DeleteClient(Guid workspaceId, [FromServices] DeleteClientCommandHandler handler, CancellationToken cancellationToken)
     {
         var result = await handler.Handle(new DeleteClientCommand(workspaceId), cancellationToken);
-        if (result.IsFailure) return BadRequest(result.Error.Description);
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return NoContent();
     }
 }

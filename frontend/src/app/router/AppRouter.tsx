@@ -25,6 +25,10 @@ const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, chi
 // 2. GUARDIÁN DE ONBOARDING
 const OnboardingGuard = ({ children }: { children: React.ReactNode }) => {
   const { me } = useAuthStore();
+  
+  // 🔥 CORRECCIÓN: El SuperAdmin es inmune al Onboarding. Pasa directo.
+  if (me?.user?.isSuperAdmin) return <>{children}</>;
+
   if (me?.workspace?.status === 'Pending') {
     return <Navigate to="/onboarding" replace />;
   }
@@ -40,21 +44,17 @@ const router = createBrowserRouter([
     path: '/',
     element: <ProtectedRoute />, 
     children: [
-      // 🔥 RUTA COMPLETAMENTE AISLADA (Fallo #15): SuperAdmin
-      { 
-        path: 'superadmin', 
-        element: <SuperAdminPage /> 
-      },
-      // 🔥 FLUJO EXCLUSIVO PARA DUEÑOS DE NEGOCIO
       {
         path: 'onboarding',
         element: <OnboardingPage />, 
       },
+      // 🔥 CORRECCIÓN: El Layout ahora envuelve TODO, incluyendo la consola SuperAdmin
       {
         path: '/',
         element: <OnboardingGuard><WorkspaceLayout /></OnboardingGuard>,
         children: [
           { index: true, element: <DashboardPage /> },
+          { path: 'superadmin', element: <SuperAdminPage /> }, // 👈 SuperAdmin regresa a casa
           { path: 'reservations', element: <ModuleGuard requiredModule="RESERVATIONS"><ReservationsPage /></ModuleGuard> },
           { path: 'faqs', element: <ModuleGuard requiredModule="FAQ"><FaqsPage/></ModuleGuard> },
           { path: 'services', element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard> },

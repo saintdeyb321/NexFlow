@@ -22,22 +22,20 @@ export const OnboardingPage = () => {
   const [location, setLocation] = useState<LocationDto>({ name: 'Sede Principal', address: '', reference: '', isMain: true });
   const [hours, setHours] = useState<BusinessHoursDto[]>(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
 
-  // 🔥 CORRECCIÓN (Fallo #23): El Onboarding ahora es inteligente y reanudable.
   useEffect(() => {
     const initOnboarding = async () => {
       try {
         const data = await getBusinessProfile();
         
-        // Si ya hay un perfil con nombre, pasamos al Paso 2 automáticamente
-        if (data && data.commercialName) {
+        // Si el perfil ya fue llenado (el backend siempre manda "Negocio por Configurar", así que verificamos el WhatsApp que es obligatorio)
+        if (data && data.whatsAppNumber) {
           setProfile(data);
           
-          // Verificamos si ya había creado su sede
           const locs = await getLocations();
           if (locs && locs.length > 0) {
              const mainLoc = locs.find(l => l.isMain) || locs[0];
              setMainLocationId(mainLoc.id!);
-             setStep(3); // ¡Saltamos directo al Paso 3 de horarios!
+             setStep(3); 
           } else {
              setStep(2); 
           }
@@ -77,8 +75,7 @@ export const OnboardingPage = () => {
         setStep(4);
       }
     } catch (e: any) {
-      alert(`Error al guardar: ${e.response?.data?.message || e.message || 'Error desconocido'}`);
-      console.error(e);
+      alert(`Error al guardar: ${e.message || 'Error desconocido'}`);
     } finally {
       setIsSaving(false);
     }
@@ -141,16 +138,6 @@ export const OnboardingPage = () => {
                 <div><label className="block text-sm font-medium mb-1">Nombre de la Sede *</label><input type="text" value={location.name} onChange={e => setLocation({...location, name: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>
                 <div><label className="block text-sm font-medium mb-1">Dirección Exacta *</label><input type="text" value={location.address} onChange={e => setLocation({...location, address: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" required /></div>
                 <div><label className="block text-sm font-medium mb-1">Referencia</label><input type="text" value={location.reference} onChange={e => setLocation({...location, reference: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" /></div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Enlace de Google Maps (Opcional)</label>
-                  <input 
-                    type="url" 
-                    value={location.mapUrl || ''} 
-                    onChange={e => setLocation({...location, mapUrl: e.target.value})} 
-                    placeholder="https://maps.app.goo.gl/..."
-                    className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500" 
-                  />
-                </div>
               </div>
             </div>
           )}

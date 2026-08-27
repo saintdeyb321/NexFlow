@@ -1,5 +1,5 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { FaqDto } from '../types/business.types'; // Ajusta la importación según tu estructura
+import type { FaqDto } from '../types/business.types';
 
 export const faqService = {
   getFaqs: async (): Promise<FaqDto[]> => {
@@ -7,7 +7,7 @@ export const faqService = {
     return data;
   },
 
-  saveFaq: async (faq: Partial<FaqDto>): Promise<FaqDto> => {
+  saveFaq: async (faq: Omit<FaqDto, 'id'> & { id?: string }): Promise<FaqDto> => {
     const { data } = await axiosClient.post<FaqDto>('/business/faqs', faq);
     return data;
   },

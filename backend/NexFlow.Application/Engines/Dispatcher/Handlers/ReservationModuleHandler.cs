@@ -28,35 +28,36 @@ public class ReservationModuleHandler : IModuleHandler
 
     public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
-        var phone = request.Parameters.TryGetValue("phone", out var p) ? p : "unknown";
+        var phone = request.Parameters.TryGetValue("phone", out var p) ? p?.ToString() ?? "unknown" : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, phone, cancellationToken) ?? new ConversationContextDto();
 
         // 1. RESOLVER SEDE
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
-        string? targetLocationId = context.LocationId;
+        // 🔥 CORRECCIÓN: Usamos SelectedLocationId
+        string? targetLocationId = context.SelectedLocationId;
 
         if (string.IsNullOrEmpty(targetLocationId))
         {
             if (locations.Count() == 1)
             {
                 targetLocationId = locations.First().Id;
-                context.LocationId = targetLocationId;
+                context.SelectedLocationId = targetLocationId;
             }
             else if (locations.Any())
             {
-                if (request.Parameters.TryGetValue("location", out var locName))
+                if (request.Parameters.TryGetValue("location", out var locName) && locName != null)
                 {
-                    var matchedLoc = locations.FirstOrDefault(l => l.Name.Contains(locName, StringComparison.OrdinalIgnoreCase));
-                    if (matchedLoc != null) context.LocationId = matchedLoc.Id;
+                    var matchedLoc = locations.FirstOrDefault(l => l.Name.Contains(locName.ToString()!, StringComparison.OrdinalIgnoreCase));
+                    if (matchedLoc != null) context.SelectedLocationId = matchedLoc.Id;
                 }
-                if (string.IsNullOrEmpty(context.LocationId))
+                if (string.IsNullOrEmpty(context.SelectedLocationId))
                 {
                     context.PendingAction = "ASK_LOCATION";
                     await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
                     var locationNames = string.Join(", ", locations.Select(l => l.Name));
                     return $"SISTEMA: El negocio tiene varias sedes. Pregúntale amablemente al cliente en cuál desea reservar. Opciones: {locationNames}.";
                 }
-                targetLocationId = context.LocationId;
+                targetLocationId = context.SelectedLocationId;
             }
             else
             {
@@ -65,28 +66,28 @@ public class ReservationModuleHandler : IModuleHandler
         }
 
         // 2. RESOLVER SERVICIO
-        string? targetServiceId = context.ServiceId;
+        // 🔥 CORRECCIÓN: Usamos SelectedServiceId
+        string? targetServiceId = context.SelectedServiceId;
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
 
         if (string.IsNullOrEmpty(targetServiceId))
         {
-            if (request.Parameters.TryGetValue("service", out var serviceName))
+            if (request.Parameters.TryGetValue("service", out var serviceName) && serviceName != null)
             {
-                var matchedService = services.FirstOrDefault(s => s.Name.Contains(serviceName, StringComparison.OrdinalIgnoreCase));
-                if (matchedService != null) context.ServiceId = matchedService.Id;
+                var matchedService = services.FirstOrDefault(s => s.Name.Contains(serviceName.ToString()!, StringComparison.OrdinalIgnoreCase));
+                if (matchedService != null) context.SelectedServiceId = matchedService.Id;
             }
 
-            if (string.IsNullOrEmpty(context.ServiceId))
+            if (string.IsNullOrEmpty(context.SelectedServiceId))
             {
                 context.PendingAction = "ASK_SERVICE";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
                 var serviceNames = string.Join(", ", services.Where(s => s.IsActive).Select(s => s.Name));
                 return $"SISTEMA: Necesitamos saber qué servicio desea. Pregúntale al cliente qué servicio quiere agendar. Opciones: {serviceNames}.";
             }
-            targetServiceId = context.ServiceId;
+            targetServiceId = context.SelectedServiceId;
         }
 
-        // Validación extra de seguridad (Si no hay sede o servicio resueltos para este punto, salimos)
         if (string.IsNullOrEmpty(targetLocationId) || string.IsNullOrEmpty(targetServiceId))
         {
             return "SISTEMA: Error interno. No se pudo determinar la Sede o el Servicio a procesar.";
@@ -94,7 +95,7 @@ public class ReservationModuleHandler : IModuleHandler
 
         // 3. RESOLVER FECHA
         DateTime dateToSearch = DateTime.UtcNow.Date;
-        if (request.Parameters.TryGetValue("date", out var dateStr) && DateTime.TryParse(dateStr, out var parsedDate))
+        if (request.Parameters.TryGetValue("date", out var dateStr) && dateStr != null && DateTime.TryParse(dateStr.ToString(), out var parsedDate))
         {
             dateToSearch = parsedDate.Date;
         }
@@ -102,7 +103,6 @@ public class ReservationModuleHandler : IModuleHandler
         // --- RUTAS DE EJECUCIÓN FINAL ---
         if (request.CapabilityCode == "CHECK_AVAILABILITY")
         {
-            // 🔥 CORRECCIÓN: Usamos ! para garantizar al compilador que no son nulos
             var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, targetLocationId!, targetServiceId!, dateToSearch, cancellationToken);
             context.PendingAction = "ASK_TIME";
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
@@ -116,14 +116,14 @@ public class ReservationModuleHandler : IModuleHandler
 
         if (request.CapabilityCode == "CREATE")
         {
-            if (!request.Parameters.TryGetValue("time", out var timeStr) || !TimeSpan.TryParse(timeStr, out var time))
+            if (!request.Parameters.TryGetValue("time", out var timeStr) || timeStr == null || !TimeSpan.TryParse(timeStr.ToString(), out var time))
             {
                 context.PendingAction = "ASK_TIME";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
                 return "SISTEMA: Falta la hora exacta. Pídele al cliente que indique a qué hora desea su cita.";
             }
 
-            if (!request.Parameters.TryGetValue("name", out var customerName) || string.IsNullOrWhiteSpace(customerName))
+            if (!request.Parameters.TryGetValue("name", out var customerName) || customerName == null || string.IsNullOrWhiteSpace(customerName.ToString()))
             {
                 context.PendingAction = "ASK_NAME";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
@@ -133,12 +133,12 @@ public class ReservationModuleHandler : IModuleHandler
             var exactDateTime = dateToSearch.Add(time);
             string customerIdentifier = phone;
 
-            // 🔥 CORRECCIÓN: Usamos ! para garantizar al compilador que no son nulos
-            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId!, targetServiceId!, customerIdentifier, customerName, exactDateTime, cancellationToken);
+            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId!, targetServiceId!, customerIdentifier, customerName.ToString()!, exactDateTime, cancellationToken);
 
             if (result.IsSuccess)
             {
-                context.LocationId = null; context.ServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
+                // 🔥 CORRECCIÓN: Limpiamos los nuevos nombres de propiedades al tener éxito
+                context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
 
                 return $"SISTEMA: Reserva CREADA EXITOSAMENTE a nombre de {customerName} para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.";

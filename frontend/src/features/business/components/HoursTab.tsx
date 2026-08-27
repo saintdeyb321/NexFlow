@@ -52,6 +52,22 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
   };
 
   const handleSave = async () => {
+    // 🔥 SOLUCIÓN (Fallo #55): Validación lógica en el frontend antes de tocar la API
+    for (const h of hours) {
+      if (!h.isClosed) {
+        if (!h.openTime || !h.closeTime) {
+          const dayName = DAYS_OF_WEEK.find(d => d.id === h.dayOfWeek)?.name;
+          showMessage(`Completa la hora de apertura y cierre para el día ${dayName}.`, 'error');
+          return;
+        }
+        if (h.openTime >= h.closeTime) {
+          const dayName = DAYS_OF_WEEK.find(d => d.id === h.dayOfWeek)?.name;
+          showMessage(`En el día ${dayName}, la hora de apertura (${h.openTime}) debe ser menor al cierre (${h.closeTime}).`, 'error');
+          return;
+        }
+      }
+    }
+
     setIsSaving(true);
     try {
       await saveBusinessHours(selectedLocationId, hours);

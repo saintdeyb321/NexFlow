@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
+import { axiosClient } from '../../../core/api/axiosClient';
 import type { ProvisionWorkspaceRequest } from '../types/admin.types';
 
 interface ProvisionModalProps {
@@ -12,36 +13,59 @@ interface ProvisionModalProps {
 
 export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvisioning }: ProvisionModalProps) => {
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
-  const [customModulesStr, setCustomModulesStr] = useState('FAQ, RESERVATIONS, SERVICES');
+  
+  // 🔥 ESTADOS DINÁMICOS DEL CATÁLOGO
+  const [dbTemplates, setDbTemplates] = useState<any[]>([]);
+  const [dbModules, setDbModules] = useState<any[]>([]);
+  const [selectedCustomModules, setSelectedCustomModules] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     email: '',
-    firstName: '',
-    lastName: '',
-    workspaceName: '',
-    templateCode: 'BOOKING', 
+    templateCode: '', 
     expiresAt: '',
     maxLocations: 1
   });
 
-  // Generar fecha por defecto al abrir el modal (1 año)
   useEffect(() => {
+    const fetchCatalog = async () => {
+      try {
+        const [tplRes, modRes] = await Promise.all([
+          axiosClient.get('/superadmin/clients/templates'),
+          axiosClient.get('/superadmin/clients/modules')
+        ]);
+        setDbTemplates(tplRes.data);
+        setDbModules(modRes.data);
+        if (tplRes.data.length > 0) {
+          setFormData(prev => ({ ...prev, templateCode: tplRes.data[0].code }));
+        }
+      } catch (error) {
+        console.error("Error cargando catálogo", error);
+      }
+    };
+
     if (isOpen) {
+      fetchCatalog();
       const defaultDate = new Date();
       defaultDate.setFullYear(defaultDate.getFullYear() + 1);
       setFormData(prev => ({ ...prev, expiresAt: defaultDate.toISOString().split('T')[0] }));
     }
   }, [isOpen]);
 
+  const handleModuleToggle = (code: string) => {
+    setSelectedCustomModules(prev => 
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    );
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Construcción estricta basada en el C# ProvisionClientCommand
+    // 🔥 CORRECCIÓN: Autocompletamos con datos genéricos para que el inquilino los llene en su Onboarding
     const payload: ProvisionWorkspaceRequest = {
       email: formData.email,
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      workspaceName: formData.workspaceName,
+      firstName: "Usuario",
+      lastName: "Nuevo",
+      workspaceName: "Negocio por Configurar",
       expiresAt: new Date(formData.expiresAt).toISOString(),
       maxLocations: Number(formData.maxLocations)
     };
@@ -49,12 +73,14 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
     if (provisionMode === 'template') {
       payload.templateCode = formData.templateCode; 
     } else {
-      payload.customModules = customModulesStr.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+      if (selectedCustomModules.length === 0) return alert('Selecciona al menos 1 módulo custom');
+      payload.customModules = selectedCustomModules;
     }
     
     await onProvision(payload, () => {
-      setFormData({ email: '', firstName: '', lastName: '', workspaceName: '', templateCode: 'BOOKING', expiresAt: '', maxLocations: 1 });
+      setFormData({ email: '', templateCode: dbTemplates[0]?.code || '', expiresAt: '', maxLocations: 1 });
       setProvisionMode('template');
+      setSelectedCustomModules([]);
       onClose();
     });
   };
@@ -64,24 +90,8 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
       <form onSubmit={handleSubmit} className="space-y-4">
         
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Negocio</label>
-          <input type="text" required value={formData.workspaceName} onChange={e => setFormData({...formData, workspaceName: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nombres</label>
-            <input type="text" required value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Apellidos</label>
-            <input type="text" required value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Correo (Google Auth)</label>
-          <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
+          <label className="block text-sm font-medium text-gray-700 mb-1">Correo del Dueño (Google Auth)</label>
+          <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" placeholder="cliente@gmail.com" />
         </div>
 
         <div className="pt-4 border-t border-gray-100">
@@ -104,24 +114,27 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
                 onChange={e => setFormData({...formData, templateCode: e.target.value})} 
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all cursor-pointer"
               >
-                <option value="SUPPORT">Atención Básica (FAQ)</option>
-                <option value="BOOKING">Asistente de Reservas</option>
-                <option value="COMMERCIAL">Asistente Comercial (Catálogo)</option>
-                <option value="REQUESTS">Asistente de Trámites</option>
-                <option value="FULL">Operaciones Completas</option>
+                {dbTemplates.map(t => (
+                  <option key={t.code} value={t.code}>{t.name} ({t.code})</option>
+                ))}
               </select>
             </div>
           ) : (
-            <div className="animate-in fade-in slide-in-from-top-1">
-              <input 
-                type="text" 
-                placeholder="Ej: FAQ, RESERVATIONS, CATALOG" 
-                value={customModulesStr} 
-                onChange={e => setCustomModulesStr(e.target.value)} 
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all uppercase" 
-                required={provisionMode === 'custom'} 
-              />
-              <p className="text-xs text-gray-500 mt-1.5">Módulos separados por coma.</p>
+            <div className="animate-in fade-in slide-in-from-top-1 bg-gray-50 p-4 rounded-xl border border-gray-200">
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Módulos Disponibles</label>
+              <div className="grid grid-cols-2 gap-3">
+                {dbModules.map(m => (
+                  <label key={m.code} className="flex items-center text-sm text-gray-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedCustomModules.includes(m.code)}
+                      onChange={() => handleModuleToggle(m.code)}
+                      className="mr-2 rounded text-purple-600 focus:ring-purple-500"
+                    />
+                    {m.name}
+                  </label>
+                ))}
+              </div>
             </div>
           )}
         </div>

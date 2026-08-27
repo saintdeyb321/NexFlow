@@ -33,7 +33,7 @@ public class UserIdentityMiddleware
             {
                 var user = await userRepository.GetByFirebaseUidAsync(firebaseUid, context.RequestAborted);
 
-                // 🔥 PRIMER LOGIN: Enlazamos la cuenta si existe el correo
+                // 🔥 CORRECCIÓN: Si no existe por UID, lo buscamos por correo.
                 if (user == null && !string.IsNullOrEmpty(email))
                 {
                     _logger.LogWarning($"[Auth] 🟡 FirebaseUid {firebaseUid} no enlazado. Buscando email ({email})...");
@@ -41,33 +41,42 @@ public class UserIdentityMiddleware
 
                     if (user != null)
                     {
-                        user.LinkFirebaseAccount(firebaseUid);
-                        await unitOfWork.SaveChangesAsync(context.RequestAborted);
-                        _logger.LogInformation($"[Auth] ✅ Enlace completado para DB Id: {user.Id}");
+                        // 🛡️ BLINDAJE EXTRA: Solo lo enlazamos si el usuario de la DB NO tiene un UID diferente asignado.
+                        if (string.IsNullOrEmpty(user.FirebaseUid))
+                        {
+                            user.LinkFirebaseAccount(firebaseUid);
+                            await unitOfWork.SaveChangesAsync(context.RequestAborted);
+                            _logger.LogInformation($"[Auth] ✅ Enlace completado para DB Id: {user.Id}");
+                        }
+                        else
+                        {
+                            _logger.LogError($"[Auth] 🔴 Choque de Identidad. El email {email} ya pertenece al UID {user.FirebaseUid}.");
+                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                            context.Response.ContentType = "application/json";
+                            await context.Response.WriteAsync("{\"code\":\"Auth.IdentityConflict\",\"message\":\"Este correo ya está asociado a otra cuenta de Google.\"}");
+                            return;
+                        }
                     }
                 }
 
-                // 🛡️ SOLUCIÓN FALLO #38: Cortar acceso a cuentas NO provisionadas
                 if (user == null)
                 {
                     _logger.LogError($"[Auth] 🔴 Acceso Denegado. El correo {email} NO está provisionado.");
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     context.Response.ContentType = "application/json";
                     await context.Response.WriteAsync("{\"code\":\"Auth.Unprovisioned\",\"message\":\"Tu cuenta no está registrada en la plataforma. Solicita acceso al administrador.\"}");
-                    return; // ¡Cortamos el pipeline aquí mismo!
+                    return;
                 }
 
-                // 🛡️ BLOQUEO DE USUARIOS SUSPENDIDOS/INACTIVOS
                 if (user.Status != UserStatus.Active)
                 {
                     _logger.LogWarning($"[Auth] 🔴 Acceso Denegado. El usuario {email} está {user.Status}.");
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     context.Response.ContentType = "application/json";
                     await context.Response.WriteAsync($"{{\"code\":\"Auth.Suspended\",\"message\":\"Tu cuenta está {user.Status}. Contacta a soporte.\"}}");
-                    return; // ¡Cortamos el pipeline aquí mismo!
+                    return;
                 }
 
-                // Si todo es válido, inyectamos la identidad real
                 context.Items["UserId"] = user.Id;
             }
             else

@@ -18,15 +18,18 @@ public class GetMeQueryHandler
     private readonly ILicenseRepository _licenseRepository;
     private readonly IEntitlementService _entitlementService;
     private readonly ISystemAdministratorRepository _sysAdminRepository;
+    private readonly IModuleRepository _moduleRepository; 
 
     public GetMeQueryHandler(
         ICurrentUser currentUser, IUserRepository userRepository, IMembershipRepository membershipRepository,
         IWorkspaceRepository workspaceRepository, ILicenseRepository licenseRepository,
-        IEntitlementService entitlementService, ISystemAdministratorRepository sysAdminRepository)
+        IEntitlementService entitlementService, ISystemAdministratorRepository sysAdminRepository,
+        IModuleRepository moduleRepository)
     {
         _currentUser = currentUser; _userRepository = userRepository; _membershipRepository = membershipRepository;
         _workspaceRepository = workspaceRepository; _licenseRepository = licenseRepository;
         _entitlementService = entitlementService; _sysAdminRepository = sysAdminRepository;
+        _moduleRepository = moduleRepository;
     }
 
     public async Task<Result<MeDto>> Handle(CancellationToken cancellationToken)
@@ -37,15 +40,10 @@ public class GetMeQueryHandler
         bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, cancellationToken);
         var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName, isSuperAdmin);
 
-        // 🛡️ SOLUCIÓN FALLOS #13 Y #14: Separación de Identidad
         if (isSuperAdmin)
         {
-            // El SuperAdmin obtiene TODOS los módulos del sistema directamente (Catálogo Maestro)
-            // No tiene Workspace, no tiene Licencia que caduque. Poder absoluto.
-            string[] systemMasterModules = {
-                "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES",
-                "CATALOG", "RESERVATIONS", "REQUESTS", "NOTIFICATIONS", "CUSTOMERS", "CONVERSATIONS"
-            };
+            var allModules = await _moduleRepository.GetAllAsync(cancellationToken);
+            var systemMasterModules = allModules.Select(m => m.Code).ToArray();
 
             return Result<MeDto>.Success(new MeDto(userDto, null, null, systemMasterModules));
         }

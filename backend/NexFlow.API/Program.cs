@@ -11,7 +11,6 @@ using NexFlow.Infrastructure.DependencyInjection;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using System.Threading.RateLimiting;
 using System.Security.Claims;
-using System;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,6 +22,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IWorkspaceContext, WorkspaceContext>();
+
+builder.Services.AddMemoryCache();
 
 // 3. Configurar Firebase Authentication (JWT)
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"];
@@ -89,11 +90,12 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // 7. CORS
+var allowedOrigins = builder.Configuration["Cors:AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:5173" };
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .WithExposedHeaders("X-Correlation-ID");
@@ -101,10 +103,7 @@ builder.Services.AddCors(options =>
 });
 
 // 8. HEALTH CHECKS
-var redisConnectionString = builder.Configuration.GetConnectionString("RedisConnection") ?? "localhost:6379";
-
 builder.Services.AddHealthChecks()
-    // 🔥 CORRECCIÓN (Fallo #33): Solo dejamos PostgreSQL como bloqueo crítico de vida de la App en el MVP
     .AddDbContextCheck<NexFlowDbContext>(name: "PostgreSQL", tags: new[] { "db", "data" });
 
 builder.Services.AddControllers();
@@ -117,7 +116,6 @@ var app = builder.Build();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
-// 🔥 CORRECCIÓN (Fallo #34): Operaciones peligrosas limitadas exclusivamente a Desarrollo
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -126,15 +124,12 @@ if (app.Environment.IsDevelopment())
     using (var scope = app.Services.CreateScope())
     {
         var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
-        // Ejecutamos migraciones al vuelo solo en modo de desarrollador
         await context.Database.MigrateAsync();
-        // Sembramos catálogos
         await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
     }
 }
 else
 {
-    // En producción solo sembramos los catálogos en caso de estar vacíos, pero NO migramos automáticamente.
     using (var scope = app.Services.CreateScope())
     {
         var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
@@ -145,6 +140,7 @@ else
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();

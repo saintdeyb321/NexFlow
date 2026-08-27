@@ -16,8 +16,10 @@ export const getServices = async (): Promise<ServiceDto[]> => {
   return data;
 };
 
-export const saveService = async (service: ServiceDto): Promise<void> => {
-  await axiosClient.post('/business/services', service);
+// 🔥 CORRECCIÓN: El backend ahora retorna la entidad, la atrapamos.
+export const saveService = async (service: ServiceDto): Promise<ServiceDto> => {
+  const { data } = await axiosClient.post<ServiceDto>('/business/services', service);
+  return data;
 };
 
 export const deleteService = async (serviceId: string): Promise<void> => {

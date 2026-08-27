@@ -42,7 +42,7 @@ public class RequestsController : ControllerBase
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken);
         if (!activeModules.Contains("REQUESTS")) return StatusCode(403, "Módulo REQUESTS no contratado.");
 
-        // 🔥 CORRECCIÓN (Fallo #53): Validamos contra el Enum estricto
+        // Validamos contra el Enum estricto
         if (!Enum.TryParse<RequestStatusEnum>(payload.Status, true, out var parsedStatus))
         {
             return BadRequest(new { code = "Request.InvalidStatus", message = $"El estado '{payload.Status}' no es válido." });
@@ -53,7 +53,6 @@ public class RequestsController : ControllerBase
     }
 }
 
-// 🔥 Enum estricto de dominio para los estados
 public enum RequestStatusEnum
 {
     Pending,
@@ -63,5 +62,4 @@ public enum RequestStatusEnum
     Completed,
     Cancelled
 }
-
 public record UpdateStatusDto(string Status);

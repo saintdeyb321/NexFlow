@@ -5,6 +5,18 @@ import {
   ShieldAlert, MessageCircle, Package, ClipboardList, Users, Bell 
 } from 'lucide-react';
 
+// 🔥 SPRINT 8: Registro Maestro de Módulos (Module Registry)
+const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: React.ElementType }> = {
+  'RESERVATIONS': { route: '/reservations', label: 'Reservas', icon: Calendar },
+  'CONVERSATIONS': { route: '/inbox', label: 'Mensajes', icon: MessageCircle },
+  'FAQ': { route: '/faqs', label: 'Base (FAQ)', icon: BookOpen },
+  'SERVICES': { route: '/services', label: 'Servicios', icon: Scissors },
+  'CATALOG': { route: '/catalog', label: 'Catálogo', icon: Package },
+  'REQUESTS': { route: '/requests', label: 'Solicitudes', icon: ClipboardList },
+  'CUSTOMERS': { route: '/customers', label: 'Clientes', icon: Users },
+  'NOTIFICATIONS': { route: '/notifications', label: 'Notificaciones', icon: Bell }
+};
+
 export const WorkspaceLayout = () => {
   const { me, logout } = useAuthStore();
   const { pathname } = useLocation();
@@ -14,10 +26,15 @@ export const WorkspaceLayout = () => {
 
   const navItemClass = (path: string) => 
     `flex items-center px-4 py-3 mb-1 rounded-lg transition-colors ${
-      pathname === path || pathname.startsWith(`${path}/`)
+      pathname === path || (path !== '/' && pathname.startsWith(`${path}/`))
         ? 'bg-blue-50 text-blue-700 font-medium' 
         : 'text-gray-600 hover:bg-gray-50'
     }`;
+
+  // Extraemos y ordenamos los módulos activos basados en el Registry
+  const activeModules = entitlements
+    .filter(code => MODULE_REGISTRY[code])
+    .map(code => ({ code, ...MODULE_REGISTRY[code] }));
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -32,55 +49,12 @@ export const WorkspaceLayout = () => {
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
           </Link>
 
-          {entitlements.includes('RESERVATIONS') && (
-            <Link to="/reservations" className={navItemClass('/reservations')}>
-              <Calendar className="w-5 h-5 mr-3" /> Reservas
+          {/* Renderizado Dinámico de Módulos */}
+          {activeModules.map(({ code, route, label, icon: Icon }) => (
+            <Link key={code} to={route} className={navItemClass(route)}>
+              <Icon className="w-5 h-5 mr-3" /> {label}
             </Link>
-          )}
-          
-          {entitlements.includes('CONVERSATIONS') && (
-            <Link to="/inbox" className={navItemClass('/inbox')}>
-              <MessageCircle className="w-5 h-5 mr-3" /> Mensajes
-            </Link>
-          )}
-
-          {entitlements.includes('FAQ') && (
-            <Link to="/faqs" className={navItemClass('/faqs')}>
-              <BookOpen className="w-5 h-5 mr-3" /> Base (FAQ)
-            </Link>
-          )}
-
-          {entitlements.includes('SERVICES') && (
-            <Link to="/services" className={navItemClass('/services')}>
-              <Scissors className="w-5 h-5 mr-3" /> Servicios
-            </Link>
-          )}
-
-          {entitlements.includes('CATALOG') && (
-            <Link to="/catalog" className={navItemClass('/catalog')}>
-              <Package className="w-5 h-5 mr-3" /> Catálogo
-            </Link>
-          )}
-
-          {entitlements.includes('REQUESTS') && (
-            <Link to="/requests" className={navItemClass('/requests')}>
-              <ClipboardList className="w-5 h-5 mr-3" /> Solicitudes
-            </Link>
-          )}
-
-          {/* 🔥 SOLUCIÓN FALLO #57: Módulo de Clientes Expuesto */}
-          {entitlements.includes('CUSTOMERS') && (
-            <Link to="/customers" className={navItemClass('/customers')}>
-              <Users className="w-5 h-5 mr-3" /> Clientes
-            </Link>
-          )}
-
-          {/* 🔥 SOLUCIÓN FALLO #58: Módulo de Notificaciones Expuesto */}
-          {entitlements.includes('NOTIFICATIONS') && (
-            <Link to="/notifications" className={navItemClass('/notifications')}>
-              <Bell className="w-5 h-5 mr-3" /> Notificaciones
-            </Link>
-          )}
+          ))}
           
           <div className="mt-8 mb-2 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
             Administración
@@ -94,12 +68,21 @@ export const WorkspaceLayout = () => {
         {/* User Profile & Logout */}
         <div className="p-4 border-t border-gray-200 bg-gray-50">
           <div className="mb-3 px-2">
-            <p className="text-sm font-semibold text-gray-800 truncate">{me?.workspace?.name || 'Configurando...'}</p>
+            <p className="text-sm font-semibold text-gray-800 truncate">
+              {isSuperAdmin ? 'Administración Global' : (me?.workspace?.name || 'Configurando...')}
+            </p>
             <p className="text-xs text-gray-500 truncate">{me?.user?.email}</p>
           </div>
           
           {isSuperAdmin && (
-            <Link to="/superadmin" className="w-full flex items-center px-4 py-2 mb-2 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
+            <Link 
+              to="/superadmin" 
+              className={`w-full flex items-center px-4 py-2 mb-2 text-sm font-medium rounded-lg transition-colors ${
+                pathname.startsWith('/superadmin') 
+                  ? 'bg-purple-600 text-white shadow-sm' 
+                  : 'text-purple-700 bg-purple-50 hover:bg-purple-100'
+              }`}
+            >
               <ShieldAlert className="w-4 h-4 mr-2" /> Consola SuperAdmin
             </Link>
           )}

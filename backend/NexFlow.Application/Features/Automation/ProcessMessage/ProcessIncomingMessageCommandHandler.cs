@@ -41,13 +41,10 @@ public class ProcessIncomingMessageCommandHandler
 
     public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
-        // 1. RESOLVER INSTANCIA PRIMERO (El origen del Tenant)
         var resolvedWorkspaceId = await _instanceResolver.ResolveInstanceAsync(request.InstanceName, cancellationToken);
         if (resolvedWorkspaceId == null || resolvedWorkspaceId == Guid.Empty) return Result.Success();
         Guid workspaceId = resolvedWorkspaceId.Value;
 
-        // 2. IDEMPOTENCIA BLINDADA (WorkspaceId + ExternalMessageId)
-        // 🔥 CORRECCIÓN: La llave ahora es absolutamente única por inquilino.
         string idempotencyKey = $"{workspaceId}_{request.MessageId}";
         bool isFirstTime = await _conversationCache.TryAcquireMessageLockAsync(workspaceId, idempotencyKey, cancellationToken);
 
@@ -57,21 +54,14 @@ public class ProcessIncomingMessageCommandHandler
             return Result.Success();
         }
 
-        // 3. BLINDAJE 1: Ignorar grupos de WhatsApp de inmediato
         if (request.CustomerPhone.Contains("@g.us") || request.CustomerPhone.Contains("-"))
             return Result.Success();
 
-        // 4. CONSULTAR ESTADO PREVIO DE LA CONVERSACIÓN
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, request.CustomerPhone, cancellationToken);
 
-        // 5. BLINDAJE 2 (Privacidad): Ignorar mensajes salientes del dueño a contactos personales no registrados.
         if (request.FromMe && conversation == null)
-        {
-            _logger.LogInformation("Mensaje saliente a un número no registrado. Ignorando para proteger privacidad del usuario.");
             return Result.Success();
-        }
 
-        // 6. IDENTIDAD DEL CONSUMIDOR (Upsert)
         var consumer = new ConsumerIdentityRecord
         {
             Phone = request.CustomerPhone,
@@ -81,7 +71,6 @@ public class ProcessIncomingMessageCommandHandler
         };
         await _consumerRepo.UpsertConsumerAsync(workspaceId, consumer, cancellationToken);
 
-        // 7. CREACIÓN DEL HILO DE CONVERSACIÓN (Si no existe)
         if (conversation == null)
         {
             conversation = new ConversationRecord
@@ -97,20 +86,17 @@ public class ProcessIncomingMessageCommandHandler
             await _conversationRepo.CreateConversationAsync(workspaceId, conversation, cancellationToken);
         }
 
-        // 8. REGISTRAR EL MENSAJE (Entrante del cliente o Saliente del dueño)
         var messageRecord = new MessageRecord
         {
             Id = request.MessageId,
             Direction = request.FromMe ? "outbound" : "inbound",
             Sender = request.FromMe ? SenderType.BusinessUser : SenderType.Consumer,
             Content = request.MessageText,
-            ExternalMessageId = request.MessageId, // Fundamental para rastrear en Evolution
+            ExternalMessageId = request.MessageId,
             Timestamp = DateTime.UtcNow
         };
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, messageRecord, cancellationToken);
 
-        // 9. EL ESCUDO DE LA IA (Handoff / Pause)
-        // 🔥 CORRECCIÓN: Si el dueño intervino desde WhatsApp Web (FromMe), silenciamos a la IA.
         if (conversation.Mode == ConversationMode.Human || conversation.Mode == ConversationMode.Paused || request.FromMe)
         {
             _logger.LogInformation("IA Silenciada en {ConvId}. Razón: Modo {Mode} o Mensaje FromMe ({FromMe}).",
@@ -118,11 +104,9 @@ public class ProcessIncomingMessageCommandHandler
             return Result.Success();
         }
 
-        // 10. VERIFICAR LICENCIA Y ENTITLEMENTS ANTES DE GASTAR TOKENS
         if (!await _entitlementService.IsLicenseValidAsync(workspaceId, cancellationToken))
             return Result.Success();
 
-        // 11. CORE AUTOMATION (El cerebro de NexFlow)
         var intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, cancellationToken);
         if (!intentResult.IsConfident())
             intentResult = new IntentResultDto(IntentType.Unknown, 0, new());
@@ -130,13 +114,18 @@ public class ProcessIncomingMessageCommandHandler
         intentResult.Parameters["phone"] = request.CustomerPhone;
         intentResult.Parameters["messageId"] = request.MessageId;
 
-        var systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
+        ModuleExecutionResult systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
+
+        if (systemContext.RequiresHuman)
+        {
+            await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
+            _logger.LogInformation("Handoff Automático disparado para conversación {ConvId}", conversation.Id);
+        }
+
         var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, intentResult, systemContext, cancellationToken);
 
-        // Enviar respuesta por WhatsApp
         await _messageGateway.SendTextAsync(workspaceId, request.CustomerPhone, finalResponse, cancellationToken);
 
-        // 12. REGISTRAR LA RESPUESTA DE LA IA EN FIRESTORE
         var aiMessageRecord = new MessageRecord
         {
             Id = Guid.NewGuid().ToString(),
