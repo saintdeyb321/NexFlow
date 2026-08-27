@@ -4,12 +4,14 @@ import { auth } from '../../app/config/firebase';
 export class ApiError extends Error {
   status: number;
   code: string;
+  correlationId?: string;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, correlationId?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.correlationId = correlationId;
   }
 }
 
@@ -47,17 +49,17 @@ axiosClient.interceptors.response.use(
       const status = error.response.status;
       const data = error.response.data;
 
-      // 🛡️ CONTRATO UNIFICADO ESTRICTO
-      // Busca 'message' prioritariamente. 'detail' queda como red de seguridad de ASP.NET
-      const message = data?.message || data?.Message || data?.detail || 'Error desconocido en el servidor';
-      const code = data?.code || data?.Error || data?.title || 'UNKNOWN_ERROR';
+      // 🛡️ CONTRATO UNIFICADO: Solo lee lo que manda el GlobalExceptionMiddleware
+      const message = data?.message || data?.detail || 'Error desconocido en el servidor';
+      const code = data?.code || data?.title || 'UNKNOWN_ERROR';
+      const correlationId = data?.correlationId;
 
       if (status === 401) console.warn("⛔ [401] Sesión expirada o inválida");
       else if (status === 403) console.warn(`🔒 [403] Acceso Denegado: ${message}`);
       else if (status === 404) console.warn(`🔍 [404] Endpoint no encontrado: ${error.config.url}`);
       else if (status >= 500) console.error(`🔥 [500] Error del Servidor Backend: ${message}`);
 
-      return Promise.reject(new ApiError(status, code, message));
+      return Promise.reject(new ApiError(status, code, message, correlationId));
     } else if (error.request) {
       return Promise.reject(new ApiError(0, 'NETWORK_ERROR', 'Sin conexión al servidor'));
     }

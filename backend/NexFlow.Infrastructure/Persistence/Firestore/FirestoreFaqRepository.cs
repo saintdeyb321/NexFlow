@@ -33,18 +33,19 @@ public class FirestoreFaqRepository : IFaqRepository
 
     public async Task<FaqDto> SaveFaqAsync(Guid workspaceId, FaqDto faq, CancellationToken cancellationToken)
     {
-        // 1. Si el Frontend no mandó ID, lo generamos.
-        var faqId = string.IsNullOrEmpty(faq.Id) ? Guid.NewGuid().ToString() : faq.Id;
-
-        // 2. Asignación directa y simple para clases estándar (soluciona el error del 'record')
-        faq.Id = faqId;
-
-        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString())
-                        .Collection("faqs").Document(faqId);
-
+        var collectionRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs");
+        var docRef = collectionRef.Document(faq.Id);
+        var docSnapshot = await docRef.GetSnapshotAsync(cancellationToken);
+        bool isNewRecord = !docSnapshot.Exists;
+        if (isNewRecord)
+        {
+            var countSnapshot = await collectionRef.Count().GetSnapshotAsync(cancellationToken);
+            if (countSnapshot.Count >= 20)
+            {
+                throw new DomainException("Se ha alcanzado el límite máximo de 20 Preguntas Frecuentes por negocio.");
+            }
+        }
         await docRef.SetAsync(faq, cancellationToken: cancellationToken);
-
-        // 3. Retornamos el DTO actualizado con su ID real
         return faq;
     }
 

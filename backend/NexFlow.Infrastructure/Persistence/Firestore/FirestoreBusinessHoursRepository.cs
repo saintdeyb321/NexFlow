@@ -1,6 +1,7 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
+using NexFlow.Domain.Exceptions; // 🔥 Necesario para la excepción de dominio
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,6 +30,19 @@ public class FirestoreBusinessHoursRepository : IBusinessHoursRepository
 
     public async Task SaveBusinessHoursAsync(Guid workspaceId, string? locationId, IEnumerable<BusinessHoursDto> hours, CancellationToken cancellationToken)
     {
+        // 🔥 CORRECCIÓN (Fallos #54 y #55): Validación estricta de formato y lógica de horas.
+        foreach (var hour in hours)
+        {
+            if (!hour.IsClosed)
+            {
+                if (!TimeSpan.TryParse(hour.OpenTime, out var open) || !TimeSpan.TryParse(hour.CloseTime, out var close))
+                    throw new DomainException($"El formato de hora para el día {hour.DayOfWeek} no es válido. Use formato HH:mm.");
+
+                if (open >= close)
+                    throw new DomainException($"Para el día {hour.DayOfWeek}, la hora de apertura ({hour.OpenTime}) debe ser menor que la de cierre ({hour.CloseTime}).");
+            }
+        }
+
         var docId = string.IsNullOrEmpty(locationId) ? "global" : locationId;
         var collectionRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("hours").Document(docId).Collection("schedule");
 
