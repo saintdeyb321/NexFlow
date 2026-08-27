@@ -3,7 +3,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Reservations;
-using NexFlow.Domain.Enums;
+using System.Transactions;
 
 namespace NexFlow.Application.Engines.Reservation;
 
@@ -16,20 +16,17 @@ public class ReservationEngine : IReservationEngine
     private readonly IWorkflowGateway _workflowGateway;
     private readonly ILogger<ReservationEngine> _logger;
 
+    // 🛡️ CORRECCIÓN (Fallo #6): El estándar absoluto para Perú.
+    private readonly TimeZoneInfo _peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+
     public ReservationEngine(
-        IReservationRepository reservationRepository,
-        IServiceRepository serviceRepository,
-        IBusinessHoursRepository hoursRepository,
-        IUnitOfWork unitOfWork,
-        IWorkflowGateway workflowGateway,
-        ILogger<ReservationEngine> logger)
+        IReservationRepository reservationRepository, IServiceRepository serviceRepository,
+        IBusinessHoursRepository hoursRepository, IUnitOfWork unitOfWork,
+        IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger)
     {
-        _reservationRepository = reservationRepository;
-        _serviceRepository = serviceRepository;
-        _hoursRepository = hoursRepository;
-        _unitOfWork = unitOfWork;
-        _workflowGateway = workflowGateway;
-        _logger = logger;
+        _reservationRepository = reservationRepository; _serviceRepository = serviceRepository;
+        _hoursRepository = hoursRepository; _unitOfWork = unitOfWork;
+        _workflowGateway = workflowGateway; _logger = logger;
     }
 
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
@@ -41,37 +38,36 @@ public class ReservationEngine : IReservationEngine
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
 
-        // 🔥 CORRECCIÓN SPRINT 6: Ajuste al Huso Horario UTC-5 para evitar bloqueos nocturnos
-        var regionalOffset = TimeSpan.FromHours(-5);
-        var localDate = date.Kind == DateTimeKind.Utc ? date.Add(regionalOffset) : date;
-
+        // Fijamos la fecha consultada al horario de Perú
+        var localDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDate.DayOfWeek);
 
-        if (todayHours == null || todayHours.IsClosed) return new List<TimeSlotDto>();
-
-        if (!TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
+        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
             return new List<TimeSlotDto>();
 
-        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, date, cancellationToken);
+        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, localDate, cancellationToken);
         var availableSlots = new List<TimeSlotDto>();
 
-        var currentSlotStart = localDate.Date.Add(openTime);
-        var endOfDay = localDate.Date.Add(closeTime);
-        var localNow = DateTime.UtcNow.Add(regionalOffset);
+        var currentSlotStartLocal = localDate.Date.Add(openTime);
+        var endOfDayLocal = localDate.Date.Add(closeTime);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _peruZone);
 
-        while (currentSlotStart.Add(slotDuration) <= endOfDay)
+        while (currentSlotStartLocal.Add(slotDuration) <= endOfDayLocal)
         {
-            var currentSlotEnd = currentSlotStart.Add(slotDuration);
+            var currentSlotEndLocal = currentSlotStartLocal.Add(slotDuration);
 
-            // Evaluar ocupación con el offset aplicado y descartar horarios que ya pasaron hoy
-            bool isOccupied = existingReservations.Any(r => r.StartTime.Add(regionalOffset) < currentSlotEnd && r.EndTime.Add(regionalOffset) > currentSlotStart);
-            bool isPast = localDate.Date == localNow.Date && currentSlotStart <= localNow;
+            // Convertimos el Slot de Perú a UTC para comparar con la Base de Datos
+            var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, _peruZone);
+            var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, _peruZone);
+
+            bool isOccupied = existingReservations.Any(r => r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
+            bool isPast = currentSlotStartLocal <= localNow;
 
             if (!isOccupied && !isPast)
             {
-                availableSlots.Add(new TimeSlotDto(currentSlotStart, currentSlotEnd, true));
+                availableSlots.Add(new TimeSlotDto(currentSlotStartLocal, currentSlotEndLocal, true));
             }
-            currentSlotStart = currentSlotEnd;
+            currentSlotStartLocal = currentSlotEndLocal;
         }
 
         return availableSlots;
@@ -79,47 +75,65 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken)
     {
-        var safeUtcDateTime = dateTime.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)
-            : dateTime.ToUniversalTime();
+        // Forzamos que la fecha que envía el frontend se lea como hora de Perú y la pasamos a UTC real.
+        var localDateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified);
+        var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, _peruZone);
 
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var targetService = services.FirstOrDefault(s => s.Id == serviceId);
 
-        if (targetService == null)
-            return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio solicitado no existe."));
+        if (targetService == null) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe."));
 
-        var startTime = safeUtcDateTime;
-        var endTime = safeUtcDateTime.AddMinutes(targetService.DurationInMinutes);
+        var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes);
 
-        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, serviceId, startTime, endTime, cancellationToken);
+        // 🛡️ CORRECCIÓN (Fallo #8): Transacción Serializable. Si hay concurrencia, PostgreSQL bloquea.
+        using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable }, TransactionScopeAsyncFlowOption.Enabled);
 
-        if (!isAvailable)
-            return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario solicitado ya está ocupado."));
+        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, startTimeUtc, endTimeUtc, null, cancellationToken);
+        if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario ya está ocupado."));
 
-        var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTime, endTime);
+        var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTimeUtc, endTimeUtc);
         _reservationRepository.Add(reservation);
-
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        scope.Complete(); // Confirmamos la transacción atómica
 
         var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
 
-        try
-        {
-            var payload = new N8nEventPayload<ReservationDto>(
-                WorkspaceId: workspaceId,
-                EventType: "RESERVATION_CREATED",
-                CorrelationId: Guid.NewGuid().ToString(),
-                IdempotencyKey: $"CREATE_{reservation.Id}",
-                Timestamp: DateTime.UtcNow,
-                Data: dto
-            );
-            await _workflowGateway.TriggerWorkflowAsync("nexflow-events", payload, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Alerta: La reserva {ReservationId} se guardó, pero falló el envío del evento a n8n.", reservation.Id);
-        }
+        // Trigger n8n (aislado de la transacción principal para no bloquear)
+        _ = TriggerN8nSafeAsync("RESERVATION_CREATED", workspaceId, dto, reservation.Id, cancellationToken);
+
+        return Result<ReservationDto>.Success(dto);
+    }
+
+    // 🛡️ CORRECCIÓN (Fallo #45): Agregamos el método de Edición (Reagendamiento)
+    public async Task<Result<ReservationDto>> EditReservationAsync(Guid workspaceId, Guid reservationId, DateTime newDateTime, CancellationToken cancellationToken)
+    {
+        var localDateTime = DateTime.SpecifyKind(newDateTime, DateTimeKind.Unspecified);
+        var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, _peruZone);
+
+        using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable }, TransactionScopeAsyncFlowOption.Enabled);
+
+        var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
+        if (reservation == null) return Result<ReservationDto>.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+
+        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
+        var targetService = services.FirstOrDefault(s => s.Id == reservation.ServiceId);
+        if (targetService == null) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe."));
+
+        var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes);
+
+        // Verificamos disponibilidad excluyendo la reserva actual
+        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
+        if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado."));
+
+        reservation.Reschedule(newStartTimeUtc, newEndTimeUtc);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        scope.Complete();
+
+        var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
+        _ = TriggerN8nSafeAsync("RESERVATION_RESCHEDULED", workspaceId, dto, reservation.Id, cancellationToken);
 
         return Result<ReservationDto>.Success(dto);
     }
@@ -128,30 +142,25 @@ public class ReservationEngine : IReservationEngine
     {
         var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
         if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
-        if (reservation.Status == ReservationStatus.Cancelled) return Result.Failure(new Error("Reservation.AlreadyCancelled", "La reserva ya estaba cancelada."));
 
         reservation.Cancel();
-
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        _ = TriggerN8nSafeAsync("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id, cancellationToken);
+
+        return Result.Success();
+    }
+
+    private async Task TriggerN8nSafeAsync(string eventType, Guid workspaceId, object data, Guid reservationId, CancellationToken cancellationToken)
+    {
         try
         {
-            var payload = new N8nEventPayload<object>(
-                WorkspaceId: workspaceId,
-                EventType: "RESERVATION_CANCELLED",
-                CorrelationId: Guid.NewGuid().ToString(),
-                IdempotencyKey: $"CANCEL_{reservation.Id}",
-                Timestamp: DateTime.UtcNow,
-                Data: new { ReservationId = reservation.Id, Status = "CANCELLED" }
-            );
-
+            var payload = new N8nEventPayload<object>(workspaceId, eventType, Guid.NewGuid().ToString(), $"{eventType}_{reservationId}", DateTime.UtcNow, data);
             await _workflowGateway.TriggerWorkflowAsync("nexflow-events", payload, cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Alerta: La reserva {ReservationId} se canceló, pero falló el envío del evento RESERVATION_CANCELLED a n8n.", reservation.Id);
+            _logger.LogError(ex, "Alerta: Falló el envío del evento {EventType} a n8n para la reserva {ReservationId}.", eventType, reservationId);
         }
-
-        return Result.Success();
     }
 }

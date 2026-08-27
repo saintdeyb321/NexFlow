@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Phone, CheckCircle, XCircle, MapPin } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Phone, XCircle, MapPin } from 'lucide-react';
 import { getReservations, cancelReservation } from '../services/reservation.service';
 import { getLocations } from '../../business/services/business.service';
 import type { ReservationDto } from '../types/reservation.types';
 import type { LocationDto } from '../../business/types/business.types';
 
+const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 08:00 a 20:00
+
 export const ReservationsPage = () => {
   const [reservations, setReservations] = useState<ReservationDto[]>([]);
   const [locations, setLocations] = useState<LocationDto[]>([]);
   
-  // 🔥 CORRECCIÓN (Fallo #22): Forzar que la fecha base sea la local (Perú) y no la UTC del navegador
   const [selectedLocation, setSelectedLocation] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     const today = new Date();
@@ -51,10 +52,9 @@ export const ReservationsPage = () => {
     setIsLoading(true);
     try {
       const data = await getReservations(selectedLocation, selectedDate);
-      const sorted = (data || []).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
-      setReservations(sorted);
+      setReservations(data || []);
     } catch (error: any) {
-      alert(`Error cargando reservas: ${error.response?.data?.error || error.message || 'Error desconocido'}`);
+      alert(`Error cargando reservas: ${error.response?.data?.message || error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -67,16 +67,8 @@ export const ReservationsPage = () => {
       await cancelReservation(id);
       setReservations(reservations.map(r => r.id === id ? { ...r, status: 'Cancelled' } : r));
     } catch (error: any) {
-      alert(`Error al cancelar: ${error.response?.data?.error || error.message || 'Es posible que ya esté cancelada.'}`);
+      alert(`Error al cancelar: ${error.response?.data?.message || error.message}`);
     }
-  };
-
-  // 🔥 CORRECCIÓN: Parseo explícito para la UI (America/Lima)
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat('es-PE', {
-      hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima'
-    }).format(date);
   };
 
   return (
@@ -86,7 +78,7 @@ export const ReservationsPage = () => {
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
             <CalendarIcon className="w-6 h-6 mr-3 text-blue-600" /> Agenda de Reservas
           </h1>
-          <p className="mt-1 text-sm text-gray-500">Citas agendadas por la IA o manualmente.</p>
+          <p className="mt-1 text-sm text-gray-500">Vista de calendario (08:00 - 20:00)</p>
         </div>
         
         <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -118,53 +110,66 @@ export const ReservationsPage = () => {
       {isLoading ? (
         <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando agenda...</div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          {reservations.length === 0 ? (
-            <div className="p-12 text-center text-gray-500 flex flex-col items-center">
-              <CalendarIcon className="w-12 h-12 text-gray-300 mb-3" />
-              <p className="font-medium text-gray-900">Agenda libre</p>
-              <p className="text-sm mt-1">No hay reservas para la fecha y sede seleccionadas.</p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-gray-200">
-              {reservations.map((res) => (
-                <li key={res.id} className="p-5 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-start space-x-4">
-                      <div className={`p-3 rounded-full ${res.status.toUpperCase() === 'CONFIRMED' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                        {res.status.toUpperCase() === 'CONFIRMED' ? <CheckCircle className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
-                      </div>
-                      
-                      <div>
-                        <h4 className="text-lg font-semibold text-gray-900">
-                          {res.customerName} <span className="text-sm font-normal text-gray-500">(Servicio: {res.serviceId.substring(0,8)})</span>
-                        </h4>
-                        
-                        <div className="mt-1 flex items-center space-x-4 text-sm text-gray-500">
-                          <span className="flex items-center text-blue-600 font-medium">
-                            <Clock className="w-4 h-4 mr-1" /> {formatTime(res.dateTime)}
-                          </span>
-                          <span className="flex items-center">
-                            <Phone className="w-4 h-4 mr-1" /> {res.customerIdentifier}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden pb-8 relative">
+          
+          {/* 🔥 SOLUCIÓN FALLO #56: Grilla Visual del Calendario */}
+          <div className="relative mt-6">
+            {HOURS.map((hour) => (
+              <div key={hour} className="flex h-[60px] border-b border-gray-100 last:border-0 relative">
+                <div className="w-20 text-right pr-4 text-xs font-medium text-gray-500 -mt-2">
+                  {hour.toString().padStart(2, '0')}:00
+                </div>
+                <div className="flex-1 border-l border-gray-100"></div>
+              </div>
+            ))}
 
-                    <div className="flex space-x-2">
-                      {res.status.toUpperCase() !== 'CANCELLED' && (
-                        <button 
-                          onClick={() => handleCancel(res.id)}
-                          className="px-3 py-1.5 bg-red-50 text-red-700 text-sm font-medium rounded-lg hover:bg-red-100 transition-colors"
-                        >
-                          Cancelar Cita
-                        </button>
-                      )}
+            {/* Bloques de Reserva */}
+            {reservations.filter(r => r.status.toUpperCase() !== 'CANCELLED').map((res) => {
+              // Tolerancia para el nombre de la variable (por si el backend envía startTime en lugar de dateTime)
+              const timeStr = (res as any).startTime || res.dateTime;
+              
+              // Forzamos la lectura en la zona horaria de Perú
+              const localTime = new Date(new Date(timeStr).toLocaleString('en-US', { timeZone: 'America/Lima' }));
+              const h = localTime.getHours();
+              const m = localTime.getMinutes();
+              
+              if (h < 8 || h > 20) return null; // Ocultamos las que estén fuera de la vista MVP
+
+              // Calculamos posición exacta: 60px por hora
+              const topPos = (h - 8) * 60 + m; 
+              const blockHeight = 45; // Altura visual estándar
+
+              return (
+                <div 
+                  key={res.id}
+                  className="absolute left-20 right-6 ml-2 bg-blue-50 border-l-4 border-blue-500 rounded p-2 shadow-sm hover:shadow-md transition-all overflow-hidden group"
+                  style={{ top: `${topPos}px`, height: `${blockHeight}px`, zIndex: 10 }}
+                >
+                  <div className="flex justify-between items-start h-full">
+                    <div>
+                      <p className="text-sm font-bold text-gray-900 leading-tight truncate">{res.customerName}</p>
+                      <p className="text-xs text-blue-700 font-medium mt-0.5 flex items-center">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {localTime.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })} - <Phone className="w-3 h-3 mx-1"/> {res.customerIdentifier}
+                      </p>
                     </div>
+                    <button 
+                      onClick={() => handleCancel(res.id)}
+                      className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 bg-red-100 p-1.5 rounded transition-all"
+                      title="Cancelar Reserva"
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </button>
                   </div>
-                </li>
-              ))}
-            </ul>
+                </div>
+              );
+            })}
+          </div>
+          
+          {reservations.length === 0 && (
+             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+               <p className="text-gray-400 font-medium bg-white px-4 py-2 rounded-full border shadow-sm">No hay citas para hoy</p>
+             </div>
           )}
         </div>
       )}

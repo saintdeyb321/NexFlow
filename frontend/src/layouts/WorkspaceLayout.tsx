@@ -1,6 +1,9 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../core/store/useAuthStore';
-import { LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, ShieldAlert, MessageCircle, Package, ClipboardList } from 'lucide-react';
+import { 
+  LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
+  ShieldAlert, MessageCircle, Package, ClipboardList, Users, Bell 
+} from 'lucide-react';
 
 export const WorkspaceLayout = () => {
   const { me, logout } = useAuthStore();
@@ -25,12 +28,10 @@ export const WorkspaceLayout = () => {
         </div>
         
         <nav className="flex-1 p-4 overflow-y-auto">
-          {/* Dashboard (Siempre visible) */}
           <Link to="/" className={navItemClass('/')}>
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
           </Link>
 
-          {/* RENDERIZADO MODULAR DICTADO POR LA LICENCIA */}
           {entitlements.includes('RESERVATIONS') && (
             <Link to="/reservations" className={navItemClass('/reservations')}>
               <Calendar className="w-5 h-5 mr-3" /> Reservas
@@ -55,17 +56,29 @@ export const WorkspaceLayout = () => {
             </Link>
           )}
 
-          {/* NUEVO: Módulo de Catálogo / Productos */}
           {entitlements.includes('CATALOG') && (
             <Link to="/catalog" className={navItemClass('/catalog')}>
               <Package className="w-5 h-5 mr-3" /> Catálogo
             </Link>
           )}
 
-          {/* NUEVO: Módulo de Solicitudes (Requests) */}
           {entitlements.includes('REQUESTS') && (
             <Link to="/requests" className={navItemClass('/requests')}>
               <ClipboardList className="w-5 h-5 mr-3" /> Solicitudes
+            </Link>
+          )}
+
+          {/* 🔥 SOLUCIÓN FALLO #57: Módulo de Clientes Expuesto */}
+          {entitlements.includes('CUSTOMERS') && (
+            <Link to="/customers" className={navItemClass('/customers')}>
+              <Users className="w-5 h-5 mr-3" /> Clientes
+            </Link>
+          )}
+
+          {/* 🔥 SOLUCIÓN FALLO #58: Módulo de Notificaciones Expuesto */}
+          {entitlements.includes('NOTIFICATIONS') && (
+            <Link to="/notifications" className={navItemClass('/notifications')}>
+              <Bell className="w-5 h-5 mr-3" /> Notificaciones
             </Link>
           )}
           
@@ -73,11 +86,9 @@ export const WorkspaceLayout = () => {
             Administración
           </div>
           
-          {/* Configuraciones globales del Workspace (Módulo Base) */}
           <Link to="/settings" className={navItemClass('/settings')}>
             <Settings className="w-5 h-5 mr-3" /> Negocio
           </Link>
-          
         </nav>
 
         {/* User Profile & Logout */}

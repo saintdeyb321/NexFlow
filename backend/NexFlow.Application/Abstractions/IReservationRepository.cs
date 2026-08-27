@@ -17,5 +17,5 @@ public interface IReservationRepository
     Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime date, CancellationToken cancellationToken);
 
     // Disponibilidad blindada por Sede y Servicio
-    Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, string serviceId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken);
+    Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, DateTime startTimeUtc, DateTime endTimeUtc, Guid? excludeReservationId = null, CancellationToken cancellationToken = default);
 }

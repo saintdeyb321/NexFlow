@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Plus, Pencil, Tag } from 'lucide-react';
+import { Plus, Pencil, Tag, Trash2 } from 'lucide-react';
 import { getServices, saveService } from '../services/business.service';
 import type { ServiceDto } from '../types/business.types';
 import { ServiceModal } from '../components/ServiceModal';
+// 🔥 Necesitamos importar axiosClient para la eliminación directa
+import { axiosClient } from '../../../core/api/axiosClient';
 
 export const ServicesPage = () => {
   const [services, setServices] = useState<ServiceDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Estado para controlar el Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState<ServiceDto | null>(null);
 
@@ -37,19 +38,29 @@ export const ServicesPage = () => {
     setIsModalOpen(true);
   };
 
+  // 🔥 NUEVO: Función para eliminar
+  const handleDelete = async (serviceId: string) => {
+    if (!window.confirm('¿Estás seguro de que deseas eliminar este servicio?')) return;
+    
+    try {
+      await axiosClient.delete(`/business/services/${serviceId}`);
+      setServices(prev => prev.filter(s => s.id !== serviceId));
+    } catch (error: any) {
+      alert(`Error al eliminar: ${error.message}`);
+    }
+  };
+
   const handleSaveService = async (service: ServiceDto) => {
     try {
       await saveService(service);
-      
-      // Actualizamos la lista localmente
       setServices(prev => {
         const exists = prev.find(s => s.id === service.id);
         if (exists) return prev.map(s => s.id === service.id ? service : s);
         return [...prev, service];
       });
     } catch (error: any) {
-      alert(`Error al guardar: ${error.response?.data?.error || error.message}`);
-      throw error; // Lanzar para que el modal no se cierre
+      alert(`Error al guardar: ${error.message}`);
+      throw error; 
     }
   };
 
@@ -57,8 +68,6 @@ export const ServicesPage = () => {
 
   return (
     <div className="max-w-5xl">
-      
-      {/* Cabecera Estilo MigaPOS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
           <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center mr-4">
@@ -76,7 +85,6 @@ export const ServicesPage = () => {
         </button>
       </div>
 
-      {/* Lista de Tarjetas Estilo MigaPOS */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
           Lista de Servicios ({services.length})
@@ -110,19 +118,29 @@ export const ServicesPage = () => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleOpenEdit(service)}
-                  className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleOpenEdit(service)}
+                    className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors"
+                    title="Editar"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  {/* 🔥 BOTÓN ELIMINAR */}
+                  <button
+                    onClick={() => handleDelete(service.id!)}
+                    className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
+                    title="Eliminar"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))
           )}
         </div>
       </div>
 
-      {/* Modal Inyectado */}
       <ServiceModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}

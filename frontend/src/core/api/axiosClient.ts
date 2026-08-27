@@ -14,14 +14,12 @@ export class ApiError extends Error {
 }
 
 export const axiosClient = axios.create({
-  // Fallo #4 de la auditoría: Asegurarnos de usar HTTPS si el backend lo fuerza, o usar la variable de entorno
   baseURL: import.meta.env.VITE_API_URL || 'https://localhost:7182/api',
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Función inyectora para evitar dependencias circulares con Zustand
 export const setWorkspaceHeader = (workspaceId: string | null) => {
   if (workspaceId) {
     axiosClient.defaults.headers.common['X-Workspace-Id'] = workspaceId;
@@ -30,7 +28,6 @@ export const setWorkspaceHeader = (workspaceId: string | null) => {
   }
 };
 
-// Interceptor solo para el Token de Google
 axiosClient.interceptors.request.use(
   async (config) => {
     const user = auth.currentUser;
@@ -43,21 +40,22 @@ axiosClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// 🔥 CORRECCIÓN (Fallo #20): Interceptor silencioso y estructurado.
 axiosClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data;
-      const message = data?.message || data?.error || 'Error desconocido en el servidor';
-      const code = data?.code || 'UNKNOWN_ERROR';
 
-      // Logueamos silenciosamente para debugging, sin interrumpir la UI
+      // 🛡️ CONTRATO UNIFICADO ESTRICTO
+      // Busca 'message' prioritariamente. 'detail' queda como red de seguridad de ASP.NET
+      const message = data?.message || data?.Message || data?.detail || 'Error desconocido en el servidor';
+      const code = data?.code || data?.Error || data?.title || 'UNKNOWN_ERROR';
+
       if (status === 401) console.warn("⛔ [401] Sesión expirada o inválida");
       else if (status === 403) console.warn(`🔒 [403] Acceso Denegado: ${message}`);
       else if (status === 404) console.warn(`🔍 [404] Endpoint no encontrado: ${error.config.url}`);
-      else if (status >= 500) console.error(`🔥 [500] Error del Servidor Backend`);
+      else if (status >= 500) console.error(`🔥 [500] Error del Servidor Backend: ${message}`);
 
       return Promise.reject(new ApiError(status, code, message));
     } else if (error.request) {

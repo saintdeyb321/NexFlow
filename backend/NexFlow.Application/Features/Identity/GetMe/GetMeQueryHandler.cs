@@ -1,8 +1,4 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Abstractions;
+﻿using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 
@@ -41,7 +37,20 @@ public class GetMeQueryHandler
         bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, cancellationToken);
         var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName, isSuperAdmin);
 
-        // 🔥 Gracias al Seeder, si eres SuperAdmin ahora SIEMPRE tendrás una membresía activa aquí
+        // 🛡️ SOLUCIÓN FALLOS #13 Y #14: Separación de Identidad
+        if (isSuperAdmin)
+        {
+            // El SuperAdmin obtiene TODOS los módulos del sistema directamente (Catálogo Maestro)
+            // No tiene Workspace, no tiene Licencia que caduque. Poder absoluto.
+            string[] systemMasterModules = {
+                "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES",
+                "CATALOG", "RESERVATIONS", "REQUESTS", "NOTIFICATIONS", "CUSTOMERS", "CONVERSATIONS"
+            };
+
+            return Result<MeDto>.Success(new MeDto(userDto, null, null, systemMasterModules));
+        }
+
+        // --- FLUJO NORMAL PARA INQUILINOS (TENANTS) ---
         var memberships = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
         var activeMembership = memberships.FirstOrDefault();
 

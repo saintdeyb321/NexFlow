@@ -31,34 +31,21 @@ public class FirestoreFaqRepository : IFaqRepository
         });
     }
 
-    public async Task SaveFaqAsync(Guid workspaceId, FaqDto faq, CancellationToken cancellationToken)
+    public async Task<FaqDto> SaveFaqAsync(Guid workspaceId, FaqDto faq, CancellationToken cancellationToken)
     {
-        var collection = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs");
+        // 1. Si el Frontend no mandó ID, lo generamos.
+        var faqId = string.IsNullOrEmpty(faq.Id) ? Guid.NewGuid().ToString() : faq.Id;
 
-        // 🛡️ REGLA: Si es una creación nueva (ID vacío o nuevo), validamos que no exceda el límite
-        if (string.IsNullOrEmpty(faq.Id) || faq.Id == Guid.Empty.ToString())
-        {
-            var countQuery = collection.Count();
-            var countSnapshot = await countQuery.GetSnapshotAsync(cancellationToken);
+        // 2. Asignación directa y simple para clases estándar (soluciona el error del 'record')
+        faq.Id = faqId;
 
-            if (countSnapshot.Count >= MAX_FAQS_PER_WORKSPACE)
-            {
-                throw new DomainException($"Límite alcanzado. El sistema permite un máximo de {MAX_FAQS_PER_WORKSPACE} Preguntas Frecuentes para mantener la eficiencia de la Inteligencia Artificial.");
-            }
-        }
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString())
+                        .Collection("faqs").Document(faqId);
 
-        var docId = string.IsNullOrEmpty(faq.Id) ? Guid.NewGuid().ToString() : faq.Id;
-        var docRef = collection.Document(docId);
+        await docRef.SetAsync(faq, cancellationToken: cancellationToken);
 
-        var data = new FirestoreFaq
-        {
-            Question = faq.Question,
-            Answer = faq.Answer,
-            Category = faq.Category,
-            IsActive = faq.IsActive
-        };
-
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+        // 3. Retornamos el DTO actualizado con su ID real
+        return faq;
     }
 
     public async Task DeleteFaqAsync(Guid workspaceId, string faqId, CancellationToken cancellationToken)

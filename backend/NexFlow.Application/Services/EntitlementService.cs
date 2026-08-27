@@ -28,10 +28,10 @@ public class EntitlementService : IEntitlementService
 
     public async Task<bool> IsLicenseValidAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
+        if (workspaceId == Guid.Empty) return false; // 🛡️ Escudo de seguridad
+
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
 
-        // 🔥 CORRECCIÓN: Permitimos que las licencias funcionen si el Workspace está 'Activo' o 'Pendiente' (Onboarding).
-        // Solo bloqueamos si está Suspendido o Archivado.
         if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
             return false;
 
@@ -65,7 +65,6 @@ public class EntitlementService : IEntitlementService
 
     public async Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        // Si el estado no es Activo/Pendiente, retorna vacío
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return Enumerable.Empty<string>();
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
@@ -76,8 +75,6 @@ public class EntitlementService : IEntitlementService
             : Enumerable.Empty<Domain.Entities.Module>();
 
         var codes = activeModules.Select(m => m.Code.ToUpperInvariant()).ToList();
-
-        // Sumamos los módulos base al listado disponible (obligatorio para Onboarding)
         codes.AddRange(_baseModules);
         return codes.Distinct();
     }
@@ -85,7 +82,6 @@ public class EntitlementService : IEntitlementService
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
         if (!await IsLicenseValidAsync(workspaceId, cancellationToken)) return false;
-
         if (_baseModules.Contains(moduleCode.ToUpperInvariant())) return true;
 
         var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);

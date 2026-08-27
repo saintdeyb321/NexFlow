@@ -1,13 +1,16 @@
-import { Building, Ban, Play, Trash2 } from 'lucide-react';
+import { Building, Ban, Play, Trash2, CalendarClock, Puzzle } from 'lucide-react';
 import type { WorkspaceSummaryDto } from '../types/admin.types';
 
 interface WorkspaceCardProps {
   workspace: WorkspaceSummaryDto;
   onToggleStatus: (ws: WorkspaceSummaryDto) => void;
   onDelete: (ws: WorkspaceSummaryDto) => void;
+  // 🔥 NUEVOS PROPS
+  onRenew?: (ws: WorkspaceSummaryDto) => void;
+  onAssignModule?: (ws: WorkspaceSummaryDto) => void;
 }
 
-export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete }: WorkspaceCardProps) => {
+export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete, onRenew, onAssignModule }: WorkspaceCardProps) => {
   const getStatusBadge = (status: number) => {
     switch (status) {
       case 0: return <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-yellow-100 text-yellow-700">PENDIENTE</span>;
@@ -34,7 +37,22 @@ export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete }: Workspace
           {getStatusBadge(workspace.status)}
         </div>
         
-        <div className="flex items-center space-x-2 border-l border-gray-200 pl-4">
+        <div className="flex items-center space-x-1 border-l border-gray-200 pl-4">
+          
+          {/* 🔥 BOTÓN ASIGNAR MÓDULO */}
+          {onAssignModule && (
+             <button onClick={() => onAssignModule(workspace)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Asignar Módulo Extra">
+               <Puzzle className="w-5 h-5" />
+             </button>
+          )}
+
+          {/* 🔥 BOTÓN RENOVAR */}
+          {onRenew && (
+             <button onClick={() => onRenew(workspace)} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors" title="Renovar Licencia">
+               <CalendarClock className="w-5 h-5" />
+             </button>
+          )}
+
           <button
             onClick={() => onToggleStatus(workspace)}
             className={`p-2 rounded-lg transition-colors ${workspace.status === 2 ? 'text-green-600 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50'}`}

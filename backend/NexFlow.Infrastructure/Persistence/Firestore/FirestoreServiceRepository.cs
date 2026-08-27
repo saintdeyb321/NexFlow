@@ -17,7 +17,6 @@ public class FirestoreServiceRepository : IServiceRepository
         return snapshot.Documents.Select(doc =>
         {
             var data = doc.ConvertTo<FirestoreService>();
-
             return new ServiceDto
             {
                 Id = doc.Id,
@@ -34,30 +33,22 @@ public class FirestoreServiceRepository : IServiceRepository
             };
         });
     }
-
-    public async Task SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
+    public async Task<ServiceDto> SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
     {
-        var docId = string.IsNullOrEmpty(service.Id) ? Guid.NewGuid().ToString() : service.Id;
-        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(docId);
+        // 1. Si el Frontend no mandó ID, lo generamos.
+        var serviceId = string.IsNullOrEmpty(service.Id) ? Guid.NewGuid().ToString() : service.Id;
 
-        var data = new FirestoreService
-        {
-            Name = service.Name,
-            Description = service.Description,
-            Category = service.Category,
-            DurationInMinutes = service.DurationInMinutes,
-            Price = (double)service.Price, // Firestore exige double
-            Currency = service.Currency,
-            RequiresReservation = service.RequiresReservation,
-            IsActive = service.IsActive,
-            AvailableAtLocations = service.AvailableAtLocations,
-            Metadata = service.Metadata
-        };
+        // 2. Asignación directa (soluciona el error del 'record')
+        service.Id = serviceId;
 
-        // MergeAll es vital aquí para no borrar campos si en el futuro agregas más cosas directamente desde Firestore
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString())
+                        .Collection("services").Document(serviceId);
+
+        await docRef.SetAsync(service, cancellationToken: cancellationToken);
+
+        // 3. Retornamos el DTO actualizado con su ID real
+        return service;
     }
-
     public async Task DeleteServiceAsync(Guid workspaceId, string serviceId, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(serviceId);
@@ -75,8 +66,6 @@ public class FirestoreServiceRepository : IServiceRepository
         [FirestoreProperty] public string Currency { get; set; } = "PEN";
         [FirestoreProperty] public bool RequiresReservation { get; set; } = true;
         [FirestoreProperty] public bool IsActive { get; set; } = true;
-
-        // Soportan colecciones nativas de C#
         [FirestoreProperty] public List<string> AvailableAtLocations { get; set; } = new();
         [FirestoreProperty] public Dictionary<string, object> Metadata { get; set; } = new();
     }

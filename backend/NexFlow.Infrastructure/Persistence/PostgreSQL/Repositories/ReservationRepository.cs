@@ -3,11 +3,6 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
 
@@ -28,24 +23,25 @@ public class ReservationRepository : IReservationRepository
 
     public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime date, CancellationToken cancellationToken)
     {
-        var utcDate = date.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(date, DateTimeKind.Utc)
-            : date.ToUniversalTime();
+        // 🔥 CORRECCIÓN (Fallo #9): Calculamos el día exacto en Perú y lo pasamos a UTC
+        var peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+        var peruDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
 
-        var startOfDay = DateTime.SpecifyKind(utcDate.Date, DateTimeKind.Utc);
-        var endOfDay = startOfDay.AddDays(1).AddTicks(-1);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(peruDate, peruZone);
+        var endUtc = startUtc.AddDays(1);
 
         return await _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
                      && r.LocationId == locationId
                      && r.Status != ReservationStatus.Cancelled
-                     && r.StartTime >= startOfDay
-                     && r.StartTime <= endOfDay)
+                     && r.StartTime >= startUtc
+                     && r.StartTime < endUtc)
             .OrderBy(r => r.StartTime)
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, string serviceId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken)
+    // 🔥 CORRECCIÓN (Fallo #7 y #45): Quitamos serviceId (el recurso físico es la sede) y añadimos excludeReservationId
+    public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, DateTime startTime, DateTime endTime, Guid? excludeReservationId = null, CancellationToken cancellationToken = default)
     {
         var utcStartTime = startTime.Kind == DateTimeKind.Unspecified
             ? DateTime.SpecifyKind(startTime, DateTimeKind.Utc)
@@ -55,14 +51,20 @@ public class ReservationRepository : IReservationRepository
             ? DateTime.SpecifyKind(endTime, DateTimeKind.Utc)
             : endTime.ToUniversalTime();
 
-        bool hasOverlap = await _context.Reservations
-            .AnyAsync(r => r.WorkspaceId == workspaceId
-                        && r.LocationId == locationId
-                        && r.ServiceId == serviceId
-                        && r.Status != ReservationStatus.Cancelled
-                        && r.StartTime < utcEndTime
-                        && r.EndTime > utcStartTime,
-                      cancellationToken);
+        var query = _context.Reservations
+            .Where(r => r.WorkspaceId == workspaceId
+                     && r.LocationId == locationId
+                     // ELIMINADO: && r.ServiceId == serviceId (para bloquear la sede completa)
+                     && r.Status != ReservationStatus.Cancelled
+                     && r.StartTime < utcEndTime
+                     && r.EndTime > utcStartTime);
+
+        if (excludeReservationId.HasValue)
+        {
+            query = query.Where(r => r.Id != excludeReservationId.Value);
+        }
+
+        bool hasOverlap = await query.AnyAsync(cancellationToken);
 
         return !hasOverlap;
     }

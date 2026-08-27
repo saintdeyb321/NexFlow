@@ -51,7 +51,7 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("WorkspaceMember", policy => policy.Requirements.Add(new WorkspaceMemberRequirement()));
 });
 
-// 6. RATE LIMITING GLOBAL ENTERPRISE (Tenant & Webhook Aware)
+// 6. RATE LIMITING GLOBAL ENTERPRISE
 var rateLimitConfig = builder.Configuration.GetSection("RateLimiting");
 var permitLimit = rateLimitConfig.GetValue<int>("PermitLimit", 100);
 var windowMinutes = rateLimitConfig.GetValue<int>("WindowMinutes", 1);
@@ -61,20 +61,17 @@ builder.Services.AddRateLimiter(options =>
 {
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
-        // 🔥 CORRECCIÓN BLINDAJE 1: Identificamos el Webhook por su ruta oficial, no por un header falsificable.
-        // La validación de la contraseña ocurre después, dentro del controlador.
         if (context.Request.Path.StartsWithSegments("/api/webhooks/evolution"))
         {
             return RateLimitPartition.GetFixedWindowLimiter("evolution_webhook_limiter",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     AutoReplenishment = true,
-                    PermitLimit = 2000, // Alto límite para soportar la ráfaga de mensajes de WhatsApp
+                    PermitLimit = 2000,
                     Window = TimeSpan.FromMinutes(1)
                 });
         }
 
-        // BLINDAJE 2: Tráfico normal (Frontend, Postman, etc.)
         var partitionKey = context.User.Identity?.IsAuthenticated == true
             ? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown_user"
             : context.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
@@ -103,41 +100,55 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 8. HEALTH CHECKS (V2.13: Producción y Observabilidad)
+// 8. HEALTH CHECKS
 var redisConnectionString = builder.Configuration.GetConnectionString("RedisConnection") ?? "localhost:6379";
 
 builder.Services.AddHealthChecks()
-    // Verifica que PostgreSQL responda
-    .AddDbContextCheck<NexFlowDbContext>(name: "PostgreSQL", tags: new[] { "db", "data" })
-    // Verifica que Redis esté vivo
-    .AddRedis(redisConnectionString, name: "Redis", tags: new[] { "cache", "locks" });
-builder.Services.AddControllers();
+    // 🔥 CORRECCIÓN (Fallo #33): Solo dejamos PostgreSQL como bloqueo crítico de vida de la App en el MVP
+    .AddDbContextCheck<NexFlowDbContext>(name: "PostgreSQL", tags: new[] { "db", "data" });
 
+builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// --- PIPELINE DE MIDDLEWARES (El orden es CRÍTICO) ---
+// --- PIPELINE DE MIDDLEWARES ---
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
+// 🔥 CORRECCIÓN (Fallo #34): Operaciones peligrosas limitadas exclusivamente a Desarrollo
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    using (var scope = app.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
+        // Ejecutamos migraciones al vuelo solo en modo de desarrollador
+        await context.Database.MigrateAsync();
+        // Sembramos catálogos
+        await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
+    }
+}
+else
+{
+    // En producción solo sembramos los catálogos en caso de estar vacíos, pero NO migramos automáticamente.
+    using (var scope = app.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
+        await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
+    }
 }
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
-
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();
 
-// Exponer el endpoint de vida para Docker/Nginx
-// Exponer el endpoint de vida para Docker/Nginx
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
@@ -154,13 +165,4 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
 });
 
 app.MapControllers();
-
-// Asegurar que la BD esté migrada y el catálogo inicializado
-using (var scope = app.Services.CreateScope())
-{
-    var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
-    await context.Database.MigrateAsync();
-    await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
-}
-
 app.Run();

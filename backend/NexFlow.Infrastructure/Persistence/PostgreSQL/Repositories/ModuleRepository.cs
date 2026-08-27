@@ -48,4 +48,8 @@ public class ModuleRepository : IModuleRepository
             .Where(m => moduleIds.Contains(m.Id) && m.Status == ModuleStatus.Active)
             .ToListAsync(cancellationToken);
     }
+    public async Task<IEnumerable<Module>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        return await _context.Modules.ToListAsync(cancellationToken);
+    }
 }

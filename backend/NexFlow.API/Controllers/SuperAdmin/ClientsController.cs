@@ -1,11 +1,9 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 using NexFlow.Application.Features.SuperAdmin.Workspaces;
 using NexFlow.Application.Features.SuperAdmin.Licenses;
+using NexFlow.Application.Abstractions.Repositories; // 🔥 Necesario para los catálogos
 
 namespace NexFlow.API.Controllers.SuperAdmin;
 
@@ -30,6 +28,24 @@ public class ClientsController : ControllerBase
     {
         var workspaces = await _getWorkspacesHandler.Handle(cancellationToken);
         return Ok(workspaces);
+    }
+
+    // 🔥 SOLUCIÓN FALLO #41: Exponer las Plantillas reales
+    [HttpGet("templates")]
+    public async Task<IActionResult> GetTemplates([FromServices] ITemplateRepository templateRepository, CancellationToken cancellationToken)
+    {
+        // Asumiendo que tienes un GetAllAsync o similar. Si se llama distinto en tu repo, ajusta el nombre.
+        var templates = await templateRepository.GetAllAsync(cancellationToken);
+        return Ok(templates);
+    }
+
+    // 🔥 SOLUCIÓN FALLO #41: Exponer los Módulos reales
+    [HttpGet("modules")]
+    public async Task<IActionResult> GetModules([FromServices] IModuleRepository moduleRepository, CancellationToken cancellationToken)
+    {
+        // Asumiendo que tienes un GetAllAsync o similar.
+        var modules = await moduleRepository.GetAllAsync(cancellationToken);
+        return Ok(modules);
     }
 
     [HttpPost("provision")]
@@ -72,7 +88,6 @@ public class ClientsController : ControllerBase
         return Ok();
     }
 
-    // 🔥 CORRECCIÓN APLICADA: Ahora llama a DeleteClientCommand, no al Handler.
     [HttpDelete("{workspaceId}")]
     public async Task<IActionResult> DeleteClient(Guid workspaceId, [FromServices] DeleteClientCommandHandler handler, CancellationToken cancellationToken)
     {

@@ -22,21 +22,36 @@ export const OnboardingPage = () => {
   const [location, setLocation] = useState<LocationDto>({ name: 'Sede Principal', address: '', reference: '', isMain: true });
   const [hours, setHours] = useState<BusinessHoursDto[]>(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
 
-  // 🔥 CORRECCIÓN: Cargamos el perfil inicial para no empezar en blanco si ya había un borrador
+  // 🔥 CORRECCIÓN (Fallo #23): El Onboarding ahora es inteligente y reanudable.
   useEffect(() => {
-    const fetchProfile = async () => {
+    const initOnboarding = async () => {
       try {
         const data = await getBusinessProfile();
+        
+        // Si ya hay un perfil con nombre, pasamos al Paso 2 automáticamente
         if (data && data.commercialName) {
           setProfile(data);
+          
+          // Verificamos si ya había creado su sede
+          const locs = await getLocations();
+          if (locs && locs.length > 0) {
+             const mainLoc = locs.find(l => l.isMain) || locs[0];
+             setMainLocationId(mainLoc.id!);
+             setStep(3); // ¡Saltamos directo al Paso 3 de horarios!
+          } else {
+             setStep(2); 
+          }
+        } else {
+          setStep(1);
         }
       } catch (error) {
-        console.warn("No se pudo cargar el perfil base.");
+        console.warn("No se pudo cargar el estado del onboarding. Iniciando desde el paso 1.");
+        setStep(1);
       } finally {
         setIsLoading(false);
       }
     };
-    fetchProfile();
+    initOnboarding();
   }, []);
 
   const handleNext = async () => {
@@ -52,7 +67,6 @@ export const OnboardingPage = () => {
         
         await saveLocation(location);
         
-        // Recuperamos el ID que Firestore le asignó a la sede
         const locs = await getLocations();
         const mainLoc = locs.find(l => l.isMain) || locs[0];
         setMainLocationId(mainLoc.id!);
@@ -63,8 +77,7 @@ export const OnboardingPage = () => {
         setStep(4);
       }
     } catch (e: any) {
-      // 🔥 CORRECCIÓN: Mostrar error real si excede límite de sedes o hay fallo de red
-      alert(`Error al guardar: ${e.response?.data?.error || e.message || 'Error desconocido'}`);
+      alert(`Error al guardar: ${e.response?.data?.message || e.message || 'Error desconocido'}`);
       console.error(e);
     } finally {
       setIsSaving(false);
@@ -85,7 +98,7 @@ export const OnboardingPage = () => {
     setHours(hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h));
   };
 
-  if (isLoading) return <div className="h-screen flex items-center justify-center text-gray-500">Cargando Onboarding...</div>;
+  if (isLoading) return <div className="h-screen flex items-center justify-center text-gray-500">Recuperando tu progreso...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center py-10 px-4">

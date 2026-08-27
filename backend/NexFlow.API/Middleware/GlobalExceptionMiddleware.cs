@@ -1,9 +1,5 @@
-﻿using System;
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.API.Middleware;
@@ -27,7 +23,6 @@ public class GlobalExceptionMiddleware
         }
         catch (Exception ex)
         {
-            // El ILogger ya tiene el CorrelationId gracias al Middleware anterior
             _logger.LogError(ex, "Excepción no controlada atrapada por el escudo global en {Path}", context.Request.Path);
             await HandleExceptionAsync(context, ex);
         }
@@ -35,7 +30,7 @@ public class GlobalExceptionMiddleware
 
     private static Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
-        context.Response.ContentType = "application/problem+json";
+        context.Response.ContentType = "application/json"; // 🛡️ Simplificado a JSON estándar
 
         var statusCode = exception switch
         {
@@ -45,25 +40,25 @@ public class GlobalExceptionMiddleware
         };
 
         context.Response.StatusCode = statusCode;
-
-        // Extraemos el Correlation ID del HttpContext
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? "N/A";
 
+        // 🛡️ CONTRATO UNIFICADO: Solo code, message y correlationId
         var response = new
         {
-            status = statusCode,
-            title = exception switch
+            code = exception switch
             {
-                DomainException => "Violación de regla de negocio",
-                UnauthorizedAccessException => "Acceso denegado",
-                _ => "Error interno del servidor"
+                DomainException => "Domain.RuleViolation",
+                UnauthorizedAccessException => "Security.AccessDenied",
+                _ => "System.InternalError"
             },
-            detail = statusCode == 500
+            message = statusCode == 500
                 ? "Ha ocurrido un error inesperado en NexFlow. Nuestro equipo ha sido notificado."
                 : exception.Message,
-            correlationId = correlationId // <-- Blindaje Enterprise: Trazabilidad total
+            correlationId = correlationId
         };
 
-        return context.Response.WriteAsync(JsonSerializer.Serialize(response));
+        // Forzamos formato CamelCase para que JS lo lea nativo
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        return context.Response.WriteAsync(JsonSerializer.Serialize(response, options));
     }
 }

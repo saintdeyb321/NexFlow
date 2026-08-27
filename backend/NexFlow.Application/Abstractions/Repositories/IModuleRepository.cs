@@ -8,4 +8,5 @@ public interface IModuleRepository
     Task<Module?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
     Task<IEnumerable<Module>> GetActiveModulesAsync(IEnumerable<Guid> moduleIds, CancellationToken cancellationToken);
     Task<List<Module>> GetByCodesAsync(IEnumerable<string> moduleCodes, CancellationToken cancellationToken);
+    Task<IEnumerable<Module>> GetAllAsync(CancellationToken cancellationToken);
 }

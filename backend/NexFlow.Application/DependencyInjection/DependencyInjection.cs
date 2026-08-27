@@ -30,6 +30,9 @@ public static class DependencyInjection
         services.AddScoped<CreateCustomLicenseCommandHandler>();
         services.AddScoped<GetMeQueryHandler>();
         services.AddScoped<SaveLocationCommandHandler>();
+        services.AddScoped<GetSystemWorkspacesQueryHandler>();
+        services.AddScoped<ReactivateClientCommandHandler>();
+        services.AddScoped<DeleteClientCommandHandler>();
 
         // 3. Registrar Handlers del Motor Conversacional (Module Dispatcher)
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
@@ -38,10 +41,6 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();
         services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
-        services.AddScoped<ProvisionClientCommandHandler>();
-        services.AddScoped<GetSystemWorkspacesQueryHandler>();
-        services.AddScoped<ReactivateClientCommandHandler>();
-        services.AddScoped<DeleteClientCommandHandler>();
 
         return services;
     }

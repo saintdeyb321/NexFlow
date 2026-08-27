@@ -1,7 +1,4 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
@@ -56,15 +53,11 @@ public class BusinessController : ControllerBase
         return activeModules.Contains(moduleCode.ToUpperInvariant());
     }
 
-    // 🔥 NUEVO: Endpoints de Profile para solucionar el 404 del Onboarding (Fallo Crítico #3)
     [HttpGet("profile")]
     public async Task<IActionResult> GetProfile(CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
         var profile = await _profileRepository.GetProfileAsync(WorkspaceId, cancellationToken);
-
-        // 🔥 CORRECCIÓN: El constructor de BusinessProfileDto exige los 5 campos obligatorios. 
-        // Los enviamos vacíos para que el frontend inicie el formulario en blanco.
         return Ok(profile ?? new BusinessProfileDto(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty));
     }
 
@@ -97,6 +90,16 @@ public class BusinessController : ControllerBase
         return Ok();
     }
 
+    // 🔥 SOLUCIÓN FALLO #24: Endpoint para eliminar sedes expuesto
+    [HttpDelete("locations/{locationId}")]
+    public async Task<IActionResult> DeleteLocation(string locationId, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
+        return NoContent();
+    }
+
     // --- HOURS ---
     [HttpGet("locations/{locationId}/hours")]
     public async Task<IActionResult> GetHours(string locationId, CancellationToken cancellationToken)
@@ -127,8 +130,8 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> SaveService([FromBody] ServiceDto service, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-        await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
-        return Ok();
+        var savedService = await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
+        return Ok(savedService);
     }
 
     [HttpDelete("services/{serviceId}")]
@@ -152,8 +155,8 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> SaveFaq([FromBody] FaqDto faq, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
-        await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
-        return Ok();
+        var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
+        return Ok(savedFaq);
     }
 
     [HttpDelete("faqs/{faqId}")]

@@ -22,14 +22,7 @@ const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, chi
   return <>{children}</>;
 };
 
-// 2. GUARDIÁN DE SUPER ADMIN
-const SuperAdminGuard = ({ children }: { children: React.ReactNode }) => {
-  const { me } = useAuthStore();
-  if (!me?.user?.isSuperAdmin) return <Navigate to="/" replace />;
-  return <>{children}</>;
-};
-
-// 3. GUARDIÁN DE ONBOARDING
+// 2. GUARDIÁN DE ONBOARDING
 const OnboardingGuard = ({ children }: { children: React.ReactNode }) => {
   const { me } = useAuthStore();
   if (me?.workspace?.status === 'Pending') {
@@ -45,8 +38,14 @@ const router = createBrowserRouter([
   },
   {
     path: '/',
-    element: <ProtectedRoute />,
+    element: <ProtectedRoute />, 
     children: [
+      // 🔥 RUTA COMPLETAMENTE AISLADA (Fallo #15): SuperAdmin
+      { 
+        path: 'superadmin', 
+        element: <SuperAdminPage /> 
+      },
+      // 🔥 FLUJO EXCLUSIVO PARA DUEÑOS DE NEGOCIO
       {
         path: 'onboarding',
         element: <OnboardingPage />, 
@@ -56,37 +55,13 @@ const router = createBrowserRouter([
         element: <OnboardingGuard><WorkspaceLayout /></OnboardingGuard>,
         children: [
           { index: true, element: <DashboardPage /> },
-          
-          { 
-            path: 'reservations', 
-            element: <ModuleGuard requiredModule="RESERVATIONS"><ReservationsPage /></ModuleGuard>
-          },
-          { 
-            path: 'faqs', 
-            element: <ModuleGuard requiredModule="FAQ"><FaqsPage/></ModuleGuard>
-          },
-          { 
-            path: 'services', 
-            element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard>
-          },
-          { 
-            path: 'inbox', 
-            element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard>
-          },
-          // 🔥 BLOQUE B: NUEVAS RUTAS COMERCIALES Y OPERATIVAS
-          { 
-            path: 'requests', 
-            element: <ModuleGuard requiredModule="REQUESTS"><RequestsPage/></ModuleGuard>
-          },
-          { 
-            path: 'catalog', 
-            element: <ModuleGuard requiredModule="CATALOG"><CatalogPage/></ModuleGuard>
-          },
+          { path: 'reservations', element: <ModuleGuard requiredModule="RESERVATIONS"><ReservationsPage /></ModuleGuard> },
+          { path: 'faqs', element: <ModuleGuard requiredModule="FAQ"><FaqsPage/></ModuleGuard> },
+          { path: 'services', element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard> },
+          { path: 'inbox', element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard> },
+          { path: 'requests', element: <ModuleGuard requiredModule="REQUESTS"><RequestsPage/></ModuleGuard> },
+          { path: 'catalog', element: <ModuleGuard requiredModule="CATALOG"><CatalogPage/></ModuleGuard> },
           { path: 'settings', element: <SettingsPage /> },
-          { 
-            path: 'superadmin', 
-            element: <SuperAdminGuard><SuperAdminPage /></SuperAdminGuard> 
-          },
         ],
       },
     ],

@@ -28,4 +28,10 @@ public interface IReservationEngine
         Guid workspaceId,
         Guid reservationId,
         CancellationToken cancellationToken);
+
+    Task<Result<ReservationDto>> EditReservationAsync(
+        Guid workspaceId, 
+        Guid reservationId, 
+        DateTime newDateTime, 
+        CancellationToken cancellationToken);
 }

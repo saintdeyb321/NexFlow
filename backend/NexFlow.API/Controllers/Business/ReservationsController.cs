@@ -2,6 +2,9 @@
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Reservations;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.API.Controllers.Reservations;
 
@@ -16,15 +19,11 @@ public class ReservationsController : ControllerBase
     private readonly IEntitlementService _entitlementService;
 
     public ReservationsController(
-        IReservationEngine reservationEngine,
-        IReservationRepository reservationRepository,
-        IWorkspaceContext workspaceContext,
-        IEntitlementService entitlementService)
+        IReservationEngine reservationEngine, IReservationRepository reservationRepository,
+        IWorkspaceContext workspaceContext, IEntitlementService entitlementService)
     {
-        _reservationEngine = reservationEngine;
-        _reservationRepository = reservationRepository;
-        _workspaceContext = workspaceContext;
-        _entitlementService = entitlementService;
+        _reservationEngine = reservationEngine; _reservationRepository = reservationRepository;
+        _workspaceContext = workspaceContext; _entitlementService = entitlementService;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -38,7 +37,6 @@ public class ReservationsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetReservations([FromQuery] string locationId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
-        // 🔥 CORRECCIÓN (Fallo #9): El Guardia de Seguridad de la Licencia
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
         if (string.IsNullOrEmpty(locationId)) return BadRequest("LocationId es requerido");
 
@@ -50,8 +48,7 @@ public class ReservationsController : ControllerBase
     public async Task<IActionResult> GetAvailability([FromQuery] string locationId, [FromQuery] string serviceId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
-        if (string.IsNullOrEmpty(locationId) || string.IsNullOrEmpty(serviceId))
-            return BadRequest("LocationId y ServiceId son requeridos");
+        if (string.IsNullOrEmpty(locationId) || string.IsNullOrEmpty(serviceId)) return BadRequest("LocationId y ServiceId son requeridos");
 
         var slots = await _reservationEngine.GetAvailabilityAsync(WorkspaceId, locationId, serviceId, date, cancellationToken);
         return Ok(slots);
@@ -63,17 +60,21 @@ public class ReservationsController : ControllerBase
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
 
         var result = await _reservationEngine.CreateReservationAsync(
-            WorkspaceId,
-            request.LocationId,
-            request.ServiceId,
-            request.CustomerIdentifier,
-            request.CustomerName,
-            request.DateTime,
-            cancellationToken);
+            WorkspaceId, request.LocationId, request.ServiceId, request.CustomerIdentifier, request.CustomerName, request.DateTime, cancellationToken);
 
-        if (result.IsFailure)
-            return BadRequest(new { Error = result.Error.Description });
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
+        return Ok(result.Value);
+    }
 
+    // 🛡️ CORRECCIÓN (Fallo #45): Endpoint para Editar/Reagendar
+    [HttpPut("{id}")]
+    public async Task<IActionResult> EditReservation(Guid id, [FromBody] EditReservationRequest request, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
+
+        var result = await _reservationEngine.EditReservationAsync(WorkspaceId, id, request.NewDateTime, cancellationToken);
+
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Ok(result.Value);
     }
 
@@ -84,17 +85,12 @@ public class ReservationsController : ControllerBase
 
         var result = await _reservationEngine.CancelReservationAsync(WorkspaceId, id, cancellationToken);
 
-        if (result.IsFailure)
-            return BadRequest(new { Error = result.Error.Description });
-
+        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return NoContent();
     }
 }
 
-public record CreateReservationRequest(
-    string LocationId,
-    string ServiceId,
-    string CustomerIdentifier,
-    string CustomerName,
-    DateTime DateTime
-);
+public record CreateReservationRequest(string LocationId, string ServiceId, string CustomerIdentifier, string CustomerName, DateTime DateTime);
+
+// El nuevo Request para editar
+public record EditReservationRequest(DateTime NewDateTime);
