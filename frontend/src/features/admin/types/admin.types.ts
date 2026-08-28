@@ -1,12 +1,12 @@
 export interface ProvisionWorkspaceRequest {
   email: string;
-  firstName: string;
-  lastName: string;
+  firstName?: string;
+  lastName?: string;
   workspaceName: string;
-  templateCode?: string; // 🔥 Exactamente como lo pide C#
+  templateCode?: string;
   customModules?: string[]; 
   expiresAt: string;
-  maxLocations: number; // 🔥 Confirmado que C# lo espera
+  maxLocations: number;
 }
 
 export interface WorkspaceSummaryDto {

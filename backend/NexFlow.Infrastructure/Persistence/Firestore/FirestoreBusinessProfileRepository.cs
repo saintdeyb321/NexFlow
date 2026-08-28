@@ -1,9 +1,6 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -19,7 +16,15 @@ public class FirestoreBusinessProfileRepository : IBusinessProfileRepository
 
         if (!snapshot.Exists) return null;
         var data = snapshot.ConvertTo<FirestoreBusinessProfile>();
-        return new BusinessProfileDto(data.CommercialName, data.TaxId, data.ContactEmail, data.WhatsAppNumber, data.Description);
+
+        return new BusinessProfileDto(
+            data.CommercialName,
+            data.TaxId,
+            data.ContactEmail,
+            data.WhatsAppNumber,
+            data.Description,
+            data.TimeZone ?? "America/Lima"
+        );
     }
 
     public async Task SaveProfileAsync(Guid workspaceId, BusinessProfileDto profile, CancellationToken cancellationToken)
@@ -31,7 +36,8 @@ public class FirestoreBusinessProfileRepository : IBusinessProfileRepository
             TaxId = profile.TaxId,
             ContactEmail = profile.ContactEmail,
             WhatsAppNumber = profile.WhatsAppNumber,
-            Description = profile.Description
+            Description = profile.Description,
+            TimeZone = profile.TimeZone 
         };
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
     }
@@ -44,5 +50,6 @@ public class FirestoreBusinessProfileRepository : IBusinessProfileRepository
         [FirestoreProperty] public string ContactEmail { get; set; } = string.Empty;
         [FirestoreProperty] public string WhatsAppNumber { get; set; } = string.Empty;
         [FirestoreProperty] public string Description { get; set; } = string.Empty;
+        [FirestoreProperty] public string TimeZone { get; set; } = "America/Lima";
     }
 }

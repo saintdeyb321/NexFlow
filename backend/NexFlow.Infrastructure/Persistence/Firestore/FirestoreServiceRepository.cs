@@ -1,6 +1,11 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -24,7 +29,7 @@ public class FirestoreServiceRepository : IServiceRepository
                 Description = data.Description,
                 Category = data.Category,
                 DurationInMinutes = data.DurationInMinutes,
-                Price = (decimal)data.Price,
+                PriceMinorUnits = data.PriceMinorUnits, // 🔥 Parseo limpio sin comas
                 Currency = data.Currency,
                 RequiresReservation = data.RequiresReservation,
                 IsActive = data.IsActive,
@@ -37,7 +42,6 @@ public class FirestoreServiceRepository : IServiceRepository
     public async Task<ServiceDto> SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
     {
         var collection = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services");
-
         var docRef = string.IsNullOrEmpty(service.Id) ? collection.Document() : collection.Document(service.Id);
 
         service.Id = docRef.Id;
@@ -48,7 +52,7 @@ public class FirestoreServiceRepository : IServiceRepository
             Description = service.Description,
             Category = service.Category,
             DurationInMinutes = service.DurationInMinutes,
-            Price = (double)service.Price,
+            PriceMinorUnits = service.PriceMinorUnits, // 🔥 Persistencia de entero
             Currency = service.Currency ?? "PEN",
             RequiresReservation = service.RequiresReservation,
             IsActive = service.IsActive,
@@ -57,7 +61,6 @@ public class FirestoreServiceRepository : IServiceRepository
         };
 
         await docRef.SetAsync(firestoreService, SetOptions.MergeAll, cancellationToken);
-
         return service;
     }
 
@@ -74,7 +77,7 @@ public class FirestoreServiceRepository : IServiceRepository
         [FirestoreProperty] public string? Description { get; set; }
         [FirestoreProperty] public string? Category { get; set; }
         [FirestoreProperty] public int DurationInMinutes { get; set; }
-        [FirestoreProperty] public double Price { get; set; }
+        [FirestoreProperty] public long PriceMinorUnits { get; set; }
         [FirestoreProperty] public string Currency { get; set; } = "PEN";
         [FirestoreProperty] public bool RequiresReservation { get; set; } = true;
         [FirestoreProperty] public bool IsActive { get; set; } = true;

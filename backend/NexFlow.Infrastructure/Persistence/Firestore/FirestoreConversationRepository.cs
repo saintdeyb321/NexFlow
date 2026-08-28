@@ -3,6 +3,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Domain.Enums;
 
+
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreConversationRepository : IConversationRepository
@@ -32,12 +33,59 @@ public class FirestoreConversationRepository : IConversationRepository
 
         return MapToConversation(doc);
     }
+    public async Task<ConversationRecord> GetOrCreateActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken)
+    {
+        var collection = GetCollection(workspaceId);
+
+        return await _db.RunTransactionAsync(async transaction =>
+        {
+            var query = collection
+                .WhereEqualTo("consumerPhone", consumerPhone)
+                .WhereEqualTo("status", "open")
+                .OrderByDescending("startedAt")
+                .Limit(1);
+
+            var snapshot = await transaction.GetSnapshotAsync(query, cancellationToken);
+            var doc = snapshot.Documents.FirstOrDefault();
+
+            if (doc != null)
+            {
+                return MapToConversation(doc);
+            }
+
+            var newConv = new ConversationRecord
+            {
+                Id = Guid.NewGuid().ToString(),
+                ConsumerPhone = consumerPhone,
+                Channel = "whatsapp",
+                Mode = ConversationMode.Automatic,
+                Status = "open",
+                StartedAt = DateTime.UtcNow,
+                LastMessageAt = DateTime.UtcNow
+            };
+
+            var docRef = collection.Document(newConv.Id);
+            var expiresAt = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(90), DateTimeKind.Utc);
+            var data = new Dictionary<string, object>
+            {
+                { "id", newConv.Id },
+                { "consumerPhone", newConv.ConsumerPhone },
+                { "channel", newConv.Channel },
+                { "mode", newConv.Mode.ToString() },
+                { "status", newConv.Status },
+                { "startedAt", DateTime.SpecifyKind(newConv.StartedAt, DateTimeKind.Utc) },
+                { "lastMessageAt", DateTime.SpecifyKind(newConv.LastMessageAt, DateTimeKind.Utc) },
+                { "expiresAt", expiresAt }
+            };
+
+            transaction.Set(docRef, data);
+            return newConv;
+        }, cancellationToken: cancellationToken);
+    }
 
     public async Task CreateConversationAsync(Guid workspaceId, ConversationRecord conversation, CancellationToken cancellationToken)
     {
         var docRef = GetCollection(workspaceId).Document(conversation.Id);
-
-        // Calculamos la fecha de expiración (90 días a partir de hoy)
         var expiresAt = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(90), DateTimeKind.Utc);
 
         var data = new Dictionary<string, object>
@@ -49,7 +97,7 @@ public class FirestoreConversationRepository : IConversationRepository
             { "status", conversation.Status },
             { "startedAt", DateTime.SpecifyKind(conversation.StartedAt, DateTimeKind.Utc) },
             { "lastMessageAt", DateTime.SpecifyKind(conversation.LastMessageAt, DateTimeKind.Utc) },
-            { "expiresAt", expiresAt } // <-- Inyectamos la expiración
+            { "expiresAt", expiresAt }
         };
 
         await docRef.SetAsync(data, cancellationToken: cancellationToken);
@@ -58,12 +106,7 @@ public class FirestoreConversationRepository : IConversationRepository
     public async Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, CancellationToken cancellationToken)
     {
         var docRef = GetCollection(workspaceId).Document(conversationId);
-
-        var updates = new Dictionary<string, object>
-        {
-            { "mode", mode.ToString() }
-        };
-
+        var updates = new Dictionary<string, object> { { "mode", mode.ToString() } };
         await docRef.UpdateAsync(updates, cancellationToken: cancellationToken);
     }
 
@@ -79,7 +122,7 @@ public class FirestoreConversationRepository : IConversationRepository
             { "sender", message.Sender.ToString() },
             { "content", message.Content },
             { "timestamp", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) },
-            { "expiresAt", expiresAt } // <-- Mensaje caducará automáticamente
+            { "expiresAt", expiresAt }
         };
 
         if (!string.IsNullOrEmpty(message.ExternalMessageId))
@@ -87,12 +130,11 @@ public class FirestoreConversationRepository : IConversationRepository
 
         await messageRef.SetAsync(data, cancellationToken: cancellationToken);
 
-        // Actualizamos el LastMessageAt y REFRESCAMOS el ExpiresAt de la conversación padre para que no muera mientras esté activa
         var convRef = GetCollection(workspaceId).Document(conversationId);
         await convRef.UpdateAsync(new Dictionary<string, object>
         {
             { "lastMessageAt", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) },
-            { "expiresAt", expiresAt } // Extendemos su vida útil
+            { "expiresAt", expiresAt }
         }, cancellationToken: cancellationToken);
     }
 
@@ -114,7 +156,6 @@ public class FirestoreConversationRepository : IConversationRepository
 
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
 
-        // Invertimos en memoria para que el frontend los reciba en orden cronológico (más viejo al más nuevo)
         return snapshot.Documents.Select(d => new MessageRecord
         {
             Id = d.Id,

@@ -1,7 +1,5 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Google.Cloud.Firestore;
+﻿using Google.Cloud.Firestore;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
@@ -9,42 +7,48 @@ namespace NexFlow.Infrastructure.Persistence.Firestore;
 public class FirestoreTenantCleanupService : ITenantCleanupService
 {
     private readonly FirestoreDb _db;
+    private readonly ILogger<FirestoreTenantCleanupService> _logger;
 
-    public FirestoreTenantCleanupService(FirestoreDb db)
+    public FirestoreTenantCleanupService(FirestoreDb db, ILogger<FirestoreTenantCleanupService> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
     public async Task PurgeTenantDataAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
+        _logger.LogInformation("Iniciando Job asíncrono de purga masiva de datos en Firestore para Workspace: {WorkspaceId}", workspaceId);
+
         var workspaceRef = _db.Collection("workspaces").Document(workspaceId.ToString());
 
-        // 1. ELIMINACIÓN DINÁMICA: Listar todas las subcolecciones existentes de forma automática
-        var collections = await workspaceRef.ListCollectionsAsync().ToListAsync();
-
-        foreach (var collectionRef in collections)
+        try
         {
-            // Para cada subcolección (sea faqs, services, reservations, conversations, etc.)
-            var snapshot = await collectionRef.GetSnapshotAsync(cancellationToken);
+            var collections = await workspaceRef.ListCollectionsAsync().ToListAsync();
 
-            foreach (var doc in snapshot.Documents)
+            foreach (var collectionRef in collections)
             {
-                // Si la colección tiene documentos anidados (ej. conversaciones que contienen mensajes)
-                var nestedCollections = await doc.Reference.ListCollectionsAsync().ToListAsync();
-                foreach (var nestedCol in nestedCollections)
+                var snapshot = await collectionRef.GetSnapshotAsync(cancellationToken);
+                foreach (var doc in snapshot.Documents)
                 {
-                    await DeleteEntireCollectionAsync(nestedCol, cancellationToken);
+                    var nestedCollections = await doc.Reference.ListCollectionsAsync().ToListAsync();
+                    foreach (var nestedCol in nestedCollections)
+                    {
+                        await DeleteEntireCollectionAsync(nestedCol, cancellationToken);
+                    }
+                    await doc.Reference.DeleteAsync(Precondition.None, cancellationToken);
                 }
-
-                await doc.Reference.DeleteAsync(Precondition.None, cancellationToken);
             }
-        }
 
-        // 2. Finalmente borrar el documento maestro del Tenant
-        await workspaceRef.DeleteAsync(Precondition.None, cancellationToken);
+            await workspaceRef.DeleteAsync(Precondition.None, cancellationToken);
+            _logger.LogInformation("Purga masiva de Firestore completada con éxito para Workspace: {WorkspaceId}", workspaceId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Fallo crítico durante la purga en segundo plano del Workspace: {WorkspaceId}", workspaceId);
+            throw; 
+        }
     }
 
-    // Método auxiliar recursivo para colecciones anidadas profundamente
     private async Task DeleteEntireCollectionAsync(CollectionReference collectionRef, CancellationToken cancellationToken)
     {
         var snapshot = await collectionRef.GetSnapshotAsync(cancellationToken);

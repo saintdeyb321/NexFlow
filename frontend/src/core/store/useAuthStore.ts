@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { axiosClient, setWorkspaceHeader, ApiError } from '../api/axiosClient'; // Importamos ApiError
+import { axiosClient, ApiError } from '../api/axiosClient'; // Importamos ApiError
 import type { MeResponse } from '../types/auth.types';
 import { auth } from '../../app/config/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth'; 
@@ -39,7 +39,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
 
       if (!auth.currentUser) {
-        setWorkspaceHeader(null);
         set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
         isCheckingSession = false;
         return;
@@ -47,13 +46,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const { data } = await axiosClient.get<MeResponse>('/me');
       
-      setWorkspaceHeader(data.workspace?.id || null);
       set({ isAuthenticated: true, me: data, isLoading: false, isBootstrapping: false });
 
     } catch (error: unknown) {
       console.error("Error validando sesión contra el backend:", error);
       await signOut(auth);
-      setWorkspaceHeader(null);
       set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
       
       // 🔥 CORRECCIÓN (Fallo #19): Ahora evaluamos el error correctamente usando ApiError
@@ -69,14 +66,12 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async () => {
     await signOut(auth);
-    setWorkspaceHeader(null);
     set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
   },
 
   completeOnboarding: async () => {
     try {
       const { data } = await axiosClient.get<MeResponse>('/me');
-      setWorkspaceHeader(data.workspace?.id || null);
       set({ me: data });
     } catch (error) {
       console.error("Error al sincronizar la sesión post-onboarding:", error);

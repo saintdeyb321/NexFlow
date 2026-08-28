@@ -62,7 +62,7 @@ export const useConversations = () => {
     
     setIsSending(true);
     try {
-      const sentMessage = await sendManualMessage(selectedChat.id, selectedChat.consumerPhone, content.trim());
+      const sentMessage = await sendManualMessage(selectedChat.id, content.trim());
       setMessages(prev => [...prev, sentMessage]);
       return sentMessage;
     } catch (error) {

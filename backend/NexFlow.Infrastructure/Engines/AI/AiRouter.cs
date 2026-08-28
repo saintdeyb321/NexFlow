@@ -1,9 +1,5 @@
-﻿using System;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Text.Json;
 using NexFlow.Application.Engines.AI;
-using NexFlow.Application.Engines.Intent.AI;
 using NexFlow.Application.Engines.Dispatcher;
 
 namespace NexFlow.Infrastructure.Engines.AI;
@@ -17,8 +13,7 @@ public class AiRouter : IAiRouter
         _aiProvider = aiProvider;
     }
 
-    // 🔥 SPRINT 7: Ahora recibimos el ModuleExecutionResult estructurado
-    public async Task<string> GenerateResponseAsync(Guid workspaceId, IntentResultDto intent, ModuleExecutionResult systemContext, CancellationToken cancellationToken)
+    public async Task<string> GenerateResponseAsync(Guid workspaceId, ModuleExecutionResult systemContext, CancellationToken cancellationToken)
     {
         var systemInstruction = @"
 Eres la voz oficial de atención al cliente del negocio por WhatsApp, impulsado por NexFlow.
@@ -31,7 +26,6 @@ MANDAMIENTOS INQUEBRANTABLES (CERO ALUCINACIONES):
 4. LENGUAJE NATURAL: NUNCA menciones palabras técnicas como 'el sistema', 'JSON', 'MissingParameters' o 'el dispatcher'. Háblale al cliente como si fueras un empleado humano de recepción. NUNCA digas que eres una IA.
 5. HANDOFF: Si el JSON indica 'RequiresHuman: true', despídete y dile que un humano tomará el control del chat en breve.";
 
-        // Convertimos el DTO en un JSON legible para que Gemini lo entienda a la perfección
         var jsonContext = JsonSerializer.Serialize(systemContext, new JsonSerializerOptions { WriteIndented = true });
 
         var userPrompt = $"RESULTADO DEL SISTEMA (Formato JSON Estructurado. Tu única fuente de verdad):\n{jsonContext}";

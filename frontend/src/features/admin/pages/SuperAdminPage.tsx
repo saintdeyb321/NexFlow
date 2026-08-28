@@ -58,11 +58,13 @@ export const SuperAdminPage = () => {
             <div className="text-center py-10 text-gray-500">No hay negocios registrados en el sistema.</div>
           ) : (
             workspaces.map(ws => (
-              <WorkspaceCard 
-                key={ws.id} 
-                workspace={ws} 
-                onToggleStatus={handleToggleStatus} 
-                onDelete={handleDelete} 
+              <WorkspaceCard
+                  key={ws.id} // 🔥 Corregido: ws.id en lugar de workspace.id
+                  workspace={ws} // 🔥 Corregido: ws en lugar de workspace
+                  onToggleStatus={handleToggleStatus}
+                  onDelete={handleDelete}
+                  onRenew={(w) => console.log('Renovar pendiente', w)}
+                  onAssignModule={(w) => console.log('Módulo pendiente', w)}
               />
             ))
           )}

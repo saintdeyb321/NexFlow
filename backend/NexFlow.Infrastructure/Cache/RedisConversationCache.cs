@@ -1,21 +1,23 @@
-﻿using System;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using StackExchange.Redis;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using NexFlow.Application.Abstractions.Cache;
+using NexFlow.Domain.Entities;
+using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using StackExchange.Redis;
+using System.Text.Json;
 
 namespace NexFlow.Infrastructure.Cache;
 
 public class RedisConversationCache : IConversationCache
 {
     private readonly IDatabase _redisDb;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public RedisConversationCache(IConnectionMultiplexer redis)
+    public RedisConversationCache(IConnectionMultiplexer redis, IServiceScopeFactory scopeFactory)
     {
         _redisDb = redis.GetDatabase();
+        _scopeFactory = scopeFactory;
     }
-
     public async Task SetContextAsync(Guid workspaceId, string customerPhone, ConversationContextDto context, CancellationToken cancellationToken)
     {
         var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
@@ -41,12 +43,26 @@ public class RedisConversationCache : IConversationCache
             return null;
         }
     }
-
-    // 🔥 CORRECCIÓN (Aislamiento Multitenant): Forzamos la recepción del WorkspaceId en el candado
     public async Task<bool> TryAcquireMessageLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
-        var key = $"workspace:{workspaceId}:webhook:processed:{messageId}";
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
 
-        return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromMinutes(2), When.NotExists);
+        var record = new ProcessedMessage
+        {
+            WorkspaceId = workspaceId,
+            MessageId = messageId,
+            ProcessedAt = DateTime.UtcNow
+        };
+        db.ProcessedMessages.Add(record);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            return false;
+        }
     }
 }

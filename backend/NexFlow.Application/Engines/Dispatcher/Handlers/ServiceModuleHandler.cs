@@ -26,14 +26,25 @@ public class ServiceModuleHandler : IModuleHandler
         if (!activeServices.Any())
             return "SISTEMA: Informa cortésmente que actualmente no hay servicios configurados o disponibles en el catálogo.";
 
-        // Formateamos la lista de servicios para que la IA la lea claramente
+        // 🔥 SPRINT 3 (Auditoría #20): Límite de Contexto para servicios.
+        if (activeServices.Count > 10)
+        {
+            var categories = activeServices
+                .Select(s => string.IsNullOrWhiteSpace(s.Category) ? "Generales" : s.Category)
+                .Distinct()
+                .ToList();
+
+            var categoriesText = string.Join(", ", categories);
+            return $"SISTEMA: El negocio ofrece {activeServices.Count} servicios distribuidos en estas categorías: {categoriesText}. Pregúntale al cliente qué tipo de servicio necesita para darle el detalle, duración y precio exacto.";
+        }
+
         var servicesText = string.Join("\n", activeServices.Select(s =>
         {
             var durationText = s.DurationInMinutes > 0 ? $" ({s.DurationInMinutes} min)" : "";
             var reqReservation = s.RequiresReservation ? " [Requiere Reserva]" : "";
             var desc = !string.IsNullOrWhiteSpace(s.Description) ? $" - {s.Description}" : "";
 
-            return $"- {s.Name}: {s.Currency} {s.Price}{durationText}{reqReservation}{desc}";
+            return $"- {s.Name}: {s.Currency} {s.PriceMinorUnits / 100m}{durationText}{reqReservation}{desc}";
         }));
 
         return $@"SISTEMA: Utiliza la siguiente lista de servicios y sus precios para responder la duda del cliente. NO ofrezcas servicios que no estén en esta lista:

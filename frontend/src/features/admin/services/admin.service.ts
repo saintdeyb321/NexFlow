@@ -6,7 +6,6 @@ export const getSystemWorkspaces = async (): Promise<WorkspaceSummaryDto[]> => {
   return data;
 };
 
-// 🔥 NUEVO: Traer catálogos reales
 export const getSystemTemplates = async (): Promise<any[]> => {
   const { data } = await axiosClient.get<any[]>('/superadmin/clients/templates');
   return data;
@@ -33,11 +32,10 @@ export const deleteWorkspace = async (workspaceId: string): Promise<void> => {
   await axiosClient.delete(`/superadmin/clients/${workspaceId}`);
 };
 
-// 🔥 NUEVO: Operaciones faltantes
-export const renewWorkspaceLicense = async (workspaceId: string, extensionMonths: number): Promise<void> => {
-  await axiosClient.post('/superadmin/clients/renew', { workspaceId, extensionMonths });
+export const renewWorkspaceLicense = async (workspaceId: string, durationInMonths: number): Promise<void> => {
+  await axiosClient.post('/superadmin/clients/renew', { workspaceId, durationInMonths });
 };
 
-export const assignModuleToWorkspace = async (licenseId: string, moduleId: string): Promise<void> => {
-  await axiosClient.post('/superadmin/clients/assign-module', { licenseId, moduleId });
+export const assignModuleToWorkspace = async (workspaceId: string, moduleId: string): Promise<void> => {
+  await axiosClient.post('/superadmin/clients/assign-module', { workspaceId, moduleId });
 };

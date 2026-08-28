@@ -5,5 +5,6 @@ public record BusinessProfileDto(
     string TaxId, // RUC, CUIT, etc.
     string ContactEmail,
     string WhatsAppNumber,
-    string Description
+    string Description,
+    string TimeZone = "America/Lima"
 );

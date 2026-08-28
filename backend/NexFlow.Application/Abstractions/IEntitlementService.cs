@@ -8,4 +8,5 @@ public interface IEntitlementService
     Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken);
     Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken);
     Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken);
+    void InvalidateWorkspaceCache(Guid workspaceId);
 }

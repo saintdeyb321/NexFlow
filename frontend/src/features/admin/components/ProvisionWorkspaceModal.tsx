@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
-import { axiosClient } from '../../../core/api/axiosClient';
+import { getSystemTemplates, getSystemModules } from '../services/admin.service';
 import type { ProvisionWorkspaceRequest } from '../types/admin.types';
 
 interface ProvisionModalProps {
@@ -14,7 +14,6 @@ interface ProvisionModalProps {
 export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvisioning }: ProvisionModalProps) => {
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
   
-  // 🔥 ESTADOS DINÁMICOS DEL CATÁLOGO
   const [dbTemplates, setDbTemplates] = useState<any[]>([]);
   const [dbModules, setDbModules] = useState<any[]>([]);
   const [selectedCustomModules, setSelectedCustomModules] = useState<string[]>([]);
@@ -30,13 +29,13 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
     const fetchCatalog = async () => {
       try {
         const [tplRes, modRes] = await Promise.all([
-          axiosClient.get('/superadmin/clients/templates'),
-          axiosClient.get('/superadmin/clients/modules')
+          getSystemTemplates(),
+          getSystemModules()
         ]);
-        setDbTemplates(tplRes.data);
-        setDbModules(modRes.data);
-        if (tplRes.data.length > 0) {
-          setFormData(prev => ({ ...prev, templateCode: tplRes.data[0].code }));
+        setDbTemplates(tplRes);
+        setDbModules(modRes);
+        if (tplRes.length > 0) {
+          setFormData(prev => ({ ...prev, templateCode: tplRes[0].code }));
         }
       } catch (error) {
         console.error("Error cargando catálogo", error);
@@ -60,11 +59,9 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 🔥 CORRECCIÓN: Autocompletamos con datos genéricos para que el inquilino los llene en su Onboarding
+    // 🔥 SPRINT 1 (Auditoría #38): Limpiamos la inyección forzada de Nombres y Apellidos
     const payload: ProvisionWorkspaceRequest = {
       email: formData.email,
-      firstName: "Usuario",
-      lastName: "Nuevo",
       workspaceName: "Negocio por Configurar",
       expiresAt: new Date(formData.expiresAt).toISOString(),
       maxLocations: Number(formData.maxLocations)

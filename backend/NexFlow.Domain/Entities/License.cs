@@ -1,4 +1,7 @@
-﻿using NexFlow.Domain.Enums;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using NexFlow.Domain.Enums;
 using NexFlow.Domain.Exceptions;
 using NexFlow.Domain.ValueObjects;
 
@@ -11,8 +14,6 @@ public class License : Entity
     public LicenseStatus Status { get; private set; }
     public DateRange ValidityPeriod { get; private set; } = null!;
     public Guid? TemplateId { get; private set; }
-
-    // NUEVO: El control estricto de sedes
     public int MaxLocations { get; private set; }
 
     private readonly List<LicenseModule> _licenseModules = new();
@@ -36,16 +37,15 @@ public class License : Entity
             MaxLocations = maxLocations
         };
     }
-
-    public static License CreateCustomLicense(Guid workspaceId, DateTime now, DateTime expiresAt, int maxLocations)
+    public static License CreateCustomLicense(Guid workspaceId, DateTime now, DateTime? expiresAt, int maxLocations)
     {
-        if (expiresAt <= now) throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
+        if (expiresAt.HasValue && expiresAt.Value <= now) throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
         if (maxLocations < 1) throw new DomainException("La licencia debe permitir al menos 1 sede operativa.");
 
         return new License
         {
             WorkspaceId = workspaceId,
-            Type = LicenseType.Custom,
+            Type = !expiresAt.HasValue ? LicenseType.Internal : LicenseType.Custom,
             TemplateId = null,
             Status = LicenseStatus.Active,
             ValidityPeriod = new DateRange(now, expiresAt),
@@ -61,7 +61,7 @@ public class License : Entity
 
     public void AddCustomModule(Guid moduleId)
     {
-        if (Type != LicenseType.Custom) throw new DomainException("No se pueden agregar módulos a la carta en una licencia de plantilla fija.");
+        if (Type != LicenseType.Custom && Type != LicenseType.Internal) throw new DomainException("No se pueden agregar módulos a la carta en una licencia de plantilla fija.");
         AddModuleInternal(moduleId);
     }
 
@@ -73,20 +73,19 @@ public class License : Entity
 
         _licenseModules.Add(new LicenseModule(this.Id, moduleId));
     }
-
-    public bool IsValidAt(DateTime currentDate) => Status == LicenseStatus.Active && currentDate >= ValidityPeriod.Start && currentDate <= ValidityPeriod.End;
+    public bool IsValidAt(DateTime currentDate) => Status == LicenseStatus.Active && ValidityPeriod.IsActive(currentDate);
 
     public void Renew(int durationInMonths, DateTime now)
     {
         if (durationInMonths <= 0) throw new DomainException("La duración debe ser mayor a cero.");
-        DateTime newStart = ValidityPeriod.End > now ? ValidityPeriod.End : now;
+        if (!ValidityPeriod.End.HasValue) return;
+
+        DateTime newStart = ValidityPeriod.End.Value > now ? ValidityPeriod.End.Value : now;
         ValidityPeriod = new DateRange(ValidityPeriod.Start, newStart.AddMonths(durationInMonths));
         Status = LicenseStatus.Active;
     }
 
     public void Suspend() => Status = LicenseStatus.Suspended;
-
-    // Opcional: Si en el futuro quieres que el SuperAdmin aumente las sedes de un cliente
     public void UpdateMaxLocations(int newMaxLocations)
     {
         if (newMaxLocations < 1) throw new DomainException("La licencia debe permitir al menos 1 sede operativa.");

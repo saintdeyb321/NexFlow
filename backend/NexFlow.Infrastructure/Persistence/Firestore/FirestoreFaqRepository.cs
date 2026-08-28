@@ -1,14 +1,14 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Knowledge;
-using NexFlow.Domain.Exceptions; // Para lanzar excepciones de negocio
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreFaqRepository : IFaqRepository
 {
     private readonly FirestoreDb _firestoreDb;
-    private const int MAX_FAQS_PER_WORKSPACE = 30; // 🛡️ EL LÍMITE FILOSÓFICO
+    private const int MAX_FAQS_PER_WORKSPACE = 30; 
 
     public FirestoreFaqRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
 

@@ -4,6 +4,10 @@ using NexFlow.Application.Common;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Domain.ValueObjects;
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 
@@ -48,7 +52,10 @@ public class ProvisionClientCommandHandler
         if (request.ExpiresAt <= now)
             return Result<Guid>.Failure(new Error("License.Invalid", "Fecha de expiración inválida."));
 
-        // 🔥 CORRECCIÓN (Fallo #18): Validación estricta Template XOR Custom (Nunca ambos, nunca ninguno)
+        // 🔥 SPRINT 1: Validar MaxLocations desde el Backend (Auditoría #37)
+        if (request.MaxLocations < 1)
+            return Result<Guid>.Failure(new Error("Provision.InvalidLocations", "El negocio debe permitir al menos 1 sede operativa."));
+
         bool hasTemplate = !string.IsNullOrEmpty(request.TemplateCode);
         bool hasCustomModules = request.CustomModules != null && request.CustomModules.Any();
 
@@ -58,24 +65,31 @@ public class ProvisionClientCommandHandler
         if (!hasTemplate && !hasCustomModules)
             return Result<Guid>.Failure(new Error("Provision.Invalid", "Debe proporcionar obligatoriamente un TemplateCode o una lista de CustomModules."));
 
-        // 1. Reutilizar usuario si existe, crearlo si no
         var email = new Email(request.Email);
         var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
 
         if (user == null)
         {
-            user = User.Create(email, request.FirstName, request.LastName);
+            // Solo colocamos "Usuario" si de verdad es nuevo y no enviaron nombre.
+            user = User.Create(email, request.FirstName ?? "Usuario", request.LastName ?? "");
             _userRepository.Add(user);
         }
+        else
+        {
+            // 🔥 SPRINT 1: Bloqueamos creación de múltiples workspaces para el mismo correo (Auditoría #36)
+            var existingMemberships = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
+            if (existingMemberships.Any())
+            {
+                return Result<Guid>.Failure(new Error("Provision.UserAlreadyHasWorkspace", "El usuario ya tiene un negocio asignado. El sistema solo permite un negocio por correo."));
+            }
+        }
 
-        // 2. Crear Entorno y Membresía
         var workspace = Workspace.Create(request.WorkspaceName);
         _workspaceRepository.Add(workspace);
 
         var membership = Membership.Create(user.Id, workspace.Id, MembershipRole.Owner);
         _membershipRepository.Add(membership);
 
-        // 3. ESTRATEGIA DE LICENCIAMIENTO
         License license;
 
         if (hasTemplate)
@@ -106,7 +120,6 @@ public class ProvisionClientCommandHandler
 
         _licenseRepository.Add(license);
 
-        // 4. Auditoría y Guardado
         var audit = AuditLog.Create(workspace.Id, user.Id, AuditAction.WorkspaceCreated, "Provisioned");
         _auditLogRepository.Add(audit);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

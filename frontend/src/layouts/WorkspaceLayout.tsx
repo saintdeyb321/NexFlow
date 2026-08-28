@@ -2,19 +2,17 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../core/store/useAuthStore';
 import { 
   LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
-  ShieldAlert, MessageCircle, Package, ClipboardList, Users, Bell 
+  ShieldAlert, MessageCircle, Package, ClipboardList 
 } from 'lucide-react';
 
-// 🔥 SPRINT 8: Registro Maestro de Módulos (Module Registry)
+// 🔥 SPRINT 2 (Auditoría #8): Eliminadas las rutas fantasmas (CUSTOMERS, NOTIFICATIONS)
 const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: React.ElementType }> = {
   'RESERVATIONS': { route: '/reservations', label: 'Reservas', icon: Calendar },
   'CONVERSATIONS': { route: '/inbox', label: 'Mensajes', icon: MessageCircle },
   'FAQ': { route: '/faqs', label: 'Base (FAQ)', icon: BookOpen },
   'SERVICES': { route: '/services', label: 'Servicios', icon: Scissors },
   'CATALOG': { route: '/catalog', label: 'Catálogo', icon: Package },
-  'REQUESTS': { route: '/requests', label: 'Solicitudes', icon: ClipboardList },
-  'CUSTOMERS': { route: '/customers', label: 'Clientes', icon: Users },
-  'NOTIFICATIONS': { route: '/notifications', label: 'Notificaciones', icon: Bell }
+  'REQUESTS': { route: '/requests', label: 'Solicitudes', icon: ClipboardList }
 };
 
 export const WorkspaceLayout = () => {
@@ -31,14 +29,12 @@ export const WorkspaceLayout = () => {
         : 'text-gray-600 hover:bg-gray-50'
     }`;
 
-  // Extraemos y ordenamos los módulos activos basados en el Registry
   const activeModules = entitlements
     .filter(code => MODULE_REGISTRY[code])
     .map(code => ({ code, ...MODULE_REGISTRY[code] }));
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div className="h-16 flex items-center px-6 border-b border-gray-200">
           <span className="font-bold text-xl text-blue-600 tracking-tight">NexFlow</span>
@@ -49,7 +45,6 @@ export const WorkspaceLayout = () => {
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
           </Link>
 
-          {/* Renderizado Dinámico de Módulos */}
           {activeModules.map(({ code, route, label, icon: Icon }) => (
             <Link key={code} to={route} className={navItemClass(route)}>
               <Icon className="w-5 h-5 mr-3" /> {label}
@@ -65,7 +60,6 @@ export const WorkspaceLayout = () => {
           </Link>
         </nav>
 
-        {/* User Profile & Logout */}
         <div className="p-4 border-t border-gray-200 bg-gray-50">
           <div className="mb-3 px-2">
             <p className="text-sm font-semibold text-gray-800 truncate">
@@ -96,7 +90,6 @@ export const WorkspaceLayout = () => {
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto">
         <div className="p-8 max-w-7xl mx-auto">
           <Outlet />

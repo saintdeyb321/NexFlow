@@ -16,20 +16,13 @@ export class ApiError extends Error {
 }
 
 export const axiosClient = axios.create({
-  // 🔥 SPRINT 8: Cero localhosts hardcodeados, entorno estricto
   baseURL: import.meta.env.VITE_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-export const setWorkspaceHeader = (workspaceId: string | null) => {
-  if (workspaceId) {
-    axiosClient.defaults.headers.common['X-Workspace-Id'] = workspaceId;
-  } else {
-    delete axiosClient.defaults.headers.common['X-Workspace-Id'];
-  }
-};
+export const setWorkspaceHeader = () => {}; 
 
 axiosClient.interceptors.request.use(
   async (config) => {
@@ -38,6 +31,20 @@ axiosClient.interceptors.request.use(
       const token = await user.getIdToken();
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // 🔥 SPRINT 6 (Auditoría #47): Inyectar Workspace Id de forma segura y por hilo.
+    const storedAuth = localStorage.getItem('auth-storage');
+    if (storedAuth) {
+      try {
+        const parsed = JSON.parse(storedAuth);
+        const wsId = parsed?.state?.me?.workspace?.id;
+        if (wsId) {
+          config.headers['X-Workspace-Id'] = wsId;
+        }
+      } catch (e) {
+      }
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -49,17 +56,18 @@ axiosClient.interceptors.response.use(
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data;
+      const headerCorrelationId = error.response.headers['x-correlation-id'];
 
       const message = data?.message || data?.detail || 'Error desconocido en el servidor';
       const code = data?.code || data?.title || 'UNKNOWN_ERROR';
-      const correlationId = data?.correlationId;
+      const finalCorrelationId = data?.correlationId || headerCorrelationId;
 
       if (status === 401) console.warn("⛔ [401] Sesión expirada o inválida");
       else if (status === 403) console.warn(`🔒 [403] Acceso Denegado: ${message}`);
       else if (status === 404) console.warn(`🔍 [404] Endpoint no encontrado: ${error.config.url}`);
-      else if (status >= 500) console.error(`🔥 [500] Error del Servidor Backend: ${message}`);
+      else if (status >= 500) console.error(`🔥 [500] Error del Servidor Backend: ${message} (Trace: ${finalCorrelationId})`);
 
-      return Promise.reject(new ApiError(status, code, message, correlationId));
+      return Promise.reject(new ApiError(status, code, message, finalCorrelationId));
     } else if (error.request) {
       return Promise.reject(new ApiError(0, 'NETWORK_ERROR', 'Sin conexión al servidor'));
     }

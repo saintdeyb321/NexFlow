@@ -24,6 +24,7 @@ public class ReservationModuleHandler : IModuleHandler
         _reservationEngine = reservationEngine;
         _conversationCache = conversationCache;
     }
+
     public string[] SupportedCapabilities => new[] { "CHECK_AVAILABILITY", "CREATE", "CANCEL" };
 
     public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
@@ -31,9 +32,19 @@ public class ReservationModuleHandler : IModuleHandler
         var phone = request.Parameters.TryGetValue("phone", out var p) ? p?.ToString() ?? "unknown" : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, phone, cancellationToken) ?? new ConversationContextDto();
 
+        // 🔥 SPRINT 3 (Auditoría #15): Implementación de CANCEL
+        if (request.CapabilityCode == "CANCEL")
+        {
+            // 🔥 CORRECCIÓN: Usamos SelectedLocationId y SelectedServiceId
+            context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
+            await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
+
+            // Usamos el flag [RequiresHuman] para que el Dispatcher lo intercepte y active el Handoff
+            return "SISTEMA: Indícale al cliente que has recibido su solicitud de cancelación y que un asesor se comunicará en breve para procesarla. [RequiresHuman]";
+        }
+
         // 1. RESOLVER SEDE
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
-        // 🔥 CORRECCIÓN: Usamos SelectedLocationId
         string? targetLocationId = context.SelectedLocationId;
 
         if (string.IsNullOrEmpty(targetLocationId))
@@ -66,23 +77,49 @@ public class ReservationModuleHandler : IModuleHandler
         }
 
         // 2. RESOLVER SERVICIO
-        // 🔥 CORRECCIÓN: Usamos SelectedServiceId
         string? targetServiceId = context.SelectedServiceId;
-        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
+        var allServices = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
+
+        // 🔥 SPRINT 3 (Auditoría #17): Filtramos estrictamente solo los servicios activos
+        var services = allServices.Where(s => s.IsActive).ToList();
 
         if (string.IsNullOrEmpty(targetServiceId))
         {
             if (request.Parameters.TryGetValue("service", out var serviceName) && serviceName != null)
             {
-                var matchedService = services.FirstOrDefault(s => s.Name.Contains(serviceName.ToString()!, StringComparison.OrdinalIgnoreCase));
-                if (matchedService != null) context.SelectedServiceId = matchedService.Id;
+                var searchStr = serviceName.ToString()!;
+
+                // 🔥 SPRINT 3 (Auditoría #16): Búsqueda estricta primero (Exact match)
+                var exactMatch = services.FirstOrDefault(s => s.Name.Equals(searchStr, StringComparison.OrdinalIgnoreCase));
+
+                if (exactMatch != null)
+                {
+                    context.SelectedServiceId = exactMatch.Id;
+                }
+                else
+                {
+                    // Si no es exacto, buscamos parciales (Contains)
+                    var matchedServices = services.Where(s => s.Name.Contains(searchStr, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (matchedServices.Count == 1)
+                    {
+                        context.SelectedServiceId = matchedServices.First().Id;
+                    }
+                    else if (matchedServices.Count > 1)
+                    {
+                        context.PendingAction = "ASK_SERVICE";
+                        await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
+                        var options = string.Join(", ", matchedServices.Select(m => m.Name));
+                        return $"SISTEMA: Hay varios servicios que coinciden con '{searchStr}'. Opciones: {options}. Pregunta cuál de estos específicos desea.";
+                    }
+                }
             }
 
             if (string.IsNullOrEmpty(context.SelectedServiceId))
             {
                 context.PendingAction = "ASK_SERVICE";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-                var serviceNames = string.Join(", ", services.Where(s => s.IsActive).Select(s => s.Name));
+                var serviceNames = string.Join(", ", services.Select(s => s.Name));
                 return $"SISTEMA: Necesitamos saber qué servicio desea. Pregúntale al cliente qué servicio quiere agendar. Opciones: {serviceNames}.";
             }
             targetServiceId = context.SelectedServiceId;
@@ -100,7 +137,6 @@ public class ReservationModuleHandler : IModuleHandler
             dateToSearch = parsedDate.Date;
         }
 
-        // --- RUTAS DE EJECUCIÓN FINAL ---
         if (request.CapabilityCode == "CHECK_AVAILABILITY")
         {
             var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, targetLocationId!, targetServiceId!, dateToSearch, cancellationToken);
@@ -137,7 +173,6 @@ public class ReservationModuleHandler : IModuleHandler
 
             if (result.IsSuccess)
             {
-                // 🔥 CORRECCIÓN: Limpiamos los nuevos nombres de propiedades al tener éxito
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
 

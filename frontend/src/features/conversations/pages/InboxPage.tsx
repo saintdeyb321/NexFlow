@@ -76,7 +76,7 @@ export const InboxPage = () => {
     if (!selectedChat) return;
     setIsSending(true);
     try {
-      const sentMessage = await sendManualMessage(selectedChat.id, selectedChat.consumerPhone, content);
+      const sentMessage = await sendManualMessage(selectedChat.id, content);
       setMessages(prev => [...prev, sentMessage]);
     } catch (error) {
       console.error('Error enviando mensaje', error);

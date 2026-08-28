@@ -103,7 +103,7 @@ export const ServicesPage = () => {
                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">INACTIVO</span>
                       )}
                       <span className="ml-3 text-xs text-gray-500 border-l border-gray-200 pl-3">
-                        {service.durationInMinutes} min • S/ {service.price?.toFixed(2) || '0.00'}
+                        {service.durationInMinutes} min • S/ {service.priceMinorUnits ? (service.priceMinorUnits / 100).toFixed(2) : '0.00'}
                       </span>
                     </div>
                   </div>

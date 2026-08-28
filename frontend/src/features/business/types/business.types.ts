@@ -11,12 +11,13 @@ export interface ServiceDto {
   name: string;
   description?: string;
   category?: string;
-  price?: number;
+  // 🔥 SPRINT 5: Migrado a unidades menores (ej: S/ 10.50 se envía como 1050)
+  priceMinorUnits?: number; 
   currency?: string;
   durationInMinutes: number;
   requiresReservation: boolean;
   isActive: boolean;
-  availableAtLocations?: string[]; // IDs de las sedes
+  availableAtLocations?: string[];
 }
 
 export interface FaqDto {
@@ -30,8 +31,8 @@ export interface LocationDto {
   id?: string; 
   name: string;
   address: string;
-  reference?: string;  // 🔥 CORRECCIÓN: Ahora es opcional en el front
-  mapUrl?: string;     // 🔥 NUEVO: Link de Google Maps
+  reference?: string;
+  mapUrl?: string;
   isMain: boolean;
 }
 

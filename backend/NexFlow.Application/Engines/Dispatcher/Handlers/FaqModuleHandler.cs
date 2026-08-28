@@ -15,7 +15,6 @@ public class FaqModuleHandler : IModuleHandler
         _profileRepository = profileRepository;
     }
 
-    // 🛡️ AHORA RESPETA LA CAPACIDAD INYECTADA EN EL SEEDER
     public string[] SupportedCapabilities => new[] { "READ" };
 
     public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
@@ -26,8 +25,10 @@ public class FaqModuleHandler : IModuleHandler
         var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
         var faqs = await _faqRepository.GetFaqsAsync(workspaceId, cancellationToken);
 
-        var faqsText = faqs.Any()
-            ? string.Join(" | ", faqs.Select(f => $"P: {f.Question} R: {f.Answer}"))
+        var relevantFaqs = faqs.Take(10).ToList();
+
+        var faqsText = relevantFaqs.Any()
+            ? string.Join(" | ", relevantFaqs.Select(f => $"P: {f.Question} R: {f.Answer}"))
             : "Actualmente no hay preguntas frecuentes configuradas.";
 
         return profile != null

@@ -39,6 +39,16 @@ public class ProcessIncomingMessageCommandHandler
         _logger = logger;
     }
 
+    // 🔥 SPRINT 4 (Auditoría #23): Normalizador Canónico
+    private static string NormalizePhone(string phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return phone;
+        var clean = phone.Split('@')[0];
+        clean = new string(clean.Where(c => char.IsDigit(c) || c == '+').ToArray());
+        if (!clean.StartsWith("+") && clean.Length >= 10) clean = "+" + clean;
+        return clean;
+    }
+
     public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
         var resolvedWorkspaceId = await _instanceResolver.ResolveInstanceAsync(request.InstanceName, cancellationToken);
@@ -57,14 +67,23 @@ public class ProcessIncomingMessageCommandHandler
         if (request.CustomerPhone.Contains("@g.us") || request.CustomerPhone.Contains("-"))
             return Result.Success();
 
-        var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, request.CustomerPhone, cancellationToken);
+        var normalizedPhone = NormalizePhone(request.CustomerPhone);
 
+        var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
+
+        // PRIVACIDAD: Ignorar salientes a desconocidos
         if (request.FromMe && conversation == null)
             return Result.Success();
 
+        if (!await _entitlementService.IsLicenseValidAsync(workspaceId, cancellationToken))
+        {
+            _logger.LogWarning("Licencia inválida. Ignorando mensaje en {WorkspaceId}.", workspaceId);
+            return Result.Success();
+        }
+
         var consumer = new ConsumerIdentityRecord
         {
-            Phone = request.CustomerPhone,
+            Phone = normalizedPhone,
             DisplayName = request.CustomerName,
             FirstSeenAt = DateTime.UtcNow,
             LastInteractionAt = DateTime.UtcNow
@@ -73,17 +92,13 @@ public class ProcessIncomingMessageCommandHandler
 
         if (conversation == null)
         {
-            conversation = new ConversationRecord
-            {
-                Id = Guid.NewGuid().ToString(),
-                ConsumerPhone = request.CustomerPhone,
-                Channel = "whatsapp",
-                Mode = ConversationMode.Automatic,
-                Status = "open",
-                StartedAt = DateTime.UtcNow,
-                LastMessageAt = DateTime.UtcNow
-            };
-            await _conversationRepo.CreateConversationAsync(workspaceId, conversation, cancellationToken);
+            conversation = await _conversationRepo.GetOrCreateActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
+        }
+
+        if (request.FromMe && conversation.Mode != ConversationMode.Human)
+        {
+            await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
+            _logger.LogInformation("Handoff Automático disparado por intervención manual del dueño en la conversación {ConvId}", conversation.Id);
         }
 
         var messageRecord = new MessageRecord
@@ -97,21 +112,17 @@ public class ProcessIncomingMessageCommandHandler
         };
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, messageRecord, cancellationToken);
 
+        // ESCUDO IA
         if (conversation.Mode == ConversationMode.Human || conversation.Mode == ConversationMode.Paused || request.FromMe)
         {
-            _logger.LogInformation("IA Silenciada en {ConvId}. Razón: Modo {Mode} o Mensaje FromMe ({FromMe}).",
-                conversation.Id, conversation.Mode, request.FromMe);
             return Result.Success();
         }
-
-        if (!await _entitlementService.IsLicenseValidAsync(workspaceId, cancellationToken))
-            return Result.Success();
 
         var intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, cancellationToken);
         if (!intentResult.IsConfident())
             intentResult = new IntentResultDto(IntentType.Unknown, 0, new());
 
-        intentResult.Parameters["phone"] = request.CustomerPhone;
+        intentResult.Parameters["phone"] = normalizedPhone;
         intentResult.Parameters["messageId"] = request.MessageId;
 
         ModuleExecutionResult systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
@@ -119,12 +130,11 @@ public class ProcessIncomingMessageCommandHandler
         if (systemContext.RequiresHuman)
         {
             await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
-            _logger.LogInformation("Handoff Automático disparado para conversación {ConvId}", conversation.Id);
+            _logger.LogInformation("Handoff Automático disparado por IA para conversación {ConvId}", conversation.Id);
         }
 
-        var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, intentResult, systemContext, cancellationToken);
-
-        await _messageGateway.SendTextAsync(workspaceId, request.CustomerPhone, finalResponse, cancellationToken);
+        var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, cancellationToken);
+        await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
 
         var aiMessageRecord = new MessageRecord
         {

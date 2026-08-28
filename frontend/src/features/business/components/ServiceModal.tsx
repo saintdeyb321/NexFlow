@@ -16,19 +16,18 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
     name: '',
     description: '',
     durationInMinutes: 30,
-    price: 0,
+    priceMinorUnits: 0,
     currency: 'PEN',
     requiresReservation: true,
     isActive: true,
   });
 
-  // Si nos pasan datos iniciales (Editar), los cargamos. Si no, limpiamos (Nuevo).
   useEffect(() => {
     if (initialData) {
       setFormData(initialData);
     } else {
       setFormData({
-        name: '', description: '', durationInMinutes: 30, price: 0, currency: 'PEN', requiresReservation: true, isActive: true
+        name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true
       });
     }
   }, [initialData, isOpen]);
@@ -40,15 +39,15 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
     setIsSaving(true);
     try {
       const serviceToSave: ServiceDto = {
+        ...formData,
         id: formData.id || crypto.randomUUID(),
         name: formData.name,
         description: formData.description,
         durationInMinutes: formData.durationInMinutes,
-        price: formData.price,
         currency: formData.currency,
         requiresReservation: formData.requiresReservation ?? true,
         isActive: formData.isActive ?? true
-      };
+      } as ServiceDto;
       
       await onSave(serviceToSave);
       onClose();
@@ -107,8 +106,9 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
               </span>
               <input
                 type="number" min="0" step="0.10"
-                value={formData.price}
-                onChange={e => setFormData({ ...formData, price: parseFloat(e.target.value) })}
+                // 🔥 Cálculo seguro: Evita NaN si priceMinorUnits es undefined
+                value={(formData.priceMinorUnits || 0) / 100}
+                onChange={e => setFormData({ ...formData, priceMinorUnits: Math.round(parseFloat(e.target.value) * 100) })}
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-r-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               />
             </div>

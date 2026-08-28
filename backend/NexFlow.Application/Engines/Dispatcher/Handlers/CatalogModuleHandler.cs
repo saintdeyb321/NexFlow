@@ -26,10 +26,22 @@ public class CatalogModuleHandler : IModuleHandler
         if (!activeProducts.Any())
             return "SISTEMA: Informa cortésmente que actualmente no hay productos disponibles en el catálogo.";
 
+        // 🔥 SPRINT 3 (Auditoría #20): Límite de Contexto. Si hay más de 10, resumimos.
+        if (activeProducts.Count > 10)
+        {
+            var categories = activeProducts
+                .Select(p => string.IsNullOrWhiteSpace(p.Category) ? "Generales" : p.Category)
+                .Distinct()
+                .ToList();
+
+            var categoriesText = string.Join(", ", categories);
+            return $"SISTEMA: El catálogo tiene {activeProducts.Count} productos divididos en estas categorías: {categoriesText}. Pídele amablemente al cliente que especifique qué categoría o tipo de producto busca para darle opciones y precios exactos.";
+        }
+
         var productsText = string.Join("\n", activeProducts.Select(p =>
         {
             var desc = !string.IsNullOrWhiteSpace(p.Description) ? $" - {p.Description}" : "";
-            return $"- {p.Name}: {p.Currency} {p.Price}{desc}";
+            return $"- {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m}{desc}";
         }));
 
         return $@"SISTEMA: Utiliza la siguiente lista de productos y sus precios para responder la duda del cliente. NO ofrezcas productos que no estén en esta lista:

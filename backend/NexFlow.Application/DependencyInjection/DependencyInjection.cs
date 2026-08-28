@@ -2,6 +2,7 @@
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Engines.Dispatcher;
 using NexFlow.Application.Engines.Dispatcher.Handlers;
+using NexFlow.Application.Engines.Reservation;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Identity.GetMe;
@@ -41,7 +42,7 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();
         services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
-
+        services.AddScoped<IReservationEngine, ReservationEngine>();
         return services;
     }
 }

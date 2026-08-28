@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
+using NexFlow.Application.Features.Requests;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -42,8 +43,7 @@ public class RequestsController : ControllerBase
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken);
         if (!activeModules.Contains("REQUESTS")) return StatusCode(403, "Módulo REQUESTS no contratado.");
 
-        // Validamos contra el Enum estricto
-        if (!Enum.TryParse<RequestStatusEnum>(payload.Status, true, out var parsedStatus))
+        if (!Enum.TryParse<RequestStatus>(payload.Status, true, out var parsedStatus))
         {
             return BadRequest(new { code = "Request.InvalidStatus", message = $"El estado '{payload.Status}' no es válido." });
         }
@@ -53,13 +53,4 @@ public class RequestsController : ControllerBase
     }
 }
 
-public enum RequestStatusEnum
-{
-    Pending,
-    InReview,
-    Approved,
-    Rejected,
-    Completed,
-    Cancelled
-}
 public record UpdateStatusDto(string Status);

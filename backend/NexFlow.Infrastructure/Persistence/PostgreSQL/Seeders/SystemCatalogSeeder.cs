@@ -3,7 +3,6 @@ using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 
-
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders;
 
 public static class SystemCatalogSeeder
@@ -17,8 +16,7 @@ public static class SystemCatalogSeeder
             new { Code = "LOCATIONS", Name = "Gestión de Sedes", Desc = "Administración de locales.", Caps = new[] { new { Code = "READ", Desc = "Leer sedes" } } },
             new { Code = "BUSINESS_HOURS", Name = "Horarios de Atención", Desc = "Control de disponibilidad.", Caps = new[] { new { Code = "READ", Desc = "Leer horarios" } } },
             new { Code = "FAQ", Name = "Base de Conocimiento", Desc = "Preguntas frecuentes para la IA.", Caps = new[] { new { Code = "READ", Desc = "Consultar FAQs" } } },
-            
-            // Módulos Transaccionales
+
             new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar servicios" } } },
             new { Code = "CATALOG", Name = "Catálogo de Productos", Desc = "Productos físicos o consumibles.", Caps = new[] { new { Code = "READ", Desc = "Consultar productos" } } },
 
@@ -121,25 +119,22 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 🔥 4. SPRINT 3: CREACIÓN DEL WORKSPACE INTERNO PARA SUPERADMINS (Fallo Crítico #2)
+        // 🔥 4. SPRINT 1: CREACIÓN DEL WORKSPACE INTERNO PARA SUPERADMINS
         var internalWorkspace = await context.Workspaces.FirstOrDefaultAsync(w => w.Name == "NexFlow Internal");
         if (internalWorkspace == null)
         {
-            // Usamos tu método estático y lo activamos
             internalWorkspace = Workspace.Create("NexFlow Internal");
             internalWorkspace.Activate();
             context.Workspaces.Add(internalWorkspace);
             await context.SaveChangesAsync();
 
-            // Creamos una licencia Custom Infinita usando tu método exacto
             var license = License.CreateCustomLicense(
                 internalWorkspace.Id,
                 DateTime.UtcNow,
-                DateTime.UtcNow.AddYears(10),
+                null,
                 999
             );
 
-            // Asignamos TODOS los módulos existentes usando el método de Dominio
             foreach (var mod in existingModules)
             {
                 license.AddCustomModule(mod.Id);
@@ -149,14 +144,13 @@ public static class SystemCatalogSeeder
             await context.SaveChangesAsync();
         }
 
-        // 🔥 5. Vincular a los SuperAdmins
+        // 5. Vincular a los SuperAdmins
         var sysAdmins = await context.SystemAdministrators.ToListAsync();
         foreach (var admin in sysAdmins)
         {
             var isMember = await context.Memberships.AnyAsync(m => m.UserId == admin.UserId && m.WorkspaceId == internalWorkspace.Id);
             if (!isMember)
             {
-                // Usamos el método fábrica de Membership
                 var membership = Membership.Create(admin.UserId, internalWorkspace.Id, MembershipRole.Owner);
                 context.Memberships.Add(membership);
             }

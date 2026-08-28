@@ -3,5 +3,6 @@
 public enum LicenseType
 {
     Template,
-    Custom
+    Custom,
+    Internal
 }

@@ -11,8 +11,6 @@ public class EntitlementService : IEntitlementService
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly IModuleRepository _moduleRepository;
     private readonly IClock _clock;
-
-    // 🔥 SPRINT 6: Inyectamos Memoria Caché para no asfixiar a PostgreSQL
     private readonly IMemoryCache _cache;
 
     private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS" };
@@ -30,21 +28,29 @@ public class EntitlementService : IEntitlementService
         _clock = clock;
         _cache = cache;
     }
+    public void InvalidateWorkspaceCache(Guid workspaceId)
+    {
+        _cache.Remove($"entitlement_{workspaceId}");
+    }
 
     private async Task<EntitlementSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         if (workspaceId == Guid.Empty) return new EntitlementSnapshot();
         string cacheKey = $"entitlement_{workspaceId}";
+
         var result = await _cache.GetOrCreateAsync(cacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
             var snapshot = new EntitlementSnapshot();
+
             var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
             if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
                 return snapshot;
+
             var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
             if (license == null || !license.IsValidAt(_clock.UtcNow))
                 return snapshot;
+
             snapshot.IsValid = true;
             snapshot.MaxLocations = license.MaxLocations;
             var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
@@ -59,14 +65,13 @@ public class EntitlementService : IEntitlementService
                     snapshot.ModuleCapabilities[code] = mod.Capabilities.Select(c => c.Code.ToUpperInvariant()).ToHashSet();
                 }
             }
-
             foreach (var baseMod in _baseModules)
             {
                 snapshot.ActiveModuleCodes.Add(baseMod);
             }
-
             return snapshot;
         });
+
         return result ?? new EntitlementSnapshot();
     }
 
@@ -85,12 +90,14 @@ public class EntitlementService : IEntitlementService
     public async Task<IEnumerable<Guid>> GetAvailableModulesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        if (!snapshot.IsValid) return Enumerable.Empty<Guid>();
         return snapshot.ActiveModuleIds;
     }
 
     public async Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        if (!snapshot.IsValid) return Enumerable.Empty<string>();
         return snapshot.ActiveModuleCodes;
     }
 
@@ -116,7 +123,6 @@ public class EntitlementService : IEntitlementService
         return snapshot.MaxLocations;
     }
 
-    // Objeto interno para transportar los datos cacheados
     private class EntitlementSnapshot
     {
         public bool IsValid { get; set; }

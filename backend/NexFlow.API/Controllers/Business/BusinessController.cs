@@ -69,7 +69,6 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
-    // --- LOCATIONS ---
     [HttpGet("locations")]
     public async Task<IActionResult> GetLocations(CancellationToken cancellationToken)
     {
@@ -86,21 +85,19 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
         var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
-        if (result.IsFailure) return StatusCode(403, result.Error);
+        if (result.IsFailure) return StatusCode(409, result.Error);
+
         return Ok();
     }
 
-    // 🔥 SOLUCIÓN FALLO #24: Endpoint para eliminar sedes expuesto
     [HttpDelete("locations/{locationId}")]
     public async Task<IActionResult> DeleteLocation(string locationId, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
-
         await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
         return NoContent();
     }
 
-    // --- HOURS ---
     [HttpGet("locations/{locationId}/hours")]
     public async Task<IActionResult> GetHours(string locationId, CancellationToken cancellationToken)
     {
@@ -117,7 +114,6 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
-    // --- SERVICES ---
     [HttpGet("services")]
     public async Task<IActionResult> GetServices(CancellationToken cancellationToken)
     {
@@ -142,7 +138,6 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
-    // --- FAQS ---
     [HttpGet("faqs")]
     public async Task<IActionResult> GetFaqs(CancellationToken cancellationToken)
     {
@@ -167,7 +162,6 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
-    // --- ONBOARDING ---
     [HttpPost("complete-onboarding")]
     public async Task<IActionResult> CompleteOnboarding(CancellationToken cancellationToken)
     {

@@ -18,7 +18,7 @@ public class GetMeQueryHandler
     private readonly ILicenseRepository _licenseRepository;
     private readonly IEntitlementService _entitlementService;
     private readonly ISystemAdministratorRepository _sysAdminRepository;
-    private readonly IModuleRepository _moduleRepository; 
+    private readonly IModuleRepository _moduleRepository;
 
     public GetMeQueryHandler(
         ICurrentUser currentUser, IUserRepository userRepository, IMembershipRepository membershipRepository,
@@ -39,16 +39,6 @@ public class GetMeQueryHandler
 
         bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, cancellationToken);
         var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName, isSuperAdmin);
-
-        if (isSuperAdmin)
-        {
-            var allModules = await _moduleRepository.GetAllAsync(cancellationToken);
-            var systemMasterModules = allModules.Select(m => m.Code).ToArray();
-
-            return Result<MeDto>.Success(new MeDto(userDto, null, null, systemMasterModules));
-        }
-
-        // --- FLUJO NORMAL PARA INQUILINOS (TENANTS) ---
         var memberships = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
         var activeMembership = memberships.FirstOrDefault();
 
@@ -63,7 +53,8 @@ public class GetMeQueryHandler
         var entitlements = await _entitlementService.GetAvailableModuleCodesAsync(workspace.Id, cancellationToken);
 
         var workspaceDto = new WorkspaceDto(workspace.Id, workspace.Name, workspace.Status.ToString());
-        var licenseDto = license != null ? new LicenseDto(license.Type.ToString(), license.Status.ToString(), license.ValidityPeriod.End) : null;
+
+        var licenseDto = license != null ? new LicenseDto(license.Type.ToString(), license.Status.ToString(), license.ValidityPeriod?.End) : null;
 
         return Result<MeDto>.Success(new MeDto(userDto, workspaceDto, licenseDto, entitlements.ToArray()));
     }

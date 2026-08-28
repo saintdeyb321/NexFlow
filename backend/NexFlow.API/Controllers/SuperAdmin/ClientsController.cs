@@ -85,10 +85,21 @@ public class ClientsController : ControllerBase
     }
 
     [HttpDelete("{workspaceId}")]
-    public async Task<IActionResult> DeleteClient(Guid workspaceId, [FromServices] DeleteClientCommandHandler handler, CancellationToken cancellationToken)
+    public IActionResult DeleteClient(Guid workspaceId, [FromServices] IServiceScopeFactory scopeFactory)
     {
-        var result = await handler.Handle(new DeleteClientCommand(workspaceId), cancellationToken);
-        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
-        return NoContent();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var handler = scope.ServiceProvider.GetRequiredService<DeleteClientCommandHandler>();
+                await handler.Handle(new DeleteClientCommand(workspaceId), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CRITICAL] Error en proceso background (DeleteClient): {ex.Message}");
+            }
+        });
+        return Accepted(new { code = "Workspace.DeletionStarted", message = "La purga completa de datos del negocio ha comenzado en segundo plano." });
     }
 }

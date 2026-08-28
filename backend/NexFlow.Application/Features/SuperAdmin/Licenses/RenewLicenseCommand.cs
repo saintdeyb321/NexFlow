@@ -1,15 +1,15 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Common;
+﻿using NexFlow.Application.Common;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
 using NexFlow.Domain.Entities;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Application.Features.SuperAdmin.Licenses;
 
-// 1. Ya no recibimos fecha de inicio manual, solo a qué cliente y por cuántos meses.
+// 🔥 SPRINT 1: Contrato Backend firme: WorkspaceId + DurationInMonths
 public record RenewLicenseCommand(Guid WorkspaceId, int DurationInMonths);
 
 public class RenewLicenseCommandHandler
@@ -19,19 +19,22 @@ public class RenewLicenseCommandHandler
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
     private readonly ICurrentUser _currentUser;
+    private readonly IEntitlementService _entitlementService;
 
     public RenewLicenseCommandHandler(
         ILicenseRepository licenseRepository,
         IAuditLogRepository auditLogRepository,
         IUnitOfWork unitOfWork,
         IClock clock,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IEntitlementService entitlementService)
     {
         _licenseRepository = licenseRepository;
         _auditLogRepository = auditLogRepository;
         _unitOfWork = unitOfWork;
         _clock = clock;
         _currentUser = currentUser;
+        _entitlementService = entitlementService;
     }
 
     public async Task<Result> Handle(RenewLicenseCommand request, CancellationToken cancellationToken)
@@ -42,7 +45,6 @@ public class RenewLicenseCommandHandler
 
         var now = _clock.UtcNow;
 
-        // 2. El dominio hace el cálculo seguro. Solo pasamos los meses y la fecha actual.
         license.Renew(request.DurationInMonths, now);
 
         var audit = AuditLog.Create(
@@ -54,6 +56,7 @@ public class RenewLicenseCommandHandler
         _auditLogRepository.Add(audit);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _entitlementService.InvalidateWorkspaceCache(request.WorkspaceId);
 
         return Result.Success();
     }

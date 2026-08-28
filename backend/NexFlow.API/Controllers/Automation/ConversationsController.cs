@@ -14,20 +14,31 @@ public class ConversationsController : ControllerBase
 {
     private readonly IConversationRepository _conversationRepository;
     private readonly IWorkspaceContext _workspaceContext;
+    private readonly IEntitlementService _entitlementService;
 
     public ConversationsController(
         IConversationRepository conversationRepository,
-        IWorkspaceContext workspaceContext)
+        IWorkspaceContext workspaceContext,
+        IEntitlementService entitlementService)
     {
         _conversationRepository = conversationRepository;
         _workspaceContext = workspaceContext;
+        _entitlementService = entitlementService;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
 
+    // Helper para limpiar el código de validación
+    private async Task<bool> CheckCapabilityAsync(string capability, CancellationToken ct) =>
+        await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CONVERSATIONS", capability, ct);
+
     [HttpGet]
     public async Task<IActionResult> GetConversations([FromQuery] int limit = 50, CancellationToken cancellationToken = default)
     {
+        // 🔥 SPRINT 4 (Auditoría #29 y #30): Validación de licencia y límites
+        if (!await CheckCapabilityAsync("READ", cancellationToken)) return StatusCode(403, "No tiene permisos para leer chats.");
+        if (limit < 1 || limit > 100) return BadRequest(new { code = "Pagination.Invalid", message = "El límite debe estar entre 1 y 100." });
+
         var conversations = await _conversationRepository.GetRecentConversationsAsync(WorkspaceId, limit, cancellationToken);
         return Ok(conversations);
     }
@@ -35,6 +46,9 @@ public class ConversationsController : ControllerBase
     [HttpGet("{conversationId}/messages")]
     public async Task<IActionResult> GetMessages(string conversationId, [FromQuery] int limit = 50, CancellationToken cancellationToken = default)
     {
+        if (!await CheckCapabilityAsync("READ", cancellationToken)) return StatusCode(403, "No tiene permisos para leer chats.");
+        if (limit < 1 || limit > 100) return BadRequest(new { code = "Pagination.Invalid", message = "El límite debe estar entre 1 y 100." });
+
         var messages = await _conversationRepository.GetMessagesAsync(WorkspaceId, conversationId, limit, cancellationToken);
         return Ok(messages);
     }
@@ -42,6 +56,8 @@ public class ConversationsController : ControllerBase
     [HttpPost("{conversationId}/takeover")]
     public async Task<IActionResult> TakeOverConversation(string conversationId, CancellationToken cancellationToken)
     {
+        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para asumir el control humano.");
+
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Human, cancellationToken);
         return Ok(new { message = "Control humano asumido. La IA ha sido silenciada temporalmente.", mode = ConversationMode.Human.ToString() });
     }
@@ -49,6 +65,8 @@ public class ConversationsController : ControllerBase
     [HttpPost("{conversationId}/release")]
     public async Task<IActionResult> ReleaseConversation(string conversationId, CancellationToken cancellationToken)
     {
+        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para liberar el chat.");
+
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Automatic, cancellationToken);
         return Ok(new { message = "Chat liberado. La Inteligencia Artificial vuelve a tomar el control.", mode = ConversationMode.Automatic.ToString() });
     }
@@ -60,10 +78,11 @@ public class ConversationsController : ControllerBase
         [FromServices] IMessageGateway messageGateway,
         CancellationToken cancellationToken)
     {
+        if (!await CheckCapabilityAsync("SEND_MESSAGE", cancellationToken)) return StatusCode(403, "No tiene permisos para enviar mensajes.");
+
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        // Enviar a Evolution API / WhatsApp
         await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, cancellationToken);
 
         var messageRecord = new MessageRecord

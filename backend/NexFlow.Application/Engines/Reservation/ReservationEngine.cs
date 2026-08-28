@@ -12,29 +12,45 @@ public class ReservationEngine : IReservationEngine
     private readonly IReservationRepository _reservationRepository;
     private readonly IServiceRepository _serviceRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
+    private readonly IBusinessProfileRepository _profileRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IWorkflowGateway _workflowGateway;
     private readonly ILogger<ReservationEngine> _logger;
 
-    private readonly TimeZoneInfo _peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
-
     public ReservationEngine(
-        IReservationRepository reservationRepository, IServiceRepository serviceRepository,
-        IBusinessHoursRepository hoursRepository, IUnitOfWork unitOfWork,
-        IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger)
+        IReservationRepository reservationRepository,
+        IServiceRepository serviceRepository,
+        IBusinessHoursRepository hoursRepository,
+        IBusinessProfileRepository profileRepository,
+        IUnitOfWork unitOfWork,
+        IWorkflowGateway workflowGateway,
+        ILogger<ReservationEngine> logger)
     {
-        _reservationRepository = reservationRepository; _serviceRepository = serviceRepository;
-        _hoursRepository = hoursRepository; _unitOfWork = unitOfWork;
-        _workflowGateway = workflowGateway; _logger = logger;
+        _reservationRepository = reservationRepository;
+        _serviceRepository = serviceRepository;
+        _hoursRepository = hoursRepository;
+        _profileRepository = profileRepository;
+        _unitOfWork = unitOfWork;
+        _workflowGateway = workflowGateway;
+        _logger = logger;
+    }
+    private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
+    {
+        var profile = await _profileRepository.GetProfileAsync(workspaceId, ct);
+        var tzId = string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone;
+
+        try { return TimeZoneInfo.FindSystemTimeZoneById(tzId); }
+        catch { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
     }
 
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
     {
+        var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
+
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var targetService = services.FirstOrDefault(s => s.Id == serviceId);
 
-        // 🔥 CORRECCIÓN (Fallo #21): Si no existe o no se ofrece en esta sede, no hay disponibilidad.
-        if (targetService == null || (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId)))
+        if (targetService == null || !targetService.IsActive || (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId)))
             return new List<TimeSlotDto>();
 
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
@@ -51,14 +67,14 @@ public class ReservationEngine : IReservationEngine
 
         var currentSlotStartLocal = localDate.Date.Add(openTime);
         var endOfDayLocal = localDate.Date.Add(closeTime);
-        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _peruZone);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, workspaceZone);
 
         while (currentSlotStartLocal.Add(slotDuration) <= endOfDayLocal)
         {
             var currentSlotEndLocal = currentSlotStartLocal.Add(slotDuration);
 
-            var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, _peruZone);
-            var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, _peruZone);
+            var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, workspaceZone);
+            var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, workspaceZone);
 
             bool isOccupied = existingReservations.Any(r => r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
             bool isPast = currentSlotStartLocal <= localNow;
@@ -75,15 +91,16 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken)
     {
+        var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         var localDateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified);
-        var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, _peruZone);
+        var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var targetService = services.FirstOrDefault(s => s.Id == serviceId);
 
-        if (targetService == null) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe."));
+        if (targetService == null || !targetService.IsActive)
+            return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o se encuentra inactivo."));
 
-        // 🔥 CORRECCIÓN (Fallo #21): Evita que se reserve en una sede no autorizada
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio no se ofrece en la sede seleccionada."));
 
@@ -108,8 +125,9 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result<ReservationDto>> EditReservationAsync(Guid workspaceId, Guid reservationId, DateTime newDateTime, CancellationToken cancellationToken)
     {
+        var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         var localDateTime = DateTime.SpecifyKind(newDateTime, DateTimeKind.Unspecified);
-        var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, _peruZone);
+        var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
         using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable }, TransactionScopeAsyncFlowOption.Enabled);
 
@@ -118,9 +136,10 @@ public class ReservationEngine : IReservationEngine
 
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var targetService = services.FirstOrDefault(s => s.Id == reservation.ServiceId);
-        if (targetService == null) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe."));
 
-        // Validación extra por si le quitaron el servicio a la sede después de haber reservado
+        if (targetService == null || !targetService.IsActive)
+            return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe o se encuentra inactivo."));
+
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(reservation.LocationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual de la reserva."));
 

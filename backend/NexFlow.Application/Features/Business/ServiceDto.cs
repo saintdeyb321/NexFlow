@@ -9,10 +9,8 @@ public class ServiceDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Category { get; set; }
-
-    // Campos Core (Requeridos por la IA y Reservas)
+    public long PriceMinorUnits { get; set; }
     public int DurationInMinutes { get; set; }
-    public decimal Price { get; set; }
     public string Currency { get; set; } = "PEN";
     public bool RequiresReservation { get; set; }
     public bool IsActive { get; set; } = true;

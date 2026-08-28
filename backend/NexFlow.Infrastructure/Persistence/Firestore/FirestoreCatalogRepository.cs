@@ -1,6 +1,11 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -25,7 +30,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
                 Name = data.Name,
                 Description = data.Description,
                 Category = data.Category,
-                Price = (decimal)data.Price, // Firestore lo guarda como double
+                PriceMinorUnits = data.PriceMinorUnits, // 🔥 Parseo limpio sin comas
                 Currency = data.Currency,
                 IsActive = data.IsActive,
                 Metadata = data.Metadata ?? new Dictionary<string, object>()
@@ -43,7 +48,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
             Name = product.Name,
             Description = product.Description,
             Category = product.Category,
-            Price = (double)product.Price,
+            PriceMinorUnits = product.PriceMinorUnits, // 🔥 Persistencia de entero
             Currency = product.Currency,
             IsActive = product.IsActive,
             Metadata = product.Metadata
@@ -64,7 +69,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         [FirestoreProperty] public string Name { get; set; } = string.Empty;
         [FirestoreProperty] public string? Description { get; set; }
         [FirestoreProperty] public string? Category { get; set; }
-        [FirestoreProperty] public double Price { get; set; }
+        [FirestoreProperty] public long PriceMinorUnits { get; set; }
         [FirestoreProperty] public string Currency { get; set; } = "PEN";
         [FirestoreProperty] public bool IsActive { get; set; } = true;
         [FirestoreProperty] public Dictionary<string, object> Metadata { get; set; } = new();

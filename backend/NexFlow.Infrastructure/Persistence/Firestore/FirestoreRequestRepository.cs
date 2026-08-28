@@ -48,13 +48,18 @@ public class FirestoreRequestRepository : IRequestRepository
         {
             if (doc.Exists)
             {
+                var statusString = doc.GetValue<string>("Status");
+                var statusEnum = Enum.TryParse<RequestStatus>(statusString, true, out var parsed)
+                                 ? parsed
+                                 : RequestStatus.Pending;
+
                 list.Add(new RequestRecord
                 {
                     Id = doc.GetValue<string>("Id"),
                     ConsumerPhone = doc.GetValue<string>("ConsumerPhone"),
                     Title = doc.GetValue<string>("Title"),
                     Description = doc.GetValue<string>("Description"),
-                    Status = doc.GetValue<string>("Status"),
+                    Status = statusEnum,
                     CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
                     UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
                 });
