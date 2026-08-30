@@ -15,7 +15,7 @@ public class Workspace : Entity
         {
             Name = name,
             // CORRECCIÓN: Nace pendiente para forzar el Onboarding del negocio
-            Status = WorkspaceStatus.Pending
+            Status = WorkspaceStatus.Active
         };
     }
 

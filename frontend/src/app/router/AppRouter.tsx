@@ -9,7 +9,6 @@ import { ReservationsPage } from '../../features/reservations/pages/Reservations
 import { SuperAdminPage } from '../../features/admin/pages/SuperAdminPage';
 import { useAuthStore } from '../../core/store/useAuthStore';
 import { DashboardPage } from '../../features/dashboard/pages/DashboardPage';
-import { OnboardingPage } from '../../features/business/pages/OnboardingPage';
 import { InboxPage } from '../../features/conversations/pages/InboxPage';
 import { RequestsPage } from '../../features/requests/pages/RequestsPage';
 import { CatalogPage } from '../../features/catalog/pages/CatalogPage';
@@ -19,19 +18,6 @@ const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, chi
   const { me } = useAuthStore();
   const hasAccess = me?.entitlements?.includes(requiredModule);
   if (!hasAccess) return <Navigate to="/" replace />;
-  return <>{children}</>;
-};
-
-// 2. GUARDIÁN DE ONBOARDING
-const OnboardingGuard = ({ children }: { children: React.ReactNode }) => {
-  const { me } = useAuthStore();
-  
-  // 🔥 CORRECCIÓN: El SuperAdmin es inmune al Onboarding. Pasa directo.
-  if (me?.user?.isSuperAdmin) return <>{children}</>;
-
-  if (me?.workspace?.status === 'Pending') {
-    return <Navigate to="/onboarding" replace />;
-  }
   return <>{children}</>;
 };
 
@@ -45,16 +31,11 @@ const router = createBrowserRouter([
     element: <ProtectedRoute />, 
     children: [
       {
-        path: 'onboarding',
-        element: <OnboardingPage />, 
-      },
-      // 🔥 CORRECCIÓN: El Layout ahora envuelve TODO, incluyendo la consola SuperAdmin
-      {
         path: '/',
-        element: <OnboardingGuard><WorkspaceLayout /></OnboardingGuard>,
+        element: <WorkspaceLayout />, // 🔥 Todo el Onboarding fue eliminado de raíz
         children: [
           { index: true, element: <DashboardPage /> },
-          { path: 'superadmin', element: <SuperAdminPage /> }, // 👈 SuperAdmin regresa a casa
+          { path: 'superadmin', element: <SuperAdminPage /> },
           { path: 'reservations', element: <ModuleGuard requiredModule="RESERVATIONS"><ReservationsPage /></ModuleGuard> },
           { path: 'faqs', element: <ModuleGuard requiredModule="FAQ"><FaqsPage/></ModuleGuard> },
           { path: 'services', element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard> },

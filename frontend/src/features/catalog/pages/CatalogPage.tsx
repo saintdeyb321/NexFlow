@@ -9,7 +9,6 @@ export const CatalogPage = () => {
   const [showModal, setShowModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
-  // 🔥 CORRECCIÓN: Estado inicial con Categoría y Moneda por defecto
   const [newProduct, setNewProduct] = useState<ProductDto>({ 
     name: '', 
     description: '', 
@@ -29,7 +28,6 @@ export const CatalogPage = () => {
       setProducts(data);
     } catch (error: any) {
       console.error("Error al cargar productos", error);
-      // Opcional: mostrar error en UI si falla la carga
     } finally {
       setIsLoading(false);
     }
@@ -44,7 +42,6 @@ export const CatalogPage = () => {
       setNewProduct({ name: '', description: '', category: 'General', price: 0, currency: 'PEN', isActive: true });
       loadProducts();
     } catch (error: any) {
-      // 🔥 CORRECCIÓN: Mostramos el error real del backend (Ej: "Módulo no incluido en la licencia")
       alert(`Error al guardar: ${error.message || 'Error desconocido'}`);
     } finally {
       setIsSaving(false);
@@ -57,7 +54,6 @@ export const CatalogPage = () => {
       await deleteProduct(id);
       setProducts(products.filter(p => p.id !== id));
     } catch (error: any) {
-      // 🔥 CORRECCIÓN: Manejo de error limpio
       alert(`Error al eliminar: ${error.message || 'El producto no pudo ser eliminado'}`);
     }
   };
@@ -84,28 +80,33 @@ export const CatalogPage = () => {
             Tu catálogo está vacío. Comienza agregando tu primer producto.
           </div>
         ) : (
-          products.map((prod) => (
-            <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h3 className="font-bold text-gray-900 text-lg leading-tight">{prod.name}</h3>
-                  <span className="text-xs text-gray-500">{prod.category}</span>
+          products.map((prod) => {
+            // 🔥 SOLUCIÓN BLINDADA: Calcula el precio sin importar si el backend manda price o priceMinorUnits
+            const displayPrice = (prod as any).priceMinorUnits ? ((prod as any).priceMinorUnits / 100) : (prod.price || 0);
+            
+            return (
+              <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg leading-tight">{prod.name}</h3>
+                    <span className="text-xs text-gray-500">{prod.category}</span>
+                  </div>
+                  <span className="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-1 rounded-lg">
+                    {prod.currency} {displayPrice.toFixed(2)}
+                  </span>
                 </div>
-                <span className="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-1 rounded-lg">
-                  {prod.currency} {prod.price.toFixed(2)}
-                </span>
+                <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden text-ellipsis line-clamp-2">{prod.description}</p>
+                <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+                  <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>
+                    {prod.isActive ? 'Disponible' : 'Agotado'}
+                  </span>
+                  <button onClick={() => handleDelete(prod.id!)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden text-ellipsis line-clamp-2">{prod.description}</p>
-              <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-                <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>
-                  {prod.isActive ? 'Disponible' : 'Agotado'}
-                </span>
-                <button onClick={() => handleDelete(prod.id!)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -128,7 +129,17 @@ export const CatalogPage = () => {
                   <label className="block text-sm font-medium mb-1">Precio</label>
                   <div className="flex items-center">
                     <span className="text-gray-500 mr-2 text-sm">{newProduct.currency}</span>
-                    <input type="number" step="0.10" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: parseFloat(e.target.value)})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                    <input 
+                      type="number" 
+                      step="0.10" 
+                      value={(newProduct as any).priceMinorUnits ? (newProduct as any).priceMinorUnits / 100 : (newProduct.price || 0)} 
+                      onChange={e => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setNewProduct({...newProduct, price: val, priceMinorUnits: Math.round(val * 100)} as any);
+                      }} 
+                      className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" 
+                      required 
+                    />
                   </div>
                 </div>
               </div>

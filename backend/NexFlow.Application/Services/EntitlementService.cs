@@ -108,13 +108,7 @@ public class EntitlementService : IEntitlementService
 
         var code = moduleCode.ToUpperInvariant();
         if (_baseModules.Contains(code)) return true;
-
-        if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
-        {
-            return caps.Contains(capabilityCode.ToUpperInvariant());
-        }
-
-        return false;
+        return snapshot.ActiveModuleCodes.Contains(code);
     }
 
     public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)

@@ -21,10 +21,11 @@ export interface ServiceDto {
 }
 
 export interface FaqDto {
-  id: string;
+  id?: string; // Opcional porque C# le hace Guid.NewGuid()
   question: string;
   answer: string;
-  category: string;
+  category?: string | null; // C# tiene string?
+  isActive?: boolean;
 }
 
 export interface LocationDto {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createReservation } from '../services/reservation.service';
 import type { LocationDto } from '../../business/types/business.types';
@@ -14,21 +14,39 @@ interface CreateReservationModalProps {
 
 export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services }: CreateReservationModalProps) => {
   const [isSaving, setIsSaving] = useState(false);
+  
   const [formData, setFormData] = useState({
-    locationId: locations.length > 0 ? (locations.find(l => l.isMain)?.id || locations[0].id) : '',
-    serviceId: services.length > 0 ? services[0].id : '',
-    customerName: '', // 🔥 NUEVO: Obligatorio para el backend
+    locationId: '',
+    serviceId: '',
+    customerName: '',
     customerIdentifier: '',
     date: new Date().toISOString().split('T')[0],
     time: '10:00'
   });
 
+  // 🔥 SOLUCIÓN: Efecto que sincroniza los selects cuando abres el modal
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        // Busca la sede principal, si no hay, agarra la primera. Si no hay sedes, lo deja vacío.
+        locationId: locations.length > 0 ? (locations.find(l => l.isMain)?.id || locations[0].id || '') : '',
+        serviceId: services.length > 0 ? services[0].id : '',
+        customerName: '',
+        customerIdentifier: '',
+        date: new Date().toISOString().split('T')[0],
+        time: '10:00'
+      });
+    }
+  }, [isOpen, locations, services]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Verificación de seguridad
     if (!formData.locationId || !formData.serviceId || !formData.customerIdentifier || !formData.customerName) {
-      alert("Por favor, completa todos los campos.");
+      alert("Por favor, selecciona una sede, un servicio y completa los datos del cliente.");
       return;
     }
 
@@ -39,7 +57,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
       await createReservation({
         locationId: formData.locationId,
         serviceId: formData.serviceId,
-        customerName: formData.customerName, // 🔥 CORRECCIÓN: Añadido al payload
+        customerName: formData.customerName,
         customerIdentifier: formData.customerIdentifier,
         dateTime: exactDateTime
       });
@@ -47,18 +65,18 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
       onSuccess(); 
       onClose();   
     } catch (error: any) {
-      alert(`Error al crear la reserva: ${error.response?.data?.error || 'Conflicto de horario'}`);
+      alert(`Error al crear la reserva: ${error.response?.data?.message || error.response?.data?.error || 'Conflicto de horario'}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
         <div className="flex justify-between items-center px-6 py-4 border-b bg-gray-50">
           <h3 className="text-lg font-bold text-gray-800">Nueva Reserva Manual</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -69,8 +87,10 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
             <select 
               value={formData.locationId} 
               onChange={e => setFormData({...formData, locationId: e.target.value})}
-              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+              required
             >
+              <option value="" disabled>Selecciona una sede...</option>
               {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
             </select>
           </div>
@@ -80,13 +100,14 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
             <select 
               value={formData.serviceId} 
               onChange={e => setFormData({...formData, serviceId: e.target.value})}
-              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+              required
             >
+              <option value="" disabled>Selecciona un servicio...</option>
               {services.map(srv => <option key={srv.id} value={srv.id}>{srv.name} ({srv.durationInMinutes} min)</option>)}
             </select>
           </div>
 
-          {/* 🔥 CORRECCIÓN: Separamos el Nombre del Teléfono */}
           <div>
             <label className="block text-sm font-medium mb-1">Nombre del Cliente</label>
             <input 
@@ -135,10 +156,10 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
           </div>
 
           <div className="pt-4 flex justify-end space-x-3">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
               Cancelar
             </button>
-            <button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
               {isSaving ? 'Guardando...' : 'Confirmar Cita'}
             </button>
           </div>

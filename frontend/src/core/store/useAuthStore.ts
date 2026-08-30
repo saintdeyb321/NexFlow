@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { axiosClient, ApiError } from '../api/axiosClient'; // Importamos ApiError
+import { axiosClient, ApiError, setActiveWorkspaceId } from '../api/axiosClient'; 
 import type { MeResponse } from '../types/auth.types';
 import { auth } from '../../app/config/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth'; 
@@ -8,15 +8,14 @@ import type { User } from 'firebase/auth';
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
-  isBootstrapping: boolean; // 🔥 NUEVO: Estado explícito para el arranque de la App
+  isBootstrapping: boolean;
   me: MeResponse | null;
   
   checkSession: () => Promise<void>;
   logout: () => Promise<void>;
-  completeOnboarding: () => Promise<void>;
 }
 
-let isCheckingSession = false; // Candado para evitar doble ejecución
+let isCheckingSession = false;
 
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
@@ -39,6 +38,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
 
       if (!auth.currentUser) {
+        setActiveWorkspaceId(null); 
         set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
         isCheckingSession = false;
         return;
@@ -46,14 +46,16 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const { data } = await axiosClient.get<MeResponse>('/me');
       
+      setActiveWorkspaceId(data.workspace?.id || null); 
       set({ isAuthenticated: true, me: data, isLoading: false, isBootstrapping: false });
 
     } catch (error: unknown) {
       console.error("Error validando sesión contra el backend:", error);
       await signOut(auth);
+      
+      setActiveWorkspaceId(null); 
       set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
       
-      // 🔥 CORRECCIÓN (Fallo #19): Ahora evaluamos el error correctamente usando ApiError
       if (error instanceof ApiError) {
         if (error.status === 401 || error.status === 403) {
            console.warn("⛔ Sesión rechazada: Tu cuenta no está registrada o no tienes permisos.");
@@ -66,15 +68,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async () => {
     await signOut(auth);
+    setActiveWorkspaceId(null); 
     set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
-  },
-
-  completeOnboarding: async () => {
-    try {
-      const { data } = await axiosClient.get<MeResponse>('/me');
-      set({ me: data });
-    } catch (error) {
-      console.error("Error al sincronizar la sesión post-onboarding:", error);
-    }
   }
 }));

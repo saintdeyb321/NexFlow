@@ -32,3 +32,8 @@ export const editReservation = async (reservationId: string, newDateTime: string
 export const cancelReservation = async (reservationId: string): Promise<void> => {
   await axiosClient.delete(`/reservations/${reservationId}`);
 };
+
+export const completeReservation = async (reservationId: string): Promise<void> => {
+  // Ajusta la ruta si tu backend tiene un endpoint diferente (ej: /reservations/{id}/complete)
+  await axiosClient.put(`/reservations/${reservationId}/status`, { status: 'Completed' });
+};

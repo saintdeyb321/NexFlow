@@ -5,6 +5,7 @@ using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Knowledge;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -65,10 +66,28 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> SaveProfile([FromBody] BusinessProfileDto profile, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
+
+        // 1. Guardar los datos extendidos en Firestore
         await _profileRepository.SaveProfileAsync(WorkspaceId, profile, cancellationToken);
+
+        var workspace = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);
+        if (workspace != null)
+        {
+            if (!string.IsNullOrWhiteSpace(profile.CommercialName) && workspace.Name != profile.CommercialName)
+            {
+                workspace.Rename(profile.CommercialName);
+            }
+            if (workspace.Status == WorkspaceStatus.Pending)
+            {
+                workspace.Activate();
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
         return NoContent();
     }
 
+    // --- LOCATIONS ---
     [HttpGet("locations")]
     public async Task<IActionResult> GetLocations(CancellationToken cancellationToken)
     {
@@ -85,7 +104,26 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
         var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
-        if (result.IsFailure) return StatusCode(409, result.Error);
+        if (result.IsFailure) return StatusCode(400, new { message = result.Error });
+
+        return Ok();
+    }
+
+    // 🔥 NUEVO: Endpoint para Editar Sede (PUT)
+    [HttpPut("locations/{locationId}")]
+    public async Task<IActionResult> UpdateLocation(
+        string locationId,
+        [FromBody] LocationDto location,
+        [FromServices] SaveLocationCommandHandler handler,
+        CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        // El DTO asume el ID de la URL por seguridad
+        location = location with { Id = locationId };
+
+        var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
+        if (result.IsFailure) return StatusCode(400, new { message = result.Error });
 
         return Ok();
     }
@@ -98,6 +136,7 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
+    // --- HOURS ---
     [HttpGet("locations/{locationId}/hours")]
     public async Task<IActionResult> GetHours(string locationId, CancellationToken cancellationToken)
     {
@@ -114,6 +153,7 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
+    // --- SERVICES ---
     [HttpGet("services")]
     public async Task<IActionResult> GetServices(CancellationToken cancellationToken)
     {
@@ -138,6 +178,7 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
+    // --- FAQS ---
     [HttpGet("faqs")]
     public async Task<IActionResult> GetFaqs(CancellationToken cancellationToken)
     {
@@ -150,6 +191,21 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> SaveFaq([FromBody] FaqDto faq, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
+
+        // Si no trae ID, le generamos uno para asegurar que se crea correctamente
+        if (string.IsNullOrEmpty(faq.Id)) faq.Id = Guid.NewGuid().ToString();
+
+        var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
+        return Ok(savedFaq);
+    }
+
+    // 🔥 NUEVO: Endpoint para Editar FAQ (PUT)
+    [HttpPut("faqs/{faqId}")]
+    public async Task<IActionResult> UpdateFaq(string faqId, [FromBody] FaqDto faq, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
+
+        faq.Id = faqId; // Forzamos el ID de la URL
         var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
         return Ok(savedFaq);
     }
@@ -162,6 +218,7 @@ public class BusinessController : ControllerBase
         return NoContent();
     }
 
+    // --- ONBOARDING ---
     [HttpPost("complete-onboarding")]
     public async Task<IActionResult> CompleteOnboarding(CancellationToken cancellationToken)
     {

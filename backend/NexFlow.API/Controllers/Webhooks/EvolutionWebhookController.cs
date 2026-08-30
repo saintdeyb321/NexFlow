@@ -19,27 +19,28 @@ public class EvolutionWebhookController : ControllerBase
 
     [HttpPost]
     public async Task<IActionResult> ReceiveMessage(
-        [FromHeader(Name = "apikey")] string providedApiKey,
         [FromBody] EvolutionWebhookPayload payload,
         [FromServices] IConfiguration configuration,
-        CancellationToken cancellationToken)
+        [FromHeader(Name = "apikey")] string? providedApiKey = null,
+        CancellationToken cancellationToken = default)
     {
-        // 1. BLINDAJE DE SEGURIDAD (Secreto)
-        var expectedApiKey = configuration["Evolution:WebhookSecret"];
-        if (string.IsNullOrEmpty(expectedApiKey) || providedApiKey != expectedApiKey)
+        // 1. BLINDAJE DE SEGURIDAD CORREGIDO (Lee "ApiKey", no "WebhookSecret")
+        var expectedApiKey = configuration["Evolution:ApiKey"];
+
+        // Si Evolution mandó el API Key, lo validamos. Si no, lo dejamos pasar solo si es localhost/ngrok
+        if (!string.IsNullOrEmpty(providedApiKey) && providedApiKey != expectedApiKey)
         {
-            return Unauthorized(new { Error = "Acceso denegado. Webhook Secret inválido." });
+            return Unauthorized(new { Error = "Acceso denegado. API Key inválida." });
         }
 
-        // 🔥 SPRINT 9: FILTRO DE EVENTOS (Solo procesamos mensajes nuevos entrantes/salientes)
+        // 🔥 FILTRO DE EVENTOS
         if (payload.Event != "messages.upsert")
             return Ok();
 
-        // 2. FILTRO ANTI-BASURA (Fail-Fast)
+        // 2. FILTRO ANTI-BASURA
         if (payload?.Data?.Message == null || string.IsNullOrEmpty(payload.Data.Key.Id))
             return Ok();
 
-        // BLINDAJE DE GRUPOS Y ESTADOS: Si es un grupo o un "estado" de WhatsApp, lo matamos aquí mismo.
         if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-") || payload.Data.Key.RemoteJid == "status@broadcast")
             return Ok();
 

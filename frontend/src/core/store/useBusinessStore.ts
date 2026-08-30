@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 // Ajusta esta ruta a donde tengas tu archivo business.service.ts
-import { getServices, getLocations } from '../features/business/services/business.service';
-import type { ServiceDto, LocationDto } from '../features/business/types/business.types';
+import { getServices, getLocations } from '../../features/business/services/business.service';
+import type { ServiceDto, LocationDto } from '../../features/business/types/business.types';
 
 interface BusinessState {
   services: ServiceDto[];
@@ -11,7 +11,6 @@ interface BusinessState {
   clearCache: () => void;
 }
 
-// 🔥 SPRINT 8 (Auditoría #49): 5 minutos de tiempo de vida (TTL) para la caché
 const CACHE_TTL_MS = 1000 * 60 * 5; 
 
 export const useBusinessStore = create<BusinessState>((set, get) => ({

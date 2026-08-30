@@ -15,14 +15,19 @@ export class ApiError extends Error {
   }
 }
 
+// 🔥 ARQUITECTURA LIMPIA: Variable en memoria aislada (sin localStorage)
+let activeWorkspaceId: string | null = null;
+
+export const setActiveWorkspaceId = (id: string | null) => {
+  activeWorkspaceId = id;
+};
+
 export const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
-
-export const setWorkspaceHeader = () => {}; 
 
 axiosClient.interceptors.request.use(
   async (config) => {
@@ -32,17 +37,9 @@ axiosClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
-    // 🔥 SPRINT 6 (Auditoría #47): Inyectar Workspace Id de forma segura y por hilo.
-    const storedAuth = localStorage.getItem('auth-storage');
-    if (storedAuth) {
-      try {
-        const parsed = JSON.parse(storedAuth);
-        const wsId = parsed?.state?.me?.workspace?.id;
-        if (wsId) {
-          config.headers['X-Workspace-Id'] = wsId;
-        }
-      } catch (e) {
-      }
+    // Inyectamos el ID directo desde la memoria
+    if (activeWorkspaceId) {
+      config.headers['X-Workspace-Id'] = activeWorkspaceId;
     }
 
     return config;
@@ -56,9 +53,15 @@ axiosClient.interceptors.response.use(
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data;
-      const headerCorrelationId = error.response.headers['x-correlation-id'];
+      const headerCorrelationId = error.response.headers?.['x-correlation-id'];
 
-      const message = data?.message || data?.detail || 'Error desconocido en el servidor';
+      let message = 'Error desconocido en el servidor';
+      if (typeof data === 'string' && data.trim() !== '') {
+        message = data;
+      } else if (data?.message || data?.detail) {
+        message = data.message || data.detail;
+      }
+
       const code = data?.code || data?.title || 'UNKNOWN_ERROR';
       const finalCorrelationId = data?.correlationId || headerCorrelationId;
 
