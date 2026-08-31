@@ -34,4 +34,6 @@ public interface IReservationEngine
         Guid reservationId, 
         DateTime newDateTime, 
         CancellationToken cancellationToken);
+
+    Task<Result> CompleteReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken);
 }

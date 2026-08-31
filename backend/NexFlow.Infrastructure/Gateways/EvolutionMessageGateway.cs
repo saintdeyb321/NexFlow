@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions.Integrations;
@@ -20,7 +21,6 @@ public class EvolutionMessageGateway : IMessageGateway
         _baseUrl = configuration["Evolution:BaseUrl"] ?? throw new ArgumentNullException("Evolution BaseUrl no configurada");
         _apiKey = configuration["Evolution:ApiKey"] ?? string.Empty;
 
-        // Limitar a que falle rápido si Evolution está apagado o colgado (Fail-Fast)
         var timeout = int.TryParse(configuration["Evolution:TimeoutSeconds"], out var t) ? t : 10;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
 
@@ -29,8 +29,7 @@ public class EvolutionMessageGateway : IMessageGateway
             _httpClient.DefaultRequestHeaders.Add("apikey", _apiKey);
         }
     }
-
-    public async Task SendTextAsync(Guid workspaceId, string customerIdentifier, string message, CancellationToken cancellationToken)
+    public async Task<string> SendTextAsync(Guid workspaceId, string customerIdentifier, string message, CancellationToken cancellationToken)
     {
         var url = $"{_baseUrl}/message/sendText/{workspaceId}";
 
@@ -45,11 +44,19 @@ public class EvolutionMessageGateway : IMessageGateway
         {
             var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
             response.EnsureSuccessStatusCode();
+
+            var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+            if (jsonResponse.TryGetProperty("key", out var keyProp) && keyProp.TryGetProperty("id", out var idProp))
+            {
+                return idProp.GetString() ?? Guid.NewGuid().ToString();
+            }
+
+            return Guid.NewGuid().ToString();
         }
         catch (TaskCanceledException)
         {
             _logger.LogError("Timeout: Evolution API no respondió en el tiempo esperado para enviar un mensaje a {Customer}", customerIdentifier);
-            throw; // Propagamos para que se marque como fallo
+            throw;
         }
         catch (Exception ex)
         {

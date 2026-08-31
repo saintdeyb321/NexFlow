@@ -1,8 +1,10 @@
-﻿namespace NexFlow.Application.Engines.Dispatcher;
+﻿using NexFlow.Application.Engines.Dispatcher;
+
+namespace NexFlow.Application.Engines.Dispatcher;
 
 public interface IModuleHandler
 {
     string ModuleCode { get; }
     string[] SupportedCapabilities { get; }
-    Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken);
+    Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken);
 }

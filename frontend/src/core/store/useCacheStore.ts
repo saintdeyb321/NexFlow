@@ -1,22 +1,26 @@
 import { create } from 'zustand';
-import { getServices } from '../../features/business/services/business.service';
+import { getServices, getLocations } from '../../features/business/services/business.service';
 import { faqService } from '../../features/business/services/faq.service';
-import type { ServiceDto } from '../../features/business/types/business.types';
-import type { FaqDto } from '../../features/business/types/business.types';
-// 🔥 SPRINT 2 (Auditoría #31): Importamos la sesión para aislar los datos
+import type { ServiceDto, LocationDto, FaqDto } from '../../features/business/types/business.types';
 import { useAuthStore } from './useAuthStore'; 
 
 interface CacheState {
   workspaceId: string | null;
   services: ServiceDto[] | null;
+  locations: LocationDto[] | null;
   faqs: FaqDto[] | null;
+  
   isServicesLoading: boolean;
+  isLocationsLoading: boolean;
   isFaqsLoading: boolean;
 
   fetchServices: (force?: boolean) => Promise<void>;
+  fetchLocations: (force?: boolean) => Promise<void>;
   fetchFaqs: (force?: boolean) => Promise<void>;
 
+  // 🔥 Añadidos los setters para que las páginas puedan hacer actualizaciones optimistas
   setServices: (services: ServiceDto[]) => void;
+  setLocations: (locations: LocationDto[]) => void;
   setFaqs: (faqs: FaqDto[]) => void;
   
   invalidateAll: () => void;
@@ -25,16 +29,18 @@ interface CacheState {
 export const useCacheStore = create<CacheState>((set, get) => ({
   workspaceId: null,
   services: null,
+  locations: null,
   faqs: null,
+  
   isServicesLoading: false,
+  isLocationsLoading: false,
   isFaqsLoading: false,
 
   fetchServices: async (force = false) => {
     const currentWorkspaceId = useAuthStore.getState().me?.workspace?.id || null;
     
-    // 🔥 SPRINT 2 (Auditoría #31): Si cambió el Workspace, vaciamos la memoria (Prevención de data bleed)
     if (get().workspaceId !== currentWorkspaceId) {
-      set({ workspaceId: currentWorkspaceId, services: null, faqs: null });
+      set({ workspaceId: currentWorkspaceId, services: null, locations: null, faqs: null });
     } else if (get().services !== null && !force) {
       return; 
     }
@@ -52,11 +58,33 @@ export const useCacheStore = create<CacheState>((set, get) => ({
     }
   },
 
+  fetchLocations: async (force = false) => {
+    const currentWorkspaceId = useAuthStore.getState().me?.workspace?.id || null;
+    
+    if (get().workspaceId !== currentWorkspaceId) {
+      set({ workspaceId: currentWorkspaceId, services: null, locations: null, faqs: null });
+    } else if (get().locations !== null && !force) {
+      return; 
+    }
+    
+    if (!currentWorkspaceId) return;
+
+    set({ isLocationsLoading: true });
+    try {
+      const data = await getLocations();
+      set({ locations: data || [] });
+    } catch (error) {
+      console.error("Error cargando sedes al caché", error);
+    } finally {
+      set({ isLocationsLoading: false });
+    }
+  },
+
   fetchFaqs: async (force = false) => {
     const currentWorkspaceId = useAuthStore.getState().me?.workspace?.id || null;
 
     if (get().workspaceId !== currentWorkspaceId) {
-      set({ workspaceId: currentWorkspaceId, services: null, faqs: null });
+      set({ workspaceId: currentWorkspaceId, services: null, locations: null, faqs: null });
     } else if (get().faqs !== null && !force) {
       return;
     }
@@ -75,7 +103,8 @@ export const useCacheStore = create<CacheState>((set, get) => ({
   },
 
   setServices: (services) => set({ services }),
+  setLocations: (locations) => set({ locations }),
   setFaqs: (faqs) => set({ faqs }),
   
-  invalidateAll: () => set({ workspaceId: null, services: null, faqs: null })
+  invalidateAll: () => set({ workspaceId: null, services: null, locations: null, faqs: null })
 }));

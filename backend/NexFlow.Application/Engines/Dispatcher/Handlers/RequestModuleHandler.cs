@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using NexFlow.Application.Abstractions.Repositories;
+using NexFlow.Application.Engines.Dispatcher;
 
 namespace NexFlow.Application.Engines.Dispatcher.Handlers;
 
@@ -17,7 +18,7 @@ public class RequestModuleHandler : IModuleHandler
         _requestRepository = requestRepository;
     }
 
-    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
+    public async Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
         if (request.CapabilityCode == "CREATE")
         {
@@ -33,16 +34,15 @@ public class RequestModuleHandler : IModuleHandler
 
             await _requestRepository.CreateRequestAsync(workspaceId, record, cancellationToken);
 
-            return "SISTEMA: El trámite o afiliación ha sido registrado correctamente. Infórmale al cliente que hemos guardado su solicitud y que un asesor revisará su caso a la brevedad.";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "El trámite o afiliación ha sido registrado correctamente. Infórmale al cliente que hemos guardado su solicitud y que un asesor revisará su caso a la brevedad.", false, Array.Empty<string>());
         }
 
-        // 🔥 SPRINT 3 (Auditoría #10): Implementación segura de UPDATE_STATUS
         if (request.CapabilityCode == "UPDATE_STATUS")
         {
             var phone = request.Parameters.TryGetValue("phone", out var p) ? p?.ToString() ?? "Desconocido" : "Desconocido";
-            return $"SISTEMA: Dile al cliente que un agente revisará el estado del trámite asociado a su número {phone} y le responderá por este mismo medio. [RequiresHuman]";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Dile al cliente que un agente revisará el estado del trámite asociado a su número {phone} y le responderá por este mismo medio.", true, Array.Empty<string>());
         }
 
-        return "SISTEMA: Capacidad no implementada en el módulo de trámites.";
+        return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Capacidad no implementada en el módulo de trámites.", false, Array.Empty<string>());
     }
 }

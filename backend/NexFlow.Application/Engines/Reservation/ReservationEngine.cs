@@ -34,6 +34,7 @@ public class ReservationEngine : IReservationEngine
         _workflowGateway = workflowGateway;
         _logger = logger;
     }
+
     private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
     {
         var profile = await _profileRepository.GetProfileAsync(workspaceId, ct);
@@ -50,7 +51,13 @@ public class ReservationEngine : IReservationEngine
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var targetService = services.FirstOrDefault(s => s.Id == serviceId);
 
-        if (targetService == null || !targetService.IsActive || (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId)))
+        // 🔥 SPRINT 4.1: Blindaje de RequiresReservation
+        if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation ||
+            (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId)))
+            return new List<TimeSlotDto>();
+
+        // 🔥 SPRINT 4.1: Prevención de bucle infinito (DurationInMinutes <= 0)
+        if (targetService.DurationInMinutes < 5)
             return new List<TimeSlotDto>();
 
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
@@ -101,6 +108,13 @@ public class ReservationEngine : IReservationEngine
         if (targetService == null || !targetService.IsActive)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o se encuentra inactivo."));
 
+        // 🔥 SPRINT 4.1: Blindaje de RequiresReservation y Duración en creación
+        if (!targetService.RequiresReservation)
+            return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
+
+        if (targetService.DurationInMinutes < 5)
+            return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida para operar una reserva."));
+
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio no se ofrece en la sede seleccionada."));
 
@@ -140,6 +154,13 @@ public class ReservationEngine : IReservationEngine
         if (targetService == null || !targetService.IsActive)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe o se encuentra inactivo."));
 
+        // 🔥 SPRINT 4.1: Blindaje de RequiresReservation y Duración en edición
+        if (!targetService.RequiresReservation)
+            return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
+
+        if (targetService.DurationInMinutes < 5)
+            return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida para operar una reserva."));
+
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(reservation.LocationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual de la reserva."));
 
@@ -168,6 +189,20 @@ public class ReservationEngine : IReservationEngine
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _ = TriggerN8nSafeAsync("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id, cancellationToken);
+
+        return Result.Success();
+    }
+
+    // 🔥 SPRINT 4.1: Caso de uso explícito para completar reservas
+    public async Task<Result> CompleteReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
+    {
+        var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
+        if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+
+        reservation.Complete();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _ = TriggerN8nSafeAsync("RESERVATION_COMPLETED", workspaceId, new { ReservationId = reservation.Id, Status = "COMPLETED" }, reservation.Id, cancellationToken);
 
         return Result.Success();
     }

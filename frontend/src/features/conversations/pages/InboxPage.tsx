@@ -13,21 +13,16 @@ export const InboxPage = () => {
   const [isChangingMode, setIsChangingMode] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
+  // Carga inicial (Con Spinner)
   useEffect(() => {
-    loadConversations();
+    loadInitialData();
   }, []);
 
-  useEffect(() => {
-    if (selectedChat) {
-      loadMessages(selectedChat.id);
-    }
-  }, [selectedChat?.id]);
-
-  const loadConversations = async () => {
+  const loadInitialData = async () => {
     try {
       const data = await getConversations();
       setConversations(data);
-      if (data.length > 0 && !selectedChat) setSelectedChat(data[0]);
+      if (data.length > 0) setSelectedChat(data[0]);
     } catch (error) {
       console.error('Error cargando conversaciones', error);
     } finally {
@@ -35,14 +30,37 @@ export const InboxPage = () => {
     }
   };
 
-  const loadMessages = async (conversationId: string) => {
-    try {
-      const data = await getMessages(conversationId);
-      setMessages(data);
-    } catch (error) {
-      console.error('Error cargando mensajes', error);
+  // 🔥 SPRINT 2.3: POLLING DINÁMICO (Actualización Silenciosa cada 12 segundos)
+  useEffect(() => {
+    if (selectedChat) {
+      // Cargar mensajes inmediatamente al cambiar de chat
+      getMessages(selectedChat.id).then(setMessages).catch(console.error);
     }
-  };
+
+    const interval = setInterval(async () => {
+      try {
+        const freshConvs = await getConversations();
+        setConversations(freshConvs);
+
+        if (selectedChat) {
+          const freshMsgs = await getMessages(selectedChat.id);
+          setMessages(freshMsgs);
+
+          // Si la IA o el backend cambió el modo de la conversación en segundo plano, lo reflejamos
+          const updatedChat = freshConvs.find(c => c.id === selectedChat.id);
+          if (updatedChat && updatedChat.mode !== selectedChat.mode) {
+            setSelectedChat(updatedChat);
+          }
+        } else if (freshConvs.length > 0) {
+          setSelectedChat(freshConvs[0]);
+        }
+      } catch (error) {
+        console.error('Error en polling de Inbox', error);
+      }
+    }, 12000); // 12 segundos
+
+    return () => clearInterval(interval);
+  }, [selectedChat]); // Reiniciar el timer cada vez que el usuario selecciona un chat distinto
 
   const updateChatMode = (mode: 'Human' | 'Automatic') => {
     if (!selectedChat) return;

@@ -15,20 +15,19 @@ public class AiRouter : IAiRouter
 
     public async Task<string> GenerateResponseAsync(Guid workspaceId, ModuleExecutionResult systemContext, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 3.3: Adaptación a JSON estructurado y MissingParameters
         var systemInstruction = @"
-Eres la voz oficial de atención al cliente del negocio por WhatsApp, impulsado por NexFlow.
-Tu única misión es comunicar al cliente el 'RESULTADO DEL SISTEMA' (Que viene en formato JSON) de forma natural, cálida y empática.
+Eres la voz de atención al cliente de un negocio por WhatsApp. Tu misión es comunicar el 'RESULTADO ESTRUCTURADO DEL SISTEMA' de forma natural y cálida.
 
-MANDAMIENTOS INQUEBRANTABLES (CERO ALUCINACIONES):
-1. ERES UN TRADUCTOR, NO UNA ENCICLOPEDIA: Tu respuesta debe basarse 100% y EXCLUSIVAMENTE en el nodo 'Data' del JSON proporcionado.
-2. PROHIBIDO INVENTAR DATOS: Bajo ninguna circunstancia puedes adivinar precios, sedes, horarios, duraciones o servicios. Si el JSON no menciona un dato, TÚ TAMPOCO LO HACES.
-3. INSTRUCCIONES DIRECTAS: Si el JSON contiene 'MissingParameters' (Ej: locationId o date), DEBES preguntarle al cliente específicamente por esos datos faltantes.
-4. LENGUAJE NATURAL: NUNCA menciones palabras técnicas como 'el sistema', 'JSON', 'MissingParameters' o 'el dispatcher'. Háblale al cliente como si fueras un empleado humano de recepción. NUNCA digas que eres una IA.
-5. HANDOFF: Si el JSON indica 'RequiresHuman: true', despídete y dile que un humano tomará el control del chat en breve.";
+MANDAMIENTOS:
+1. TRADUCTOR ESTRICTO: Basate 100% en el nodo 'Data'.
+2. CERO ALUCINACIONES: Si un dato (precio, horario, sede) no está en el JSON, dile al cliente que no tienes esa información. No inventes.
+3. EXTRACCIÓN DE DATOS: Si el JSON contiene 'MissingParameters', DEBES preguntarle al cliente por ese dato específico (ej. ¿En qué sede deseas la reserva?).
+4. LENGUAJE HUMANO: NUNCA menciones la palabra 'JSON', 'MissingParameters' o 'Sistema'.
+5. HANDOFF: Si el JSON dice 'RequiresHuman: true', despídete y dile que un asesor continuará la charla.";
 
         var jsonContext = JsonSerializer.Serialize(systemContext, new JsonSerializerOptions { WriteIndented = true });
-
-        var userPrompt = $"RESULTADO DEL SISTEMA (Formato JSON Estructurado. Tu única fuente de verdad):\n{jsonContext}";
+        var userPrompt = $"RESULTADO ESTRUCTURADO DEL SISTEMA:\n{jsonContext}";
 
         return await _aiProvider.GenerateTextAsync(systemInstruction, userPrompt, useJsonMode: false, cancellationToken);
     }

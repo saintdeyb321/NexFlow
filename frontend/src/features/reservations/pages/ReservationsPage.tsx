@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, MapPin, List, CalendarDays } from 'lucide-react';
-// 🔥 CORRECCIÓN: Faltaba importar completeReservation aquí
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
 import { getLocations } from '../../business/services/business.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
 import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
-import { useBusinessStore } from '../../../core/store/useBusinessStore';
+import { useCacheStore } from '../../../core/store/useCacheStore';
 import type { ReservationDto } from '../types/reservation.types';
 import type { LocationDto } from '../../business/types/business.types';
 
 export const ReservationsPage = () => {
-  const { services, fetchData } = useBusinessStore();
+  // 🔥 CORRECCIÓN: Usamos fetchServices en lugar del viejo fetchData
+  const { services, fetchServices } = useCacheStore();
   
   const [reservations, setReservations] = useState<ReservationDto[]>([]);
   const [locations, setLocations] = useState<LocationDto[]>([]);
@@ -26,15 +26,14 @@ export const ReservationsPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
 
-  // Controladores de Modales
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
 
   useEffect(() => {
-    fetchData(); 
+    fetchServices(); // 🔥 Cargamos los servicios al caché global
     loadInitialData();
-  }, [fetchData]);
+  }, [fetchServices]);
 
   useEffect(() => {
     if (selectedLocation && selectedLocation !== 'global') loadReservations();
@@ -86,7 +85,6 @@ export const ReservationsPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto">
-      {/* Cabecera y Filtros */}
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
@@ -131,7 +129,6 @@ export const ReservationsPage = () => {
         </div>
       </div>
 
-      {/* Contenedor Principal Delegado */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-400">
@@ -141,7 +138,7 @@ export const ReservationsPage = () => {
         ) : viewMode === 'list' ? (
           <ReservationList 
             reservations={reservations} 
-            services={services} 
+            services={services || []} 
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
             onCancel={handleCancel} 
             onComplete={handleComplete}
@@ -160,7 +157,7 @@ export const ReservationsPage = () => {
         onClose={() => setIsCreateModalOpen(false)} 
         onSuccess={loadReservations} 
         locations={locations} 
-        services={services} 
+        services={services || []} 
       />
 
       <EditReservationModal 

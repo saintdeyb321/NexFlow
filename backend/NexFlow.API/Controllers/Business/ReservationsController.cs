@@ -41,7 +41,6 @@ public class ReservationsController : ControllerBase
         return Ok(reservations);
     }
 
-    // 🔥 CORRECCIÓN: Endpoint expuesto para consultar espacios libres
     [HttpGet("availability")]
     public async Task<IActionResult> GetAvailability([FromQuery] string locationId, [FromQuery] string serviceId, [FromQuery] DateTime date, CancellationToken cancellationToken)
     {
@@ -64,7 +63,6 @@ public class ReservationsController : ControllerBase
         return Ok(result.Value);
     }
 
-    // 🔥 CORRECCIÓN (Fallo #45): Endpoint para Editar/Reagendar
     [HttpPut("{id}")]
     public async Task<IActionResult> EditReservation(Guid id, [FromBody] EditReservationRequest request, CancellationToken cancellationToken)
     {
@@ -74,6 +72,22 @@ public class ReservationsController : ControllerBase
 
         if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         return Ok(result.Value);
+    }
+
+    // 🔥 SPRINT 4.1: Endpoint faltante para actualizar estado (Completar reserva)
+    [HttpPut("{id}/status")]
+    public async Task<IActionResult> UpdateReservationStatus(Guid id, [FromBody] UpdateReservationStatusRequest request, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
+
+        if (request.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            var result = await _reservationEngine.CompleteReservationAsync(WorkspaceId, id, cancellationToken);
+            if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
+            return Ok();
+        }
+
+        return BadRequest(new { code = "Validation.Error", message = "Solo se permite el estado 'Completed' a través de este endpoint." });
     }
 
     [HttpDelete("{id}")]
@@ -90,3 +104,4 @@ public class ReservationsController : ControllerBase
 
 public record CreateReservationRequest(string LocationId, string ServiceId, string CustomerIdentifier, string CustomerName, DateTime DateTime);
 public record EditReservationRequest(DateTime NewDateTime);
+public record UpdateReservationStatusRequest(string Status);

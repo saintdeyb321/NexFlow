@@ -21,9 +21,26 @@ public class License : Entity
 
     private License() { }
 
+    // 🔥 SPRINT 4.4: Corrección de Zona Horaria (Cierre al final del día local)
+    private static DateTime AdjustToEndOfDay(DateTime expirationDate)
+    {
+        try
+        {
+            var timeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); // Ajusta el UTC a la zona correcta
+            var localExpiration = new DateTime(expirationDate.Year, expirationDate.Month, expirationDate.Day, 23, 59, 59, DateTimeKind.Unspecified);
+            return TimeZoneInfo.ConvertTimeToUtc(localExpiration, timeZone);
+        }
+        catch
+        {
+            return new DateTime(expirationDate.Year, expirationDate.Month, expirationDate.Day, 23, 59, 59, DateTimeKind.Utc);
+        }
+    }
+
     public static License CreateTemplateLicense(Guid workspaceId, Guid templateId, DateTime now, DateTime expiresAt, int maxLocations)
     {
-        if (expiresAt <= now) throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
+        var adjustedExpiration = AdjustToEndOfDay(expiresAt);
+
+        if (adjustedExpiration <= now) throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
         if (templateId == Guid.Empty) throw new DomainException("La plantilla es obligatoria.");
         if (maxLocations < 1) throw new DomainException("La licencia debe permitir al menos 1 sede operativa.");
 
@@ -33,22 +50,25 @@ public class License : Entity
             Type = LicenseType.Template,
             TemplateId = templateId,
             Status = LicenseStatus.Active,
-            ValidityPeriod = new DateRange(now, expiresAt),
+            ValidityPeriod = new DateRange(now, adjustedExpiration),
             MaxLocations = maxLocations
         };
     }
+
     public static License CreateCustomLicense(Guid workspaceId, DateTime now, DateTime? expiresAt, int maxLocations)
     {
-        if (expiresAt.HasValue && expiresAt.Value <= now) throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
+        DateTime? adjustedExpiration = expiresAt.HasValue ? AdjustToEndOfDay(expiresAt.Value) : null;
+
+        if (adjustedExpiration.HasValue && adjustedExpiration.Value <= now) throw new DomainException("La fecha de expiración debe ser mayor a la fecha de inicio.");
         if (maxLocations < 1) throw new DomainException("La licencia debe permitir al menos 1 sede operativa.");
 
         return new License
         {
             WorkspaceId = workspaceId,
-            Type = !expiresAt.HasValue ? LicenseType.Internal : LicenseType.Custom,
+            Type = !adjustedExpiration.HasValue ? LicenseType.Internal : LicenseType.Custom,
             TemplateId = null,
             Status = LicenseStatus.Active,
-            ValidityPeriod = new DateRange(now, expiresAt),
+            ValidityPeriod = new DateRange(now, adjustedExpiration),
             MaxLocations = maxLocations
         };
     }
@@ -73,6 +93,7 @@ public class License : Entity
 
         _licenseModules.Add(new LicenseModule(this.Id, moduleId));
     }
+
     public bool IsValidAt(DateTime currentDate) => Status == LicenseStatus.Active && ValidityPeriod.IsActive(currentDate);
 
     public void Renew(int durationInMonths, DateTime now)
@@ -81,7 +102,11 @@ public class License : Entity
         if (!ValidityPeriod.End.HasValue) return;
 
         DateTime newStart = ValidityPeriod.End.Value > now ? ValidityPeriod.End.Value : now;
-        ValidityPeriod = new DateRange(ValidityPeriod.Start, newStart.AddMonths(durationInMonths));
+        var newEnd = newStart.AddMonths(durationInMonths);
+
+        var adjustedExpiration = AdjustToEndOfDay(newEnd);
+
+        ValidityPeriod = new DateRange(ValidityPeriod.Start, adjustedExpiration);
         Status = LicenseStatus.Active;
     }
 

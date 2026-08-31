@@ -13,7 +13,8 @@ public class EntitlementService : IEntitlementService
     private readonly IClock _clock;
     private readonly IMemoryCache _cache;
 
-    private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS" };
+    // 🔥 SPRINT 2.4: CONVERSATIONS incluido como módulo base obligatorio (Auditoría #15)
+    private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS" };
 
     public EntitlementService(
         ILicenseRepository licenseRepository,
@@ -28,6 +29,7 @@ public class EntitlementService : IEntitlementService
         _clock = clock;
         _cache = cache;
     }
+
     public void InvalidateWorkspaceCache(Guid workspaceId)
     {
         _cache.Remove($"entitlement_{workspaceId}");
@@ -36,43 +38,40 @@ public class EntitlementService : IEntitlementService
     private async Task<EntitlementSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         if (workspaceId == Guid.Empty) return new EntitlementSnapshot();
-        string cacheKey = $"entitlement_{workspaceId}";
 
-        var result = await _cache.GetOrCreateAsync(cacheKey, async entry =>
-        {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-            var snapshot = new EntitlementSnapshot();
+        // 🔥 SPRINT 2.2: Aniquilación total de caché fantasma de 5 minutos (Auditoría #24). 
+        var snapshot = new EntitlementSnapshot();
 
-            var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
-            if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
-                return snapshot;
-
-            var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-            if (license == null || !license.IsValidAt(_clock.UtcNow))
-                return snapshot;
-
-            snapshot.IsValid = true;
-            snapshot.MaxLocations = license.MaxLocations;
-            var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
-            if (assignedModuleIds.Any())
-            {
-                var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
-                foreach (var mod in activeModules)
-                {
-                    var code = mod.Code.ToUpperInvariant();
-                    snapshot.ActiveModuleCodes.Add(code);
-                    snapshot.ActiveModuleIds.Add(mod.Id);
-                    snapshot.ModuleCapabilities[code] = mod.Capabilities.Select(c => c.Code.ToUpperInvariant()).ToHashSet();
-                }
-            }
-            foreach (var baseMod in _baseModules)
-            {
-                snapshot.ActiveModuleCodes.Add(baseMod);
-            }
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
+        if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
             return snapshot;
-        });
 
-        return result ?? new EntitlementSnapshot();
+        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        if (license == null || !license.IsValidAt(_clock.UtcNow))
+            return snapshot;
+
+        snapshot.IsValid = true;
+        snapshot.MaxLocations = license.MaxLocations;
+        var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
+
+        if (assignedModuleIds.Any())
+        {
+            var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
+            foreach (var mod in activeModules)
+            {
+                var code = mod.Code.ToUpperInvariant();
+                snapshot.ActiveModuleCodes.Add(code);
+                snapshot.ActiveModuleIds.Add(mod.Id);
+                snapshot.ModuleCapabilities[code] = mod.Capabilities.Select(c => c.Code.ToUpperInvariant()).ToHashSet();
+            }
+        }
+
+        foreach (var baseMod in _baseModules)
+        {
+            snapshot.ActiveModuleCodes.Add(baseMod);
+        }
+
+        return snapshot;
     }
 
     public async Task<bool> IsLicenseValidAsync(Guid workspaceId, CancellationToken cancellationToken)
@@ -108,7 +107,14 @@ public class EntitlementService : IEntitlementService
 
         var code = moduleCode.ToUpperInvariant();
         if (_baseModules.Contains(code)) return true;
-        return snapshot.ActiveModuleCodes.Contains(code);
+
+        // 🔥 SPRINT 2.4: Validación real y estricta de Capability exacta (Auditoría #14)
+        if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
+        {
+            return caps.Contains(capabilityCode.ToUpperInvariant());
+        }
+
+        return false;
     }
 
     public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)

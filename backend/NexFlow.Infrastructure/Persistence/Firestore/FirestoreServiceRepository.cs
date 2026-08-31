@@ -1,17 +1,15 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using NexFlow.Domain.Exceptions; 
+
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreServiceRepository : IServiceRepository
 {
     private readonly FirestoreDb _firestoreDb;
+
     public FirestoreServiceRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
 
     public async Task<IEnumerable<ServiceDto>> GetServicesAsync(Guid workspaceId, CancellationToken cancellationToken)
@@ -29,7 +27,7 @@ public class FirestoreServiceRepository : IServiceRepository
                 Description = data.Description,
                 Category = data.Category,
                 DurationInMinutes = data.DurationInMinutes,
-                PriceMinorUnits = data.PriceMinorUnits, // 🔥 Parseo limpio sin comas
+                PriceMinorUnits = data.PriceMinorUnits,
                 Currency = data.Currency,
                 RequiresReservation = data.RequiresReservation,
                 IsActive = data.IsActive,
@@ -41,6 +39,32 @@ public class FirestoreServiceRepository : IServiceRepository
 
     public async Task<ServiceDto> SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 4.4: Validación de Integridad de Dominio
+        if (service.PriceMinorUnits < 0)
+            throw new DomainException("El precio del servicio no puede ser negativo.");
+
+        if (service.RequiresReservation && service.DurationInMinutes < 5)
+            throw new DomainException("Los servicios que requieren reserva deben tener una duración mínima de 5 minutos.");
+
+        // 🔥 SPRINT 4.2: Validación de Sedes (Prevenir Relaciones Huérfanas)
+        if (service.AvailableAtLocations != null && service.AvailableAtLocations.Any())
+        {
+            var locationsSnapshot = await _firestoreDb.Collection("workspaces")
+                .Document(workspaceId.ToString())
+                .Collection("locations")
+                .GetSnapshotAsync(cancellationToken);
+
+            var activeLocationIds = locationsSnapshot.Documents.Select(d => d.Id).ToHashSet();
+
+            foreach (var locId in service.AvailableAtLocations)
+            {
+                if (!activeLocationIds.Contains(locId))
+                {
+                    throw new DomainException($"Operación rechazada: La sede con ID {locId} no existe en la base de datos.");
+                }
+            }
+        }
+
         var collection = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services");
         var docRef = string.IsNullOrEmpty(service.Id) ? collection.Document() : collection.Document(service.Id);
 
@@ -52,7 +76,7 @@ public class FirestoreServiceRepository : IServiceRepository
             Description = service.Description,
             Category = service.Category,
             DurationInMinutes = service.DurationInMinutes,
-            PriceMinorUnits = service.PriceMinorUnits, // 🔥 Persistencia de entero
+            PriceMinorUnits = service.PriceMinorUnits,
             Currency = service.Currency ?? "PEN",
             RequiresReservation = service.RequiresReservation,
             IsActive = service.IsActive,

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using Google.Cloud.Firestore;
+﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Requests;
 
@@ -24,7 +20,6 @@ public class FirestoreRequestRepository : IRequestRepository
     {
         var docRef = GetCollection(workspaceId).Document(request.Id);
 
-        // Mapeo manual para no contaminar la capa Application con atributos [FirestoreData]
         var data = new Dictionary<string, object>
         {
             { "Id", request.Id },
@@ -41,7 +36,12 @@ public class FirestoreRequestRepository : IRequestRepository
 
     public async Task<IEnumerable<RequestRecord>> GetRequestsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        var snapshot = await GetCollection(workspaceId).OrderByDescending("CreatedAt").GetSnapshotAsync(cancellationToken);
+        // 🔥 SPRINT 4.3: Paginación y Límite de Memoria (Auditoría #21)
+        var snapshot = await GetCollection(workspaceId)
+            .OrderByDescending("CreatedAt")
+            .Limit(100) // Protegemos el backend limitando a 100 resultados
+            .GetSnapshotAsync(cancellationToken);
+
         var list = new List<RequestRecord>();
 
         foreach (var doc in snapshot.Documents)

@@ -11,6 +11,7 @@ using NexFlow.Infrastructure.DependencyInjection;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using System.Threading.RateLimiting;
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,7 +23,6 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IWorkspaceContext, WorkspaceContext>();
-
 builder.Services.AddMemoryCache();
 
 // 3. Configurar Firebase Authentication (JWT)
@@ -106,7 +106,13 @@ builder.Services.AddCors(options =>
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<NexFlowDbContext>(name: "PostgreSQL", tags: new[] { "db", "data" });
 
-builder.Services.AddControllers();
+// 🔥 SPRINT 2.1: Estandarización de Enums a Strings para alinearlo con React
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -137,10 +143,13 @@ else
     }
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
-
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();

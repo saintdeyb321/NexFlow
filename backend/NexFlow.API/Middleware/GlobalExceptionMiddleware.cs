@@ -30,7 +30,7 @@ public class GlobalExceptionMiddleware
 
     private static Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
-        context.Response.ContentType = "application/json"; // 🛡️ Simplificado a JSON estándar
+        context.Response.ContentType = "application/json";
 
         var statusCode = exception switch
         {
@@ -42,7 +42,7 @@ public class GlobalExceptionMiddleware
         context.Response.StatusCode = statusCode;
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? "N/A";
 
-        // 🛡️ CONTRATO UNIFICADO: Solo code, message y correlationId
+        // 🔥 SPRINT 2.1: Contrato estandarizado y blindado
         var response = new
         {
             code = exception switch
@@ -57,7 +57,6 @@ public class GlobalExceptionMiddleware
             correlationId = correlationId
         };
 
-        // Forzamos formato CamelCase para que JS lo lea nativo
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         return context.Response.WriteAsync(JsonSerializer.Serialize(response, options));
     }

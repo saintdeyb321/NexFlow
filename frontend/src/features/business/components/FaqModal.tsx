@@ -60,7 +60,7 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
           <select 
-            value={formData.category}
+            value={formData.category || ''}
             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
             className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
           >

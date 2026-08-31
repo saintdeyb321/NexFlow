@@ -1,4 +1,5 @@
 ﻿using NexFlow.Application.Abstractions;
+using NexFlow.Application.Engines.Dispatcher;
 
 namespace NexFlow.Application.Engines.Dispatcher.Handlers;
 
@@ -15,18 +16,17 @@ public class ServiceModuleHandler : IModuleHandler
 
     public string[] SupportedCapabilities => new[] { "READ" };
 
-    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
+    public async Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
         if (request.CapabilityCode != "READ")
-            return "SISTEMA: Capacidad no soportada por el módulo SERVICES.";
+            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Capacidad no soportada por el módulo SERVICES.", false, Array.Empty<string>());
 
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var activeServices = services.Where(s => s.IsActive).ToList();
 
         if (!activeServices.Any())
-            return "SISTEMA: Informa cortésmente que actualmente no hay servicios configurados o disponibles en el catálogo.";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Informa cortésmente que actualmente no hay servicios configurados o disponibles en el catálogo.", false, Array.Empty<string>());
 
-        // 🔥 SPRINT 3 (Auditoría #20): Límite de Contexto para servicios.
         if (activeServices.Count > 10)
         {
             var categories = activeServices
@@ -35,7 +35,7 @@ public class ServiceModuleHandler : IModuleHandler
                 .ToList();
 
             var categoriesText = string.Join(", ", categories);
-            return $"SISTEMA: El negocio ofrece {activeServices.Count} servicios distribuidos en estas categorías: {categoriesText}. Pregúntale al cliente qué tipo de servicio necesita para darle el detalle, duración y precio exacto.";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"El negocio ofrece {activeServices.Count} servicios distribuidos en estas categorías: {categoriesText}. Pregúntale al cliente qué tipo de servicio necesita para darle el detalle, duración y precio exacto.", false, Array.Empty<string>());
         }
 
         var servicesText = string.Join("\n", activeServices.Select(s =>
@@ -47,7 +47,8 @@ public class ServiceModuleHandler : IModuleHandler
             return $"- {s.Name}: {s.Currency} {s.PriceMinorUnits / 100m}{durationText}{reqReservation}{desc}";
         }));
 
-        return $@"SISTEMA: Utiliza la siguiente lista de servicios y sus precios para responder la duda del cliente. NO ofrezcas servicios que no estén en esta lista:
-{servicesText}";
+        var responseText = $"Utiliza la siguiente lista de servicios y sus precios para responder la duda del cliente. NO ofrezcas servicios que no estén en esta lista:\n{servicesText}";
+
+        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, responseText, false, Array.Empty<string>());
     }
 }

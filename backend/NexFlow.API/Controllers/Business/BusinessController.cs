@@ -67,7 +67,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
 
-        // 1. Guardar los datos extendidos en Firestore
         await _profileRepository.SaveProfileAsync(WorkspaceId, profile, cancellationToken);
 
         var workspace = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);
@@ -109,7 +108,6 @@ public class BusinessController : ControllerBase
         return Ok();
     }
 
-    // 🔥 NUEVO: Endpoint para Editar Sede (PUT)
     [HttpPut("locations/{locationId}")]
     public async Task<IActionResult> UpdateLocation(
         string locationId,
@@ -119,7 +117,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        // El DTO asume el ID de la URL por seguridad
         location = location with { Id = locationId };
 
         var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
@@ -132,6 +129,17 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> DeleteLocation(string locationId, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        // 🔥 SPRINT 4.2: Prevenir sedes huérfanas en los servicios
+        var services = await _serviceRepository.GetServicesAsync(WorkspaceId, cancellationToken);
+        var affectedServices = services.Where(s => s.AvailableAtLocations != null && s.AvailableAtLocations.Contains(locationId)).ToList();
+
+        foreach (var service in affectedServices)
+        {
+            service.AvailableAtLocations.Remove(locationId);
+            await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
+        }
+
         await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
         return NoContent();
     }
@@ -192,20 +200,27 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
 
-        // Si no trae ID, le generamos uno para asegurar que se crea correctamente
-        if (string.IsNullOrEmpty(faq.Id)) faq.Id = Guid.NewGuid().ToString();
+        // 🔥 SPRINT 4.3: Inconsistencia y límite de 20 FAQs
+        if (string.IsNullOrEmpty(faq.Id))
+        {
+            var currentFaqs = await _faqRepository.GetFaqsAsync(WorkspaceId, cancellationToken);
+            if (currentFaqs.Count() >= 20)
+            {
+                return BadRequest(new { code = "Limit.Exceeded", message = "Has alcanzado el límite máximo de 20 preguntas frecuentes. Elimina una antigua para agregar una nueva." });
+            }
+            faq.Id = Guid.NewGuid().ToString();
+        }
 
         var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
         return Ok(savedFaq);
     }
 
-    // 🔥 NUEVO: Endpoint para Editar FAQ (PUT)
     [HttpPut("faqs/{faqId}")]
     public async Task<IActionResult> UpdateFaq(string faqId, [FromBody] FaqDto faq, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
 
-        faq.Id = faqId; // Forzamos el ID de la URL
+        faq.Id = faqId;
         var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
         return Ok(savedFaq);
     }
@@ -216,18 +231,5 @@ public class BusinessController : ControllerBase
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         await _faqRepository.DeleteFaqAsync(WorkspaceId, faqId, cancellationToken);
         return NoContent();
-    }
-
-    // --- ONBOARDING ---
-    [HttpPost("complete-onboarding")]
-    public async Task<IActionResult> CompleteOnboarding(CancellationToken cancellationToken)
-    {
-        var workspace = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);
-        if (workspace == null) return NotFound();
-
-        workspace.Activate();
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return Ok();
     }
 }

@@ -1,4 +1,5 @@
 ﻿using NexFlow.Application.Abstractions;
+using NexFlow.Application.Engines.Dispatcher;
 
 namespace NexFlow.Application.Engines.Dispatcher.Handlers;
 
@@ -15,18 +16,17 @@ public class CatalogModuleHandler : IModuleHandler
 
     public string[] SupportedCapabilities => new[] { "READ" };
 
-    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
+    public async Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
         if (request.CapabilityCode != "READ")
-            return "SISTEMA: Capacidad no soportada por el módulo CATALOG.";
+            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Capacidad no soportada por el módulo CATALOG.", false, Array.Empty<string>());
 
         var products = await _catalogRepository.GetProductsAsync(workspaceId, cancellationToken);
         var activeProducts = products.Where(p => p.IsActive).ToList();
 
         if (!activeProducts.Any())
-            return "SISTEMA: Informa cortésmente que actualmente no hay productos disponibles en el catálogo.";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Informa cortésmente que actualmente no hay productos disponibles en el catálogo.", false, Array.Empty<string>());
 
-        // 🔥 SPRINT 3 (Auditoría #20): Límite de Contexto. Si hay más de 10, resumimos.
         if (activeProducts.Count > 10)
         {
             var categories = activeProducts
@@ -35,7 +35,7 @@ public class CatalogModuleHandler : IModuleHandler
                 .ToList();
 
             var categoriesText = string.Join(", ", categories);
-            return $"SISTEMA: El catálogo tiene {activeProducts.Count} productos divididos en estas categorías: {categoriesText}. Pídele amablemente al cliente que especifique qué categoría o tipo de producto busca para darle opciones y precios exactos.";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"El catálogo tiene {activeProducts.Count} productos divididos en estas categorías: {categoriesText}. Pídele amablemente al cliente que especifique qué categoría o tipo de producto busca para darle opciones y precios exactos.", false, Array.Empty<string>());
         }
 
         var productsText = string.Join("\n", activeProducts.Select(p =>
@@ -44,7 +44,8 @@ public class CatalogModuleHandler : IModuleHandler
             return $"- {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m}{desc}";
         }));
 
-        return $@"SISTEMA: Utiliza la siguiente lista de productos y sus precios para responder la duda del cliente. NO ofrezcas productos que no estén en esta lista:
-{productsText}";
+        var responseText = $"Utiliza la siguiente lista de productos y sus precios para responder la duda del cliente. NO ofrezcas productos que no estén en esta lista:{productsText}";
+
+        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, responseText, false, Array.Empty<string>());
     }
 }

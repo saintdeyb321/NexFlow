@@ -15,6 +15,7 @@ public class Reservation : Entity
     public DateTime EndTime { get; private set; }
     public ReservationStatus Status { get; private set; }
     public byte[] RowVersion { get; private set; } = null!;
+    
 
     private Reservation() { }
 
@@ -37,6 +38,9 @@ public class Reservation : Entity
         };
     }
 
+    public void Complete() { 
+        Status = ReservationStatus.Completed; 
+    }
     public void Cancel()
     {
         if (Status == ReservationStatus.Completed || Status == ReservationStatus.NoShow)

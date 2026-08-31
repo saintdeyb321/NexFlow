@@ -3,7 +3,6 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Domain.Enums;
 
-
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreConversationRepository : IConversationRepository
@@ -33,6 +32,7 @@ public class FirestoreConversationRepository : IConversationRepository
 
         return MapToConversation(doc);
     }
+
     public async Task<ConversationRecord> GetOrCreateActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken)
     {
         var collection = GetCollection(workspaceId);

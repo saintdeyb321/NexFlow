@@ -46,3 +46,6 @@ docker-compose*.yaml
 # =========================
 .DS_Store
 Thumbs.db
+
+**/.env
+.aider*

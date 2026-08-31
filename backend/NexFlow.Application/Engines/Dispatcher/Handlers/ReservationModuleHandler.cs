@@ -27,20 +27,18 @@ public class ReservationModuleHandler : IModuleHandler
 
     public string[] SupportedCapabilities => new[] { "CHECK_AVAILABILITY", "CREATE", "CANCEL" };
 
-    public async Task<string> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
+    public async Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
         var phone = request.Parameters.TryGetValue("phone", out var p) ? p?.ToString() ?? "unknown" : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, phone, cancellationToken) ?? new ConversationContextDto();
 
-        // 🔥 SPRINT 3 (Auditoría #15): Implementación de CANCEL
         if (request.CapabilityCode == "CANCEL")
         {
-            // 🔥 CORRECCIÓN: Usamos SelectedLocationId y SelectedServiceId
             context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
 
-            // Usamos el flag [RequiresHuman] para que el Dispatcher lo intercepte y active el Handoff
-            return "SISTEMA: Indícale al cliente que has recibido su solicitud de cancelación y que un asesor se comunicará en breve para procesarla. [RequiresHuman]";
+            // Activamos el flag booleano RequiresHuman a true en el objeto estructurado
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Indícale al cliente que has recibido su solicitud de cancelación y que un asesor se comunicará en breve para procesarla.", true, Array.Empty<string>());
         }
 
         // 1. RESOLVER SEDE
@@ -66,21 +64,19 @@ public class ReservationModuleHandler : IModuleHandler
                     context.PendingAction = "ASK_LOCATION";
                     await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
                     var locationNames = string.Join(", ", locations.Select(l => l.Name));
-                    return $"SISTEMA: El negocio tiene varias sedes. Pregúntale amablemente al cliente en cuál desea reservar. Opciones: {locationNames}.";
+                    return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"El negocio tiene varias sedes. Pregúntale amablemente al cliente en cuál desea reservar. Opciones: {locationNames}.", false, new[] { "locationId" });
                 }
                 targetLocationId = context.SelectedLocationId;
             }
             else
             {
-                return "SISTEMA: El negocio aún no ha configurado sus sedes. Dile al cliente que por el momento no pueden agendar.";
+                return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "El negocio aún no ha configurado sus sedes. Dile al cliente que por el momento no pueden agendar.", false, Array.Empty<string>());
             }
         }
 
         // 2. RESOLVER SERVICIO
         string? targetServiceId = context.SelectedServiceId;
         var allServices = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-
-        // 🔥 SPRINT 3 (Auditoría #17): Filtramos estrictamente solo los servicios activos
         var services = allServices.Where(s => s.IsActive).ToList();
 
         if (string.IsNullOrEmpty(targetServiceId))
@@ -88,8 +84,6 @@ public class ReservationModuleHandler : IModuleHandler
             if (request.Parameters.TryGetValue("service", out var serviceName) && serviceName != null)
             {
                 var searchStr = serviceName.ToString()!;
-
-                // 🔥 SPRINT 3 (Auditoría #16): Búsqueda estricta primero (Exact match)
                 var exactMatch = services.FirstOrDefault(s => s.Name.Equals(searchStr, StringComparison.OrdinalIgnoreCase));
 
                 if (exactMatch != null)
@@ -98,7 +92,6 @@ public class ReservationModuleHandler : IModuleHandler
                 }
                 else
                 {
-                    // Si no es exacto, buscamos parciales (Contains)
                     var matchedServices = services.Where(s => s.Name.Contains(searchStr, StringComparison.OrdinalIgnoreCase)).ToList();
 
                     if (matchedServices.Count == 1)
@@ -110,7 +103,7 @@ public class ReservationModuleHandler : IModuleHandler
                         context.PendingAction = "ASK_SERVICE";
                         await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
                         var options = string.Join(", ", matchedServices.Select(m => m.Name));
-                        return $"SISTEMA: Hay varios servicios que coinciden con '{searchStr}'. Opciones: {options}. Pregunta cuál de estos específicos desea.";
+                        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Hay varios servicios que coinciden con '{searchStr}'. Opciones: {options}. Pregunta cuál de estos específicos desea.", false, new[] { "serviceId" });
                     }
                 }
             }
@@ -120,14 +113,14 @@ public class ReservationModuleHandler : IModuleHandler
                 context.PendingAction = "ASK_SERVICE";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
                 var serviceNames = string.Join(", ", services.Select(s => s.Name));
-                return $"SISTEMA: Necesitamos saber qué servicio desea. Pregúntale al cliente qué servicio quiere agendar. Opciones: {serviceNames}.";
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Necesitamos saber qué servicio desea. Pregúntale al cliente qué servicio quiere agendar. Opciones: {serviceNames}.", false, new[] { "serviceId" });
             }
             targetServiceId = context.SelectedServiceId;
         }
 
         if (string.IsNullOrEmpty(targetLocationId) || string.IsNullOrEmpty(targetServiceId))
         {
-            return "SISTEMA: Error interno. No se pudo determinar la Sede o el Servicio a procesar.";
+            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Error interno. No se pudo determinar la Sede o el Servicio a procesar.", false, Array.Empty<string>());
         }
 
         // 3. RESOLVER FECHA
@@ -144,10 +137,10 @@ public class ReservationModuleHandler : IModuleHandler
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
 
             if (!slots.Any())
-                return $"SISTEMA: NO hay horarios disponibles el {dateToSearch:yyyy-MM-dd}. Pídele amablemente al cliente que elija otro día.";
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"NO hay horarios disponibles el {dateToSearch:yyyy-MM-dd}. Pídele amablemente al cliente que elija otro día.", false, Array.Empty<string>());
 
             var slotsText = string.Join(", ", slots.Select(s => s.StartTime.ToString("HH:mm")));
-            return $"SISTEMA: Horarios libres para el {dateToSearch:yyyy-MM-dd}: {slotsText}. Pregúntale al cliente cuál de estos horarios prefiere.";
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Horarios libres para el {dateToSearch:yyyy-MM-dd}: {slotsText}. Pregúntale al cliente cuál de estos horarios prefiere.", false, new[] { "time" });
         }
 
         if (request.CapabilityCode == "CREATE")
@@ -156,14 +149,14 @@ public class ReservationModuleHandler : IModuleHandler
             {
                 context.PendingAction = "ASK_TIME";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-                return "SISTEMA: Falta la hora exacta. Pídele al cliente que indique a qué hora desea su cita.";
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Falta la hora exacta. Pídele al cliente que indique a qué hora desea su cita.", false, new[] { "time" });
             }
 
             if (!request.Parameters.TryGetValue("name", out var customerName) || customerName == null || string.IsNullOrWhiteSpace(customerName.ToString()))
             {
                 context.PendingAction = "ASK_NAME";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-                return "SISTEMA: Falta el nombre. Dile que SÍ tienes disponibilidad a esa hora, pero necesitas su nombre completo para registrar la cita.";
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Falta el nombre. Dile que SÍ tienes disponibilidad a esa hora, pero necesitas su nombre completo para registrar la cita.", false, new[] { "name" });
             }
 
             var exactDateTime = dateToSearch.Add(time);
@@ -176,13 +169,14 @@ public class ReservationModuleHandler : IModuleHandler
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
 
-                return $"SISTEMA: Reserva CREADA EXITOSAMENTE a nombre de {customerName} para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.";
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Reserva CREADA EXITOSAMENTE a nombre de {customerName} para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.", false, Array.Empty<string>());
             }
             else
             {
-                return $"SISTEMA: Hubo un conflicto. {result.Error.Description}. Pide disculpas y ofrécele otros horarios.";
+                return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, $"Hubo un conflicto. {result.Error.Description}. Pide disculpas y ofrécele otros horarios.", false, Array.Empty<string>());
             }
         }
-        return "SISTEMA: La intención no es soportada por este módulo.";
+
+        return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "La intención no es soportada por este módulo.", false, Array.Empty<string>());
     }
 }

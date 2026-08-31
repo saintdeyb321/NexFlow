@@ -39,7 +39,6 @@ public class ProcessIncomingMessageCommandHandler
         _logger = logger;
     }
 
-    // 🔥 SPRINT 4 (Auditoría #23): Normalizador Canónico
     private static string NormalizePhone(string phone)
     {
         if (string.IsNullOrWhiteSpace(phone)) return phone;
@@ -68,12 +67,28 @@ public class ProcessIncomingMessageCommandHandler
             return Result.Success();
 
         var normalizedPhone = NormalizePhone(request.CustomerPhone);
-
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
 
-        // PRIVACIDAD: Ignorar salientes a desconocidos
-        if (request.FromMe && conversation == null)
+        if (request.FromMe && conversation != null)
+        {
+            var recentMessages = await _conversationRepo.GetMessagesAsync(workspaceId, conversation.Id, 20, cancellationToken);
+            bool isAiMessage = recentMessages.Any(m => m.ExternalMessageId == request.MessageId && m.Sender == SenderType.AI);
+
+            if (isAiMessage)
+            {
+                return Result.Success();
+            }
+
+            if (conversation.Mode != ConversationMode.Human)
+            {
+                await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
+                _logger.LogInformation("Handoff Automático disparado por intervención manual del dueño en la conversación {ConvId}", conversation.Id);
+            }
+        }
+        else if (request.FromMe && conversation == null)
+        {
             return Result.Success();
+        }
 
         if (!await _entitlementService.IsLicenseValidAsync(workspaceId, cancellationToken))
         {
@@ -95,12 +110,6 @@ public class ProcessIncomingMessageCommandHandler
             conversation = await _conversationRepo.GetOrCreateActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
         }
 
-        if (request.FromMe && conversation.Mode != ConversationMode.Human)
-        {
-            await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
-            _logger.LogInformation("Handoff Automático disparado por intervención manual del dueño en la conversación {ConvId}", conversation.Id);
-        }
-
         var messageRecord = new MessageRecord
         {
             Id = request.MessageId,
@@ -112,7 +121,6 @@ public class ProcessIncomingMessageCommandHandler
         };
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, messageRecord, cancellationToken);
 
-        // ESCUDO IA
         if (conversation.Mode == ConversationMode.Human || conversation.Mode == ConversationMode.Paused || request.FromMe)
         {
             return Result.Success();
@@ -134,11 +142,13 @@ public class ProcessIncomingMessageCommandHandler
         }
 
         var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, cancellationToken);
-        await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
+
+        var evolutionExternalId = await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
 
         var aiMessageRecord = new MessageRecord
         {
             Id = Guid.NewGuid().ToString(),
+            ExternalMessageId = evolutionExternalId,
             Direction = "outbound",
             Sender = SenderType.AI,
             Content = finalResponse,

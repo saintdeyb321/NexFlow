@@ -31,14 +31,12 @@ public static class SystemCatalogSeeder
                 new { Code = "UPDATE_STATUS", Desc = "Actualizar estado" }
             } },
 
-            new { Code = "NOTIFICATIONS", Name = "Alertas", Desc = "Centro de avisos para el negocio.", Caps = new[] { new { Code = "READ", Desc = "Ver alertas" } } },
-            new { Code = "CUSTOMERS", Name = "Contactos", Desc = "Identidad de consumidores.", Caps = new[] { new { Code = "READ", Desc = "Ver contactos" } } },
-
             new { Code = "CONVERSATIONS", Name = "Bandeja de Entrada", Desc = "Inbox y control de chats.", Caps = new[] {
                 new { Code = "READ", Desc = "Leer chats" },
                 new { Code = "SEND_MESSAGE", Desc = "Enviar mensaje manual" },
                 new { Code = "TAKEOVER", Desc = "Asumir control humano" }
             } }
+            // 🔥 SPRINT 4.3: Eliminamos "NOTIFICATIONS" y "CUSTOMERS" del catálogo comercial para no vender aire.
         };
 
         var existingModules = await context.Modules.Include(m => m.Capabilities).ToListAsync();
@@ -69,7 +67,7 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 2. Las 5 Plantillas Estratégicas
+        // 2. Las Plantillas Estratégicas
         var templates = new[]
         {
             new { Code = "SUPPORT", Name = "Atención Básica", Desc = "Respuestas automáticas e información general." },
@@ -93,14 +91,14 @@ public static class SystemCatalogSeeder
         existingTemplates = await context.Templates.ToListAsync();
         var existingTemplateModules = await context.TemplateModules.ToListAsync();
 
-        // 3. El Armado Final de los Bloques de Lego
+        // 🔥 SPRINT 4.3: Depuramos las plantillas para no amarrar módulos inexistentes
         var templateConfig = new Dictionary<string, string[]>
         {
-            { "SUPPORT", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CONVERSATIONS", "CUSTOMERS" } },
-            { "BOOKING", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "RESERVATIONS", "CONVERSATIONS", "CUSTOMERS" } },
-            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "CONVERSATIONS", "CUSTOMERS" } },
-            { "REQUESTS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "REQUESTS", "CONVERSATIONS", "CUSTOMERS", "NOTIFICATIONS" } },
-            { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "RESERVATIONS", "REQUESTS", "CONVERSATIONS", "CUSTOMERS", "NOTIFICATIONS" } }
+            { "SUPPORT", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CONVERSATIONS" } },
+            { "BOOKING", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "RESERVATIONS", "CONVERSATIONS" } },
+            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "CONVERSATIONS" } },
+            { "REQUESTS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "REQUESTS", "CONVERSATIONS" } },
+            { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "RESERVATIONS", "REQUESTS", "CONVERSATIONS" } }
         };
 
         foreach (var config in templateConfig)
@@ -119,7 +117,7 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 🔥 4. SPRINT 1: CREACIÓN DEL WORKSPACE INTERNO PARA SUPERADMINS
+        // 🔥 SPRINT 4.4: Reconciliación total del Seeder del SuperAdmin
         var internalWorkspace = await context.Workspaces.FirstOrDefaultAsync(w => w.Name == "NexFlow Internal");
         if (internalWorkspace == null)
         {
@@ -131,7 +129,7 @@ public static class SystemCatalogSeeder
             var license = License.CreateCustomLicense(
                 internalWorkspace.Id,
                 DateTime.UtcNow,
-                null,
+                null, // SuperAdmin no expira
                 999
             );
 
@@ -143,8 +141,24 @@ public static class SystemCatalogSeeder
             context.Licenses.Add(license);
             await context.SaveChangesAsync();
         }
+        else
+        {
+            // Reconciliación: Asegurar que la licencia interna siempre tiene TODOS los módulos vigentes
+            var license = await context.Licenses.Include(l => l.LicenseModules).FirstOrDefaultAsync(l => l.WorkspaceId == internalWorkspace.Id);
+            if (license != null)
+            {
+                foreach (var mod in existingModules)
+                {
+                    if (!license.LicenseModules.Any(lm => lm.ModuleId == mod.Id))
+                    {
+                        license.AddCustomModule(mod.Id);
+                    }
+                }
+                await context.SaveChangesAsync();
+            }
+        }
 
-        // 5. Vincular a los SuperAdmins
+        // Vincular a los SuperAdmins
         var sysAdmins = await context.SystemAdministrators.ToListAsync();
         foreach (var admin in sysAdmins)
         {
