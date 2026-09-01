@@ -21,8 +21,16 @@ public class ServiceModuleHandler : IModuleHandler
         if (request.CapabilityCode != "READ")
             return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Capacidad no soportada por el módulo SERVICES.", false, Array.Empty<string>());
 
-        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var activeServices = services.Where(s => s.IsActive).ToList();
+        // 🔥 Auditoría (Fase 3): Si la IA identificó una categoría, filtramos en base de datos.
+        if (request.Parameters.TryGetValue("category", out var categoryObj) && !string.IsNullOrWhiteSpace(categoryObj?.ToString()))
+        {
+            var categoryServices = await _serviceRepository.GetServicesByCategoryAsync(workspaceId, categoryObj.ToString()!, cancellationToken);
+            if (categoryServices.Any())
+                return BuildServicesResponse(categoryServices.ToList(), request.CapabilityCode);
+        }
+
+        // 🔥 Auditoría (Fase 3): Consulta específica para servicios activos, no la colección completa.
+        var activeServices = (await _serviceRepository.GetActiveServicesAsync(workspaceId, cancellationToken)).ToList();
 
         if (!activeServices.Any())
             return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Informa cortésmente que actualmente no hay servicios configurados o disponibles en el catálogo.", false, Array.Empty<string>());
@@ -38,7 +46,12 @@ public class ServiceModuleHandler : IModuleHandler
             return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"El negocio ofrece {activeServices.Count} servicios distribuidos en estas categorías: {categoriesText}. Pregúntale al cliente qué tipo de servicio necesita para darle el detalle, duración y precio exacto.", false, Array.Empty<string>());
         }
 
-        var servicesText = string.Join("\n", activeServices.Select(s =>
+        return BuildServicesResponse(activeServices, request.CapabilityCode);
+    }
+
+    private ModuleExecutionResult BuildServicesResponse(List<NexFlow.Application.Features.Business.ServiceDto> services, string capabilityCode)
+    {
+        var servicesText = string.Join("\n", services.Select(s =>
         {
             var durationText = s.DurationInMinutes > 0 ? $" ({s.DurationInMinutes} min)" : "";
             var reqReservation = s.RequiresReservation ? " [Requiere Reserva]" : "";
@@ -49,6 +62,6 @@ public class ServiceModuleHandler : IModuleHandler
 
         var responseText = $"Utiliza la siguiente lista de servicios y sus precios para responder la duda del cliente. NO ofrezcas servicios que no estén en esta lista:\n{servicesText}";
 
-        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, responseText, false, Array.Empty<string>());
+        return new ModuleExecutionResult(true, ModuleCode, capabilityCode, responseText, false, Array.Empty<string>());
     }
 }

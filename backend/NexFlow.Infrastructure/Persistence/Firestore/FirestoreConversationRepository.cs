@@ -113,6 +113,9 @@ public class FirestoreConversationRepository : IConversationRepository
     public async Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken)
     {
         var messageRef = GetCollection(workspaceId).Document(conversationId).Collection("messages").Document(message.Id);
+
+        // 🔥 Auditoría (Fase 3): El TTL está configurado correctamente en el mensaje hijo. 
+        // Firestore borrará este documento independientemente de su padre.
         var expiresAt = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(90), DateTimeKind.Utc);
 
         var data = new Dictionary<string, object>
@@ -122,7 +125,7 @@ public class FirestoreConversationRepository : IConversationRepository
             { "sender", message.Sender.ToString() },
             { "content", message.Content },
             { "timestamp", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) },
-            { "expiresAt", expiresAt }
+            { "expiresAt", expiresAt } // Clave para el TTL
         };
 
         if (!string.IsNullOrEmpty(message.ExternalMessageId))
@@ -203,5 +206,19 @@ public class FirestoreConversationRepository : IConversationRepository
         if (!snapshot.Exists) return null;
 
         return MapToConversation(snapshot);
+    }
+    public async Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
+    {
+        var convRef = GetCollection(workspaceId).Document(conversationId);
+
+        // 1. Borramos la subcolección de mensajes primero
+        var messagesSnapshot = await convRef.Collection("messages").GetSnapshotAsync(cancellationToken);
+        foreach (var messageDoc in messagesSnapshot.Documents)
+        {
+            await messageDoc.Reference.DeleteAsync(Precondition.None, cancellationToken);
+        }
+
+        // 2. Borramos el documento de la conversación padre
+        await convRef.DeleteAsync(Precondition.None, cancellationToken);
     }
 }

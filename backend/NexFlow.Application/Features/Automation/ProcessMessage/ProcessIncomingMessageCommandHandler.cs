@@ -2,6 +2,7 @@
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Application.Abstractions.Repositories; // 🔥 Requisito para el nuevo repositorio
 using NexFlow.Application.Common;
 using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Intent;
@@ -23,6 +24,7 @@ public class ProcessIncomingMessageCommandHandler
     private readonly IInstanceResolver _instanceResolver;
     private readonly IConsumerIdentityRepository _consumerRepo;
     private readonly IConversationRepository _conversationRepo;
+    private readonly IProcessedMessageRepository _processedMessageRepo; // 🔥 Inyección del nuevo repo
     private readonly ILogger<ProcessIncomingMessageCommandHandler> _logger;
 
     public ProcessIncomingMessageCommandHandler(
@@ -30,12 +32,14 @@ public class ProcessIncomingMessageCommandHandler
         IEntitlementService entitlementService, IConversationCache conversationCache,
         IModuleDispatcher moduleDispatcher, IInstanceResolver instanceResolver,
         IConsumerIdentityRepository consumerRepo, IConversationRepository conversationRepo,
+        IProcessedMessageRepository processedMessageRepo, // 🔥 Inyección del nuevo repo
         ILogger<ProcessIncomingMessageCommandHandler> logger)
     {
         _intentEngine = intentEngine; _aiRouter = aiRouter; _messageGateway = messageGateway;
         _entitlementService = entitlementService; _conversationCache = conversationCache;
         _moduleDispatcher = moduleDispatcher; _instanceResolver = instanceResolver;
         _consumerRepo = consumerRepo; _conversationRepo = conversationRepo;
+        _processedMessageRepo = processedMessageRepo; // 🔥 Inyección del nuevo repo
         _logger = logger;
     }
 
@@ -54,12 +58,12 @@ public class ProcessIncomingMessageCommandHandler
         if (resolvedWorkspaceId == null || resolvedWorkspaceId == Guid.Empty) return Result.Success();
         Guid workspaceId = resolvedWorkspaceId.Value;
 
-        string idempotencyKey = $"{workspaceId}_{request.MessageId}";
-        bool isFirstTime = await _conversationCache.TryAcquireMessageLockAsync(workspaceId, idempotencyKey, cancellationToken);
+        // 🔥 Auditoría: Idempotencia delegada al repositorio de PostgreSQL, no a Redis.
+        bool isFirstTime = await _processedMessageRepo.TryAcquireLockAsync(workspaceId, request.MessageId, cancellationToken);
 
         if (!isFirstTime)
         {
-            _logger.LogInformation("Mensaje duplicado interceptado (Idempotencia): {Key}", idempotencyKey);
+            _logger.LogInformation("Mensaje duplicado interceptado (Idempotencia en BD): {MessageId}", request.MessageId);
             return Result.Success();
         }
 
@@ -74,8 +78,7 @@ public class ProcessIncomingMessageCommandHandler
             var recentMessages = await _conversationRepo.GetMessagesAsync(workspaceId, conversation.Id, 20, cancellationToken);
             bool isAiMessage = recentMessages.Any(m => m.ExternalMessageId == request.MessageId && m.Sender == SenderType.AI);
 
-            // 🔥 SPRINT 2.3: Lectura a la memoria caché ultrarrápida. 
-            // Si la base de datos Firestore aún no guarda el mensaje, Redis sí lo tendrá.
+            // Lectura a la memoria caché ultrarrápida.
             if (!isAiMessage)
             {
                 isAiMessage = await _conversationCache.IsMessageAiGeneratedAsync(workspaceId, request.MessageId, cancellationToken);
@@ -137,35 +140,43 @@ public class ProcessIncomingMessageCommandHandler
         if (!intentResult.IsConfident())
             intentResult = new IntentResultDto(IntentType.Unknown, 0, new());
 
-        intentResult.Parameters["phone"] = normalizedPhone;
-        intentResult.Parameters["messageId"] = request.MessageId;
+        string finalResponse;
 
-        ModuleExecutionResult systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
-
-        if (systemContext.RequiresHuman)
+        // 🔥 Auditoría: Capacidades Core Desacopladas. Saludo directo sin procesar módulos ni consumir IA.
+        if (intentResult.Intent == IntentType.GeneralGreeting)
         {
-            await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
-            _logger.LogInformation("Handoff Automático disparado por IA para conversación {ConvId}", conversation.Id);
+            finalResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
+        }
+        else
+        {
+            intentResult.Parameters["phone"] = normalizedPhone;
+            intentResult.Parameters["messageId"] = request.MessageId;
+
+            ModuleExecutionResult systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
+
+            if (systemContext.RequiresHuman)
+            {
+                await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, cancellationToken);
+                _logger.LogInformation("Handoff Automático disparado por IA para conversación {ConvId}", conversation.Id);
+            }
+
+            finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, cancellationToken);
         }
 
-        var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, cancellationToken);
-
-        var evolutionExternalId = await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
-
-        // 🔥 SPRINT 2.3: Anotar el mensaje en Redis instantáneamente tras dispararlo a Evolution
-        await _conversationCache.MarkMessageAsAiGeneratedAsync(workspaceId, evolutionExternalId, cancellationToken);
-
+        var pendingMessageId = Guid.NewGuid().ToString();
         var aiMessageRecord = new MessageRecord
         {
-            Id = Guid.NewGuid().ToString(),
-            ExternalMessageId = evolutionExternalId,
+            Id = pendingMessageId,
+            ExternalMessageId = pendingMessageId, // Asumimos control del ID hasta que Evolution responda
             Direction = "outbound",
             Sender = SenderType.AI,
             Content = finalResponse,
             Timestamp = DateTime.UtcNow
         };
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, aiMessageRecord, cancellationToken);
+        var evolutionExternalId = await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
+        await _conversationCache.MarkMessageAsAiGeneratedAsync(workspaceId, evolutionExternalId, cancellationToken);
 
         return Result.Success();
+        }
     }
-}

@@ -1,8 +1,7 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
-using NexFlow.Domain.Exceptions; 
-
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -16,37 +15,44 @@ public class FirestoreServiceRepository : IServiceRepository
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services");
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
+        return snapshot.Documents.Select(MapToDto);
+    }
 
-        return snapshot.Documents.Select(doc =>
-        {
-            var data = doc.ConvertTo<FirestoreService>();
-            return new ServiceDto
-            {
-                Id = doc.Id,
-                Name = data.Name,
-                Description = data.Description,
-                Category = data.Category,
-                DurationInMinutes = data.DurationInMinutes,
-                PriceMinorUnits = data.PriceMinorUnits,
-                Currency = data.Currency,
-                RequiresReservation = data.RequiresReservation,
-                IsActive = data.IsActive,
-                AvailableAtLocations = data.AvailableAtLocations ?? new List<string>(),
-                Metadata = data.Metadata ?? new Dictionary<string, object>()
-            };
-        });
+    // 🔥 Auditoría (Fase 3): Consultas específicas y filtradas directamente en Firestore[cite: 2].
+    public async Task<IEnumerable<ServiceDto>> GetActiveServicesAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services")
+            .WhereEqualTo("IsActive", true);
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+        return snapshot.Documents.Select(MapToDto);
+    }
+
+    public async Task<ServiceDto?> GetServiceByIdAsync(Guid workspaceId, string serviceId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(serviceId)) return null;
+        var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(serviceId);
+        var snapshot = await docRef.GetSnapshotAsync(cancellationToken);
+
+        return snapshot.Exists ? MapToDto(snapshot) : null;
+    }
+
+    public async Task<IEnumerable<ServiceDto>> GetServicesByCategoryAsync(Guid workspaceId, string category, CancellationToken cancellationToken)
+    {
+        var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services")
+            .WhereEqualTo("IsActive", true)
+            .WhereEqualTo("Category", category);
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+        return snapshot.Documents.Select(MapToDto);
     }
 
     public async Task<ServiceDto> SaveServiceAsync(Guid workspaceId, ServiceDto service, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 4.4: Validación de Integridad de Dominio
         if (service.PriceMinorUnits < 0)
             throw new DomainException("El precio del servicio no puede ser negativo.");
 
         if (service.RequiresReservation && service.DurationInMinutes < 5)
             throw new DomainException("Los servicios que requieren reserva deben tener una duración mínima de 5 minutos.");
 
-        // 🔥 SPRINT 4.2: Validación de Sedes (Prevenir Relaciones Huérfanas)
         if (service.AvailableAtLocations != null && service.AvailableAtLocations.Any())
         {
             var locationsSnapshot = await _firestoreDb.Collection("workspaces")
@@ -59,9 +65,7 @@ public class FirestoreServiceRepository : IServiceRepository
             foreach (var locId in service.AvailableAtLocations)
             {
                 if (!activeLocationIds.Contains(locId))
-                {
                     throw new DomainException($"Operación rechazada: La sede con ID {locId} no existe en la base de datos.");
-                }
             }
         }
 
@@ -92,6 +96,25 @@ public class FirestoreServiceRepository : IServiceRepository
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("services").Document(serviceId);
         await docRef.DeleteAsync(Precondition.None, cancellationToken);
+    }
+
+    private static ServiceDto MapToDto(DocumentSnapshot doc)
+    {
+        var data = doc.ConvertTo<FirestoreService>();
+        return new ServiceDto
+        {
+            Id = doc.Id,
+            Name = data.Name,
+            Description = data.Description,
+            Category = data.Category,
+            DurationInMinutes = data.DurationInMinutes,
+            PriceMinorUnits = data.PriceMinorUnits,
+            Currency = data.Currency,
+            RequiresReservation = data.RequiresReservation,
+            IsActive = data.IsActive,
+            AvailableAtLocations = data.AvailableAtLocations ?? new List<string>(),
+            Metadata = data.Metadata ?? new Dictionary<string, object>()
+        };
     }
 
     [FirestoreData]

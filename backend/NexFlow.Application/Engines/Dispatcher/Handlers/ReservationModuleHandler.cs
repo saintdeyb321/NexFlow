@@ -36,28 +36,28 @@ public class ReservationModuleHandler : IModuleHandler
         {
             context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-
             return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Indícale al cliente que has recibido su solicitud de cancelación y que un asesor se comunicará en breve para procesarla.", true, Array.Empty<string>());
         }
 
         // 1. RESOLVER SEDE
-        var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         string? targetLocationId = context.SelectedLocationId;
-
         if (string.IsNullOrEmpty(targetLocationId))
         {
-            if (locations.Count() == 1)
+            var locations = (await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken)).ToList();
+            if (locations.Count == 1)
             {
                 targetLocationId = locations.First().Id;
                 context.SelectedLocationId = targetLocationId;
             }
             else if (locations.Any())
             {
+                // 🔥 Auditoría (Fase 3): IA entrega "El Tambo", el backend resuelve a "LocationId".
                 if (request.Parameters.TryGetValue("location", out var locName) && locName != null)
                 {
                     var matchedLoc = locations.FirstOrDefault(l => l.Name.Contains(locName.ToString()!, StringComparison.OrdinalIgnoreCase));
                     if (matchedLoc != null) context.SelectedLocationId = matchedLoc.Id;
                 }
+
                 if (string.IsNullOrEmpty(context.SelectedLocationId))
                 {
                     context.PendingAction = "ASK_LOCATION";
@@ -73,17 +73,17 @@ public class ReservationModuleHandler : IModuleHandler
             }
         }
 
-        // 2. RESOLVER SERVICIO
+        // 2. RESOLVER SERVICIO (Sin GetServicesAsync completo por defecto)
         string? targetServiceId = context.SelectedServiceId;
-        var allServices = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var services = allServices.Where(s => s.IsActive).ToList();
-
         if (string.IsNullOrEmpty(targetServiceId))
         {
             if (request.Parameters.TryGetValue("service", out var serviceName) && serviceName != null)
             {
                 var searchStr = serviceName.ToString()!;
-                var exactMatch = services.FirstOrDefault(s => s.Name.Equals(searchStr, StringComparison.OrdinalIgnoreCase));
+
+                // 🔥 Auditoría (Fase 3): Solo consultamos servicios activos si no lo tenemos aún.
+                var activeServices = (await _serviceRepository.GetActiveServicesAsync(workspaceId, cancellationToken)).ToList();
+                var exactMatch = activeServices.FirstOrDefault(s => s.Name.Equals(searchStr, StringComparison.OrdinalIgnoreCase));
 
                 if (exactMatch != null)
                 {
@@ -91,8 +91,7 @@ public class ReservationModuleHandler : IModuleHandler
                 }
                 else
                 {
-                    var matchedServices = services.Where(s => s.Name.Contains(searchStr, StringComparison.OrdinalIgnoreCase)).ToList();
-
+                    var matchedServices = activeServices.Where(s => s.Name.Contains(searchStr, StringComparison.OrdinalIgnoreCase)).ToList();
                     if (matchedServices.Count == 1)
                     {
                         context.SelectedServiceId = matchedServices.First().Id;
@@ -109,20 +108,18 @@ public class ReservationModuleHandler : IModuleHandler
 
             if (string.IsNullOrEmpty(context.SelectedServiceId))
             {
+                var allActive = (await _serviceRepository.GetActiveServicesAsync(workspaceId, cancellationToken)).ToList();
                 context.PendingAction = "ASK_SERVICE";
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-                var serviceNames = string.Join(", ", services.Select(s => s.Name));
+                var serviceNames = string.Join(", ", allActive.Select(s => s.Name));
                 return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Necesitamos saber qué servicio desea. Pregúntale al cliente qué servicio quiere agendar. Opciones: {serviceNames}.", false, new[] { "serviceId" });
             }
             targetServiceId = context.SelectedServiceId;
         }
 
         if (string.IsNullOrEmpty(targetLocationId) || string.IsNullOrEmpty(targetServiceId))
-        {
             return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Error interno. No se pudo determinar la Sede o el Servicio a procesar.", false, Array.Empty<string>());
-        }
 
-        // 🔥 SPRINT 3.2: RESOLVER FECHA OBLIGATORIA
         DateTime dateToSearch;
         if (request.Parameters.TryGetValue("date", out var dateStr) && dateStr != null && DateTime.TryParse(dateStr.ToString(), out var parsedDate))
         {
@@ -130,7 +127,6 @@ public class ReservationModuleHandler : IModuleHandler
         }
         else
         {
-            // Nunca asumas la fecha de hoy. Obliga a la IA a preguntar.
             context.PendingAction = "ASK_DATE";
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
             return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Falta la fecha exacta. Pregúntale al cliente para qué día desea consultar o agendar la cita.", false, new[] { "date" });
@@ -166,15 +162,12 @@ public class ReservationModuleHandler : IModuleHandler
             }
 
             var exactDateTime = dateToSearch.Add(time);
-            string customerIdentifier = phone;
-
-            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId!, targetServiceId!, customerIdentifier, customerName.ToString()!, exactDateTime, cancellationToken);
+            var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId!, targetServiceId!, phone, customerName.ToString()!, exactDateTime, cancellationToken);
 
             if (result.IsSuccess)
             {
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-
                 return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"Reserva CREADA EXITOSAMENTE a nombre de {customerName} para el {exactDateTime:yyyy-MM-dd HH:mm}. Confírmale al cliente con amabilidad y despídete.", false, Array.Empty<string>());
             }
             else

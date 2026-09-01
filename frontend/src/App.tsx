@@ -1,7 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from './core/store/useAuthStore';
 import { AppRouter } from './app/router/AppRouter';
-import { Loader2 } from 'lucide-react'; // Asumiendo que usas Lucide, lo importamos
+import { Loader2 } from 'lucide-react'; 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+// 🔥 Auditoría (Fase 5): Instancia del cliente de TanStack Query con reglas globales
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false, // Evita recargar cada vez que cambias de pestaña
+      retry: 1, // Solo 1 reintento automático si falla la red, para no ocultar errores
+    },
+  },
+});
 
 function App() {
   const { checkSession, isBootstrapping } = useAuthStore();
@@ -30,7 +41,12 @@ function App() {
     );
   }
 
-  return <AppRouter />;
+  // 🔥 Auditoría (Fase 5): Envolvemos el enrutador para habilitar caché global y polling
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppRouter />
+    </QueryClientProvider>
+  );
 }
 
 export default App;

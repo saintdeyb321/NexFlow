@@ -19,27 +19,32 @@ public class IntentEngine : IIntentEngine
 
     public async Task<IntentResultDto> AnalyzeAsync(string message, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 2.2: IA como intérprete, no como decisor. 
-        // Eliminamos la instrucción dañina que forzaba a la IA a adivinar flujos.
-        var systemPrompt = @"
-Eres el motor de clasificación (Intent Engine) de NexFlow. Tu tarea es clasificar estrictamente el mensaje en una de las siguientes intenciones.
+        // 🔥 Auditoría: FAST INTENT LAYER. Cero llamadas a IA para interacciones básicas.
+        var lowerMsg = message.Trim().ToLowerInvariant();
+        var greetings = new[] { "hola", "buenas", "buenos dias", "buenas tardes", "buenas noches", "hey", "saludos" };
+        var acknowledgments = new[] { "gracias", "ok", "perfecto", "entendido", "vale", "listo", "si", "no" };
 
-- CreateReservation: Quiere agendar.
-- CheckAvailability: Pregunta por disponibilidad.
-- CancelReservation: Anular reserva.
-- CreateRequest: Trámite o soporte.
-- CheckRequestStatus: Estado de trámite.
-- ServiceInformation: Servicios, precios o características. NUNCA uses FaqQuery para esto.
-- ProductInformation: Catálogo o productos físicos.
-- FaqQuery: Preguntas operativas generales (pagos, requisitos).
-- BusinessProfileQuery: Quiénes son, historia, ruc.
-- LocationQuery: Dónde están, direcciones.
-- BusinessHoursQuery: A qué hora abren/cierran.
-- HumanHandoffRequest: Cliente enojado, pide un humano, O ENVIÓ MULTIMEDIA ('[Mensaje de Audio]', '[Mensaje de Imagen]', '[Documento Adjunto]').
-- GeneralGreeting: Saludos simples.
-- Unknown: Dato suelto sin contexto (ej: 'El Tambo', 'Mañana', 'Sí', 'Las 5'), respuesta corta o incomprensible.
+        if (greetings.Contains(lowerMsg))
+            return new IntentResultDto(IntentType.GeneralGreeting, 1.0, new Dictionary<string, string>());
 
-Devuelve UNICAMENTE un JSON con: Intent, Confidence y Parameters (extrae cualquier entidad útil como fechas, lugares o servicios).";
+        if (acknowledgments.Contains(lowerMsg))
+            return new IntentResultDto(IntentType.Unknown, 1.0, new Dictionary<string, string>());
+
+        // 🔥 Auditoría: Prompt hiper-compactado para reducir la latencia de carga en Gemini.
+        var systemPrompt = @"Clasifica el mensaje en UNA de estas intenciones exactas:
+- CreateReservation, CheckAvailability, CancelReservation
+- CreateRequest, CheckRequestStatus
+- ServiceInformation (Precios/servicios)
+- ProductInformation (Catálogo)
+- FaqQuery (Pagos, reglas operativas)
+- BusinessProfileQuery (Quiénes son)
+- LocationQuery (Dónde están, sedes)
+- BusinessHoursQuery (Horarios)
+- HumanHandoffRequest (Quejas, exigir humano o envío de multimedia)
+- GeneralGreeting
+- Unknown (Datos sueltos o incomprensibles)
+
+Devuelve ÚNICAMENTE un JSON exacto: { ""Intent"": """", ""Confidence"": 0.0, ""Parameters"": {} }";
 
         try
         {

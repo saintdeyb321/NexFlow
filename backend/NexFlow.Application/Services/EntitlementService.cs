@@ -103,9 +103,6 @@ public class EntitlementService : IEntitlementService
 
     public async Task<bool> HasModuleAccessAsync(Guid workspaceId, Guid moduleId, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 4.1: Bypass absoluto para SuperAdmins
-        if (await IsSuperAdminAsync(cancellationToken)) return true;
-
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         return snapshot.IsValid && snapshot.ActiveModuleIds.Contains(moduleId);
     }
@@ -126,9 +123,6 @@ public class EntitlementService : IEntitlementService
 
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 4.1: Bypass absoluto para SuperAdmins
-        if (await IsSuperAdminAsync(cancellationToken)) return true;
-
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         if (!snapshot.IsValid) return false;
 

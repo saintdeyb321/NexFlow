@@ -49,17 +49,14 @@ public class EvolutionMessageGateway : IMessageGateway
 
         var url = $"{_baseUrl}/message/sendText/{instanceName}";
 
-        // 🔥 BLINDAJE 1: Si la IA devolvió un texto vacío, enviamos un fallback para que Evolution no colapse
         var safeMessage = string.IsNullOrWhiteSpace(message)
             ? "Lo siento, tuve un pequeño problema procesando la respuesta. ¿Puedes repetir?"
             : message;
 
-        // 🔥 BLINDAJE 2: Compatibilidad multiplataforma. Enviamos tanto "text" (para v1) como "textMessage" (para v2)
         var payload = new
         {
             number = customerIdentifier,
             text = safeMessage,
-            textMessage = new { text = safeMessage },
             options = new { delay = 1200, presence = "composing" }
         };
 
@@ -67,14 +64,19 @@ public class EvolutionMessageGateway : IMessageGateway
         {
             var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
 
-            // 🔥 RADAR DE DEPURACIÓN: Si Evolution lo rechaza, imprimiremos el porqué exacto
             if (!response.IsSuccessStatusCode)
             {
                 var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
-                Console.WriteLine($"\n🚨 EVOLUTION API RECHAZÓ EL MENSAJE (400) 🚨");
-                Console.WriteLine($"URL: {url}");
-                Console.WriteLine($"Detalle del Error: {errorDetails}");
-                Console.WriteLine("--------------------------------------------------\n");
+
+                // 🔥 Auditoría aplicada: Log estructurado, sin exponer URLs completas en producción[cite: 2].
+                _logger.LogError(
+                    "Evolution rejected outbound message. Workspace={WorkspaceId}, Instance={InstanceName}, Status={StatusCode}",
+                    workspaceId,
+                    instanceName,
+                    response.StatusCode);
+
+                // Solo guardamos el cuerpo del error en nivel Debug para no saturar los logs de producción[cite: 2].
+                _logger.LogDebug("Detalle completo del error: {ErrorDetails}", errorDetails);
 
                 response.EnsureSuccessStatusCode();
             }

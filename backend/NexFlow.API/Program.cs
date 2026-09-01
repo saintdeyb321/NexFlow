@@ -12,6 +12,7 @@ using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using System.Threading.RateLimiting;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
+using NexFlow.API.Services.BackgroundServices;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +25,8 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IWorkspaceContext, WorkspaceContext>();
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IWebhookTaskQueue, WebhookTaskQueue>();
+builder.Services.AddHostedService<WebhookProcessingBackgroundService>();
 
 // 3. Configurar Firebase Authentication (JWT)
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"];

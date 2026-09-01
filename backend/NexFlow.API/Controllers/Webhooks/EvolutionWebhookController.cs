@@ -1,7 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using System.Text.Json.Serialization;
 using NexFlow.Application.Features.Automation.ProcessMessage;
-using Microsoft.Extensions.DependencyInjection; // Necesario para crear alcances seguros
+using NexFlow.API.Services.BackgroundServices;
 
 namespace NexFlow.API.Controllers.Webhooks;
 
@@ -9,16 +9,17 @@ namespace NexFlow.API.Controllers.Webhooks;
 [Route("api/webhooks/evolution")]
 public class EvolutionWebhookController : ControllerBase
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IWebhookTaskQueue _taskQueue;
+    private readonly ILogger<EvolutionWebhookController> _logger;
 
-    // Inyectamos la fábrica de alcances en lugar del manejador directamente
-    public EvolutionWebhookController(IServiceScopeFactory scopeFactory)
+    public EvolutionWebhookController(IWebhookTaskQueue taskQueue, ILogger<EvolutionWebhookController> logger)
     {
-        _scopeFactory = scopeFactory;
+        _taskQueue = taskQueue;
+        _logger = logger;
     }
 
     [HttpPost]
-    public IActionResult ReceiveMessage(
+    public async Task<IActionResult> ReceiveMessage(
         [FromBody] EvolutionWebhookPayload payload,
         [FromServices] IConfiguration configuration)
     {
@@ -26,22 +27,18 @@ public class EvolutionWebhookController : ControllerBase
 
         if (string.IsNullOrEmpty(expectedWebhookKey))
         {
-            return StatusCode(500, new { Error = "Configuración crítica ausente: Evolution:WebhookKey no está definido." });
+            _logger.LogError("Configuración crítica ausente: Evolution:WebhookKey no está definido.");
+            return StatusCode(500, new { Error = "Error interno de servidor." });
         }
 
-        var providedWebhookKey = (Request.Headers["X-NexFlow-Webhook-Key"].FirstOrDefault()
-                              ?? Request.Headers["apikey"].FirstOrDefault()
-                              ?? Request.Headers["ApiKey"].FirstOrDefault()
-                              ?? Request.Query["apikey"].FirstOrDefault()
-                              ?? payload?.ApiKey)?.Trim();
+        // 🔥 Auditoría aplicada: Solo aceptamos el header personalizado X-NexFlow-Webhook-Key. 
+        // Eliminados QueryString y Body parameters para evitar brechas.
+        var providedWebhookKey = Request.Headers["X-NexFlow-Webhook-Key"].FirstOrDefault()?.Trim();
 
         if (string.IsNullOrEmpty(providedWebhookKey) || !string.Equals(providedWebhookKey, expectedWebhookKey, StringComparison.OrdinalIgnoreCase))
         {
-            Console.WriteLine("\n🚨 ALERTA DE SEGURIDAD: CLAVES NO COINCIDEN 🚨");
-            Console.WriteLine($"El Backend ESPERABA: '{expectedWebhookKey}'");
-            Console.WriteLine($"Evolution ENVIÓ:   '{providedWebhookKey}'");
-            Console.WriteLine("--------------------------------------------------\n");
-
+            // 🔥 Auditoría aplicada: Cero impresión de secretos. Solo metadata[cite: 2].
+            _logger.LogWarning("Webhook authentication failed. Instance={Instance}, Event={Event}", payload?.Instance, payload?.Event);
             return Unauthorized(new { Error = "Acceso denegado. Webhook Key inválida o ausente." });
         }
 
@@ -64,27 +61,9 @@ public class EvolutionWebhookController : ControllerBase
             FromMe: payload.Data.Key.FromMe
         );
 
-        // 🔥 PATRÓN FIRE AND FORGET BLINDADO
-        // Desacoplamos el proceso pesado de la solicitud HTTP para que Evolution reciba su OK de inmediato.
-        _ = Task.Run(async () =>
-        {
-            // Creamos un ecosistema de memoria completamente nuevo y aislado para esta transacción
-            using var scope = _scopeFactory.CreateScope();
-            var handler = scope.ServiceProvider.GetRequiredService<ProcessIncomingMessageCommandHandler>();
+        // 🔥 Auditoría aplicada: Encolamos de forma segura usando Channel<T> en lugar del inestable Task.Run[cite: 2].
+        await _taskQueue.QueueBackgroundWorkItemAsync(command);
 
-            try
-            {
-                // Usamos CancellationToken.None porque este proceso ya no depende de la conexión web
-                await handler.Handle(command, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                // Si la BD o Gemini fallan internamente, lo registramos pero no colapsamos el webhook
-                Console.WriteLine($"\n⚠️ Fallo en el procesamiento de fondo: {ex.Message}\n");
-            }
-        });
-
-        // Evolution recibe esto inmediatamente y cierra la conexión HTTP feliz.
         return Ok();
     }
 
@@ -99,8 +78,7 @@ public class EvolutionWebhookController : ControllerBase
         [JsonPropertyName("data")]
         public EvolutionData? Data { get; set; }
 
-        [JsonPropertyName("apikey")]
-        public string? ApiKey { get; set; }
+        // Propiedad ApiKey eliminada para cerrar superficie de ataque[cite: 2].
     }
 
     public class EvolutionData

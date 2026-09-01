@@ -25,3 +25,8 @@ export const sendManualMessage = async (conversationId: string, content: string)
   });
   return data;
 };
+
+// 🔥 Auditoría (Fase 5): Nuevo método para ejecutar el borrado real del documento y subcolecciones.
+export const deleteConversation = async (conversationId: string): Promise<void> => {
+  await axiosClient.delete(`/conversations/${conversationId}`);
+};

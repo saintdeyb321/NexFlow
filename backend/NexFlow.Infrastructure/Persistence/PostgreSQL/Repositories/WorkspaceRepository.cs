@@ -115,4 +115,23 @@ public class WorkspaceRepository : IWorkspaceRepository
             CreatedAt = x.Workspace.CreatedAt
         });
     }
+    // 🔥 Auditoría (Fase 5): Implementación de búsqueda por instancia sin ensuciar Application
+    public async Task<Guid?> GetIdByEvolutionInstanceNameAsync(string instanceName, CancellationToken cancellationToken)
+    {
+        var workspace = await _context.Set<NexFlow.Domain.Entities.Workspace>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(w => w.EvolutionInstanceName == instanceName, cancellationToken);
+
+        return workspace?.Id;
+    }
+
+    public async Task<string?> GetEvolutionInstanceNameByIdAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        var workspace = await _context.Set<NexFlow.Domain.Entities.Workspace>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(w => w.Id == workspaceId, cancellationToken);
+
+        return workspace?.EvolutionInstanceName;
+    }
+
 }

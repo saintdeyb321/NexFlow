@@ -18,4 +18,6 @@ public interface IWorkspaceRepository
     Task DeleteNuclearAsync(Workspace workspace, CancellationToken cancellationToken);
 
     Task<IEnumerable<WorkspaceSummaryDto>> GetAllSummariesAsync(CancellationToken cancellationToken);
+    Task<Guid?> GetIdByEvolutionInstanceNameAsync(string instanceName, CancellationToken cancellationToken);
+    Task<string?> GetEvolutionInstanceNameByIdAsync(Guid workspaceId, CancellationToken cancellationToken);
 }

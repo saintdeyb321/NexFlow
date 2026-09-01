@@ -104,6 +104,30 @@ public class ConversationsController : ControllerBase
 
         return Ok(messageRecord);
     }
+    // 🔥 Auditoría (Fase 5): Endpoint DELETE para limpiar conversaciones de la bandeja de entrada[cite: 2].
+    [HttpDelete("{conversationId}")]
+    public async Task<IActionResult> DeleteConversation(
+        string conversationId,
+        [FromServices] NexFlow.Application.Abstractions.Cache.IConversationCache conversationCache,
+        CancellationToken cancellationToken)
+    {
+        // Usamos TAKEOVER como permiso proxy para eliminar, o puedes crear un permiso "DELETE_CONVERSATION" en base de datos.
+        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para eliminar conversaciones.");
+
+        var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
+        if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
+
+        // 1. Eliminar de Firestore (Conversación y Mensajes)
+        await _conversationRepository.DeleteConversationAsync(WorkspaceId, conversationId, cancellationToken);
+
+        // 2. Eliminar el contexto caliente de Redis
+        // Nota: Agrega un método DeleteContextAsync en IConversationCache si no lo tienes, o simplemente limpia el estado actual.
+        var emptyContext = new NexFlow.Application.Abstractions.Cache.ConversationContextDto();
+        await conversationCache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, emptyContext, cancellationToken);
+
+        return NoContent();
+    }
+
 }
 
 public record SendManualMessageRequest(string Content);

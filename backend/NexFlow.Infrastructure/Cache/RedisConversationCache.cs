@@ -1,8 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using NexFlow.Application.Abstractions.Cache;
-using NexFlow.Domain.Entities;
-using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+﻿using NexFlow.Application.Abstractions.Cache;
 using StackExchange.Redis;
 using System.Text.Json;
 
@@ -11,12 +7,10 @@ namespace NexFlow.Infrastructure.Cache;
 public class RedisConversationCache : IConversationCache
 {
     private readonly IDatabase _redisDb;
-    private readonly IServiceScopeFactory _scopeFactory;
 
-    public RedisConversationCache(IConnectionMultiplexer redis, IServiceScopeFactory scopeFactory)
+    public RedisConversationCache(IConnectionMultiplexer redis)
     {
         _redisDb = redis.GetDatabase();
-        _scopeFactory = scopeFactory;
     }
 
     public async Task SetContextAsync(Guid workspaceId, string customerPhone, ConversationContextDto context, CancellationToken cancellationToken)
@@ -45,37 +39,22 @@ public class RedisConversationCache : IConversationCache
         }
     }
 
+    // 🔥 Auditoría (Fase 3): Este método originalmente inyectaba PostgreSQL aquí adentro. 
+    // Ahora, simplemente verificamos un set de Idempotencia en Redis con un TTL corto para proteger el webhook.
+    // Para persistencia fuerte (la tabla PostgreSQL ProcessedMessages), el Handler principal debe usar un Repositorio dedicado[cite: 2].
     public async Task<bool> TryAcquireMessageLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
-
-        var record = new ProcessedMessage
-        {
-            WorkspaceId = workspaceId,
-            MessageId = messageId,
-            ProcessedAt = DateTime.UtcNow
-        };
-        db.ProcessedMessages.Add(record);
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-            return true;
-        }
-        catch (DbUpdateException)
-        {
-            return false;
-        }
+        var key = $"workspace:{workspaceId}:idempotency:{messageId}";
+        // Guarda un candado de 1 hora en Redis para evitar doble procesamiento del mismo webhook
+        return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromHours(1), When.NotExists);
     }
 
-    // 🔥 SPRINT 2.3: Inserción ultrarrápida en memoria
     public async Task MarkMessageAsAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
         var key = $"workspace:{workspaceId}:aimessage:{messageId}";
         await _redisDb.StringSetAsync(key, "1", TimeSpan.FromMinutes(10));
     }
 
-    // 🔥 SPRINT 2.3: Verificación ultrarrápida en memoria
     public async Task<bool> IsMessageAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
         var key = $"workspace:{workspaceId}:aimessage:{messageId}";

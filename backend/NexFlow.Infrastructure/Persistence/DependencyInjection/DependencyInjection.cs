@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<ISystemAdministratorRepository, SystemAdministratorRepository>();
         services.AddScoped<IModuleRepository, ModuleRepository>();
+        services.AddScoped<IProcessedMessageRepository, ProcessedMessageRepository>();
 
         // 3. Caché
         services.AddStackExchangeRedisCache(options => { options.Configuration = configuration.GetConnectionString("Redis"); });

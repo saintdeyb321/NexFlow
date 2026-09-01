@@ -17,7 +17,7 @@ public class ModuleDispatcher : IModuleDispatcher
     {
         _moduleHandlers = moduleHandlers;
         _entitlementService = entitlementService;
-        _conversationCache = conversationCache;
+        _conversationCache = _conversationCache = conversationCache;
     }
 
     public async Task<ModuleExecutionResult> BuildSystemContextAsync(Guid workspaceId, IntentResultDto intentResult, CancellationToken cancellationToken)
@@ -25,16 +25,12 @@ public class ModuleDispatcher : IModuleDispatcher
         var customerPhone = intentResult.Parameters.ContainsKey("phone") ? intentResult.Parameters["phone"]?.ToString() ?? "unknown" : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, customerPhone, cancellationToken) ?? new ConversationContextDto();
 
-        // 🔥 SPRINT 2.2: Prioridad absoluta de contexto.
-        // Si hay una acción pendiente, el CÓDIGO decide el flujo, ignorando clasificaciones genéricas de la IA.
         if (!string.IsNullOrEmpty(context.PendingAction))
         {
-            // Solo permitimos que la IA rompa el flujo si el cliente cancela o pide un humano explícitamente.
             bool isInterrupt = intentResult.Intent == IntentType.CancelReservation || intentResult.Intent == IntentType.HumanHandoffRequest;
 
             if (!isInterrupt && Enum.TryParse<IntentType>(context.CurrentIntent, true, out var previousIntent))
             {
-                // Forzamos la intención original y mantenemos los parámetros (ej. "El Tambo") que la IA haya podido extraer.
                 intentResult = new IntentResultDto(previousIntent, 1.0, intentResult.Parameters);
             }
             else if (isInterrupt)
@@ -48,7 +44,6 @@ public class ModuleDispatcher : IModuleDispatcher
             context.CurrentIntent = intentResult.Intent.ToString();
         }
 
-        // Inyección de memoria acumulada
         if (intentResult.Parameters.TryGetValue("locationId", out var locId) && locId != null) context.SelectedLocationId = locId.ToString();
         if (intentResult.Parameters.TryGetValue("serviceId", out var srvId) && srvId != null) context.SelectedServiceId = srvId.ToString();
         if (intentResult.Parameters.TryGetValue("date", out var date) && date != null) context.PendingDate = date.ToString();
@@ -70,6 +65,18 @@ public class ModuleDispatcher : IModuleDispatcher
             return new ModuleExecutionResult(false, "SYSTEM", "UNKNOWN", "Responde cortésmente que no lograste entender la solicitud.", true, Array.Empty<string>());
         }
 
+        // 🔥 Auditoría (Fase 2): Bypass para Capacidades Core. No consumen licencia.
+        if (capabilityRequest.ModuleCode == "CORE")
+        {
+            await _conversationCache.SetContextAsync(workspaceId, customerPhone, context, cancellationToken);
+
+            if (capabilityRequest.CapabilityCode == "TAKEOVER")
+                return new ModuleExecutionResult(true, "CORE", "TAKEOVER", "Un momento, te transferiré con un asesor humano.", true, Array.Empty<string>());
+
+            if (capabilityRequest.CapabilityCode == "GREETING")
+                return new ModuleExecutionResult(true, "CORE", "GREETING", "¡Hola! Soy el asistente virtual corporativo. ¿En qué te puedo ayudar?", false, Array.Empty<string>());
+        }
+
         bool hasAccess = await _entitlementService.HasCapabilityAccessAsync(workspaceId, capabilityRequest.ModuleCode, capabilityRequest.CapabilityCode, cancellationToken);
         if (!hasAccess)
             return new ModuleExecutionResult(false, capabilityRequest.ModuleCode, capabilityRequest.CapabilityCode, $"El negocio no tiene contratado el módulo de {capabilityRequest.ModuleCode}.", false, Array.Empty<string>());
@@ -80,15 +87,10 @@ public class ModuleDispatcher : IModuleDispatcher
 
         var executionResult = await handler.ExecuteCapabilityAsync(workspaceId, capabilityRequest, cancellationToken);
 
-        // Actualización del Pending Action para el próximo turno
         if (executionResult.MissingParameters != null && executionResult.MissingParameters.Any())
-        {
             context.PendingAction = $"ASK_{executionResult.MissingParameters.First().ToUpperInvariant()}";
-        }
         else
-        {
             context.PendingAction = null;
-        }
 
         await _conversationCache.SetContextAsync(workspaceId, customerPhone, context, cancellationToken);
         return executionResult;
@@ -106,11 +108,12 @@ public class ModuleDispatcher : IModuleDispatcher
             IntentType.CreateRequest => new CapabilityRequest("REQUESTS", "CREATE", intentResult.Parameters),
             IntentType.CheckRequestStatus => new CapabilityRequest("REQUESTS", "UPDATE_STATUS", intentResult.Parameters),
             IntentType.FaqQuery => new CapabilityRequest("FAQ", "READ", intentResult.Parameters),
-            IntentType.BusinessProfileQuery => new CapabilityRequest("BUSINESS_PROFILE", "READ", intentResult.Parameters),
             IntentType.LocationQuery => new CapabilityRequest("LOCATIONS", "READ", intentResult.Parameters),
             IntentType.BusinessHoursQuery => new CapabilityRequest("BUSINESS_HOURS", "READ", intentResult.Parameters),
-            IntentType.GeneralGreeting => new CapabilityRequest("BUSINESS_PROFILE", "READ", intentResult.Parameters),
-            IntentType.HumanHandoffRequest => new CapabilityRequest("CONVERSATIONS", "TAKEOVER", intentResult.Parameters),
+            IntentType.BusinessProfileQuery => new CapabilityRequest("BUSINESS_PROFILE", "READ", intentResult.Parameters),
+            // 🔥 Auditoría: Handoff y Saludos mapeados a CORE en lugar de módulos comerciales.
+            IntentType.GeneralGreeting => new CapabilityRequest("CORE", "GREETING", intentResult.Parameters),
+            IntentType.HumanHandoffRequest => new CapabilityRequest("CORE", "TAKEOVER", intentResult.Parameters),
             _ => null
         };
     }
