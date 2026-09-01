@@ -19,6 +19,7 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         // 1. Registrar Servicios de Dominio y Motores
+        // Se mantiene una única declaración de IReservationEngine
         services.AddScoped<IReservationEngine, NexFlow.Application.Engines.Reservation.ReservationEngine>();
         services.AddScoped<IEntitlementService, EntitlementService>();
 
@@ -37,12 +38,19 @@ public static class DependencyInjection
 
         // 3. Registrar Handlers del Motor Conversacional (Module Dispatcher)
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
+
+        // Handlers Transaccionales y de Catálogo
         services.AddScoped<IModuleHandler, ReservationModuleHandler>();
         services.AddScoped<IModuleHandler, FaqModuleHandler>();
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();
         services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
-        services.AddScoped<IReservationEngine, ReservationEngine>();
+
+        // 🔥 SPRINT 2.1: Handlers Informativos añadidos
+        services.AddScoped<IModuleHandler, BusinessHoursModuleHandler>();
+        services.AddScoped<IModuleHandler, BusinessProfileModuleHandler>();
+        services.AddScoped<IModuleHandler, LocationModuleHandler>();
+
         return services;
     }
 }

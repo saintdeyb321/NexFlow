@@ -13,7 +13,10 @@ public class EntitlementService : IEntitlementService
     private readonly IClock _clock;
     private readonly IMemoryCache _cache;
 
-    // 🔥 SPRINT 2.4: CONVERSATIONS incluido como módulo base obligatorio (Auditoría #15)
+    // 🔥 SPRINT 4.1: Dependencias inyectadas para validación de SuperAdmin
+    private readonly ICurrentUser _currentUser;
+    private readonly ISystemAdministratorRepository _sysAdminRepository;
+
     private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS" };
 
     public EntitlementService(
@@ -21,13 +24,17 @@ public class EntitlementService : IEntitlementService
         IWorkspaceRepository workspaceRepository,
         IModuleRepository moduleRepository,
         IClock clock,
-        IMemoryCache cache)
+        IMemoryCache cache,
+        ICurrentUser currentUser,
+        ISystemAdministratorRepository sysAdminRepository)
     {
         _licenseRepository = licenseRepository;
         _workspaceRepository = workspaceRepository;
         _moduleRepository = moduleRepository;
         _clock = clock;
         _cache = cache;
+        _currentUser = currentUser;
+        _sysAdminRepository = sysAdminRepository;
     }
 
     public void InvalidateWorkspaceCache(Guid workspaceId)
@@ -35,11 +42,25 @@ public class EntitlementService : IEntitlementService
         _cache.Remove($"entitlement_{workspaceId}");
     }
 
+    // 🔥 Método interno para verificar bypass de SuperAdmin
+    private async Task<bool> IsSuperAdminAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (_currentUser == null || _currentUser.UserId == Guid.Empty) return false;
+            return await _sysAdminRepository.IsUserSuperAdminAsync(_currentUser.UserId, cancellationToken);
+        }
+        catch
+        {
+            // Falla silenciosamente si no hay contexto HTTP (ej. Webhooks)
+            return false;
+        }
+    }
+
     private async Task<EntitlementSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         if (workspaceId == Guid.Empty) return new EntitlementSnapshot();
 
-        // 🔥 SPRINT 2.2: Aniquilación total de caché fantasma de 5 minutos (Auditoría #24). 
         var snapshot = new EntitlementSnapshot();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
@@ -82,6 +103,9 @@ public class EntitlementService : IEntitlementService
 
     public async Task<bool> HasModuleAccessAsync(Guid workspaceId, Guid moduleId, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 4.1: Bypass absoluto para SuperAdmins
+        if (await IsSuperAdminAsync(cancellationToken)) return true;
+
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         return snapshot.IsValid && snapshot.ActiveModuleIds.Contains(moduleId);
     }
@@ -102,13 +126,15 @@ public class EntitlementService : IEntitlementService
 
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 4.1: Bypass absoluto para SuperAdmins
+        if (await IsSuperAdminAsync(cancellationToken)) return true;
+
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         if (!snapshot.IsValid) return false;
 
         var code = moduleCode.ToUpperInvariant();
         if (_baseModules.Contains(code)) return true;
 
-        // 🔥 SPRINT 2.4: Validación real y estricta de Capability exacta (Auditoría #14)
         if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
         {
             return caps.Contains(capabilityCode.ToUpperInvariant());

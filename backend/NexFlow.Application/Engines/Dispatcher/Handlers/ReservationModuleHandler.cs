@@ -37,7 +37,6 @@ public class ReservationModuleHandler : IModuleHandler
             context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
 
-            // Activamos el flag booleano RequiresHuman a true en el objeto estructurado
             return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Indícale al cliente que has recibido su solicitud de cancelación y que un asesor se comunicará en breve para procesarla.", true, Array.Empty<string>());
         }
 
@@ -123,11 +122,18 @@ public class ReservationModuleHandler : IModuleHandler
             return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Error interno. No se pudo determinar la Sede o el Servicio a procesar.", false, Array.Empty<string>());
         }
 
-        // 3. RESOLVER FECHA
-        DateTime dateToSearch = DateTime.UtcNow.Date;
+        // 🔥 SPRINT 3.2: RESOLVER FECHA OBLIGATORIA
+        DateTime dateToSearch;
         if (request.Parameters.TryGetValue("date", out var dateStr) && dateStr != null && DateTime.TryParse(dateStr.ToString(), out var parsedDate))
         {
             dateToSearch = parsedDate.Date;
+        }
+        else
+        {
+            // Nunca asumas la fecha de hoy. Obliga a la IA a preguntar.
+            context.PendingAction = "ASK_DATE";
+            await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Falta la fecha exacta. Pregúntale al cliente para qué día desea consultar o agendar la cita.", false, new[] { "date" });
         }
 
         if (request.CapabilityCode == "CHECK_AVAILABILITY")

@@ -25,12 +25,22 @@ public class ModuleDispatcher : IModuleDispatcher
         var customerPhone = intentResult.Parameters.ContainsKey("phone") ? intentResult.Parameters["phone"]?.ToString() ?? "unknown" : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, customerPhone, cancellationToken) ?? new ConversationContextDto();
 
-        // 🔥 SPRINT 3.2: Restauración de contexto Multi-turno
-        if (!string.IsNullOrEmpty(context.PendingAction) && intentResult.Intent == IntentType.Unknown)
+        // 🔥 SPRINT 2.2: Prioridad absoluta de contexto.
+        // Si hay una acción pendiente, el CÓDIGO decide el flujo, ignorando clasificaciones genéricas de la IA.
+        if (!string.IsNullOrEmpty(context.PendingAction))
         {
-            if (Enum.TryParse<IntentType>(context.CurrentIntent, true, out var previousIntent))
+            // Solo permitimos que la IA rompa el flujo si el cliente cancela o pide un humano explícitamente.
+            bool isInterrupt = intentResult.Intent == IntentType.CancelReservation || intentResult.Intent == IntentType.HumanHandoffRequest;
+
+            if (!isInterrupt && Enum.TryParse<IntentType>(context.CurrentIntent, true, out var previousIntent))
             {
+                // Forzamos la intención original y mantenemos los parámetros (ej. "El Tambo") que la IA haya podido extraer.
                 intentResult = new IntentResultDto(previousIntent, 1.0, intentResult.Parameters);
+            }
+            else if (isInterrupt)
+            {
+                context.PendingAction = null;
+                context.CurrentIntent = intentResult.Intent.ToString();
             }
         }
         else if (intentResult.Intent != IntentType.Unknown)
@@ -68,7 +78,6 @@ public class ModuleDispatcher : IModuleDispatcher
         if (handler == null || !handler.SupportedCapabilities.Contains(capabilityRequest.CapabilityCode))
             return new ModuleExecutionResult(false, capabilityRequest.ModuleCode, capabilityRequest.CapabilityCode, $"Error interno. El módulo {capabilityRequest.ModuleCode} no está configurado.", false, Array.Empty<string>());
 
-        // 🔥 SPRINT 3.3: Delegación total al Handler. El Dispatcher ya no "adivina" usando strings.
         var executionResult = await handler.ExecuteCapabilityAsync(workspaceId, capabilityRequest, cancellationToken);
 
         // Actualización del Pending Action para el próximo turno

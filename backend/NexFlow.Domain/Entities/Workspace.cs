@@ -7,6 +7,9 @@ public class Workspace : Entity
     public string Name { get; private set; } = null!;
     public WorkspaceStatus Status { get; private set; }
 
+    // 🔥 Identificador único de la conexión en Evolution API (ej. "mi-negocio-01")
+    public string? EvolutionInstanceName { get; private set; }
+
     private Workspace() { }
 
     public static Workspace Create(string name)
@@ -14,7 +17,6 @@ public class Workspace : Entity
         return new Workspace
         {
             Name = name,
-            // CORRECCIÓN: Nace pendiente para forzar el Onboarding del negocio
             Status = WorkspaceStatus.Active
         };
     }
@@ -23,4 +25,5 @@ public class Workspace : Entity
     public void Suspend() => Status = WorkspaceStatus.Suspended;
     public void Activate() => Status = WorkspaceStatus.Active;
     public void Archive() => Status = WorkspaceStatus.Archived;
+    public void LinkEvolutionInstance(string instanceName) => EvolutionInstanceName = instanceName;
 }

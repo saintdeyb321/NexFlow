@@ -150,21 +150,35 @@ public class FirestoreConversationRepository : IConversationRepository
 
     public async Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken)
     {
-        var query = GetCollection(workspaceId).Document(conversationId).Collection("messages")
-            .OrderByDescending("timestamp")
-            .Limit(limit);
-
-        var snapshot = await query.GetSnapshotAsync(cancellationToken);
-
-        return snapshot.Documents.Select(d => new MessageRecord
+        try
         {
-            Id = d.Id,
-            Direction = d.GetValue<string>("direction"),
-            Sender = Enum.Parse<SenderType>(d.GetValue<string>("sender")),
-            Content = d.GetValue<string>("content"),
-            ExternalMessageId = d.TryGetValue("externalMessageId", out string extId) ? extId : null,
-            Timestamp = d.GetValue<Timestamp>("timestamp").ToDateTime()
-        }).Reverse();
+            var query = GetCollection(workspaceId).Document(conversationId).Collection("messages")
+                .OrderByDescending("timestamp")
+                .Limit(limit);
+
+            var snapshot = await query.GetSnapshotAsync(cancellationToken);
+
+            return snapshot.Documents.Select(d => new MessageRecord
+            {
+                Id = d.Id,
+                Direction = d.GetValue<string>("direction"),
+                Sender = Enum.Parse<SenderType>(d.GetValue<string>("sender")),
+                Content = d.GetValue<string>("content"),
+                ExternalMessageId = d.TryGetValue("externalMessageId", out string extId) ? extId : null,
+                Timestamp = d.GetValue<Timestamp>("timestamp").ToDateTime()
+            }).Reverse();
+        }
+        catch (OperationCanceledException)
+        {
+            // El frontend (ej. un useEffect de React) abortó la petición antes de tiempo.
+            // Devolvemos una lista vacía silenciosamente sin colapsar el backend.
+            return Enumerable.Empty<MessageRecord>();
+        }
+        catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.Cancelled)
+        {
+            // Captura específica para cancelaciones nativas de gRPC/Firestore
+            return Enumerable.Empty<MessageRecord>();
+        }
     }
 
     private static ConversationRecord MapToConversation(DocumentSnapshot doc)

@@ -17,8 +17,11 @@ public class GeminiAiProvider : IAiProvider
     {
         _httpClient = httpClient;
         _logger = logger;
-        _apiKey = configuration["Gemini:ApiKey"] ?? throw new ArgumentNullException("Falta la API Key de Gemini");
-        _model = configuration["Gemini:Model"] ?? "gemini-1.5-flash";
+        _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? throw new ArgumentNullException("Falta la API Key de Gemini");
+
+        // 🔥 BLINDAJE: Limpiamos el nombre del modelo por si el appsettings trae espacios o el prefijo "models/"
+        var rawModel = configuration["Gemini:Model"] ?? "gemini-1.5-flash";
+        _model = rawModel.Trim().Replace("models/", "");
 
         var timeout = int.TryParse(configuration["Gemini:TimeoutSeconds"], out var t) ? t : 15;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
@@ -28,14 +31,29 @@ public class GeminiAiProvider : IAiProvider
     {
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
 
-        // Construcción dinámica del payload (Strategy Pattern simplificado)
+        var safeSystemPrompt = string.IsNullOrWhiteSpace(systemPrompt) ? "Eres un asistente virtual corporativo útil y amable." : systemPrompt;
+        var safeUserMessage = string.IsNullOrWhiteSpace(userMessage) ? "Hola" : userMessage;
+
+        // 🔥 ESTRUCTURA OFICIAL EXACTA DE GOOGLE GEMINI API (v1beta)
         object payload;
+        var systemInstructionObj = new { parts = new[] { new { text = safeSystemPrompt } } };
+
+        // La documentación oficial EXIGE incluir la propiedad "role" para identificar al emisor
+        var contentsObj = new[]
+        {
+            new
+            {
+                role = "user",
+                parts = new[] { new { text = safeUserMessage } }
+            }
+        };
+
         if (useJsonMode)
         {
             payload = new
             {
-                system_instruction = new { parts = new[] { new { text = systemPrompt } } },
-                contents = new[] { new { parts = new[] { new { text = userMessage } } } },
+                system_instruction = systemInstructionObj,
+                contents = contentsObj,
                 generationConfig = new { response_mime_type = "application/json" }
             };
         }
@@ -43,8 +61,8 @@ public class GeminiAiProvider : IAiProvider
         {
             payload = new
             {
-                system_instruction = new { parts = new[] { new { text = systemPrompt } } },
-                contents = new[] { new { parts = new[] { new { text = userMessage } } } }
+                system_instruction = systemInstructionObj,
+                contents = contentsObj
             };
         }
 
@@ -53,7 +71,17 @@ public class GeminiAiProvider : IAiProvider
         try
         {
             var response = await _httpClient.PostAsync(url, content, cancellationToken);
-            response.EnsureSuccessStatusCode();
+
+            // RADAR DE DEPURACIÓN
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
+                Console.WriteLine($"\n🚨 GOOGLE GEMINI RECHAZÓ LA PETICIÓN ({(int)response.StatusCode}) 🚨");
+                Console.WriteLine($"URL Intentada: {url}");
+                Console.WriteLine($"Detalle Oficial: {errorDetails}");
+                Console.WriteLine("--------------------------------------------------\n");
+                response.EnsureSuccessStatusCode();
+            }
 
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var jsonDocument = JsonDocument.Parse(responseString);

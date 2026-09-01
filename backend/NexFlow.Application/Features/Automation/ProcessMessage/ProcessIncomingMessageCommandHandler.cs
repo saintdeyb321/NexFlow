@@ -74,6 +74,13 @@ public class ProcessIncomingMessageCommandHandler
             var recentMessages = await _conversationRepo.GetMessagesAsync(workspaceId, conversation.Id, 20, cancellationToken);
             bool isAiMessage = recentMessages.Any(m => m.ExternalMessageId == request.MessageId && m.Sender == SenderType.AI);
 
+            // 🔥 SPRINT 2.3: Lectura a la memoria caché ultrarrápida. 
+            // Si la base de datos Firestore aún no guarda el mensaje, Redis sí lo tendrá.
+            if (!isAiMessage)
+            {
+                isAiMessage = await _conversationCache.IsMessageAiGeneratedAsync(workspaceId, request.MessageId, cancellationToken);
+            }
+
             if (isAiMessage)
             {
                 return Result.Success();
@@ -144,6 +151,9 @@ public class ProcessIncomingMessageCommandHandler
         var finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, cancellationToken);
 
         var evolutionExternalId = await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
+
+        // 🔥 SPRINT 2.3: Anotar el mensaje en Redis instantáneamente tras dispararlo a Evolution
+        await _conversationCache.MarkMessageAsAiGeneratedAsync(workspaceId, evolutionExternalId, cancellationToken);
 
         var aiMessageRecord = new MessageRecord
         {

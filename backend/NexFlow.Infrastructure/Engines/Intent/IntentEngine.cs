@@ -19,10 +19,10 @@ public class IntentEngine : IIntentEngine
 
     public async Task<IntentResultDto> AnalyzeAsync(string message, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 2.2: IA como intérprete, no como decisor. 
+        // Eliminamos la instrucción dañina que forzaba a la IA a adivinar flujos.
         var systemPrompt = @"
 Eres el motor de clasificación (Intent Engine) de NexFlow. Tu tarea es clasificar estrictamente el mensaje en una de las siguientes intenciones.
-
-REGLA MULTI-TURNO OBLIGATORIA: Si el usuario responde con un dato suelto (ej: 'El Tambo', 'Mañana', 'Corte de cabello'), ASUME que está continuando un flujo. Clasifícalo como CreateReservation o ServiceInformation y extrae el dato en Parameters. NUNCA lo clasifiques como Unknown.
 
 - CreateReservation: Quiere agendar.
 - CheckAvailability: Pregunta por disponibilidad.
@@ -37,9 +37,9 @@ REGLA MULTI-TURNO OBLIGATORIA: Si el usuario responde con un dato suelto (ej: 'E
 - BusinessHoursQuery: A qué hora abren/cierran.
 - HumanHandoffRequest: Cliente enojado, pide un humano, O ENVIÓ MULTIMEDIA ('[Mensaje de Audio]', '[Mensaje de Imagen]', '[Documento Adjunto]').
 - GeneralGreeting: Saludos simples.
-- Unknown: Totalmente incomprensible.
+- Unknown: Dato suelto sin contexto (ej: 'El Tambo', 'Mañana', 'Sí', 'Las 5'), respuesta corta o incomprensible.
 
-Devuelve UNICAMENTE un JSON con: Intent, Confidence y Parameters.";
+Devuelve UNICAMENTE un JSON con: Intent, Confidence y Parameters (extrae cualquier entidad útil como fechas, lugares o servicios).";
 
         try
         {

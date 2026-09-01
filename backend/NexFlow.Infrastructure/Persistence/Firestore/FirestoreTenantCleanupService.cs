@@ -1,6 +1,8 @@
 ﻿using Google.Cloud.Firestore;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -17,49 +19,57 @@ public class FirestoreTenantCleanupService : ITenantCleanupService
 
     public async Task PurgeTenantDataAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Iniciando Job asíncrono de purga masiva de datos en Firestore para Workspace: {WorkspaceId}", workspaceId);
+        _logger.LogInformation("Iniciando estado de purga (InProgress) en Firestore para Workspace: {WorkspaceId}", workspaceId);
 
         var workspaceRef = _db.Collection("workspaces").Document(workspaceId.ToString());
+        var docsToDelete = new List<DocumentReference>();
 
         try
         {
-            var collections = await workspaceRef.ListCollectionsAsync().ToListAsync();
+            // 1. Recolectar todas las referencias de forma recursiva
+            await CollectDocumentsToDeleteAsync(workspaceRef, docsToDelete, cancellationToken);
 
-            foreach (var collectionRef in collections)
+            // 2. Agregar el documento raíz del tenant al final
+            docsToDelete.Add(workspaceRef);
+
+            // 🔥 SPRINT 4.2: Procesar en lotes de 500 (Límite estricto de Firestore)
+            const int batchSize = 500;
+            for (int i = 0; i < docsToDelete.Count; i += batchSize)
             {
-                var snapshot = await collectionRef.GetSnapshotAsync(cancellationToken);
-                foreach (var doc in snapshot.Documents)
+                var batch = _db.StartBatch();
+                var currentBatchDocs = docsToDelete.Skip(i).Take(batchSize);
+
+                foreach (var doc in currentBatchDocs)
                 {
-                    var nestedCollections = await doc.Reference.ListCollectionsAsync().ToListAsync();
-                    foreach (var nestedCol in nestedCollections)
-                    {
-                        await DeleteEntireCollectionAsync(nestedCol, cancellationToken);
-                    }
-                    await doc.Reference.DeleteAsync(Precondition.None, cancellationToken);
+                    batch.Delete(doc, Precondition.None);
                 }
+
+                await batch.CommitAsync(cancellationToken);
             }
 
-            await workspaceRef.DeleteAsync(Precondition.None, cancellationToken);
-            _logger.LogInformation("Purga masiva de Firestore completada con éxito para Workspace: {WorkspaceId}", workspaceId);
+            _logger.LogInformation("Purga masiva completada con éxito. Se eliminaron {Count} documentos.", docsToDelete.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fallo crítico durante la purga en segundo plano del Workspace: {WorkspaceId}", workspaceId);
-            throw; 
+            _logger.LogError(ex, "Fallo crítico durante la purga de Firestore del Workspace: {WorkspaceId}", workspaceId);
+            throw;
         }
     }
 
-    private async Task DeleteEntireCollectionAsync(CollectionReference collectionRef, CancellationToken cancellationToken)
+    private async Task CollectDocumentsToDeleteAsync(DocumentReference parentRef, List<DocumentReference> docsToDelete, CancellationToken cancellationToken)
     {
-        var snapshot = await collectionRef.GetSnapshotAsync(cancellationToken);
-        foreach (var doc in snapshot.Documents)
+        var collections = await parentRef.ListCollectionsAsync().ToListAsync();
+
+        foreach (var collection in collections)
         {
-            var deeperCollections = await doc.Reference.ListCollectionsAsync().ToListAsync();
-            foreach (var deepCol in deeperCollections)
+            var snapshot = await collection.GetSnapshotAsync(cancellationToken);
+            foreach (var doc in snapshot.Documents)
             {
-                await DeleteEntireCollectionAsync(deepCol, cancellationToken);
+                // Entrar a subcolecciones antes de marcar el documento actual
+                await CollectDocumentsToDeleteAsync(doc.Reference, docsToDelete, cancellationToken);
+
+                docsToDelete.Add(doc.Reference);
             }
-            await doc.Reference.DeleteAsync(Precondition.None, cancellationToken);
         }
     }
 }

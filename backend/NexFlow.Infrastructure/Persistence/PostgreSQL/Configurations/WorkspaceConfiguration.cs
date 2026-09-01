@@ -12,5 +12,7 @@ public class WorkspaceConfiguration : IEntityTypeConfiguration<Workspace>
 
         builder.Property(w => w.Name).IsRequired().HasMaxLength(150);
         builder.Property(w => w.Status).HasConversion<string>().IsRequired();
+        builder.Property(w => w.EvolutionInstanceName).HasMaxLength(150);
+        builder.HasIndex(w => w.EvolutionInstanceName).IsUnique();
     }
 }

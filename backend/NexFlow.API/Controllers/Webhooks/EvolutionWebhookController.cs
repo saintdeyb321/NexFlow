@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using System.Text.Json.Serialization;
 using NexFlow.Application.Features.Automation.ProcessMessage;
+using Microsoft.Extensions.DependencyInjection; // Necesario para crear alcances seguros
 
 namespace NexFlow.API.Controllers.Webhooks;
 
@@ -8,37 +9,43 @@ namespace NexFlow.API.Controllers.Webhooks;
 [Route("api/webhooks/evolution")]
 public class EvolutionWebhookController : ControllerBase
 {
-    private readonly ProcessIncomingMessageCommandHandler _handler;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public EvolutionWebhookController(ProcessIncomingMessageCommandHandler handler)
+    // Inyectamos la fábrica de alcances en lugar del manejador directamente
+    public EvolutionWebhookController(IServiceScopeFactory scopeFactory)
     {
-        _handler = handler;
+        _scopeFactory = scopeFactory;
     }
 
     [HttpPost]
-    public async Task<IActionResult> ReceiveMessage(
+    public IActionResult ReceiveMessage(
         [FromBody] EvolutionWebhookPayload payload,
-        [FromServices] IConfiguration configuration,
-        CancellationToken cancellationToken = default)
+        [FromServices] IConfiguration configuration)
     {
-        var expectedApiKey = configuration["Evolution:ApiKey"];
+        var expectedWebhookKey = configuration["Evolution:WebhookKey"]?.Trim();
 
-        if (string.IsNullOrEmpty(expectedApiKey))
+        if (string.IsNullOrEmpty(expectedWebhookKey))
         {
-            return StatusCode(500, new { Error = "Configuración crítica ausente: Evolution:ApiKey no está definido." });
+            return StatusCode(500, new { Error = "Configuración crítica ausente: Evolution:WebhookKey no está definido." });
         }
 
-        // 🔥 LECTURA BLINDADA: Busca en Headers (si Evolution lo arregla en el futuro) o en la URL encriptada (TLS).
-        var providedApiKey = Request.Headers["apikey"].FirstOrDefault()
-                          ?? Request.Headers["ApiKey"].FirstOrDefault()
-                          ?? Request.Query["apikey"].FirstOrDefault();
+        var providedWebhookKey = (Request.Headers["X-NexFlow-Webhook-Key"].FirstOrDefault()
+                              ?? Request.Headers["apikey"].FirstOrDefault()
+                              ?? Request.Headers["ApiKey"].FirstOrDefault()
+                              ?? Request.Query["apikey"].FirstOrDefault()
+                              ?? payload?.ApiKey)?.Trim();
 
-        if (string.IsNullOrEmpty(providedApiKey) || providedApiKey != expectedApiKey)
+        if (string.IsNullOrEmpty(providedWebhookKey) || !string.Equals(providedWebhookKey, expectedWebhookKey, StringComparison.OrdinalIgnoreCase))
         {
-            return Unauthorized(new { Error = "Acceso denegado. API Key inválida o ausente." });
+            Console.WriteLine("\n🚨 ALERTA DE SEGURIDAD: CLAVES NO COINCIDEN 🚨");
+            Console.WriteLine($"El Backend ESPERABA: '{expectedWebhookKey}'");
+            Console.WriteLine($"Evolution ENVIÓ:   '{providedWebhookKey}'");
+            Console.WriteLine("--------------------------------------------------\n");
+
+            return Unauthorized(new { Error = "Acceso denegado. Webhook Key inválida o ausente." });
         }
 
-        var normalizedEvent = payload.Event?.Trim().Replace(".", "_").ToUpperInvariant();
+        var normalizedEvent = payload?.Event?.Trim().Replace(".", "_").ToUpperInvariant();
         if (normalizedEvent != "MESSAGES_UPSERT")
             return Ok();
 
@@ -57,22 +64,43 @@ public class EvolutionWebhookController : ControllerBase
             FromMe: payload.Data.Key.FromMe
         );
 
-        await _handler.Handle(command, cancellationToken);
+        // 🔥 PATRÓN FIRE AND FORGET BLINDADO
+        // Desacoplamos el proceso pesado de la solicitud HTTP para que Evolution reciba su OK de inmediato.
+        _ = Task.Run(async () =>
+        {
+            // Creamos un ecosistema de memoria completamente nuevo y aislado para esta transacción
+            using var scope = _scopeFactory.CreateScope();
+            var handler = scope.ServiceProvider.GetRequiredService<ProcessIncomingMessageCommandHandler>();
 
+            try
+            {
+                // Usamos CancellationToken.None porque este proceso ya no depende de la conexión web
+                await handler.Handle(command, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // Si la BD o Gemini fallan internamente, lo registramos pero no colapsamos el webhook
+                Console.WriteLine($"\n⚠️ Fallo en el procesamiento de fondo: {ex.Message}\n");
+            }
+        });
+
+        // Evolution recibe esto inmediatamente y cierra la conexión HTTP feliz.
         return Ok();
     }
 
-    // DTOs con mapeo profesional
     public class EvolutionWebhookPayload
     {
         [JsonPropertyName("event")]
-        public string Event { get; set; } = string.Empty;
+        public string? Event { get; set; } = string.Empty;
 
         [JsonPropertyName("instance")]
         public string Instance { get; set; } = string.Empty;
 
         [JsonPropertyName("data")]
         public EvolutionData? Data { get; set; }
+
+        [JsonPropertyName("apikey")]
+        public string? ApiKey { get; set; }
     }
 
     public class EvolutionData
@@ -84,7 +112,7 @@ public class EvolutionWebhookController : ControllerBase
         public EvolutionMessage Message { get; set; } = new();
 
         [JsonPropertyName("pushName")]
-        public string PushName { get; set; } = string.Empty;
+        public string? PushName { get; set; } = string.Empty;
     }
 
     public class EvolutionKey
@@ -102,7 +130,7 @@ public class EvolutionWebhookController : ControllerBase
     public class EvolutionMessage
     {
         [JsonPropertyName("conversation")]
-        public string Conversation { get; set; } = string.Empty;
+        public string? Conversation { get; set; } = string.Empty;
 
         [JsonPropertyName("extendedTextMessage")]
         public ExtendedTextMessage? ExtendedTextMessage { get; set; }
@@ -127,6 +155,6 @@ public class EvolutionWebhookController : ControllerBase
     public class ExtendedTextMessage
     {
         [JsonPropertyName("text")]
-        public string Text { get; set; } = string.Empty;
+        public string? Text { get; set; } = string.Empty;
     }
 }

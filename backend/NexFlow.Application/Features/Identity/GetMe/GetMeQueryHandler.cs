@@ -39,6 +39,39 @@ public class GetMeQueryHandler
 
         bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, cancellationToken);
         var userDto = new UserDto(user.Id, user.Email.Value, user.FirstName, user.LastName, isSuperAdmin);
+
+        // 🔥 SPRINT 4.1: Si es SuperAdmin, se otorgan todos los módulos globales sin depender de un workspace
+        if (isSuperAdmin)
+        {
+            var allSystemModules = await _moduleRepository.GetAllAsync(cancellationToken);
+            var superAdminEntitlements = allSystemModules.Select(m => m.Code.ToUpperInvariant()).ToHashSet();
+
+            // Incluir módulos base obligatorios
+            superAdminEntitlements.Add("BUSINESS_PROFILE");
+            superAdminEntitlements.Add("LOCATIONS");
+            superAdminEntitlements.Add("BUSINESS_HOURS");
+            superAdminEntitlements.Add("CONVERSATIONS");
+
+            var membershipsForAdmin = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
+            var firstMembership = membershipsForAdmin.FirstOrDefault();
+
+            WorkspaceDto? adminWorkspaceDto = null;
+            LicenseDto? adminLicenseDto = null;
+
+            if (firstMembership != null)
+            {
+                var ws = await _workspaceRepository.GetByIdAsync(firstMembership.WorkspaceId, cancellationToken);
+                if (ws != null)
+                {
+                    adminWorkspaceDto = new WorkspaceDto(ws.Id, ws.Name, ws.Status.ToString());
+                    var lic = await _licenseRepository.GetByWorkspaceIdAsync(ws.Id, cancellationToken);
+                    adminLicenseDto = lic != null ? new LicenseDto(lic.Type.ToString(), lic.Status.ToString(), lic.ValidityPeriod?.End) : null;
+                }
+            }
+
+            return Result<MeDto>.Success(new MeDto(userDto, adminWorkspaceDto, adminLicenseDto, superAdminEntitlements.ToArray()));
+        }
+
         var memberships = await _membershipRepository.GetMembershipsByUserIdAsync(user.Id, cancellationToken);
         var activeMembership = memberships.FirstOrDefault();
 
@@ -53,7 +86,6 @@ public class GetMeQueryHandler
         var entitlements = await _entitlementService.GetAvailableModuleCodesAsync(workspace.Id, cancellationToken);
 
         var workspaceDto = new WorkspaceDto(workspace.Id, workspace.Name, workspace.Status.ToString());
-
         var licenseDto = license != null ? new LicenseDto(license.Type.ToString(), license.Status.ToString(), license.ValidityPeriod?.End) : null;
 
         return Result<MeDto>.Success(new MeDto(userDto, workspaceDto, licenseDto, entitlements.ToArray()));

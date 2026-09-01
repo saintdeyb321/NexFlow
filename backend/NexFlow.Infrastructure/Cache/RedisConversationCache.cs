@@ -18,6 +18,7 @@ public class RedisConversationCache : IConversationCache
         _redisDb = redis.GetDatabase();
         _scopeFactory = scopeFactory;
     }
+
     public async Task SetContextAsync(Guid workspaceId, string customerPhone, ConversationContextDto context, CancellationToken cancellationToken)
     {
         var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
@@ -43,6 +44,7 @@ public class RedisConversationCache : IConversationCache
             return null;
         }
     }
+
     public async Task<bool> TryAcquireMessageLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -64,5 +66,19 @@ public class RedisConversationCache : IConversationCache
         {
             return false;
         }
+    }
+
+    // 🔥 SPRINT 2.3: Inserción ultrarrápida en memoria
+    public async Task MarkMessageAsAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
+    {
+        var key = $"workspace:{workspaceId}:aimessage:{messageId}";
+        await _redisDb.StringSetAsync(key, "1", TimeSpan.FromMinutes(10));
+    }
+
+    // 🔥 SPRINT 2.3: Verificación ultrarrápida en memoria
+    public async Task<bool> IsMessageAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
+    {
+        var key = $"workspace:{workspaceId}:aimessage:{messageId}";
+        return await _redisDb.KeyExistsAsync(key);
     }
 }

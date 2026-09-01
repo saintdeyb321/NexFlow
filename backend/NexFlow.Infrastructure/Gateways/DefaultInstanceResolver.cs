@@ -1,34 +1,41 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Repositories;
+using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 
 namespace NexFlow.Infrastructure.Gateways;
 
 public class DefaultInstanceResolver : IInstanceResolver
 {
-    private readonly IWorkspaceRepository _workspaceRepository;
+    private readonly NexFlowDbContext _dbContext;
 
-    public DefaultInstanceResolver(IWorkspaceRepository workspaceRepository)
+    // Inyectamos el contexto de BD para consultas rápidas sin pasar por repositorios de dominio
+    public DefaultInstanceResolver(NexFlowDbContext dbContext)
     {
-        _workspaceRepository = workspaceRepository;
+        _dbContext = dbContext;
     }
 
     public async Task<Guid?> ResolveInstanceAsync(string instanceName, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 5: Validación explícita contra la base de datos.
-        // Ya no adivinamos. Si el nombre de instancia no es un negocio válido, lo rechazamos de inmediato.
-        if (Guid.TryParse(instanceName, out var workspaceId))
-        {
-            var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(instanceName)) return null;
 
-            if (workspace != null)
-            {
-                return workspace.Id;
-            }
-        }
+        // 🔥 SPRINT 1.2: Búsqueda real del ID del negocio mediante el nombre de su instancia en Evolution
+        var workspace = await _dbContext.Set<NexFlow.Domain.Entities.Workspace>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(w => w.EvolutionInstanceName == instanceName, cancellationToken);
 
-        return null;
+        return workspace?.Id;
+    }
+
+    public async Task<string?> GetInstanceNameAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        // 🔥 Viaje de vuelta: Obtener el string de la instancia para armar la URL de salida
+        var workspace = await _dbContext.Set<NexFlow.Domain.Entities.Workspace>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(w => w.Id == workspaceId, cancellationToken);
+
+        return workspace?.EvolutionInstanceName;
     }
 }
