@@ -1,86 +1,69 @@
-import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, MapPin, List, CalendarDays } from 'lucide-react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Calendar as CalendarIcon, List, CalendarDays, AlertCircle } from 'lucide-react';
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
-import { getLocations } from '../../business/services/business.service';
+import { getLocations, getServices } from '../../business/services/business.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
 import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
-import { useCacheStore } from '../../../core/store/useCacheStore';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { ReservationDto } from '../types/reservation.types';
-import type { LocationDto } from '../../business/types/business.types';
 
 export const ReservationsPage = () => {
-  // 🔥 CORRECCIÓN: Usamos fetchServices en lugar del viejo fetchData
-  const { services, fetchServices } = useCacheStore();
-  
-  const [reservations, setReservations] = useState<ReservationDto[]>([]);
-  const [locations, setLocations] = useState<LocationDto[]>([]);
-  
-  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const queryClient = useQueryClient();
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  const selectedLocationId = useAuthStore(state => state.selectedLocationId);
+
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     const today = new Date();
     today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
     return today.toISOString().split('T')[0];
   });
   
-  const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
-
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
 
-  useEffect(() => {
-    fetchServices(); // 🔥 Cargamos los servicios al caché global
-    loadInitialData();
-  }, [fetchServices]);
+  // 🔥 Sprint 5.1/5.2: Migración completa a TanStack Query
+  const { data: services = [] } = useQuery({
+    queryKey: ['services', workspaceId],
+    queryFn: getServices,
+    enabled: !!workspaceId,
+    staleTime: 1000 * 60 * 10,
+  });
 
-  useEffect(() => {
-    if (selectedLocation && selectedLocation !== 'global') loadReservations();
-  }, [selectedLocation, selectedDate]);
+  const { data: locations = [] } = useQuery({
+    queryKey: ['locations', workspaceId],
+    queryFn: getLocations,
+    enabled: !!workspaceId,
+  });
 
-  const loadInitialData = async () => {
-    try {
-      const locs = await getLocations();
-      setLocations(locs);
-      if (locs.length > 0) setSelectedLocation(locs.find(l => l.isMain)?.id || locs[0].id || 'global');
-    } catch (error) {
-      console.error("Error al cargar sedes", error);
-    } finally {
-      setIsLoading(false);
-    }
+  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
+  const { data: reservations = [], isLoading } = useQuery({
+    queryKey: ['reservations', workspaceId, queryLocation, selectedDate],
+    queryFn: () => getReservations(queryLocation, selectedDate),
+    enabled: !!workspaceId,
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelReservation,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['reservations'] }),
+    onError: (error: any) => alert(`Error al cancelar: ${error.message}`)
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: completeReservation,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['reservations'] }),
+    onError: (error: any) => alert(`Error al completar: ${error.message}`)
+  });
+
+  const handleCancel = (id: string) => {
+    if (confirm('¿Estás seguro de cancelar esta reserva?')) cancelMutation.mutate(id);
   };
 
-  const loadReservations = async () => {
-    setIsLoading(true);
-    try {
-      const data = await getReservations(selectedLocation, selectedDate);
-      setReservations(data || []);
-    } catch (error) {
-      console.error("Error cargando reservas", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleCancel = async (id: string) => {
-    if (!confirm('¿Estás seguro de cancelar esta reserva?')) return;
-    try {
-      await cancelReservation(id);
-      setReservations(reservations.map(r => r.id === id ? { ...r, status: 'Cancelled' } : r));
-    } catch (error: any) {
-      alert(`Error al cancelar: ${error.message}`);
-    }
-  };
-
-  const handleComplete = async (id: string) => {
-    if (!confirm('¿Marcar esta cita como Completada?')) return;
-    try {
-      await completeReservation(id);
-      setReservations(reservations.map(r => r.id === id ? { ...r, status: 'Completed' } : r));
-    } catch (error: any) {
-      alert(`Error al completar: ${error.message}`);
-    }
+  const handleComplete = (id: string) => {
+    if (confirm('¿Marcar esta cita como Completada?')) completeMutation.mutate(id);
   };
 
   return (
@@ -95,18 +78,6 @@ export const ReservationsPage = () => {
         
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm">
-            <MapPin className="w-4 h-4 text-gray-400 mr-2" />
-            <select 
-              value={selectedLocation} 
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              className="bg-transparent text-sm outline-none text-gray-700"
-            >
-              <option value="global" disabled>Selecciona una sede</option>
-              {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
-            </select>
-          </div>
-          
-          <div className="flex items-center bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm">
             <input 
               type="date" 
               value={selectedDate}
@@ -120,12 +91,21 @@ export const ReservationsPage = () => {
             <button onClick={() => setViewMode('calendar')} className={`p-1.5 rounded-md ${viewMode === 'calendar' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><CalendarDays className="w-4 h-4" /></button>
           </div>
 
-          <button 
-            onClick={() => setIsCreateModalOpen(true)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-          >
-            Nueva Reserva
-          </button>
+          <div className="relative group">
+            <button 
+              onClick={() => setIsCreateModalOpen(true)}
+              disabled={selectedLocationId === 'all'}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 flex items-center transition-colors"
+            >
+              Nueva Reserva
+            </button>
+            {selectedLocationId === 'all' && (
+              <div className="absolute top-full mt-2 right-0 w-64 bg-gray-900 text-white text-xs rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none flex items-start">
+                <AlertCircle className="w-4 h-4 mr-2 shrink-0 text-yellow-400" />
+                Debes seleccionar una sede específica en el panel lateral para poder crear una reserva.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -155,7 +135,7 @@ export const ReservationsPage = () => {
       <CreateReservationModal 
         isOpen={isCreateModalOpen} 
         onClose={() => setIsCreateModalOpen(false)} 
-        onSuccess={loadReservations} 
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })} 
         locations={locations} 
         services={services || []} 
       />
@@ -163,7 +143,7 @@ export const ReservationsPage = () => {
       <EditReservationModal 
         isOpen={isEditModalOpen}
         onClose={() => { setIsEditModalOpen(false); setEditingRes(null); }}
-        onSuccess={loadReservations}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })}
         reservation={editingRes}
       />
     </div>

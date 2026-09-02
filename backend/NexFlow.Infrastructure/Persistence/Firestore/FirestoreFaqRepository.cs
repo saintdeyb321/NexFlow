@@ -8,7 +8,6 @@ namespace NexFlow.Infrastructure.Persistence.Firestore;
 public class FirestoreFaqRepository : IFaqRepository
 {
     private readonly FirestoreDb _firestoreDb;
-    private const int MAX_FAQS_PER_WORKSPACE = 30; 
 
     public FirestoreFaqRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
 
@@ -36,19 +35,9 @@ public class FirestoreFaqRepository : IFaqRepository
         var collectionRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs");
         var docRef = collectionRef.Document(faq.Id);
 
-        var docSnapshot = await docRef.GetSnapshotAsync(cancellationToken);
-        bool isNewRecord = !docSnapshot.Exists;
+        // 🔥 Auditoría (Sprint 3.2): La validación del límite (20 FAQs) ya se hace en el BusinessController. 
+        // El repositorio solo guarda.
 
-        if (isNewRecord)
-        {
-            var countSnapshot = await collectionRef.Count().GetSnapshotAsync(cancellationToken);
-            if (countSnapshot.Count >= 20) // El límite de 20 preguntas
-            {
-                throw new DomainException("Se ha alcanzado el límite máximo de 20 Preguntas Frecuentes por negocio.");
-            }
-        }
-
-        // 🔥 CORRECCIÓN: Convertir el FaqDto a la clase FirestoreFaq que Firebase SÍ entiende
         var firestoreEntity = new FirestoreFaq
         {
             Question = faq.Question,
@@ -57,7 +46,6 @@ public class FirestoreFaqRepository : IFaqRepository
             IsActive = faq.IsActive
         };
 
-        // Pasamos el firestoreEntity en lugar del FaqDto
         await docRef.SetAsync(firestoreEntity, cancellationToken: cancellationToken);
 
         return faq;

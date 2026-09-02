@@ -23,6 +23,11 @@ public enum IntentType
 
     // --- Generales ---
     GeneralGreeting,
-    HumanHandoffRequest, // Cuando el cliente explícitamente pide hablar con un humano
-    Unknown
+    HumanHandoffRequest,
+
+    Unknown,
+
+    // 🔥 Auditoría (Sprint 2.1): Distingue cuando Gemini colapsa (503) para aplicar un fallback inteligente 
+    // en lugar de enviar respuestas genéricas o asumir que el cliente habló mal.
+    ProviderUnavailable
 }

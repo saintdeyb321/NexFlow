@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Domain.Entities;
@@ -13,9 +14,12 @@ public class Product : Entity
     public string Currency { get; private set; } = "PEN";
     public bool IsActive { get; private set; }
 
+    // 🔥 Auditoría (Sprint 3.1): Soporte Multi-Sede añadido al catálogo.
+    public List<string> AvailableAtLocations { get; private set; } = new();
+
     private Product() { }
 
-    public static Product Create(Guid workspaceId, string name, string? description, string? category, decimal price, string currency)
+    public static Product Create(Guid workspaceId, string name, string? description, string? category, decimal price, string currency, List<string>? availableAtLocations = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("El nombre del producto es obligatorio.");
         if (price < 0) throw new DomainException("El precio no puede ser negativo.");
@@ -29,11 +33,12 @@ public class Product : Entity
             Category = category,
             Price = price,
             Currency = string.IsNullOrWhiteSpace(currency) ? "PEN" : currency.ToUpperInvariant(),
-            IsActive = true
+            IsActive = true,
+            AvailableAtLocations = availableAtLocations ?? new List<string>()
         };
     }
 
-    public void Update(string name, string? description, string? category, decimal price, string currency, bool isActive)
+    public void Update(string name, string? description, string? category, decimal price, string currency, bool isActive, List<string>? availableAtLocations = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("El nombre del producto es obligatorio.");
         if (price < 0) throw new DomainException("El precio no puede ser negativo.");
@@ -44,5 +49,6 @@ public class Product : Entity
         Price = price;
         Currency = string.IsNullOrWhiteSpace(currency) ? "PEN" : currency.ToUpperInvariant();
         IsActive = isActive;
+        AvailableAtLocations = availableAtLocations ?? new List<string>();
     }
 }

@@ -1,78 +1,80 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Map, MapPin, Pencil, X } from 'lucide-react';
-import { getLocations, saveLocation } from '../services/business.service';
+import { getLocations, saveLocation, deleteLocation } from '../services/business.service';
 import type { LocationDto } from '../types/business.types';
-import { axiosClient } from '../../../core/api/axiosClient';
-import { ApiError } from '../../../core/api/axiosClient';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
-  const [locations, setLocations] = useState<LocationDto[]>([]);
-  
+  const queryClient = useQueryClient();
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+
   const emptyLocation: Partial<LocationDto> = { name: '', address: '', reference: '', mapUrl: '', isMain: false };
   const [newLocation, setNewLocation] = useState<Partial<LocationDto>>(emptyLocation);
-  
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isFormOpen, setIsFormOpen] = useState(false); // 🔥 Candado para el formulario
+  const [isFormOpen, setIsFormOpen] = useState(false);
 
-  useEffect(() => { loadLocations(); }, []);
+  const { data: locations = [], isLoading } = useQuery({
+    queryKey: ['locations', workspaceId],
+    queryFn: getLocations,
+    enabled: !!workspaceId,
+    staleTime: 1000 * 60 * 15,
+  });
 
-  const loadLocations = async () => {
-    try {
-      const data = await getLocations();
-      setLocations(data);
-    } catch (error: any) {
-      showMessage('Error al cargar las sedes registradas', 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const saveMutation = useMutation({
+    mutationFn: saveLocation,
+    onSuccess: (savedLoc) => {
+      // 🔥 Auditoría (Sprint 5.3): Inyección directa en caché sin refetch (Cero latencia UI)
+      queryClient.setQueryData(['locations', workspaceId], (oldLocs: LocationDto[] = []) => {
+        const exists = oldLocs.some(l => l.id === savedLoc.id);
+        if (exists) return oldLocs.map(l => l.id === savedLoc.id ? savedLoc : l);
+        return [...oldLocs, savedLoc];
+      });
 
-  const handleEditClick = (loc: LocationDto) => {
-    setNewLocation(loc); // Cargamos la sede al formulario
-    setIsFormOpen(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' }); // Subimos la pantalla
-  };
-
-  const handleSaveLocation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-    try {
-      const locToSave = { ...newLocation, isMain: locations.length === 0 ? true : newLocation.isMain } as LocationDto;
-      await saveLocation(locToSave);
-      
       showMessage(newLocation.id ? 'Sede actualizada exitosamente' : 'Sede registrada exitosamente', 'success');
-      
-      const updatedLocs = await getLocations();
-      setLocations(updatedLocs);
-      
-      // Limpiamos y cerramos
       setNewLocation(emptyLocation);
       setIsFormOpen(false);
-    } catch (error: unknown) { 
-      // 🔥 TRADUCCIÓN HUMANA DEL LÍMITE DE LICENCIAS O ERRORES
-      if (error instanceof ApiError) {
-        if (error.status === 403 || error.status === 400) {
-          showMessage('Has alcanzado el límite de sedes permitidas por tu plan.', 'error');
-        } else {
-          showMessage(error.message || 'Error guardando la sede', 'error');
-        }
+    },
+    onError: (error: any) => {
+      // 🔥 Auditoría (Sprint 5.3): Uso exacto del código de error enviado por el backend
+      const errorCode = error?.code || 'UNKNOWN_ERROR';
+      
+      if (errorCode === 'Licensing.LocationsLimitExceeded') {
+        showMessage('Has alcanzado el límite máximo de sedes permitidas por tu plan.', 'error');
       } else {
-        showMessage('Ocurrió un error inesperado.', 'error');
+        showMessage(error?.message || 'Ocurrió un error al guardar la sede.', 'error');
       }
-    } finally { 
-      setIsSaving(false); 
     }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteLocation, // 🔥 Auditoría: Uso del Service, sin axios directo
+    onSuccess: (_, deletedId) => {
+      // 🔥 Inyección directa para remover la sede de la UI al instante
+      queryClient.setQueryData(['locations', workspaceId], (oldLocs: LocationDto[] = []) => 
+        oldLocs.filter(l => l.id !== deletedId)
+      );
+      showMessage('Sede eliminada correctamente', 'success');
+    },
+    onError: () => {
+      showMessage('Error al eliminar la sede', 'error');
+    }
+  });
+
+  const handleEditClick = (loc: LocationDto) => {
+    setNewLocation(loc);
+    setIsFormOpen(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleDeleteLocation = async (locationId: string) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar esta sede? Perderás los horarios asociados a ella.')) return;
-    try {
-      await axiosClient.delete(`/business/locations/${locationId}`);
-      showMessage('Sede eliminada correctamente', 'success');
-      setLocations(prev => prev.filter(l => l.id !== locationId));
-    } catch (error: any) {
-      showMessage('Error al eliminar la sede', 'error');
+  const handleSaveLocation = (e: React.FormEvent) => {
+    e.preventDefault();
+    const locToSave = { ...newLocation, isMain: locations.length === 0 ? true : newLocation.isMain } as LocationDto;
+    saveMutation.mutate(locToSave);
+  };
+
+  const handleDeleteLocation = (locationId: string) => {
+    if (window.confirm('¿Estás seguro de que deseas eliminar esta sede? Perderás los horarios asociados a ella.')) {
+      deleteMutation.mutate(locationId);
     }
   };
 
@@ -80,8 +82,6 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
 
   return (
     <div className="space-y-6 animate-in fade-in">
-      
-      {/* CABECERA Y BOTÓN DE AÑADIR */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
         <h3 className="font-bold text-gray-900">Gestión de Locales</h3>
         {!isFormOpen && (
@@ -91,7 +91,6 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
         )}
       </div>
 
-      {/* FORMULARIO OCULTO HASTA QUE SE SOLICITE */}
       {isFormOpen && (
         <form onSubmit={handleSaveLocation} className="bg-white shadow-sm border-2 border-blue-100 rounded-xl p-6 animate-in slide-in-from-top-4">
           <div className="flex justify-between items-center mb-4 pb-2 border-b">
@@ -139,14 +138,13 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
             <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
               Cancelar
             </button>
-            <button type="submit" disabled={isSaving} className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {isSaving ? 'Guardando...' : (newLocation.id ? 'Guardar Cambios' : 'Añadir Sede')}
+            <button type="submit" disabled={saveMutation.isPending} className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saveMutation.isPending ? 'Guardando...' : (newLocation.id ? 'Guardar Cambios' : 'Añadir Sede')}
             </button>
           </div>
         </form>
       )}
 
-      {/* LISTA DE SEDES CON BOTÓN EDITAR */}
       <div className="bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden">
         {locations.length === 0 ? (
           <div className="p-8 text-center text-gray-500 italic">Aún no hay sedes registradas.</div>

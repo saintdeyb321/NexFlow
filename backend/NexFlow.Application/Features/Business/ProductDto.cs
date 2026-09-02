@@ -14,5 +14,9 @@ public class ProductDto
 
     public string Currency { get; set; } = "PEN";
     public bool IsActive { get; set; } = true;
+
+    // 🔥 Auditoría (Sprint 3.1): Propiedad expuesta a la API.
+    public List<string> AvailableAtLocations { get; set; } = new();
+
     public Dictionary<string, object> Metadata { get; set; } = new();
 }

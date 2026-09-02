@@ -28,7 +28,8 @@ public class EvolutionMessageGateway : IMessageGateway
         _baseUrl = configuration["Evolution:BaseUrl"]?.TrimEnd('/') ?? throw new ArgumentNullException("Evolution BaseUrl no configurada");
         _apiKey = configuration["Evolution:ApiKey"] ?? string.Empty;
 
-        var timeout = int.TryParse(configuration["Evolution:TimeoutSeconds"], out var t) ? t : 10;
+        // 🔥 Auditoría (Sprint 1.3): Reducimos el timeout por defecto a 8 segundos para no bloquear la cola.
+        var timeout = int.TryParse(configuration["Evolution:TimeoutSeconds"], out var t) ? t : 8;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
 
         if (!string.IsNullOrEmpty(_apiKey))
@@ -68,17 +69,16 @@ public class EvolutionMessageGateway : IMessageGateway
             {
                 var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
 
-                // 🔥 Auditoría aplicada: Log estructurado, sin exponer URLs completas en producción[cite: 2].
                 _logger.LogError(
                     "Evolution rejected outbound message. Workspace={WorkspaceId}, Instance={InstanceName}, Status={StatusCode}",
                     workspaceId,
                     instanceName,
                     response.StatusCode);
 
-                // Solo guardamos el cuerpo del error en nivel Debug para no saturar los logs de producción[cite: 2].
                 _logger.LogDebug("Detalle completo del error: {ErrorDetails}", errorDetails);
 
-                response.EnsureSuccessStatusCode();
+                // 🔥 Auditoría (Sprint 1.3): Evitamos EnsureSuccessStatusCode para no crashear. Retornamos estado Failed.
+                return $"FAILED_{(int)response.StatusCode}_{Guid.NewGuid()}";
             }
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
@@ -91,13 +91,15 @@ public class EvolutionMessageGateway : IMessageGateway
         }
         catch (TaskCanceledException)
         {
-            _logger.LogError("Timeout: Evolution API no respondió al enviar mensaje a {Customer}", customerIdentifier);
-            throw;
+            // 🔥 Auditoría (Sprint 1.3): Timeout controlado. No usamos throw para proteger al background worker.
+            _logger.LogWarning("Timeout: Evolution API no respondió a tiempo al enviar a {Customer}. Estado: Failed.", customerIdentifier);
+            return $"FAILED_TIMEOUT_{Guid.NewGuid()}";
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fallo crítico en Evolution. Workspace: {WorkspaceId}, Instancia: {InstanceName}", workspaceId, instanceName);
-            throw;
+            // 🔥 Auditoría (Sprint 1.3): Fallo atrapado.
+            _logger.LogError(ex, "Fallo crítico en conexión a Evolution. Workspace: {WorkspaceId}, Instancia: {InstanceName}", workspaceId, instanceName);
+            return $"FAILED_ERROR_{Guid.NewGuid()}";
         }
     }
 }

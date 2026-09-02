@@ -1,98 +1,92 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getConversations, getMessages, takeOverConversation, releaseConversation, sendManualMessage } from '../services/conversation.service';
 import type { Conversation, Message } from '../types/conversation.types';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const useConversations = () => {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const queryClient = useQueryClient();
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  
+  // Estado local (UI State)
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isChangingMode, setIsChangingMode] = useState(false);
-  const [isSending, setIsSending] = useState(false);
 
-  const loadConversations = useCallback(async () => {
-    try {
-      const data = await getConversations();
-      setConversations(data);
-      if (data.length > 0 && !selectedChat) setSelectedChat(data[0]);
-    } catch (error) {
-      console.error('Error cargando conversaciones', error);
-    } finally {
-      setIsLoading(false);
+  // 🔥 Auditoría (Sprint 5.1): Aislamiento Multi-Tenant en TanStack Query
+  // Server State: Conversaciones
+  const { data: conversations = [], isLoading: isLoadingConversations } = useQuery({
+    queryKey: ['conversations', workspaceId],
+    queryFn: () => getConversations(),
+    enabled: !!workspaceId, // Nunca se ejecuta si no hay un workspace activo
+    staleTime: 1000 * 60 * 2, // 2 minutos de frescura
+  });
+
+  // Server State: Mensajes
+  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
+    queryKey: ['messages', workspaceId, selectedChat?.id],
+    queryFn: () => getMessages(selectedChat!.id),
+    enabled: !!workspaceId && !!selectedChat?.id,
+    staleTime: 1000 * 15, // Refresco rápido para chat
+  });
+
+  // Auto-selección del primer chat al cargar
+  useEffect(() => {
+    if (conversations.length > 0 && !selectedChat) {
+      setSelectedChat(conversations[0]);
     }
-  }, [selectedChat]);
+  }, [conversations, selectedChat]);
 
-  const loadMessages = useCallback(async (conversationId: string) => {
-    try {
-      const data = await getMessages(conversationId);
-      setMessages(data);
-    } catch (error) {
-      console.error('Error cargando mensajes', error);
-    }
-  }, []);
-
-  const handleTakeOver = useCallback(async () => {
-    if (!selectedChat) return;
-    setIsChangingMode(true);
-    try {
+  // Mutaciones con invalidación de caché
+  const takeOverMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedChat) throw new Error("No chat selected");
       await takeOverConversation(selectedChat.id);
-      const updatedChat = { ...selectedChat, mode: 'Human' as const };
-      setSelectedChat(updatedChat);
-      setConversations(prev => prev.map(c => c.id === selectedChat.id ? updatedChat : c));
-    } finally {
-      setIsChangingMode(false);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
+      if (selectedChat) setSelectedChat({ ...selectedChat, mode: 'Human' });
     }
-  }, [selectedChat]);
+  });
 
-  const handleRelease = useCallback(async () => {
-    if (!selectedChat) return;
-    setIsChangingMode(true);
-    try {
+  const releaseMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedChat) throw new Error("No chat selected");
       await releaseConversation(selectedChat.id);
-      const updatedChat = { ...selectedChat, mode: 'Automatic' as const };
-      setSelectedChat(updatedChat);
-      setConversations(prev => prev.map(c => c.id === selectedChat.id ? updatedChat : c));
-    } finally {
-      setIsChangingMode(false);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
+      if (selectedChat) setSelectedChat({ ...selectedChat, mode: 'Automatic' });
     }
-  }, [selectedChat]);
+  });
 
-  const handleSendMessage = useCallback(async (content: string) => {
-    if (!selectedChat || !content.trim()) return;
-    
-    setIsSending(true);
-    try {
-      const sentMessage = await sendManualMessage(selectedChat.id, content.trim());
-      setMessages(prev => [...prev, sentMessage]);
-      return sentMessage;
-    } catch (error) {
-      console.error('Error enviando mensaje', error);
-      throw error;
-    } finally {
-      setIsSending(false);
+  const sendMessageMutation = useMutation({
+    mutationFn: async (content: string) => {
+      if (!selectedChat) throw new Error("No chat selected");
+      return await sendManualMessage(selectedChat.id, content);
+    },
+    onSuccess: (newMessage) => {
+      // 🔥 Actualización optimista: inyectamos el mensaje a la caché instantáneamente
+      queryClient.setQueryData(
+        ['messages', workspaceId, selectedChat?.id],
+        (old: Message[] | undefined) => [...(old || []), newMessage]
+      );
+      
+      queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
+      if (selectedChat?.mode !== 'Human') {
+        setSelectedChat(prev => prev ? { ...prev, mode: 'Human' } : null);
+      }
     }
-  }, [selectedChat]);
-
-  useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
-
-  useEffect(() => {
-    if (selectedChat) {
-      loadMessages(selectedChat.id);
-    }
-  }, [selectedChat?.id, loadMessages]);
+  });
 
   return {
     conversations,
     selectedChat,
     messages,
-    isLoading,
-    isChangingMode,
-    isSending,
+    isLoading: isLoadingConversations || isLoadingMessages,
+    isChangingMode: takeOverMutation.isPending || releaseMutation.isPending,
+    isSending: sendMessageMutation.isPending,
     setSelectedChat,
-    handleTakeOver,
-    handleRelease,
-    handleSendMessage,
+    handleTakeOver: () => takeOverMutation.mutateAsync(),
+    handleRelease: () => releaseMutation.mutateAsync(),
+    handleSendMessage: (content: string) => sendMessageMutation.mutateAsync(content),
   };
 };

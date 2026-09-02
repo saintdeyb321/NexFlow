@@ -1,9 +1,9 @@
-﻿using NexFlow.Application.Engines.Intent.AI;
+﻿using NexFlow.Application.Abstractions.Cache;
+using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Application.Engines.Intent;
 
 public interface IIntentEngine
 {
-    // Transforma lenguaje natural en una intención estructurada
-    Task<IntentResultDto> AnalyzeAsync(string message, CancellationToken cancellationToken);
+    Task<IntentResultDto> AnalyzeAsync(string message, ConversationContextDto? context, CancellationToken cancellationToken);
 }

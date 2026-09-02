@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
-import { getLocations, getBusinessHours, saveBusinessHours } from '../services/business.service';
-import type { BusinessHoursDto, LocationDto } from '../types/business.types';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getBusinessHours, saveBusinessHours } from '../services/business.service';
+import type { BusinessHoursDto } from '../types/business.types';
+import { useAuthStore } from '../../../core/store/useAuthStore';
+import { MapPin } from 'lucide-react';
 
 const DAYS_OF_WEEK = [
   { id: 1, name: 'Lunes' }, { id: 2, name: 'Martes' }, { id: 3, name: 'Miércoles' },
@@ -8,51 +11,41 @@ const DAYS_OF_WEEK = [
 ];
 
 export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
-  const [locations, setLocations] = useState<LocationDto[]>([]);
-  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+  const queryClient = useQueryClient();
+  const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   const [hours, setHours] = useState<BusinessHoursDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+
+  // 🔥 Sprint 5.1/5.2: Carga usando TanStack vinculada al Selector Global
+  const { data: fetchedHours, isLoading } = useQuery({
+    queryKey: ['businessHours', selectedLocationId],
+    queryFn: () => getBusinessHours(selectedLocationId),
+    enabled: selectedLocationId !== 'all',
+  });
 
   useEffect(() => {
-    loadLocations();
-  }, []);
-
-  useEffect(() => {
-    if (selectedLocationId) loadHours(selectedLocationId);
-  }, [selectedLocationId]);
-
-  const loadLocations = async () => {
-    try {
-      const locs = await getLocations();
-      setLocations(locs);
-      if (locs.length > 0) setSelectedLocationId(locs[0].id!);
-    } catch (error: any) {
-      showMessage(error.message || 'Error al cargar las sedes.', 'error');
-    } finally {
-      setIsLoading(false);
+    if (fetchedHours && fetchedHours.length > 0) {
+      setHours(fetchedHours);
+    } else {
+      setHours(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
     }
-  };
+  }, [fetchedHours, selectedLocationId]);
 
-  const loadHours = async (locationId: string) => {
-    try {
-      const data = await getBusinessHours(locationId);
-      if (data && data.length > 0) {
-        setHours(data);
-      } else {
-        setHours(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
-      }
-    } catch (error: any) {
-      showMessage(error.message || 'Error al cargar los horarios.', 'error');
+  const saveMutation = useMutation({
+    mutationFn: (newHours: BusinessHoursDto[]) => saveBusinessHours(selectedLocationId, newHours),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['businessHours', selectedLocationId] });
+      showMessage('Horarios actualizados correctamente', 'success');
+    },
+    onError: (error: any) => {
+      showMessage(error.message || 'Error guardando horarios', 'error');
     }
-  };
+  });
 
   const updateHour = (day: number, field: keyof BusinessHoursDto, value: any) => {
     setHours(hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h));
   };
 
   const handleSave = async () => {
-    // 🔥 SOLUCIÓN (Fallo #55): Validación lógica en el frontend antes de tocar la API
     for (const h of hours) {
       if (!h.isClosed) {
         if (!h.openTime || !h.closeTime) {
@@ -67,44 +60,36 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
         }
       }
     }
-
-    setIsSaving(true);
-    try {
-      await saveBusinessHours(selectedLocationId, hours);
-      showMessage('Horarios actualizados correctamente', 'success');
-    } catch (error: any) {
-      showMessage(error.message || 'Error guardando horarios', 'error');
-    } finally {
-      setIsSaving(false);
-    }
+    saveMutation.mutate(hours);
   };
 
-  if (isLoading) return <div className="p-6 text-center text-gray-500">Cargando sedes...</div>;
-  if (locations.length === 0) return <div className="p-6 text-center text-red-500">Debes registrar al menos una sede primero.</div>;
+  // 🔥 Bloqueo Estricto si está en "Todas las sedes"
+  if (selectedLocationId === 'all') {
+    return (
+      <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-12 text-center animate-in fade-in">
+        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+          <MapPin className="w-8 h-8 text-blue-500" />
+        </div>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Selecciona una sede específica</h3>
+        <p className="text-gray-500 max-w-md mx-auto">
+          Los horarios de atención se configuran de manera individual por cada local. Por favor, usa el selector de sedes en la barra lateral izquierda para continuar.
+        </p>
+      </div>
+    );
+  }
+
+  if (isLoading) return <div className="p-6 text-center text-gray-500">Cargando horarios de la sede...</div>;
 
   return (
-    <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-6">
-      <div className="mb-6">
-        <label className="block text-sm font-bold text-gray-700 mb-2">Selecciona la Sede</label>
-        <select 
-          value={selectedLocationId} 
-          onChange={(e) => setSelectedLocationId(e.target.value)}
-          className="w-full md:w-1/2 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {locations.map(loc => (
-            <option key={loc.id} value={loc.id}>{loc.name} {loc.isMain ? '(Principal)' : ''}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="space-y-4 border-t pt-4">
+    <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-6 animate-in fade-in">
+      <div className="space-y-4 pt-2">
         {DAYS_OF_WEEK.map(day => {
           const h = hours.find(x => x.dayOfWeek === day.id) || { openTime: '', closeTime: '', isClosed: true, dayOfWeek: day.id };
           return (
             <div key={day.id} className="flex items-center justify-between border-b pb-3">
               <div className="w-32 font-medium text-gray-700">{day.name}</div>
               <div className="flex items-center space-x-4">
-                <label className="flex items-center text-sm text-gray-600">
+                <label className="flex items-center text-sm text-gray-600 cursor-pointer">
                   <input type="checkbox" checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-blue-600" />
                   Cerrado
                 </label>
@@ -117,7 +102,9 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
         })}
       </div>
       <div className="flex justify-end mt-6">
-        <button onClick={handleSave} disabled={isSaving} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{isSaving ? 'Guardando...' : 'Guardar Horarios'}</button>
+        <button onClick={handleSave} disabled={saveMutation.isPending} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          {saveMutation.isPending ? 'Guardando...' : 'Guardar Horarios'}
+        </button>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Abstractions.Cache;
+﻿using Microsoft.Extensions.Logging;
+using NexFlow.Application.Abstractions.Cache;
 using StackExchange.Redis;
 using System.Text.Json;
 
@@ -7,57 +8,86 @@ namespace NexFlow.Infrastructure.Cache;
 public class RedisConversationCache : IConversationCache
 {
     private readonly IDatabase _redisDb;
+    private readonly ILogger<RedisConversationCache> _logger;
 
-    public RedisConversationCache(IConnectionMultiplexer redis)
+    public RedisConversationCache(IConnectionMultiplexer redis, ILogger<RedisConversationCache> logger)
     {
         _redisDb = redis.GetDatabase();
+        _logger = logger;
     }
 
     public async Task SetContextAsync(Guid workspaceId, string customerPhone, ConversationContextDto context, CancellationToken cancellationToken)
     {
-        var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
-        context.LastUpdated = DateTime.UtcNow;
+        try
+        {
+            var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
+            context.LastUpdated = DateTime.UtcNow;
 
-        var json = JsonSerializer.Serialize(context);
-        await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30));
+            var json = JsonSerializer.Serialize(context);
+            await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30));
+        }
+        catch (Exception ex)
+        {
+            // 🔥 Auditoría (Sprint 1.1): Comportamiento degradado. Falla silenciosamente y permite que el bot responda sin memoria.
+            _logger.LogWarning(ex, "Degradación: No se pudo guardar el contexto en Redis para {Phone}.", customerPhone);
+        }
     }
 
     public async Task<ConversationContextDto?> GetContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
-        var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
-        var value = await _redisDb.StringGetAsync(key);
-
-        if (!value.HasValue) return null;
-
         try
         {
+            var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
+            var value = await _redisDb.StringGetAsync(key);
+
+            if (!value.HasValue) return null;
+
             return JsonSerializer.Deserialize<ConversationContextDto>(value.ToString());
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            _logger.LogWarning(ex, "Degradación: Redis no disponible. Devolviendo contexto vacío para {Phone}.", customerPhone);
+            return null; // El despachador asumirá una conversación nueva en lugar de lanzar excepción 500.
         }
     }
 
-    // 🔥 Auditoría (Fase 3): Este método originalmente inyectaba PostgreSQL aquí adentro. 
-    // Ahora, simplemente verificamos un set de Idempotencia en Redis con un TTL corto para proteger el webhook.
-    // Para persistencia fuerte (la tabla PostgreSQL ProcessedMessages), el Handler principal debe usar un Repositorio dedicado[cite: 2].
-    public async Task<bool> TryAcquireMessageLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
+    public async Task DeleteContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
-        var key = $"workspace:{workspaceId}:idempotency:{messageId}";
-        // Guarda un candado de 1 hora en Redis para evitar doble procesamiento del mismo webhook
-        return await _redisDb.StringSetAsync(key, "locked", TimeSpan.FromHours(1), When.NotExists);
+        try
+        {
+            var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
+            await _redisDb.KeyDeleteAsync(key);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Degradación: No se pudo eliminar el contexto en Redis para {Phone}.", customerPhone);
+        }
     }
 
     public async Task MarkMessageAsAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
-        var key = $"workspace:{workspaceId}:aimessage:{messageId}";
-        await _redisDb.StringSetAsync(key, "1", TimeSpan.FromMinutes(10));
+        try
+        {
+            var key = $"workspace:{workspaceId}:aimessage:{messageId}";
+            await _redisDb.StringSetAsync(key, "1", TimeSpan.FromMinutes(10));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Degradación: No se pudo marcar el mensaje {MessageId} en caché.", messageId);
+        }
     }
 
     public async Task<bool> IsMessageAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
-        var key = $"workspace:{workspaceId}:aimessage:{messageId}";
-        return await _redisDb.KeyExistsAsync(key);
+        try
+        {
+            var key = $"workspace:{workspaceId}:aimessage:{messageId}";
+            return await _redisDb.KeyExistsAsync(key);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Degradación: Falla al verificar origen del mensaje. Asumiendo falso para {MessageId}.", messageId);
+            return false;
+        }
     }
 }

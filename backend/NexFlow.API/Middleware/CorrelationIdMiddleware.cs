@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
@@ -20,21 +17,36 @@ public class CorrelationIdMiddleware
 
     public async Task InvokeAsync(HttpContext context, ILogger<CorrelationIdMiddleware> logger)
     {
-        // Extraer el ID si viene del cliente, o generar uno nuevo
         string correlationId = context.Request.Headers.TryGetValue(CorrelationIdHeader, out StringValues values)
             ? values.FirstOrDefault() ?? Guid.NewGuid().ToString()
             : Guid.NewGuid().ToString();
 
-        // Agregar a la respuesta para que el Frontend lo vea
         context.Response.Headers.Append(CorrelationIdHeader, correlationId);
-
-        // Guardar en el contexto de la petición
         context.Items["CorrelationId"] = correlationId;
 
-        // Inyectar el CorrelationId en todos los logs estructurados
         using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
         {
-            await _next(context);
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                await _next(context);
+            }
+            finally
+            {
+                stopwatch.Stop();
+
+                // Evitamos saturar logs con las comprobaciones periódicas de salud
+                if (!context.Request.Path.StartsWithSegments("/health"))
+                {
+                    logger.LogInformation(
+                        "HTTP {Method} {Path} respondido con Status {StatusCode} en {ElapsedMs}ms",
+                        context.Request.Method,
+                        context.Request.Path,
+                        context.Response.StatusCode,
+                        stopwatch.ElapsedMilliseconds);
+                }
+            }
         }
     }
 }

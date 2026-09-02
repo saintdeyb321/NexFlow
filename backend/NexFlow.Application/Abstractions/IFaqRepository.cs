@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Features.Knowledge;
+﻿using NexFlow.Application.Features.Knowledge;
 
 namespace NexFlow.Application.Abstractions;
 

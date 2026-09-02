@@ -21,20 +21,31 @@ public class ServiceModuleHandler : IModuleHandler
         if (request.CapabilityCode != "READ")
             return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Capacidad no soportada por el módulo SERVICES.", false, Array.Empty<string>());
 
-        // 🔥 Auditoría (Fase 3): Si la IA identificó una categoría, filtramos en base de datos.
-        if (request.Parameters.TryGetValue("category", out var categoryObj) && !string.IsNullOrWhiteSpace(categoryObj?.ToString()))
-        {
-            var categoryServices = await _serviceRepository.GetServicesByCategoryAsync(workspaceId, categoryObj.ToString()!, cancellationToken);
-            if (categoryServices.Any())
-                return BuildServicesResponse(categoryServices.ToList(), request.CapabilityCode);
-        }
-
-        // 🔥 Auditoría (Fase 3): Consulta específica para servicios activos, no la colección completa.
         var activeServices = (await _serviceRepository.GetActiveServicesAsync(workspaceId, cancellationToken)).ToList();
 
-        if (!activeServices.Any())
-            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Informa cortésmente que actualmente no hay servicios configurados o disponibles en el catálogo.", false, Array.Empty<string>());
+        // 🔥 Auditoría (Sprint 3.1): Filtrado Multi-Sede inyectado desde el orquestador
+        if (request.Parameters.TryGetValue("locationId", out var locObj) && locObj is string locationId && !string.IsNullOrWhiteSpace(locationId))
+        {
+            activeServices = activeServices.Where(s =>
+                s.AvailableAtLocations == null ||
+                !s.AvailableAtLocations.Any() ||
+                s.AvailableAtLocations.Contains(locationId)).ToList();
+        }
 
+        // Si la IA identificó una categoría, filtramos adicionalmente en memoria
+        if (request.Parameters.TryGetValue("category", out var categoryObj) && !string.IsNullOrWhiteSpace(categoryObj?.ToString()))
+        {
+            var categorySearch = categoryObj.ToString()!.ToLowerInvariant();
+            var categoryFiltered = activeServices.Where(s => s.Category?.ToLowerInvariant() == categorySearch).ToList();
+
+            if (categoryFiltered.Any())
+                return BuildServicesResponse(categoryFiltered, request.CapabilityCode);
+        }
+
+        if (!activeServices.Any())
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Informa cortésmente que actualmente no hay servicios configurados o disponibles para la sede seleccionada.", false, Array.Empty<string>());
+
+        // Mantenemos la lógica de agrupamiento para evitar sobrecargar la memoria de la IA
         if (activeServices.Count > 10)
         {
             var categories = activeServices
@@ -57,10 +68,10 @@ public class ServiceModuleHandler : IModuleHandler
             var reqReservation = s.RequiresReservation ? " [Requiere Reserva]" : "";
             var desc = !string.IsNullOrWhiteSpace(s.Description) ? $" - {s.Description}" : "";
 
-            return $"- {s.Name}: {s.Currency} {s.PriceMinorUnits / 100m}{durationText}{reqReservation}{desc}";
+            return $"- {s.Name}: {s.Currency} {s.PriceMinorUnits / 100m:0.00}{durationText}{reqReservation}{desc}";
         }));
 
-        var responseText = $"Utiliza la siguiente lista de servicios y sus precios para responder la duda del cliente. NO ofrezcas servicios que no estén en esta lista:\n{servicesText}";
+        var responseText = $"Utiliza la siguiente lista de servicios y sus precios para responder la duda del cliente. NO ofrezcas servicios ni inventes precios que no estén en esta lista:\n{servicesText}";
 
         return new ModuleExecutionResult(true, ModuleCode, capabilityCode, responseText, false, Array.Empty<string>());
     }

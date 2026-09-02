@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using System.Text.Json;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Engines.Intent.AI;
 
@@ -9,20 +10,24 @@ public class ModuleDispatcher : IModuleDispatcher
     private readonly IEnumerable<IModuleHandler> _moduleHandlers;
     private readonly IEntitlementService _entitlementService;
     private readonly IConversationCache _conversationCache;
+    private readonly ILocationRepository _locationRepository;
 
     public ModuleDispatcher(
         IEnumerable<IModuleHandler> moduleHandlers,
         IEntitlementService entitlementService,
-        IConversationCache conversationCache)
+        IConversationCache conversationCache,
+        ILocationRepository locationRepository)
     {
         _moduleHandlers = moduleHandlers;
         _entitlementService = entitlementService;
-        _conversationCache = _conversationCache = conversationCache;
+        _conversationCache = conversationCache;
+        _locationRepository = locationRepository;
     }
 
     public async Task<ModuleExecutionResult> BuildSystemContextAsync(Guid workspaceId, IntentResultDto intentResult, CancellationToken cancellationToken)
     {
         var customerPhone = intentResult.Parameters.ContainsKey("phone") ? intentResult.Parameters["phone"]?.ToString() ?? "unknown" : "unknown";
+
         var context = await _conversationCache.GetContextAsync(workspaceId, customerPhone, cancellationToken) ?? new ConversationContextDto();
 
         if (!string.IsNullOrEmpty(context.PendingAction))
@@ -62,10 +67,10 @@ public class ModuleDispatcher : IModuleDispatcher
         if (capabilityRequest == null)
         {
             await _conversationCache.SetContextAsync(workspaceId, customerPhone, context, cancellationToken);
-            return new ModuleExecutionResult(false, "SYSTEM", "UNKNOWN", "Responde cortésmente que no lograste entender la solicitud.", true, Array.Empty<string>());
+            // 🔥 CORRECCIÓN: Se actualiza el mensaje para que sea un texto amigable directo al usuario, y no bloquee el chat con un handoff innecesario.
+            return new ModuleExecutionResult(false, "SYSTEM", "UNKNOWN", "Lo siento, no logré comprender tu consulta. ¿Podrías darme un poco más de detalle?", false, Array.Empty<string>());
         }
 
-        // 🔥 Auditoría (Fase 2): Bypass para Capacidades Core. No consumen licencia.
         if (capabilityRequest.ModuleCode == "CORE")
         {
             await _conversationCache.SetContextAsync(workspaceId, customerPhone, context, cancellationToken);
@@ -75,6 +80,41 @@ public class ModuleDispatcher : IModuleDispatcher
 
             if (capabilityRequest.CapabilityCode == "GREETING")
                 return new ModuleExecutionResult(true, "CORE", "GREETING", "¡Hola! Soy el asistente virtual corporativo. ¿En qué te puedo ayudar?", false, Array.Empty<string>());
+        }
+
+        bool requiresLocation = capabilityRequest.ModuleCode is "RESERVATIONS" or "SERVICES" or "CATALOG" or "BUSINESS_HOURS";
+
+        if (requiresLocation && string.IsNullOrEmpty(context.SelectedLocationId))
+        {
+            var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
+            var locationsList = locations.ToList();
+
+            if (locationsList.Count > 1)
+            {
+                var compactLocations = locationsList.Select(l => new { id = l.Id, name = l.Name }).ToList();
+                var dataStr = JsonSerializer.Serialize(compactLocations);
+
+                context.PendingAction = "ASK_LOCATIONID";
+                await _conversationCache.SetContextAsync(workspaceId, customerPhone, context, cancellationToken);
+
+                return new ModuleExecutionResult(
+                    Success: true,
+                    ModuleCode: "SYSTEM",
+                    Capability: "DISAMBIGUATE_LOCATION",
+                    Data: $"El negocio tiene varias sedes. Basándote en estas opciones: {dataStr}, pregunta amablemente al usuario en cuál de ellas desea realizar la consulta.",
+                    RequiresHuman: false,
+                    MissingParameters: new[] { "locationId" }
+                );
+            }
+            else if (locationsList.Count == 1)
+            {
+                context.SelectedLocationId = locationsList[0].Id;
+
+                if (capabilityRequest.Parameters != null && context.SelectedLocationId != null)
+                {
+                    capabilityRequest.Parameters["locationId"] = context.SelectedLocationId;
+                }
+            }
         }
 
         bool hasAccess = await _entitlementService.HasCapabilityAccessAsync(workspaceId, capabilityRequest.ModuleCode, capabilityRequest.CapabilityCode, cancellationToken);
@@ -111,7 +151,6 @@ public class ModuleDispatcher : IModuleDispatcher
             IntentType.LocationQuery => new CapabilityRequest("LOCATIONS", "READ", intentResult.Parameters),
             IntentType.BusinessHoursQuery => new CapabilityRequest("BUSINESS_HOURS", "READ", intentResult.Parameters),
             IntentType.BusinessProfileQuery => new CapabilityRequest("BUSINESS_PROFILE", "READ", intentResult.Parameters),
-            // 🔥 Auditoría: Handoff y Saludos mapeados a CORE en lugar de módulos comerciales.
             IntentType.GeneralGreeting => new CapabilityRequest("CORE", "GREETING", intentResult.Parameters),
             IntentType.HumanHandoffRequest => new CapabilityRequest("CORE", "TAKEOVER", intentResult.Parameters),
             _ => null

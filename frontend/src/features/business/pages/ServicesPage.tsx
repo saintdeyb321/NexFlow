@@ -1,19 +1,42 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Tag, Trash2 } from 'lucide-react';
-import { saveService, deleteService } from '../services/business.service';
+import { getServices, saveService, deleteService } from '../services/business.service';
 import type { ServiceDto } from '../types/business.types';
 import { ServiceModal } from '../components/ServiceModal';
-import { useCacheStore } from '../../../core/store/useCacheStore';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const ServicesPage = () => {
-  const { services, isServicesLoading, fetchServices, setServices } = useCacheStore();
+  const queryClient = useQueryClient();
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState<ServiceDto | null>(null);
 
-  useEffect(() => {
-    fetchServices(); 
-  }, []);
+  // 🔥 Auditoría (Sprint 5.1): Aislamiento de Servicios (Removido Zustand)
+  const { data: services = [], isLoading: isServicesLoading } = useQuery({
+    queryKey: ['services', workspaceId],
+    queryFn: getServices,
+    enabled: !!workspaceId,
+    staleTime: 1000 * 60 * 10,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: saveService,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['services', workspaceId] });
+      setIsModalOpen(false);
+    },
+    onError: (error: any) => alert(`Error al guardar: ${error.message}`)
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteService,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['services', workspaceId] });
+    },
+    onError: (error: any) => alert(`Error al eliminar: ${error.message}`)
+  });
 
   const handleOpenNew = () => {
     setServiceToEdit(null);
@@ -25,37 +48,13 @@ export const ServicesPage = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (serviceId: string) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar este servicio?')) return;
-    
-    try {
-      await deleteService(serviceId);
-      setServices((services || []).filter(s => s.id !== serviceId));
-    } catch (error: any) {
-      alert(`Error al eliminar: ${error.message}`);
+  const handleDelete = (serviceId: string) => {
+    if (window.confirm('¿Estás seguro de que deseas eliminar este servicio?')) {
+      deleteMutation.mutate(serviceId);
     }
   };
 
-  const handleSaveService = async (service: ServiceDto) => {
-    try {
-      const savedService = await saveService(service);
-      const currentServices = services || [];
-      const exists = currentServices.find(s => s.id === savedService.id);
-      
-      if (exists) {
-        setServices(currentServices.map(s => s.id === savedService.id ? savedService : s));
-      } else {
-        setServices([...currentServices, savedService]);
-      }
-    } catch (error: any) {
-      alert(`Error al guardar: ${error.message}`);
-      throw error; 
-    }
-  };
-
-  if (isServicesLoading && !services) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
-
-  const displayServices = services || [];
+  if (isServicesLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
 
   return (
     <div className="max-w-5xl">
@@ -78,14 +77,14 @@ export const ServicesPage = () => {
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
-          Lista de Servicios ({displayServices.length})
+          Lista de Servicios ({services.length})
         </h3>
         
         <div className="space-y-3">
-          {displayServices.length === 0 ? (
+          {services.length === 0 ? (
             <div className="text-center py-10 text-gray-500">Aún no tienes servicios registrados.</div>
           ) : (
-            displayServices.map((service) => (
+            services.map((service) => (
               <div 
                 key={service.id} 
                 className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all"
@@ -134,7 +133,9 @@ export const ServicesPage = () => {
       <ServiceModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
-        onSave={handleSaveService}
+        onSave={async (service) => {
+          await saveMutation.mutateAsync(service);
+        }}
         initialData={serviceToEdit}
       />
     </div>

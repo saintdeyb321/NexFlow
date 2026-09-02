@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, Trash2 } from 'lucide-react';
 import { getProducts, saveProduct, deleteProduct } from '../services/catalog.service';
 import type { ProductDto } from '../types/catalog.types';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const CatalogPage = () => {
-  const [products, setProducts] = useState<ProductDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+
   const [showModal, setShowModal] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  
   const [newProduct, setNewProduct] = useState<ProductDto>({ 
     name: '', 
     description: '', 
@@ -18,43 +19,40 @@ export const CatalogPage = () => {
     isActive: true 
   });
 
-  useEffect(() => {
-    loadProducts();
-  }, []);
+  // 🔥 Auditoría (Sprint 5.1): Lectura aislada por Workspace
+  const { data: products = [], isLoading } = useQuery({
+    queryKey: ['catalog', workspaceId],
+    queryFn: getProducts,
+    enabled: !!workspaceId,
+    staleTime: 1000 * 60 * 5, // 5 minutos en caché
+  });
 
-  const loadProducts = async () => {
-    try {
-      const data = await getProducts();
-      setProducts(data);
-    } catch (error: any) {
-      console.error("Error al cargar productos", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-    try {
-      await saveProduct(newProduct);
+  const saveMutation = useMutation({
+    mutationFn: saveProduct,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
       setShowModal(false);
       setNewProduct({ name: '', description: '', category: 'General', price: 0, currency: 'PEN', isActive: true });
-      loadProducts();
-    } catch (error: any) {
-      alert(`Error al guardar: ${error.message || 'Error desconocido'}`);
-    } finally {
-      setIsSaving(false);
-    }
+    },
+    onError: (error: any) => alert(`Error al guardar: ${error.message || 'Error desconocido'}`)
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteProduct,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
+    },
+    onError: (error: any) => alert(`Error al eliminar: ${error.message || 'El producto no pudo ser eliminado'}`)
+  });
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveMutation.mutate(newProduct);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar este producto?")) return;
-    try {
-      await deleteProduct(id);
-      setProducts(products.filter(p => p.id !== id));
-    } catch (error: any) {
-      alert(`Error al eliminar: ${error.message || 'El producto no pudo ser eliminado'}`);
+  const handleDelete = (id: string) => {
+    if (window.confirm("¿Eliminar este producto?")) {
+      deleteMutation.mutate(id);
     }
   };
 
@@ -81,7 +79,6 @@ export const CatalogPage = () => {
           </div>
         ) : (
           products.map((prod) => {
-            // 🔥 SOLUCIÓN BLINDADA: Calcula el precio sin importar si el backend manda price o priceMinorUnits
             const displayPrice = (prod as any).priceMinorUnits ? ((prod as any).priceMinorUnits / 100) : (prod.price || 0);
             
             return (
@@ -151,8 +148,8 @@ export const CatalogPage = () => {
               
               <div className="flex justify-end space-x-3 pt-4 border-t">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium">Cancelar</button>
-                <button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium">
-                  {isSaving ? 'Guardando...' : 'Guardar'}
+                <button type="submit" disabled={saveMutation.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium">
+                  {saveMutation.isPending ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </form>

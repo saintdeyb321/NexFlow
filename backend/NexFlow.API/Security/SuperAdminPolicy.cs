@@ -20,7 +20,6 @@ public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, SuperAdminRequirement requirement)
     {
-        // 🔥 CORRECCIÓN: Leemos tanto la llave pura de Firebase como el mapeo automático de ASP.NET Core
         var emailClaim = context.User.FindFirst("email")?.Value
                       ?? context.User.FindFirst(ClaimTypes.Email)?.Value;
 
@@ -29,7 +28,6 @@ public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
         var user = await _userRepository.GetByEmailAsync(emailClaim, System.Threading.CancellationToken.None);
         if (user == null) return;
 
-        // Clean Architecture respetada: La API le pregunta a Application, y Application a Infrastructure
         bool isGod = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, System.Threading.CancellationToken.None);
 
         if (isGod)

@@ -1,11 +1,12 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../core/store/useAuthStore';
+import { useQuery } from '@tanstack/react-query';
+import { getLocations } from '../features/business/services/business.service';
 import { 
   LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
-  ShieldAlert, MessageCircle, Package, ClipboardList 
+  ShieldAlert, MessageCircle, Package, ClipboardList, MapPin 
 } from 'lucide-react';
 
-// 🔥 SPRINT 2 (Auditoría #8): Eliminadas las rutas fantasmas (CUSTOMERS, NOTIFICATIONS)
 const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: React.ElementType }> = {
   'RESERVATIONS': { route: '/reservations', label: 'Reservas', icon: Calendar },
   'CONVERSATIONS': { route: '/inbox', label: 'Mensajes', icon: MessageCircle },
@@ -16,11 +17,20 @@ const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: Reac
 };
 
 export const WorkspaceLayout = () => {
-  const { me, logout } = useAuthStore();
+  const { me, logout, selectedLocationId, setSelectedLocationId } = useAuthStore();
   const { pathname } = useLocation();
 
   const entitlements = me?.entitlements || [];
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
+  const workspaceId = me?.workspace?.id;
+
+  // 🔥 Sprint 5.2: Obtenemos las sedes para el selector global
+  const { data: locations = [] } = useQuery({
+    queryKey: ['locations', workspaceId],
+    queryFn: getLocations,
+    enabled: !!workspaceId,
+    staleTime: 1000 * 60 * 15, // 15 min caché
+  });
 
   const navItemClass = (path: string) => 
     `flex items-center px-4 py-3 mb-1 rounded-lg transition-colors ${
@@ -40,6 +50,24 @@ export const WorkspaceLayout = () => {
           <span className="font-bold text-xl text-blue-600 tracking-tight">NexFlow</span>
         </div>
         
+        {/* 🔥 Sprint 5.2: Selector Global de Sedes */}
+        <div className="p-4 border-b border-gray-100 bg-gray-50/50">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Sede Activa</label>
+          <div className="relative">
+            <MapPin className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+            <select
+              value={selectedLocationId}
+              onChange={(e) => setSelectedLocationId(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm text-gray-700 font-medium"
+            >
+              <option value="all">Todas las sedes</option>
+              {locations.map(loc => (
+                <option key={loc.id} value={loc.id}>{loc.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <nav className="flex-1 p-4 overflow-y-auto">
           <Link to="/" className={navItemClass('/')}>
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard

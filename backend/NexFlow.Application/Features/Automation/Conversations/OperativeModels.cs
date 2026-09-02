@@ -9,7 +9,7 @@ public record ConsumerIdentityRecord
     public string? DisplayName { get; init; }
     public DateTime FirstSeenAt { get; init; }
     public DateTime LastInteractionAt { get; init; }
-    public DateTime ExpiresAt { get; init; } // <-- NUEVO (TTL de 90 días)
+    public DateTime ExpiresAt { get; init; }
 }
 
 public record ConversationRecord
@@ -19,9 +19,13 @@ public record ConversationRecord
     public string Channel { get; init; } = "whatsapp";
     public ConversationMode Mode { get; init; }
     public string Status { get; init; } = "open";
+
+    // 🔥 Sprint 4.1: Motivo del traspaso
+    public HandoffReason HandoffReason { get; init; } = HandoffReason.None;
+
     public DateTime StartedAt { get; init; }
     public DateTime LastMessageAt { get; init; }
-    public DateTime ExpiresAt { get; init; } // <-- NUEVO
+    public DateTime ExpiresAt { get; init; }
 }
 
 public record MessageRecord
@@ -31,6 +35,10 @@ public record MessageRecord
     public SenderType Sender { get; init; }
     public string Content { get; init; } = string.Empty;
     public string? ExternalMessageId { get; init; }
+
+    // 🔥 Sprint 4.1: Estado del mensaje
+    public MessageStatus Status { get; init; } = MessageStatus.Sent;
+
     public DateTime Timestamp { get; init; }
-    public DateTime ExpiresAt { get; init; } // <-- NUEVO
+    public DateTime ExpiresAt { get; init; }
 }

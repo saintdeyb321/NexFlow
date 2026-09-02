@@ -16,6 +16,7 @@ public class BusinessController : ControllerBase
 {
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly IServiceRepository _serviceRepository;
+    private readonly ICatalogRepository _catalogRepository; // 🔥 Añadido
     private readonly IFaqRepository _faqRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
@@ -27,6 +28,7 @@ public class BusinessController : ControllerBase
     public BusinessController(
         IBusinessProfileRepository profileRepository,
         IServiceRepository serviceRepository,
+        ICatalogRepository catalogRepository, // 🔥 Añadido
         IFaqRepository faqRepository,
         ILocationRepository locationRepository,
         IBusinessHoursRepository hoursRepository,
@@ -37,6 +39,7 @@ public class BusinessController : ControllerBase
     {
         _profileRepository = profileRepository;
         _serviceRepository = serviceRepository;
+        _catalogRepository = catalogRepository;
         _faqRepository = faqRepository;
         _locationRepository = locationRepository;
         _hoursRepository = hoursRepository;
@@ -130,15 +133,27 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        // 🔥 SPRINT 4.2: Prevenir sedes huérfanas en los servicios
+        // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Servicios
         var services = await _serviceRepository.GetServicesAsync(WorkspaceId, cancellationToken);
         var affectedServices = services.Where(s => s.AvailableAtLocations != null && s.AvailableAtLocations.Contains(locationId)).ToList();
-
         foreach (var service in affectedServices)
         {
             service.AvailableAtLocations.Remove(locationId);
             await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
         }
+
+        // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Catálogo de Productos
+        var products = await _catalogRepository.GetActiveProductsAsync(WorkspaceId, cancellationToken);
+        var affectedProducts = products.Where(p => p.AvailableAtLocations != null && p.AvailableAtLocations.Contains(locationId)).ToList();
+        foreach (var product in affectedProducts)
+        {
+            product.AvailableAtLocations.Remove(locationId);
+            await _catalogRepository.SaveProductAsync(WorkspaceId, product, cancellationToken); // Ajusta SaveProductAsync según tu repo real
+        }
+
+        // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Horarios Comerciales
+        // Al enviar un arreglo vacío, se limpian los horarios de la sede eliminada.
+        await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, Array.Empty<BusinessHoursDto>(), cancellationToken);
 
         await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
         return NoContent();
@@ -200,7 +215,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
 
-        // 🔥 SPRINT 4.3: Inconsistencia y límite de 20 FAQs
         if (string.IsNullOrEmpty(faq.Id))
         {
             var currentFaqs = await _faqRepository.GetFaqsAsync(WorkspaceId, cancellationToken);

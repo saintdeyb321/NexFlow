@@ -18,7 +18,9 @@ public class EvolutionWebhookController : ControllerBase
         _logger = logger;
     }
 
+    // 🔥 Auditoría (Sprint 1.3): Soportamos tanto la ruta base como el sufijo de eventos por si webhookByEvents=true
     [HttpPost]
+    [HttpPost("messages-upsert")]
     public async Task<IActionResult> ReceiveMessage(
         [FromBody] EvolutionWebhookPayload payload,
         [FromServices] IConfiguration configuration)
@@ -31,13 +33,11 @@ public class EvolutionWebhookController : ControllerBase
             return StatusCode(500, new { Error = "Error interno de servidor." });
         }
 
-        // 🔥 Auditoría aplicada: Solo aceptamos el header personalizado X-NexFlow-Webhook-Key. 
-        // Eliminados QueryString y Body parameters para evitar brechas.
+        // 🔥 Auditoría (Sprint 1.3): Validación estricta y consistente del Header en cualquier entorno.
         var providedWebhookKey = Request.Headers["X-NexFlow-Webhook-Key"].FirstOrDefault()?.Trim();
 
         if (string.IsNullOrEmpty(providedWebhookKey) || !string.Equals(providedWebhookKey, expectedWebhookKey, StringComparison.OrdinalIgnoreCase))
         {
-            // 🔥 Auditoría aplicada: Cero impresión de secretos. Solo metadata[cite: 2].
             _logger.LogWarning("Webhook authentication failed. Instance={Instance}, Event={Event}", payload?.Instance, payload?.Event);
             return Unauthorized(new { Error = "Acceso denegado. Webhook Key inválida o ausente." });
         }
@@ -61,7 +61,6 @@ public class EvolutionWebhookController : ControllerBase
             FromMe: payload.Data.Key.FromMe
         );
 
-        // 🔥 Auditoría aplicada: Encolamos de forma segura usando Channel<T> en lugar del inestable Task.Run[cite: 2].
         await _taskQueue.QueueBackgroundWorkItemAsync(command);
 
         return Ok();
@@ -77,8 +76,6 @@ public class EvolutionWebhookController : ControllerBase
 
         [JsonPropertyName("data")]
         public EvolutionData? Data { get; set; }
-
-        // Propiedad ApiKey eliminada para cerrar superficie de ataque[cite: 2].
     }
 
     public class EvolutionData

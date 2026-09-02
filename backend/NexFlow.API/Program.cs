@@ -1,18 +1,21 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using NexFlow.API.Middleware;
 using NexFlow.API.Security;
 using NexFlow.API.Services;
+using NexFlow.API.Services.BackgroundServices;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.DependencyInjection;
 using NexFlow.Infrastructure.DependencyInjection;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
-using System.Threading.RateLimiting;
+using StackExchange.Redis;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
-using NexFlow.API.Services.BackgroundServices;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -105,11 +108,21 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 8. HEALTH CHECKS
+// 8. HEALTH CHECKS REALES DE INFRAESTRUCTURA
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<NexFlowDbContext>(name: "PostgreSQL", tags: new[] { "db", "data" });
+    .AddCheck<NexFlow.API.Services.RedisHealthCheck>( 
+        "Redis",
+        failureStatus: HealthStatus.Degraded,
+        tags: new[] { "ready", "cache" })
+    .AddCheck("Firestore", () =>
+    {
+        if (string.IsNullOrWhiteSpace(builder.Configuration["Firebase:ProjectId"]))
+        {
+            return HealthCheckResult.Unhealthy("Firebase:ProjectId no configurado.");
+        }
+        return HealthCheckResult.Healthy("Firestore configurado.");
+    }, tags: new[] { "ready", "nosql" });
 
-// 🔥 SPRINT 2.1: Estandarización de Enums a Strings para alinearlo con React
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -121,6 +134,12 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// --- ADVERTENCIAS DE INICIO (STARTUP WARNINGS) ---
+if (string.IsNullOrWhiteSpace(app.Configuration["Firebase:ProjectId"]))
+{
+    app.Logger.LogCritical("⚠️ ADVERTENCIA CRÍTICA: Firebase:ProjectId ausente. Firestore no funcionará.");
+}
+
 // --- PIPELINE DE MIDDLEWARES ---
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -130,20 +149,16 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 
-    using (var scope = app.Services.CreateScope())
-    {
-        var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
-        await context.Database.MigrateAsync();
-        await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
-    }
+    using var scope = app.Services.CreateScope();
+    var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
+    await context.Database.MigrateAsync();
+    await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
 }
 else
 {
-    using (var scope = app.Services.CreateScope())
-    {
-        var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
-        await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
-    }
+    using var scope = app.Services.CreateScope();
+    var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
+    await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
 }
 
 if (!app.Environment.IsDevelopment())
@@ -157,19 +172,43 @@ app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();
 
-app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+// Función formateadora de reporte JSON
+static Task WriteHealthResponse(HttpContext context, HealthReport report)
 {
-    ResponseWriter = async (context, report) =>
+    context.Response.ContentType = "application/json";
+    var response = new
     {
-        context.Response.ContentType = "application/json";
-        var response = new
+        status = report.Status.ToString(),
+        totalDurationMs = report.TotalDuration.TotalMilliseconds,
+        checks = report.Entries.Select(e => new
         {
-            status = report.Status.ToString(),
-            checks = report.Entries.Select(e => new { component = e.Key, status = e.Value.Status.ToString(), description = e.Value.Description }),
-            duration = report.TotalDuration
-        };
-        await context.Response.WriteAsJsonAsync(response);
-    }
+            component = e.Key,
+            status = e.Value.Status.ToString(),
+            description = e.Value.Description,
+            durationMs = e.Value.Duration.TotalMilliseconds
+        })
+    };
+    return context.Response.WriteAsJsonAsync(response);
+}
+
+// Liveness: El proceso está vivo
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false,
+    ResponseWriter = WriteHealthResponse
+});
+
+// Readiness: Los servicios y bases de datos están listos
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = WriteHealthResponse
+});
+
+// Endpoint general por compatibilidad
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = WriteHealthResponse
 });
 
 app.MapControllers();

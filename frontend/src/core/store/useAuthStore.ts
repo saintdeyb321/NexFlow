@@ -11,6 +11,10 @@ interface AuthState {
   isBootstrapping: boolean;
   me: MeResponse | null;
   
+  // 🔥 Sprint 5.2: Estado global para el selector de sedes
+  selectedLocationId: string | 'all';
+  setSelectedLocationId: (id: string | 'all') => void;
+  
   checkSession: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -22,6 +26,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true, 
   isBootstrapping: true,
   me: null,
+  
+  selectedLocationId: 'all',
+  setSelectedLocationId: (id) => set({ selectedLocationId: id }),
 
   checkSession: async () => {
     if (isCheckingSession) return;
@@ -39,7 +46,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       if (!auth.currentUser) {
         setActiveWorkspaceId(null); 
-        set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
+        set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
         isCheckingSession = false;
         return;
       }
@@ -54,7 +61,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       await signOut(auth);
       
       setActiveWorkspaceId(null); 
-      set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
+      set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
       
       if (error instanceof ApiError) {
         if (error.status === 401 || error.status === 403) {
@@ -69,6 +76,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await signOut(auth);
     setActiveWorkspaceId(null); 
-    set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false });
+    set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
   }
 }));

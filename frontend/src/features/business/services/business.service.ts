@@ -16,7 +16,6 @@ export const getServices = async (): Promise<ServiceDto[]> => {
   return data;
 };
 
-// 🔥 CORRECCIÓN: El backend ahora retorna la entidad, la atrapamos.
 export const saveService = async (service: ServiceDto): Promise<ServiceDto> => {
   const { data } = await axiosClient.post<ServiceDto>('/business/services', service);
   return data;
@@ -32,8 +31,15 @@ export const getLocations = async (): Promise<LocationDto[]> => {
   return data;
 };
 
-export const saveLocation = async (location: LocationDto): Promise<void> => {
-  await axiosClient.post('/business/locations', location);
+// 🔥 Auditoría (Sprint 5.3): Ahora retorna el DTO para inyectarlo en caché
+export const saveLocation = async (location: LocationDto): Promise<LocationDto> => {
+  const { data } = await axiosClient.post<LocationDto>('/business/locations', location);
+  return data;
+};
+
+// 🔥 Auditoría (Sprint 5.3): Centralizamos la petición de borrado
+export const deleteLocation = async (locationId: string): Promise<void> => {
+  await axiosClient.delete(`/business/locations/${locationId}`);
 };
 
 // --- HOURS & ONBOARDING ---

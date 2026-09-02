@@ -4,6 +4,7 @@ using NexFlow.Application.Engines.Dispatcher;
 using NexFlow.Application.Engines.Dispatcher.Handlers;
 using NexFlow.Application.Engines.Reservation;
 using NexFlow.Application.Features.Automation.ProcessMessage;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Importación requerida
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Identity.GetMe;
 using NexFlow.Application.Features.Reservations;
@@ -19,7 +20,6 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         // 1. Registrar Servicios de Dominio y Motores
-        // Se mantiene una única declaración de IReservationEngine
         services.AddScoped<IReservationEngine, NexFlow.Application.Engines.Reservation.ReservationEngine>();
         services.AddScoped<IEntitlementService, EntitlementService>();
 
@@ -27,7 +27,13 @@ public static class DependencyInjection
         services.AddScoped<ProvisionClientCommandHandler>();
         services.AddScoped<RenewLicenseCommandHandler>();
         services.AddScoped<SuspendClientCommandHandler>();
+
+        // 🔥 Auditoría (Sprint 2.3): El Orquestador y sus nuevos Microservicios
         services.AddScoped<ProcessIncomingMessageCommandHandler>();
+        services.AddScoped<IIncomingMessageGuard, IncomingMessageGuard>();
+        services.AddScoped<IConversationStateService, ConversationStateService>();
+        services.AddScoped<IAiResponseOrchestrator, AiResponseOrchestrator>();
+
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();
         services.AddScoped<GetMeQueryHandler>();
@@ -39,14 +45,11 @@ public static class DependencyInjection
         // 3. Registrar Handlers del Motor Conversacional (Module Dispatcher)
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
 
-        // Handlers Transaccionales y de Catálogo
         services.AddScoped<IModuleHandler, ReservationModuleHandler>();
         services.AddScoped<IModuleHandler, FaqModuleHandler>();
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();
         services.AddScoped<IModuleHandler, ServiceModuleHandler>();
         services.AddScoped<IModuleHandler, RequestModuleHandler>();
-
-        // 🔥 SPRINT 2.1: Handlers Informativos añadidos
         services.AddScoped<IModuleHandler, BusinessHoursModuleHandler>();
         services.AddScoped<IModuleHandler, BusinessProfileModuleHandler>();
         services.AddScoped<IModuleHandler, LocationModuleHandler>();

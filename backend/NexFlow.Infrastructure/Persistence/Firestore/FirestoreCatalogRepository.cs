@@ -17,7 +17,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToDto);
     }
 
-    // 🔥 Auditoría (Fase 3): Consultas específicas para evitar lectura completa inútil[cite: 2].
+    // 🔥 Auditoría (Sprint 3.2): Optimización para el módulo de lectura de catálogo
     public async Task<IEnumerable<ProductDto>> GetActiveProductsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalog")
@@ -48,7 +48,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
             PriceMinorUnits = product.PriceMinorUnits,
             Currency = product.Currency,
             IsActive = product.IsActive,
-            Metadata = product.Metadata
+            Metadata = product.Metadata,
+            AvailableAtLocations = product.AvailableAtLocations ?? new List<string>() // 🔥 Sprint 3.1
         };
 
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
@@ -72,7 +73,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
             PriceMinorUnits = data.PriceMinorUnits,
             Currency = data.Currency,
             IsActive = data.IsActive,
-            Metadata = data.Metadata ?? new Dictionary<string, object>()
+            Metadata = data.Metadata ?? new Dictionary<string, object>(),
+            AvailableAtLocations = data.AvailableAtLocations ?? new List<string>() // 🔥 Sprint 3.1
         };
     }
 
@@ -86,5 +88,6 @@ public class FirestoreCatalogRepository : ICatalogRepository
         [FirestoreProperty] public string Currency { get; set; } = "PEN";
         [FirestoreProperty] public bool IsActive { get; set; } = true;
         [FirestoreProperty] public Dictionary<string, object> Metadata { get; set; } = new();
+        [FirestoreProperty] public List<string> AvailableAtLocations { get; set; } = new(); // 🔥 Sprint 3.1
     }
 }

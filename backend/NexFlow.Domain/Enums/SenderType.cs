@@ -1,9 +1,14 @@
-﻿namespace NexFlow.Domain.Enums;
+﻿using System;
+using NexFlow.Domain.Enums;
 
-public enum SenderType
-{
-    Consumer = 1,     // El cliente de WhatsApp
-    AI = 2,           // El bot de NexFlow
-    BusinessUser = 3, // El dueño respondiendo desde el Inbox o su propio teléfono
-    System = 4        // Notificaciones automáticas (ej: "Reserva confirmada")
+namespace NexFlow.Domain.Enums
+{   
+    public enum SenderType
+    {
+        Consumer = 1,
+        AI = 2,
+        BusinessUser = 3,
+        System = 4
+    }
 }
+
