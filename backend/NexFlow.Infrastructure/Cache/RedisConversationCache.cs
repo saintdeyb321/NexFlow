@@ -1,7 +1,11 @@
-﻿using Microsoft.Extensions.Logging;
+﻿#nullable enable
+using System;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions.Cache;
 using StackExchange.Redis;
-using System.Text.Json;
 
 namespace NexFlow.Infrastructure.Cache;
 
@@ -28,7 +32,6 @@ public class RedisConversationCache : IConversationCache
         }
         catch (Exception ex)
         {
-            // 🔥 Auditoría (Sprint 1.1): Comportamiento degradado. Falla silenciosamente y permite que el bot responda sin memoria.
             _logger.LogWarning(ex, "Degradación: No se pudo guardar el contexto en Redis para {Phone}.", customerPhone);
         }
     }
@@ -40,14 +43,17 @@ public class RedisConversationCache : IConversationCache
             var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
             var value = await _redisDb.StringGetAsync(key);
 
-            if (!value.HasValue) return null;
+            if (!value.HasValue || string.IsNullOrWhiteSpace(value.ToString()))
+                return null;
 
-            return JsonSerializer.Deserialize<ConversationContextDto>(value.ToString());
+            // 🔥 SPRINT 1.1: El operador "!" asegura al compilador que si fallara, caería en el catch.
+            var context = JsonSerializer.Deserialize<ConversationContextDto>(value.ToString());
+            return context!;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: Redis no disponible. Devolviendo contexto vacío para {Phone}.", customerPhone);
-            return null; // El despachador asumirá una conversación nueva en lugar de lanzar excepción 500.
+            _logger.LogWarning(ex, "Degradación: Redis no disponible o JSON inválido. Devolviendo contexto vacío para {Phone}.", customerPhone);
+            return null; // El despachador asumirá una conversación nueva
         }
     }
 
@@ -73,7 +79,7 @@ public class RedisConversationCache : IConversationCache
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: No se pudo marcar el mensaje {MessageId} en caché.", messageId);
+            _logger.LogWarning(ex, "Degradación: No se pudo marcar el mensaje en caché.");
         }
     }
 
@@ -86,7 +92,7 @@ public class RedisConversationCache : IConversationCache
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: Falla al verificar origen del mensaje. Asumiendo falso para {MessageId}.", messageId);
+            _logger.LogWarning(ex, "Degradación: Falla al verificar origen del mensaje.");
             return false;
         }
     }

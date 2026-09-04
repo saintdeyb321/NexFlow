@@ -6,6 +6,7 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Enums;
+using System.Linq; // Aseguramos el uso de Linq
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -16,7 +17,7 @@ public class BusinessController : ControllerBase
 {
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly IServiceRepository _serviceRepository;
-    private readonly ICatalogRepository _catalogRepository; // 🔥 Añadido
+    private readonly ICatalogRepository _catalogRepository;
     private readonly IFaqRepository _faqRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
@@ -28,7 +29,7 @@ public class BusinessController : ControllerBase
     public BusinessController(
         IBusinessProfileRepository profileRepository,
         IServiceRepository serviceRepository,
-        ICatalogRepository catalogRepository, // 🔥 Añadido
+        ICatalogRepository catalogRepository,
         IFaqRepository faqRepository,
         ILocationRepository locationRepository,
         IBusinessHoursRepository hoursRepository,
@@ -105,6 +106,21 @@ public class BusinessController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        // 🔥 SPRINT 2.3: Validación Estructural de Límite de Sedes
+        var currentLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
+        bool isNewLocation = string.IsNullOrEmpty(location.Id) || !currentLocations.Any(l => l.Id == location.Id);
+
+        if (isNewLocation)
+        {
+            int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
+            if (currentLocations.Count() >= maxLocations)
+            {
+                // Cumplimiento estricto con la auditoría: 403 BusinessRuleViolation
+                return StatusCode(403, new { code = "BusinessRuleViolation", message = $"Has alcanzado el límite máximo de {maxLocations} sede(s) permitido por tu plan actual." });
+            }
+        }
+
         var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
         if (result.IsFailure) return StatusCode(400, new { message = result.Error });
 
@@ -119,6 +135,19 @@ public class BusinessController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        // 🔥 SPRINT 2.3: Prevenir que inyecten un ID falso por PUT para saltarse el límite.
+        var currentLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
+        bool exists = currentLocations.Any(l => l.Id == locationId);
+
+        if (!exists)
+        {
+            int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
+            if (currentLocations.Count() >= maxLocations)
+            {
+                return StatusCode(403, new { code = "BusinessRuleViolation", message = $"Has alcanzado el límite máximo de {maxLocations} sede(s) permitido por tu plan actual." });
+            }
+        }
 
         location = location with { Id = locationId };
 
@@ -148,11 +177,10 @@ public class BusinessController : ControllerBase
         foreach (var product in affectedProducts)
         {
             product.AvailableAtLocations.Remove(locationId);
-            await _catalogRepository.SaveProductAsync(WorkspaceId, product, cancellationToken); // Ajusta SaveProductAsync según tu repo real
+            await _catalogRepository.SaveProductAsync(WorkspaceId, product, cancellationToken);
         }
 
         // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Horarios Comerciales
-        // Al enviar un arreglo vacío, se limpian los horarios de la sede eliminada.
         await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, Array.Empty<BusinessHoursDto>(), cancellationToken);
 
         await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);

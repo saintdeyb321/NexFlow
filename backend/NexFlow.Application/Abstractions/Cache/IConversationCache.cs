@@ -1,4 +1,9 @@
-﻿namespace NexFlow.Application.Abstractions.Cache;
+﻿#nullable enable
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace NexFlow.Application.Abstractions.Cache;
 
 public class ConversationContextDto
 {
@@ -8,6 +13,7 @@ public class ConversationContextDto
     public string? PendingDate { get; set; }
     public string? PendingTime { get; set; }
     public string? PendingAction { get; set; }
+    public string? LocationScope { get; set; }
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
 

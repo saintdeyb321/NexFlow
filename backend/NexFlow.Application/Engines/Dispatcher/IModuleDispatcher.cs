@@ -1,11 +1,7 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
-using NexFlow.Application.Engines.Intent.AI;
+﻿using NexFlow.Application.Engines.Intent.AI;
 
 namespace NexFlow.Application.Engines.Dispatcher;
 
-// 🔥 SPRINT 7: El nuevo contrato estructurado que aniquila las alucinaciones de la IA
 public record ModuleExecutionResult(
     bool Success,
     string ModuleCode,
@@ -17,5 +13,5 @@ public record ModuleExecutionResult(
 
 public interface IModuleDispatcher
 {
-    Task<ModuleExecutionResult> BuildSystemContextAsync(Guid workspaceId, IntentResultDto intentResult, CancellationToken cancellationToken);
+    Task<ModuleExecutionResult> BuildSystemContextAsync(Guid workspaceId, string customerPhone, IntentResultDto intentResult, CancellationToken cancellationToken);
 }

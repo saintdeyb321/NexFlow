@@ -45,6 +45,12 @@ public static class DependencyInjection
         // 3. Registrar Handlers del Motor Conversacional (Module Dispatcher)
         services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
 
+        services.AddScoped<ICapabilityResolver, CapabilityResolver>();
+        services.AddScoped<IContextResolver, ContextResolver>();
+        services.AddScoped<IModuleAuthorizer, ModuleAuthorizer>();
+        services.AddScoped<IModuleExecutor, ModuleExecutor>();
+        services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
+
         services.AddScoped<IModuleHandler, ReservationModuleHandler>();
         services.AddScoped<IModuleHandler, FaqModuleHandler>();
         services.AddScoped<IModuleHandler, CatalogModuleHandler>();

@@ -1,11 +1,9 @@
-﻿using NexFlow.Application.Engines.Dispatcher;
+﻿using NexFlow.Application.Abstractions.Cache;
+using NexFlow.Application.Engines.Dispatcher;
 
 namespace NexFlow.Application.Engines.AI;
 
 public interface IAiRouter
 {
-    Task<string> GenerateResponseAsync(
-        Guid workspaceId,
-        ModuleExecutionResult systemContext,
-        CancellationToken cancellationToken);
+    Task<string> GenerateResponseAsync(Guid workspaceId, ModuleExecutionResult systemContext, ConversationContextDto conversationContext, CancellationToken cancellationToken);
 }

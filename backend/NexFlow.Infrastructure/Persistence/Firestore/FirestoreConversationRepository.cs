@@ -49,7 +49,7 @@ public class FirestoreConversationRepository : IConversationRepository
             {
                 { "id", newConv.Id }, { "consumerPhone", newConv.ConsumerPhone }, { "channel", newConv.Channel },
                 { "mode", newConv.Mode.ToString() }, { "status", newConv.Status },
-                { "handoffReason", newConv.HandoffReason.ToString() }, // 🔥
+                { "handoffReason", newConv.HandoffReason.ToString() },
                 { "startedAt", DateTime.SpecifyKind(newConv.StartedAt, DateTimeKind.Utc) },
                 { "lastMessageAt", DateTime.SpecifyKind(newConv.LastMessageAt, DateTimeKind.Utc) }, { "expiresAt", expiresAt }
             };
@@ -65,7 +65,7 @@ public class FirestoreConversationRepository : IConversationRepository
         {
             { "id", conversation.Id }, { "consumerPhone", conversation.ConsumerPhone }, { "channel", conversation.Channel },
             { "mode", conversation.Mode.ToString() }, { "status", conversation.Status },
-            { "handoffReason", conversation.HandoffReason.ToString() }, // 🔥
+            { "handoffReason", conversation.HandoffReason.ToString() },
             { "startedAt", DateTime.SpecifyKind(conversation.StartedAt, DateTimeKind.Utc) },
             { "lastMessageAt", DateTime.SpecifyKind(conversation.LastMessageAt, DateTimeKind.Utc) }, { "expiresAt", expiresAt }
         };
@@ -84,7 +84,7 @@ public class FirestoreConversationRepository : IConversationRepository
         var data = new Dictionary<string, object>
         {
             { "id", message.Id }, { "direction", message.Direction }, { "sender", message.Sender.ToString() },
-            { "content", message.Content }, { "status", message.Status.ToString() }, // 🔥
+            { "content", message.Content }, { "status", message.Status.ToString() },
             { "timestamp", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) }, { "expiresAt", expiresAt }
         };
         if (!string.IsNullOrEmpty(message.ExternalMessageId)) data["externalMessageId"] = message.ExternalMessageId;
@@ -119,7 +119,7 @@ public class FirestoreConversationRepository : IConversationRepository
                 Direction = d.GetValue<string>("direction"),
                 Sender = Enum.Parse<SenderType>(d.GetValue<string>("sender")),
                 Content = d.GetValue<string>("content"),
-                Status = d.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent, // 🔥
+                Status = d.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent,
                 ExternalMessageId = d.TryGetValue("externalMessageId", out string extId) ? extId : null,
                 Timestamp = d.GetValue<Timestamp>("timestamp").ToDateTime()
             }).Reverse();
@@ -153,9 +153,18 @@ public class FirestoreConversationRepository : IConversationRepository
 
     public async Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 1.3: Limpieza síncrona en Lotes (Bulk Write) para evitar datos huérfanos.
         var convRef = GetCollection(workspaceId).Document(conversationId);
         var messagesSnapshot = await convRef.Collection("messages").GetSnapshotAsync(cancellationToken);
-        foreach (var messageDoc in messagesSnapshot.Documents) await messageDoc.Reference.DeleteAsync(Precondition.None, cancellationToken);
-        await convRef.DeleteAsync(Precondition.None, cancellationToken);
+
+        var batch = _db.StartBatch();
+
+        foreach (var messageDoc in messagesSnapshot.Documents)
+        {
+            batch.Delete(messageDoc.Reference);
+        }
+        batch.Delete(convRef);
+
+        await batch.CommitAsync(cancellationToken);
     }
 }

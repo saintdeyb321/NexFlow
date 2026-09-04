@@ -22,7 +22,10 @@ public class GeminiAiProvider : IAiProvider
         var rawModel = configuration["Gemini:Model"] ?? "gemini-3.6-flash";
         _model = rawModel.Trim().Replace("models/", "");
 
-        var timeout = int.TryParse(configuration["Gemini:TimeoutSeconds"], out var t) ? t : 15;
+        // 🔥 Aumentamos el tiempo de espera del HttpClient a 45s. 
+        // Esto le da tiempo a Gemini para procesar el JSON inyectado por el AiRouter y devolver la traducción.
+        var rawTimeout = configuration["Gemini:TimeoutSeconds"];
+        var timeout = int.TryParse(rawTimeout, out var t) && t > 0 ? t : 45;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
     }
 
@@ -65,7 +68,6 @@ public class GeminiAiProvider : IAiProvider
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-        // 🔥 Auditoría (Sprint 1.2): Política de reintentos con backoff exponencial (1s, 2s, 4s).
         int maxRetries = 3;
         int delayMilliseconds = 1000;
 
@@ -79,7 +81,6 @@ public class GeminiAiProvider : IAiProvider
                 {
                     int statusCode = (int)response.StatusCode;
 
-                    // Si el error es 503 (Unavailable) o 429 (Too Many Requests), aplicamos backoff.
                     if ((statusCode == 503 || statusCode == 429) && i < maxRetries)
                     {
                         _logger.LogWarning("Gemini API saturada (Status {StatusCode}). Reintentando {RetryCount}/{MaxRetries} en {Delay}ms...", statusCode, i + 1, maxRetries, delayMilliseconds);
@@ -88,7 +89,6 @@ public class GeminiAiProvider : IAiProvider
                         continue;
                     }
 
-                    // 🔥 Auditoría (Sprint 1.2): Log seguro sin filtrar la API Key.
                     _logger.LogError("Gemini rejected request. Model={Model}, Status={StatusCode}", _model, statusCode);
                     response.EnsureSuccessStatusCode();
                 }
@@ -108,12 +108,19 @@ public class GeminiAiProvider : IAiProvider
             }
             catch (TaskCanceledException)
             {
-                _logger.LogError("Timeout: Gemini tardó demasiado en responder.");
-                return useJsonMode ? "{}" : "Lo siento, mi cerebro digital está tardando en procesar. ¿Puedes repetirlo?";
+                _logger.LogWarning("Timeout: Gemini tardó más de {TimeoutSeconds} segundos en traducir el JSON a texto.", _httpClient.Timeout.TotalSeconds);
+
+                if (i == maxRetries)
+                {
+                    return useJsonMode ? "{}" : "Lo siento, tuve una demora procesando la información. ¿Me repites tu consulta por favor?";
+                }
+
+                await Task.Delay(delayMilliseconds, cancellationToken);
+                delayMilliseconds *= 2;
             }
             catch (HttpRequestException ex) when (i == maxRetries)
             {
-                _logger.LogError(ex, "Fallo crítico persistente al comunicarse con Gemini después de {MaxRetries} reintentos.", maxRetries);
+                _logger.LogError(ex, "Fallo crítico al comunicarse con Gemini después de {MaxRetries} reintentos.", maxRetries);
                 return useJsonMode ? "{}" : "Tuve un error interno de conexión. Vuelve a intentarlo en unos segundos.";
             }
             catch (Exception ex)

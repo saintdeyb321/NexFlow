@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using System.Text.Json;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Engines.Dispatcher;
 
 namespace NexFlow.Application.Engines.Dispatcher.Handlers;
@@ -19,13 +20,11 @@ public class CatalogModuleHandler : IModuleHandler
     public async Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
         if (request.CapabilityCode != "READ")
-            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Capacidad no soportada por el módulo CATALOG.", false, Array.Empty<string>());
+            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { error = "Capacidad no soportada" }));
 
-        // 🔥 Auditoría (Sprint 3.2): Lectura optimizada usando GetActiveProductsAsync
         var activeProducts = await _catalogRepository.GetActiveProductsAsync(workspaceId, cancellationToken);
         var productsList = activeProducts.ToList();
 
-        // 🔥 Auditoría (Sprint 3.1): Filtrado Multi-Sede
         if (request.Parameters.TryGetValue("locationId", out var locObj) && locObj is string locationId && !string.IsNullOrWhiteSpace(locationId))
         {
             productsList = productsList.Where(p =>
@@ -35,14 +34,13 @@ public class CatalogModuleHandler : IModuleHandler
         }
 
         if (!productsList.Any())
-            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, "Informa cortésmente que actualmente no hay productos disponibles en el catálogo para la sede seleccionada.", false, Array.Empty<string>());
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "empty", message = "No hay productos disponibles" }));
 
-        // 🔥 Auditoría (Sprint 3.2): Búsqueda por relevancia
         var searchTerms = string.Join(" ", request.Parameters.Values)
                                 .ToLowerInvariant()
                                 .Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        if (searchTerms.Any(t => t.Length > 2)) // Ignoramos preposiciones cortas
+        if (searchTerms.Any(t => t.Length > 2))
         {
             var scoredProducts = productsList
                 .Select(p => new
@@ -60,11 +58,10 @@ public class CatalogModuleHandler : IModuleHandler
 
             if (scoredProducts.Any())
             {
-                productsList = scoredProducts.Take(5).ToList(); // Limitamos a los 5 más relevantes
+                productsList = scoredProducts.Take(5).ToList();
             }
         }
 
-        // Mantenemos tu lógica original de fallback a categorías si la lista sigue siendo muy grande
         if (productsList.Count > 10)
         {
             var categories = productsList
@@ -72,18 +69,21 @@ public class CatalogModuleHandler : IModuleHandler
                 .Distinct()
                 .ToList();
 
-            var categoriesText = string.Join(", ", categories);
-            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, $"El catálogo tiene {productsList.Count} productos divididos en estas categorías: {categoriesText}. Pídele amablemente al cliente que especifique qué categoría o tipo de producto busca para darle opciones y precios exactos.", false, Array.Empty<string>());
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new
+            {
+                status = "too_many_results",
+                totalCount = productsList.Count,
+                categories
+            }));
         }
 
-        var productsText = string.Join("\n", productsList.Select(p =>
+        var resultData = productsList.Select(p => new
         {
-            var desc = !string.IsNullOrWhiteSpace(p.Description) ? $" - {p.Description}" : "";
-            return $"- {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m:0.00}{desc}";
-        }));
+            name = p.Name,
+            price = $"{p.Currency} {p.PriceMinorUnits / 100m:0.00}",
+            description = p.Description
+        });
 
-        var responseText = $"Utiliza la siguiente lista de productos y sus precios para responder la duda del cliente. NO ofrezcas productos ni inventes precios que no estén explícitamente en esta lista:\n{productsText}";
-
-        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, responseText, false, Array.Empty<string>());
+        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "success", products = resultData }));
     }
 }

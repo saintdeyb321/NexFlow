@@ -15,7 +15,12 @@ public class EntitlementService : IEntitlementService
     private readonly ICurrentUser _currentUser;
     private readonly ISystemAdministratorRepository _sysAdminRepository;
 
-    private readonly string[] _baseModules = { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS" };
+    // 🔥 SPRINT 4.2: Agregamos SERVICES, CATALOG, FAQ y RESERVATIONS a los módulos base 
+    // para que estén desbloqueados por defecto sin necesidad de sembrarlos en la BD.
+    private readonly string[] _baseModules = {
+        "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS",
+        "SERVICES", "CATALOG", "FAQ", "RESERVATIONS", "REQUESTS"
+    };
 
     public EntitlementService(
         ILicenseRepository licenseRepository,
@@ -40,13 +45,11 @@ public class EntitlementService : IEntitlementService
         _cache.Remove($"entitlement_{workspaceId}");
     }
 
-    // 🔥 Auditoría (Sprint 3.3): Evaluar identidad de plataforma de forma segura
     private async Task<bool> IsSuperAdminAsync(CancellationToken cancellationToken)
     {
         try
         {
             if (_currentUser == null || _currentUser.UserId == Guid.Empty) return false;
-            // Usar una clave de caché corta para no saturar la BD de roles
             return await _cache.GetOrCreateAsync($"is_superadmin_{_currentUser.UserId}", async entry =>
             {
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
@@ -63,12 +66,11 @@ public class EntitlementService : IEntitlementService
     {
         if (workspaceId == Guid.Empty) return new EntitlementSnapshot();
 
-        // 🔥 Auditoría (Sprint 3.3): Uso real de IMemoryCache para evitar cuellos de botella en PostgreSQL
         var cacheKey = $"entitlement_{workspaceId}";
 
         return await _cache.GetOrCreateAsync(cacheKey, async entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15); // TTL de 15 minutos
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
 
             var snapshot = new EntitlementSnapshot();
 
@@ -76,12 +78,23 @@ public class EntitlementService : IEntitlementService
             if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
                 return snapshot;
 
+            // Agregamos todos los módulos base al snapshot inmediatamente
+            foreach (var baseMod in _baseModules)
+            {
+                snapshot.ActiveModuleCodes.Add(baseMod);
+            }
+
             var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
             if (license == null || !license.IsValidAt(_clock.UtcNow))
+            {
+                // Aunque no tenga licencia en BD, permitimos los módulos base (incluyendo Servicios/Reservas)
+                snapshot.IsValid = true;
+                snapshot.MaxLocations = 1; // Default mínimo
                 return snapshot;
+            }
 
             snapshot.IsValid = true;
-            snapshot.MaxLocations = license.MaxLocations;
+            snapshot.MaxLocations = license.MaxLocations > 0 ? license.MaxLocations : 1;
             var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
 
             if (assignedModuleIds.Any())
@@ -96,18 +109,13 @@ public class EntitlementService : IEntitlementService
                 }
             }
 
-            foreach (var baseMod in _baseModules)
-            {
-                snapshot.ActiveModuleCodes.Add(baseMod);
-            }
-
             return snapshot;
         }) ?? new EntitlementSnapshot();
     }
 
     public async Task<bool> IsLicenseValidAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (await IsSuperAdminAsync(cancellationToken)) return true; // 🔥 BYPASS Absoluto
+        if (await IsSuperAdminAsync(cancellationToken)) return true;
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         return snapshot.IsValid;
     }
@@ -130,7 +138,6 @@ public class EntitlementService : IEntitlementService
     {
         if (await IsSuperAdminAsync(cancellationToken))
         {
-            // 🔥 El SuperAdmin asume control de todos los módulos base y comerciales.
             return new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "SERVICES", "CATALOG", "FAQ", "REQUESTS", "RESERVATIONS" };
         }
 
@@ -141,12 +148,14 @@ public class EntitlementService : IEntitlementService
 
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
-        if (await IsSuperAdminAsync(cancellationToken)) return true; // 🔥 BYPASS Absoluto
+        if (await IsSuperAdminAsync(cancellationToken)) return true;
 
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         if (!snapshot.IsValid) return false;
 
         var code = moduleCode.ToUpperInvariant();
+
+        // Si el módulo está en los base (ahora incluye SERVICES, RESERVATIONS, etc), le damos acceso.
         if (_baseModules.Contains(code)) return true;
 
         if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
@@ -159,7 +168,7 @@ public class EntitlementService : IEntitlementService
 
     public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        if (await IsSuperAdminAsync(cancellationToken)) return 9999; // Capacidad ilimitada
+        if (await IsSuperAdminAsync(cancellationToken)) return 9999;
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         return snapshot.MaxLocations;
     }

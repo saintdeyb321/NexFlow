@@ -27,7 +27,10 @@ public enum IntentType
 
     Unknown,
 
-    // 🔥 Auditoría (Sprint 2.1): Distingue cuando Gemini colapsa (503) para aplicar un fallback inteligente 
-    // en lugar de enviar respuestas genéricas o asumir que el cliente habló mal.
+    // 🔥 Auditoría (Sprint 1.2): Implementar salida para ambigüedades 
+    // ("¿cuánto cuesta?") sin colapsar prematuramente en ServiceInformation.
+    Ambiguous,
+
+    // 🔥 Auditoría (Sprint 2.1): Fallback
     ProviderUnavailable
 }

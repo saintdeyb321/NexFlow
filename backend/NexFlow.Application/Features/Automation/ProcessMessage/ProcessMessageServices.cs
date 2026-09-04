@@ -38,11 +38,31 @@ public class IncomingMessageGuard : IIncomingMessageGuard
     public async Task<(bool IsValid, Guid WorkspaceId, string NormalizedPhone)> CheckMessageAsync(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
         var resolvedId = await _instanceResolver.ResolveInstanceAsync(request.InstanceName, cancellationToken);
-        if (resolvedId == null || resolvedId == Guid.Empty) return (false, Guid.Empty, string.Empty);
-        if (!await _processedMessageRepo.TryAcquireLockAsync(resolvedId.Value, request.MessageId, cancellationToken)) return (false, Guid.Empty, string.Empty);
+        if (resolvedId == null || resolvedId == Guid.Empty)
+        {
+            _logger.LogWarning("Incoming message rejected because the instance '{InstanceName}' could not be resolved.", request.InstanceName);
+            return (false, Guid.Empty, string.Empty);
+        }
+
+        if (!await _processedMessageRepo.TryAcquireLockAsync(resolvedId.Value, request.MessageId, cancellationToken))
+        {
+            _logger.LogWarning("Incoming message {MessageId} for workspace {WorkspaceId} was rejected because it is already locked or processed.", request.MessageId, resolvedId.Value);
+            return (false, Guid.Empty, string.Empty);
+        }
+
         var normalizedPhone = NormalizePhone(request.CustomerPhone);
-        if (string.IsNullOrEmpty(normalizedPhone)) return (false, Guid.Empty, string.Empty);
-        if (!await _entitlementService.IsLicenseValidAsync(resolvedId.Value, cancellationToken)) return (false, Guid.Empty, string.Empty);
+        if (string.IsNullOrEmpty(normalizedPhone))
+        {
+            _logger.LogWarning("Incoming message {MessageId} from instance '{InstanceName}' was rejected because the phone was invalid or empty.", request.MessageId, request.InstanceName);
+            return (false, Guid.Empty, string.Empty);
+        }
+
+        if (!await _entitlementService.IsLicenseValidAsync(resolvedId.Value, cancellationToken))
+        {
+            _logger.LogWarning("Incoming message {MessageId} was rejected because the license for workspace {WorkspaceId} is not valid.", request.MessageId, resolvedId.Value);
+            return (false, Guid.Empty, string.Empty);
+        }
+
         return (true, resolvedId.Value, normalizedPhone);
     }
 }
@@ -66,16 +86,34 @@ public class ConversationStateService : IConversationStateService
     {
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
 
+        // 🔥 Sprint 1.1: Si el mensaje proviene del negocio (Dueño escribiendo desde WhatsApp Web)
         if (request.FromMe)
         {
-            if (conversation == null) return (false, null!);
+            if (conversation == null)
+            {
+                _logger.LogDebug("Ignoring outbound message {MessageId} because there is no active conversation for workspace {WorkspaceId} and phone {NormalizedPhone}.", request.MessageId, workspaceId, normalizedPhone);
+                return (false, null!);
+            }
 
+            // Ignoramos los mensajes salientes que la misma IA generó
             bool isAiMessage = await _conversationCache.IsMessageAiGeneratedAsync(workspaceId, request.MessageId, cancellationToken);
-            if (isAiMessage) return (false, conversation);
+            if (isAiMessage)
+            {
+                _logger.LogDebug("Ignoring outbound AI-generated message {MessageId} for workspace {WorkspaceId}.", request.MessageId, workspaceId);
+                return (false, conversation);
+            }
 
+            // Es una intervención humana real. Cambiamos el modo.
             if (conversation.Mode != ConversationMode.Human)
             {
+                _logger.LogInformation("Manual intervention detected for workspace {WorkspaceId} and phone {NormalizedPhone}. Switching conversation {ConversationId} to Human mode.", workspaceId, normalizedPhone, conversation.Id);
                 await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
+
+                // 🔥 Sprint 1.1: Destruimos el contexto en Redis. La IA no debe recordar la transacción pausada.
+                await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
+
+                // Actualizamos la referencia local para evitar inconsistencias en el retorno
+                conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
             }
 
             await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord
@@ -89,6 +127,7 @@ public class ConversationStateService : IConversationStateService
                 Timestamp = DateTime.UtcNow
             }, cancellationToken);
 
+            // NO llamar a la IA
             return (false, conversation);
         }
 
@@ -106,7 +145,9 @@ public class ConversationStateService : IConversationStateService
             Timestamp = DateTime.UtcNow
         }, cancellationToken);
 
-        bool shouldRespond = conversation.Mode != ConversationMode.Human && conversation.Mode != ConversationMode.Paused;
+        // 🔥 Sprint 1.1: Solo la IA responde si el chat es Automático. 
+        bool shouldRespond = conversation.Mode == ConversationMode.Automatic;
+        _logger.LogDebug("Inbound message {MessageId} for workspace {WorkspaceId} processed. AI should respond: {ShouldRespond}.", request.MessageId, workspaceId, shouldRespond);
         return (shouldRespond, conversation);
     }
 }
@@ -130,20 +171,30 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
 
     public async Task RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
     {
-        var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken);
+        // 🔥 Candado Sprint 1.1
+        if (conversation.Mode != ConversationMode.Automatic)
+        {
+            return;
+        }
+
+        var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new NexFlow.Application.Abstractions.Cache.ConversationContextDto();
         var intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, context, cancellationToken);
+
         if (!intentResult.IsConfident()) intentResult = new IntentResultDto(IntentType.Unknown, 0, new());
 
         string finalResponse;
-        if (intentResult.Intent == IntentType.ProviderUnavailable) finalResponse = "Lo siento, mi sistema está experimentando una alta demanda. ¿Podrías intentar enviarme tu solicitud en un par de minutos?";
-        else if (intentResult.Intent == IntentType.GeneralGreeting) finalResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
+        if (intentResult.Intent == IntentType.ProviderUnavailable)
+            finalResponse = "Lo siento, mi sistema está experimentando una alta demanda. ¿Podrías intentar enviarme tu solicitud en un par de minutos?";
+        else if (intentResult.Intent == IntentType.GeneralGreeting)
+            finalResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
         else
         {
-            intentResult.Parameters["phone"] = normalizedPhone;
             intentResult.Parameters["messageId"] = request.MessageId;
-            var systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, intentResult, cancellationToken);
 
-            if(systemContext.RequiresHuman)
+            // 🔥 SPRINT 1.3: Inyectamos normalizedPhone de forma segura directo desde el Core
+            var systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, normalizedPhone, intentResult, cancellationToken);
+
+            if (systemContext.RequiresHuman)
             {
                 await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, HandoffReason.AiEscalation, cancellationToken);
             }
@@ -154,11 +205,11 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
             }
             else
             {
-                finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, cancellationToken);
+                finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, context, cancellationToken);
             }
         }
 
-        var pendingId = Guid.NewGuid().ToString();
+        var pendingId = Guid.NewGuid().ToString(); 
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord
         {
             Id = pendingId,
