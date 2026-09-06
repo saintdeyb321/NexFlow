@@ -1,5 +1,6 @@
 ﻿#nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,6 +29,12 @@ public class ModuleDispatcher : IModuleDispatcher
 
     public async Task<ModuleExecutionResult> BuildSystemContextAsync(Guid workspaceId, string customerPhone, IntentResultDto intentResult, CancellationToken cancellationToken)
     {
+
+        if (intentResult.Parameters != null)
+        {
+            intentResult.Parameters["phone"] = customerPhone;
+        }
+
         // 1. Traducir Intención
         var capabilityRequest = _capabilityResolver.Resolve(intentResult);
 

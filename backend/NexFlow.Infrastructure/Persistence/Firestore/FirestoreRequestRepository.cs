@@ -26,7 +26,7 @@ public class FirestoreRequestRepository : IRequestRepository
             { "ConsumerPhone", request.ConsumerPhone },
             { "Title", request.Title },
             { "Description", request.Description },
-            { "Status", request.Status },
+            { "Status", request.Status.ToString() }, // Se guarda como string para mayor claridad en BD
             { "CreatedAt", request.CreatedAt.ToUniversalTime() },
             { "UpdatedAt", request.UpdatedAt.ToUniversalTime() }
         };
@@ -36,10 +36,9 @@ public class FirestoreRequestRepository : IRequestRepository
 
     public async Task<IEnumerable<RequestRecord>> GetRequestsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 4.3: Paginación y Límite de Memoria (Auditoría #21)
         var snapshot = await GetCollection(workspaceId)
             .OrderByDescending("CreatedAt")
-            .Limit(100) // Protegemos el backend limitando a 100 resultados
+            .Limit(100)
             .GetSnapshotAsync(cancellationToken);
 
         var list = new List<RequestRecord>();
@@ -66,6 +65,39 @@ public class FirestoreRequestRepository : IRequestRepository
             }
         }
         return list;
+    }
+
+    // 🔥 SPRINT 4: Obtener la última solicitud del cliente
+    public async Task<RequestRecord?> GetLatestRequestByPhoneAsync(Guid workspaceId, string phone, CancellationToken cancellationToken)
+    {
+        var snapshot = await GetCollection(workspaceId)
+            .WhereEqualTo("ConsumerPhone", phone)
+            .OrderByDescending("CreatedAt")
+            .Limit(1)
+            .GetSnapshotAsync(cancellationToken);
+
+        var doc = snapshot.Documents.FirstOrDefault();
+
+        if (doc != null && doc.Exists)
+        {
+            var statusString = doc.GetValue<string>("Status");
+            var statusEnum = Enum.TryParse<RequestStatus>(statusString, true, out var parsed)
+                             ? parsed
+                             : RequestStatus.Pending;
+
+            return new RequestRecord
+            {
+                Id = doc.GetValue<string>("Id"),
+                ConsumerPhone = doc.GetValue<string>("ConsumerPhone"),
+                Title = doc.GetValue<string>("Title"),
+                Description = doc.GetValue<string>("Description"),
+                Status = statusEnum,
+                CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
+                UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
+            };
+        }
+
+        return null;
     }
 
     public async Task UpdateRequestStatusAsync(Guid workspaceId, string requestId, string status, CancellationToken cancellationToken)

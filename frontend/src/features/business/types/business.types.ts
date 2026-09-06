@@ -9,31 +9,31 @@ export interface BusinessProfile {
 export interface ServiceDto {
   id: string;
   name: string;
-  description?: string;
-  category?: string;
-  // 🔥 SPRINT 5: Migrado a unidades menores (ej: S/ 10.50 se envía como 1050)
-  priceMinorUnits?: number; 
-  currency?: string;
+  description?: string | null;
+  category?: string | null;
+  // 🔥 SPRINT 20: Tipado numérico estricto (Minor Units)
+  priceMinorUnits: number; 
+  currency: string;
   durationInMinutes: number;
   requiresReservation: boolean;
   isActive: boolean;
-  availableAtLocations?: string[];
+  availableAtLocations?: string[] | null;
 }
 
 export interface FaqDto {
-  id?: string; // Opcional porque C# le hace Guid.NewGuid()
+  id?: string;
   question: string;
   answer: string;
-  category?: string | null; // C# tiene string?
-  isActive?: boolean;
+  category?: string | null;
+  isActive: boolean; // En C# el default es true, pero no es opcional
 }
 
 export interface LocationDto {
   id?: string; 
   name: string;
   address: string;
-  reference?: string;
-  mapUrl?: string;
+  reference?: string | null;
+  mapUrl?: string | null;
   isMain: boolean;
 }
 

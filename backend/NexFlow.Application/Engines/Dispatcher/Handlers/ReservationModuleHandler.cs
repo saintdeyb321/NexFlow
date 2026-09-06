@@ -26,11 +26,36 @@ public class ReservationModuleHandler : IModuleHandler
         var phone = request.Parameters.TryGetValue("phone", out var p) ? p?.ToString() ?? "unknown" : "unknown";
         var context = await _conversationCache.GetContextAsync(workspaceId, phone, cancellationToken) ?? new ConversationContextDto();
 
+        // 🔥 SPRINT 3 (P0): Cancelación Atómica y Real
         if (request.CapabilityCode == "CANCEL")
         {
+            // Limpiamos el contexto en Redis inmediatamente
             context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "cancelled_request", message = "Solicitud recibida. Un asesor lo contactará." }), true);
+
+            // Llamamos al motor para ejecutar la regla de dominio (reservation.Cancel()) y guardar en BD
+            var cancelResult = await _reservationEngine.CancelActiveReservationAsync(workspaceId, phone, cancellationToken);
+
+            if (cancelResult.IsSuccess)
+            {
+                var cancelledRes = cancelResult.Value; // Tu entidad Reservation devuelta por el Result<T>
+
+                // Contrato estricto exigido por la auditoría
+                var successData = new
+                {
+                    status = "cancelled",
+                    reservationId = cancelledRes.Id,
+                    date = cancelledRes.StartTime.ToString("yyyy-MM-dd"),
+                    time = cancelledRes.StartTime.ToString("HH:mm")
+                };
+
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(successData), false, Array.Empty<string>());
+            }
+            else
+            {
+                var errorData = new { status = "NOT_FOUND", message = "No tienes ninguna reserva activa para cancelar en este momento." };
+                return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(errorData), false, Array.Empty<string>());
+            }
         }
 
         // --- PASO 1 y 2: Validar Sede y Servicio ---
@@ -41,21 +66,21 @@ public class ReservationModuleHandler : IModuleHandler
         {
             context.PendingAction = "ASK_LOCATION";
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "location", instruction = "Pídele amablemente al cliente que indique en cuál de las sedes desea realizar su reserva." }), false, new[] { "locationId" });
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "location" }), false, new[] { "locationId" });
         }
 
         if (string.IsNullOrEmpty(targetServiceId))
         {
             context.PendingAction = "ASK_SERVICE";
             await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "service", instruction = "Pregúntale amablemente al cliente qué servicio específico desea reservar." }), false, new[] { "serviceId" });
+            return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "service" }), false, new[] { "serviceId" });
         }
+
         // --- PASO 3: Validar Fecha ---
         DateTime dateToSearch;
         if (request.Parameters.TryGetValue("date", out var dateStr) && dateStr != null && DateTime.TryParse(dateStr.ToString(), out var parsedDate))
         {
-            // 🔥 Auditoría (Sprint 4.1): No permitir reservas en el pasado
-            if (parsedDate.Date < DateTime.UtcNow.AddHours(-5).Date) // Aproximación Zona Horaria
+            if (parsedDate.Date < DateTime.UtcNow.AddHours(-5).Date)
                 return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "invalid_date", message = "No se puede reservar en fechas pasadas" }), false, new[] { "date" });
 
             dateToSearch = parsedDate.Date;
@@ -70,7 +95,7 @@ public class ReservationModuleHandler : IModuleHandler
             var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, targetLocationId, targetServiceId, dateToSearch, cancellationToken);
 
             if (!slots.Any())
-                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "no_availability", date = dateToSearch.ToString("yyyy-MM-dd") }));
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "no_availability", date = dateToSearch.ToString("yyyy-MM-dd") }), false, Array.Empty<string>());
 
             var availableTimes = slots.Select(s => s.StartTime.ToString("HH:mm")).ToList();
             return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "available", date = dateToSearch.ToString("yyyy-MM-dd"), times = availableTimes }), false, new[] { "time" });
@@ -82,47 +107,30 @@ public class ReservationModuleHandler : IModuleHandler
             if (!request.Parameters.TryGetValue("time", out var timeStr) || timeStr == null || !TimeSpan.TryParse(timeStr.ToString(), out var time))
                 return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "time" }), false, new[] { "time" });
 
-            // --- PASO 5: FORZAR CHECK AVAILABILITY ANTES DE PEDIR NOMBRE ---
-            // Esto evita crear la reserva si la hora seleccionada acaba de ser ocupada o no existía.
-            var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, targetLocationId, targetServiceId, dateToSearch, cancellationToken);
-            var isTimeSlotValid = slots.Any(s => s.StartTime.TimeOfDay == time);
-
-            if (!isTimeSlotValid)
+            // --- PASO 5: Pedir Nombre ---
+            if (!request.Parameters.TryGetValue("name", out var customerName) || customerName == null || string.IsNullOrWhiteSpace(customerName.ToString()))
             {
-                // Si la hora es inválida o se acaba de ocupar, retrocedemos al paso de pedir hora.
-                context.PendingAction = "ASK_TIME";
-                await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-
-                var availableTimes = slots.Select(s => s.StartTime.ToString("HH:mm")).ToList();
-                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new
-                {
-                    status = "time_unavailable_or_invalid",
-                    date = dateToSearch.ToString("yyyy-MM-dd"),
-                    requestedTime = timeStr.ToString(),
-                    availableAlternatives = availableTimes
-                }), false, new[] { "time" });
+                // Limpiamos prompts también de las acciones pendientes
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "name" }), false, new[] { "name" });
             }
 
-            // --- PASO 6: Pedir Nombre (Último paso) ---
-            if (!request.Parameters.TryGetValue("name", out var customerName) || customerName == null || string.IsNullOrWhiteSpace(customerName.ToString()))
-                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "missing_parameter", parameter = "name" }), false, new[] { "name" });
-
-            // --- EJECUCIÓN DEL CREATE ---
             var exactDateTime = dateToSearch.Add(time);
+
             var result = await _reservationEngine.CreateReservationAsync(workspaceId, targetLocationId, targetServiceId, phone, customerName.ToString()!, exactDateTime, cancellationToken);
 
             if (result.IsSuccess)
             {
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.PendingAction = null; context.CurrentIntent = null;
                 await _conversationCache.SetContextAsync(workspaceId, phone, context, cancellationToken);
-                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "created", date = exactDateTime.ToString("yyyy-MM-dd HH:mm"), name = customerName.ToString() }));
+                return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "created", date = exactDateTime.ToString("yyyy-MM-dd HH:mm"), name = customerName.ToString() }), false, Array.Empty<string>());
             }
             else
             {
-                return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "conflict", reason = result.Error.Description }));
+
+                return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { status = "conflict", reason = result.Error.Description }), false, new[] { "time" });
             }
         }
 
-        return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { error = "Intención no soportada" }));
+        return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { error = "Intención no soportada" }), false, Array.Empty<string>());
     }
 }

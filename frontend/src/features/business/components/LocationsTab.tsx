@@ -9,6 +9,7 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
+  // 🔥 Restauramos mapUrl en el estado inicial
   const emptyLocation: Partial<LocationDto> = { name: '', address: '', reference: '', mapUrl: '', isMain: false };
   const [newLocation, setNewLocation] = useState<Partial<LocationDto>>(emptyLocation);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -22,34 +23,27 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
 
   const saveMutation = useMutation({
     mutationFn: saveLocation,
-    onSuccess: (savedLoc) => {
-      // 🔥 Auditoría (Sprint 5.3): Inyección directa en caché sin refetch (Cero latencia UI)
-      queryClient.setQueryData(['locations', workspaceId], (oldLocs: LocationDto[] = []) => {
-        const exists = oldLocs.some(l => l.id === savedLoc.id);
-        if (exists) return oldLocs.map(l => l.id === savedLoc.id ? savedLoc : l);
-        return [...oldLocs, savedLoc];
-      });
-
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['locations', workspaceId] });
       showMessage(newLocation.id ? 'Sede actualizada exitosamente' : 'Sede registrada exitosamente', 'success');
       setNewLocation(emptyLocation);
       setIsFormOpen(false);
     },
-    onError: (error: any) => {
-      // 🔥 Auditoría (Sprint 5.3): Uso exacto del código de error enviado por el backend
-      const errorCode = error?.code || 'UNKNOWN_ERROR';
+    onError: (error: Error | Record<string, unknown>) => {
+      const err = error as { code?: string; message?: string };
+      const errorCode = err?.code || 'UNKNOWN_ERROR';
       
       if (errorCode === 'Licensing.LocationsLimitExceeded') {
         showMessage('Has alcanzado el límite máximo de sedes permitidas por tu plan.', 'error');
       } else {
-        showMessage(error?.message || 'Ocurrió un error al guardar la sede.', 'error');
+        showMessage(err?.message || 'Ocurrió un error al guardar la sede.', 'error');
       }
     }
   });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteLocation, // 🔥 Auditoría: Uso del Service, sin axios directo
+    mutationFn: deleteLocation,
     onSuccess: (_, deletedId) => {
-      // 🔥 Inyección directa para remover la sede de la UI al instante
       queryClient.setQueryData(['locations', workspaceId], (oldLocs: LocationDto[] = []) => 
         oldLocs.filter(l => l.id !== deletedId)
       );
@@ -105,18 +99,18 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nombre (Ej: Sucursal Centro) *</label>
-              <input type="text" value={newLocation.name} onChange={e => setNewLocation({...newLocation, name: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
+              <input type="text" value={newLocation.name || ''} onChange={e => setNewLocation({...newLocation, name: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Dirección Exacta *</label>
-              <input type="text" value={newLocation.address} onChange={e => setNewLocation({...newLocation, address: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
+              <input type="text" value={newLocation.address || ''} onChange={e => setNewLocation({...newLocation, address: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Referencia</label>
-              <input type="text" value={newLocation.reference} onChange={e => setNewLocation({...newLocation, reference: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="Ej: Frente al parque central" />
+              <input type="text" value={newLocation.reference || ''} onChange={e => setNewLocation({...newLocation, reference: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="Ej: Frente al parque central" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
@@ -129,7 +123,7 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
 
           {locations.length > 0 && (
             <div className="mb-4 flex items-center">
-               <input type="checkbox" id="isMain" checked={newLocation.isMain} onChange={e => setNewLocation({...newLocation, isMain: e.target.checked})} className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
+               <input type="checkbox" id="isMain" checked={newLocation.isMain || false} onChange={e => setNewLocation({...newLocation, isMain: e.target.checked})} className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
                <label htmlFor="isMain" className="ml-2 text-sm text-gray-700">Definir como mi Sede Principal</label>
             </div>
           )}
@@ -160,6 +154,8 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
                   <div className="mt-2 space-y-1">
                     <p className="text-sm text-gray-600 flex items-start"><MapPin className="w-4 h-4 mr-2 text-gray-400 mt-0.5 shrink-0"/> {loc.address}</p>
                     {loc.reference && <p className="text-sm text-gray-500 flex items-start pl-6"><span className="font-medium mr-1">Ref:</span> {loc.reference}</p>}
+                    
+                    {/* 🔥 RESTAURADO: Visualización del mapa */}
                     {loc.mapUrl && (
                        <a href={loc.mapUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex items-center pl-6 mt-1">
                          <Map className="w-4 h-4 mr-1"/> Ver en Google Maps

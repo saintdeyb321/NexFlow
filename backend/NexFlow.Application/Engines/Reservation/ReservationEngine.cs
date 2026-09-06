@@ -13,7 +13,7 @@ public class ReservationEngine : IReservationEngine
     private readonly IServiceRepository _serviceRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
     private readonly IBusinessProfileRepository _profileRepository;
-    private readonly ILocationRepository _locationRepository; // 🔥 SPRINT 3.1: Repositorio de sedes inyectado
+    private readonly ILocationRepository _locationRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IWorkflowGateway _workflowGateway;
     private readonly ILogger<ReservationEngine> _logger;
@@ -23,7 +23,7 @@ public class ReservationEngine : IReservationEngine
         IServiceRepository serviceRepository,
         IBusinessHoursRepository hoursRepository,
         IBusinessProfileRepository profileRepository,
-        ILocationRepository locationRepository, // 🔥 SPRINT 3.1
+        ILocationRepository locationRepository,
         IUnitOfWork unitOfWork,
         IWorkflowGateway workflowGateway,
         ILogger<ReservationEngine> logger)
@@ -32,7 +32,7 @@ public class ReservationEngine : IReservationEngine
         _serviceRepository = serviceRepository;
         _hoursRepository = hoursRepository;
         _profileRepository = profileRepository;
-        _locationRepository = locationRepository; // 🔥 SPRINT 3.1
+        _locationRepository = locationRepository;
         _unitOfWork = unitOfWork;
         _workflowGateway = workflowGateway;
         _logger = logger;
@@ -80,7 +80,6 @@ public class ReservationEngine : IReservationEngine
         while (currentSlotStartLocal.Add(slotDuration) <= endOfDayLocal)
         {
             var currentSlotEndLocal = currentSlotStartLocal.Add(slotDuration);
-
             var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, workspaceZone);
             var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, workspaceZone);
 
@@ -99,7 +98,6 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 3.1: Validación estricta de existencia de la sede
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (locations == null || !locations.Any(l => l.Id == locationId))
             return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe o no es válida."));
@@ -107,7 +105,6 @@ public class ReservationEngine : IReservationEngine
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         var localDateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified);
 
-        // 🔥 SPRINT 3.1: Validación estricta de horario comercial
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDateTime.DayOfWeek);
 
@@ -139,25 +136,28 @@ public class ReservationEngine : IReservationEngine
         var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes);
         var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes);
 
-        // Validar rangos de apertura y cierre del día
         if (timeOnly < openTime || localEndTime.TimeOfDay > closeTime)
             return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "La hora solicitada está fuera del horario comercial de la sede."));
 
-        using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable }, TransactionScopeAsyncFlowOption.Enabled);
+        // 🔥 SPRINT 15 (P0): Transacción Atómica Serializada para evitar Double-Booking
+        using (var scope = new TransactionScope(TransactionScopeOption.Required,
+            new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) },
+            TransactionScopeAsyncFlowOption.Enabled))
+        {
+            var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, startTimeUtc, endTimeUtc, null, cancellationToken);
+            if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario ya fue tomado por otro cliente."));
 
-        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, startTimeUtc, endTimeUtc, null, cancellationToken);
-        if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario ya está ocupado."));
+            var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTimeUtc, endTimeUtc);
+            _reservationRepository.Add(reservation);
 
-        var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTimeUtc, endTimeUtc);
-        _reservationRepository.Add(reservation);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            scope.Complete();
 
-        scope.Complete();
+            var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
+            _ = TriggerN8nSafeAsync("RESERVATION_CREATED", workspaceId, dto, reservation.Id, cancellationToken);
 
-        var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
-        _ = TriggerN8nSafeAsync("RESERVATION_CREATED", workspaceId, dto, reservation.Id, cancellationToken);
-
-        return Result<ReservationDto>.Success(dto);
+            return Result<ReservationDto>.Success(dto);
+        }
     }
 
     public async Task<Result<ReservationDto>> EditReservationAsync(Guid workspaceId, Guid reservationId, DateTime newDateTime, CancellationToken cancellationToken)
@@ -168,7 +168,6 @@ public class ReservationEngine : IReservationEngine
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         var localDateTime = DateTime.SpecifyKind(newDateTime, DateTimeKind.Unspecified);
 
-        // 🔥 SPRINT 3.1: Validación estricta de horario comercial en edición
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, reservation.LocationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDateTime.DayOfWeek);
 
@@ -182,8 +181,6 @@ public class ReservationEngine : IReservationEngine
         var timeOnly = localDateTime.TimeOfDay;
         var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
-        using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable }, TransactionScopeAsyncFlowOption.Enabled);
-
         var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
         var targetService = services.FirstOrDefault(s => s.Id == reservation.ServiceId);
 
@@ -194,24 +191,29 @@ public class ReservationEngine : IReservationEngine
             return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
 
         if (targetService.DurationInMinutes < 5)
-            return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida para operar una reserva."));
+            return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida."));
 
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(reservation.LocationId))
-            return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual de la reserva."));
+            return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual."));
 
         var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes);
         var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes);
 
         if (timeOnly < openTime || localEndTime.TimeOfDay > closeTime)
-            return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "El nuevo horario solicitado está fuera del horario comercial de la sede."));
+            return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "El nuevo horario solicitado está fuera del horario comercial."));
 
-        var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
-        if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado."));
+        // 🔥 SPRINT 15: Transacción Atómica para Reprogramación
+        using (var scope = new TransactionScope(TransactionScopeOption.Required,
+            new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) },
+            TransactionScopeAsyncFlowOption.Enabled))
+        {
+            var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
+            if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado por otro cliente."));
 
-        reservation.Reschedule(newStartTimeUtc, newEndTimeUtc);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        scope.Complete();
+            reservation.Reschedule(newStartTimeUtc, newEndTimeUtc);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            scope.Complete();
+        }
 
         var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
         _ = TriggerN8nSafeAsync("RESERVATION_RESCHEDULED", workspaceId, dto, reservation.Id, cancellationToken);
@@ -230,6 +232,20 @@ public class ReservationEngine : IReservationEngine
         _ = TriggerN8nSafeAsync("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id, cancellationToken);
 
         return Result.Success();
+    }
+
+    public async Task<Result<Domain.Entities.Reservation>> CancelActiveReservationAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
+    {
+        var reservation = await _reservationRepository.GetActiveReservationByPhoneAsync(workspaceId, customerPhone, cancellationToken);
+        if (reservation == null)
+            return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.NotFound", "No tienes ninguna reserva activa para cancelar en este momento."));
+
+        reservation.Cancel();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _ = TriggerN8nSafeAsync("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id, cancellationToken);
+
+        return Result<Domain.Entities.Reservation>.Success(reservation);
     }
 
     public async Task<Result> CompleteReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)

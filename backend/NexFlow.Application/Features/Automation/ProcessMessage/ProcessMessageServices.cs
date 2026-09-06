@@ -1,4 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Text.RegularExpressions; // 🔥 Requerido para el extractor rápido de hora
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
@@ -13,7 +15,6 @@ using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
-// --- 1. GUARDIA DE ENTRADA ---
 public interface IIncomingMessageGuard { Task<(bool IsValid, Guid WorkspaceId, string NormalizedPhone)> CheckMessageAsync(ProcessIncomingMessageCommand request, CancellationToken cancellationToken); }
 
 public class IncomingMessageGuard : IIncomingMessageGuard
@@ -86,7 +87,6 @@ public class ConversationStateService : IConversationStateService
     {
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
 
-        // 🔥 Sprint 1.1: Si el mensaje proviene del negocio (Dueño escribiendo desde WhatsApp Web)
         if (request.FromMe)
         {
             if (conversation == null)
@@ -95,7 +95,6 @@ public class ConversationStateService : IConversationStateService
                 return (false, null!);
             }
 
-            // Ignoramos los mensajes salientes que la misma IA generó
             bool isAiMessage = await _conversationCache.IsMessageAiGeneratedAsync(workspaceId, request.MessageId, cancellationToken);
             if (isAiMessage)
             {
@@ -103,16 +102,11 @@ public class ConversationStateService : IConversationStateService
                 return (false, conversation);
             }
 
-            // Es una intervención humana real. Cambiamos el modo.
             if (conversation.Mode != ConversationMode.Human)
             {
                 _logger.LogInformation("Manual intervention detected for workspace {WorkspaceId} and phone {NormalizedPhone}. Switching conversation {ConversationId} to Human mode.", workspaceId, normalizedPhone, conversation.Id);
                 await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
-
-                // 🔥 Sprint 1.1: Destruimos el contexto en Redis. La IA no debe recordar la transacción pausada.
                 await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
-
-                // Actualizamos la referencia local para evitar inconsistencias en el retorno
                 conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
             }
 
@@ -127,7 +121,6 @@ public class ConversationStateService : IConversationStateService
                 Timestamp = DateTime.UtcNow
             }, cancellationToken);
 
-            // NO llamar a la IA
             return (false, conversation);
         }
 
@@ -145,7 +138,6 @@ public class ConversationStateService : IConversationStateService
             Timestamp = DateTime.UtcNow
         }, cancellationToken);
 
-        // 🔥 Sprint 1.1: Solo la IA responde si el chat es Automático. 
         bool shouldRespond = conversation.Mode == ConversationMode.Automatic;
         _logger.LogDebug("Inbound message {MessageId} for workspace {WorkspaceId} processed. AI should respond: {ShouldRespond}.", request.MessageId, workspaceId, shouldRespond);
         return (shouldRespond, conversation);
@@ -163,35 +155,60 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IConversationRepository _conversationRepo;
     private readonly IConversationCache _conversationCache;
     private readonly IMessageGateway _messageGateway;
+    private readonly IContextResolver _contextResolver; // 🔥 SPRINT 6: Inyectado
+    private readonly ILogger<AiResponseOrchestrator> _logger;
 
-    public AiResponseOrchestrator(IIntentEngine intentEngine, IModuleDispatcher moduleDispatcher, IAiRouter aiRouter, IConversationRepository conversationRepo, IConversationCache conversationCache, IMessageGateway messageGateway)
+    public AiResponseOrchestrator(
+        IIntentEngine intentEngine,
+        IModuleDispatcher moduleDispatcher,
+        IAiRouter aiRouter,
+        IConversationRepository conversationRepo,
+        IConversationCache conversationCache,
+        IMessageGateway messageGateway,
+        IContextResolver contextResolver,
+        ILogger<AiResponseOrchestrator> logger)
     {
-        _intentEngine = intentEngine; _moduleDispatcher = moduleDispatcher; _aiRouter = aiRouter; _conversationRepo = conversationRepo; _conversationCache = conversationCache; _messageGateway = messageGateway;
+        _intentEngine = intentEngine; _moduleDispatcher = moduleDispatcher; _aiRouter = aiRouter;
+        _conversationRepo = conversationRepo; _conversationCache = conversationCache;
+        _messageGateway = messageGateway; _contextResolver = contextResolver; _logger = logger;
     }
 
     public async Task RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
     {
-        // 🔥 Candado Sprint 1.1
         if (conversation.Mode != ConversationMode.Automatic)
         {
             return;
         }
 
         var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new NexFlow.Application.Abstractions.Cache.ConversationContextDto();
-        var intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, context, cancellationToken);
+
+        IntentResultDto? intentResult = null;
+
+        // 🔥 SPRINT 6 y 7 (P0): PENDING ACTION RESOLVER
+        // Evitamos llamar a Gemini si el usuario solo está respondiendo a una pregunta pendiente
+        if (!string.IsNullOrEmpty(context.PendingAction))
+        {
+            intentResult = await TryResolvePendingActionAsync(workspaceId, request.MessageText, context, cancellationToken);
+        }
+
+        // Si no pudimos resolver la acción pendiente determinísticamente, usamos Gemini
+        if (intentResult == null)
+        {
+            intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, context, cancellationToken);
+        }
 
         if (!intentResult.IsConfident()) intentResult = new IntentResultDto(IntentType.Unknown, 0, new());
 
         string finalResponse;
+
+        // 🔥 SPRINT 12: Prevención de Exposición de Errores
         if (intentResult.Intent == IntentType.ProviderUnavailable)
-            finalResponse = "Lo siento, mi sistema está experimentando una alta demanda. ¿Podrías intentar enviarme tu solicitud en un par de minutos?";
+            finalResponse = "En este momento estoy actualizando mis sistemas. ¿Podrías intentar consultarme en un par de minutos?";
         else if (intentResult.Intent == IntentType.GeneralGreeting)
             finalResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
         else
         {
             intentResult.Parameters["messageId"] = request.MessageId;
-
-            // 🔥 SPRINT 1.3: Inyectamos normalizedPhone de forma segura directo desde el Core
             var systemContext = await _moduleDispatcher.BuildSystemContextAsync(workspaceId, normalizedPhone, intentResult, cancellationToken);
 
             if (systemContext.RequiresHuman)
@@ -201,15 +218,33 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
 
             if (systemContext.ModuleCode == "CORE" || !systemContext.Success)
             {
-                finalResponse = systemContext.Data?.ToString() ?? "Operación no disponible en este momento.";
+                finalResponse = "No pude procesar esa información en este momento. En breve un asesor se pondrá en contacto contigo para ayudarte.";
             }
             else
             {
-                finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, context, cancellationToken);
+                // 🔥 SPRINT 5 (P0): FAST ROUTER - Cero IA para respuestas estructuradas
+                string? deterministicResponse = TryFormatDeterministicResponse(systemContext.ModuleCode, systemContext.Data);
+
+                if (!string.IsNullOrEmpty(deterministicResponse))
+                {
+                    finalResponse = deterministicResponse;
+                }
+                else
+                {
+                    try
+                    {
+                        finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, context, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Fallo crítico en GeminiAiProvider durante orquestación.");
+                        finalResponse = "Tuve una pequeña demora procesando tu solicitud. ¿Podrías repetirla por favor?";
+                    }
+                }
             }
         }
 
-        var pendingId = Guid.NewGuid().ToString(); 
+        var pendingId = Guid.NewGuid().ToString();
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord
         {
             Id = pendingId,
@@ -232,5 +267,154 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
             await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversation.Id, pendingId, MessageStatus.Failed, null, cancellationToken);
             throw;
         }
+    }
+
+    // 🔥 SPRINT 6: Lógica para saltarse a Gemini con Namespace Absoluto para evitar ambigüedad
+    private async Task<IntentResultDto?> TryResolvePendingActionAsync(
+        Guid workspaceId,
+        string userMessage,
+        NexFlow.Application.Abstractions.Cache.ConversationContextDto context,
+        CancellationToken ct)
+    {
+        var msg = userMessage.Trim().ToLowerInvariant();
+
+        // Escape rápido: Si el usuario se arrepiente, cancelamos sin gastar IA
+        if (msg == "cancelar" || msg == "salir" || msg == "detener")
+            return new IntentResultDto(IntentType.CancelReservation, 1.0, new Dictionary<string, string>());
+
+        var currentIntent = Enum.TryParse<IntentType>(context.CurrentIntent, true, out var parsed) ? parsed : IntentType.Unknown;
+        if (currentIntent == IntentType.Unknown) return null;
+
+        var parameters = new Dictionary<string, string>();
+
+        switch (context.PendingAction)
+        {
+            case "ASK_LOCATION":
+                var locId = await _contextResolver.GroundLocationAsync(workspaceId, userMessage, ct);
+                if (locId != null) parameters["locationId"] = locId;
+                break;
+
+            case "ASK_SERVICE":
+                var srvId = await _contextResolver.GroundServiceAsync(workspaceId, userMessage, context.SelectedLocationId, ct);
+                if (srvId != null) parameters["serviceId"] = srvId;
+                break;
+
+            case "ASK_DATE":
+                var date = await _contextResolver.GroundDateAsync(workspaceId, userMessage, ct);
+                if (date != null) parameters["date"] = date;
+                break;
+
+            case "ASK_TIME":
+                var time = ExtractTimeFast(userMessage);
+                if (time != null) parameters["time"] = time;
+                break;
+
+            case "ASK_NAME":
+                if (userMessage.Length > 2) parameters["name"] = userMessage.Trim();
+                break;
+        }
+
+        // Si resolvimos el parámetro pendiente, avanzamos en el flujo instantáneamente
+        if (parameters.Any())
+        {
+            return new IntentResultDto(currentIntent, 1.0, parameters);
+        }
+
+        return null;
+    }
+
+    // 🔥 SPRINT 6: Extracción instantánea de horas
+    private string? ExtractTimeFast(string text)
+    {
+        var match = Regex.Match(text.ToLower(), @"(\d{1,2})(?::(\d{2}))?\s*(am|pm|de la mañana|de la tarde|de la noche)?");
+        if (match.Success)
+        {
+            int hour = int.Parse(match.Groups[1].Value);
+            int min = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0;
+            string period = match.Groups[3].Value;
+
+            if (period.Contains("pm") || period.Contains("tarde") || period.Contains("noche"))
+                if (hour < 12) hour += 12;
+                else if (period.Contains("am") || period.Contains("mañana"))
+                    if (hour == 12) hour = 0;
+
+            return $"{hour:D2}:{min:D2}";
+        }
+        return null;
+    }
+
+    private string? TryFormatDeterministicResponse(string moduleCode, string? jsonData)
+    {
+        if (string.IsNullOrWhiteSpace(jsonData) || jsonData.Trim() == "{}") return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonData);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("status", out var statusProp) && statusProp.GetString() == "missing_parameter")
+            {
+                var paramName = root.TryGetProperty("parameter", out var pProp) ? pProp.GetString() : "";
+                if (paramName == "location") return "¡Claro! Para continuar, ¿me podrías indicar en cuál de nuestras sedes deseas hacer la reserva?";
+                if (paramName == "service") return "¿Qué servicio específico te gustaría reservar?";
+                if (paramName == "date") return "¿Para qué fecha deseas agendar tu turno? (Ej. Mañana, el viernes, 15 de octubre)";
+                if (paramName == "time") return "¿A qué hora te gustaría asistir?";
+                if (paramName == "name") return "Para dejar la reserva a tu nombre, ¿me podrías indicar tu nombre completo?";
+            }
+
+            if (moduleCode == "BUSINESS_HOURS" && root.TryGetProperty("status", out var hoursStatus) && hoursStatus.GetString() == "SUCCESS")
+            {
+                if (root.TryGetProperty("data", out var daysArray))
+                {
+                    var sb = new System.Text.StringBuilder("🕒 *Nuestros horarios de atención son:*\n\n");
+                    foreach (var day in daysArray.EnumerateArray())
+                    {
+                        var dayName = day.GetProperty("day").GetString();
+                        var schedule = day.GetProperty("schedule").GetString();
+                        sb.AppendLine($"• *{dayName}:* {schedule}");
+                    }
+                    return sb.ToString();
+                }
+            }
+
+            if (moduleCode == "REQUESTS" && root.TryGetProperty("status", out var reqStatus))
+            {
+                if (reqStatus.GetString() == "FOUND")
+                {
+                    var reqState = root.GetProperty("requestStatus").GetString();
+                    var title = root.GetProperty("title").GetString();
+                    return $"📄 *Estado de tu trámite*\nTu solicitud de '{title}' se encuentra actualmente en estado: *{reqState}*.";
+                }
+                if (reqStatus.GetString() == "CREATED")
+                {
+                    return "✅ Hemos guardado tu solicitud exitosamente. Un asesor revisará tu caso a la brevedad posible.";
+                }
+            }
+
+            // 🔥 SPRINT 10: Respuesta ultrarrápida (sin IA) para consultas de sedes
+            if (moduleCode == "LOCATIONS" && root.TryGetProperty("status", out var locStatus) && locStatus.GetString() == "success")
+            {
+                if (root.TryGetProperty("locations", out var locArray))
+                {
+                    var sb = new System.Text.StringBuilder("📍 *Nuestras Sedes:*\n\n");
+                    foreach (var loc in locArray.EnumerateArray())
+                    {
+                        var name = loc.GetProperty("name").GetString();
+                        var address = loc.GetProperty("address").GetString();
+                        var mapsUrl = loc.TryGetProperty("mapsUrl", out var mUrl) ? mUrl.GetString() : null;
+
+                        sb.AppendLine($"• *{name}:* {address}");
+                        if (!string.IsNullOrWhiteSpace(mapsUrl)) sb.AppendLine($"  🗺️ Ver mapa: {mapsUrl}");
+                    }
+                    return sb.ToString();
+                }
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        return null;
     }
 }

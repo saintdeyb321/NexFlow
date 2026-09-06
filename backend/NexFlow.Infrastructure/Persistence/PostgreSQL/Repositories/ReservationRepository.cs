@@ -21,6 +21,18 @@ public class ReservationRepository : IReservationRepository
             .FirstOrDefaultAsync(r => r.Id == reservationId && r.WorkspaceId == workspaceId, cancellationToken);
     }
 
+    // 🔥 SPRINT 3: Implementación faltante para cancelar reservas reales
+    public async Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken)
+    {
+        return await _context.Reservations
+            .Where(r => r.WorkspaceId == workspaceId
+                     && r.CustomerIdentifier == customerIdentifier
+                     && r.Status == ReservationStatus.Confirmed // Solo buscamos reservas activas
+                     && r.StartTime >= DateTime.UtcNow) // Que sean para el futuro
+            .OrderBy(r => r.StartTime) // Traemos la más próxima
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime date, CancellationToken cancellationToken)
     {
         // 🔥 CORRECCIÓN (Fallo #9): Calculamos el día exacto en Perú y lo pasamos a UTC

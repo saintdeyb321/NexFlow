@@ -19,13 +19,13 @@ public class GeminiAiProvider : IAiProvider
         _logger = logger;
         _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? throw new ArgumentNullException("Falta la API Key de Gemini");
 
-        var rawModel = configuration["Gemini:Model"] ?? "gemini-3.6-flash";
+        var rawModel = configuration["Gemini:Model"] ?? "gemini-1.5-flash"; // Actualizado al modelo estándar
         _model = rawModel.Trim().Replace("models/", "");
 
-        // 🔥 Aumentamos el tiempo de espera del HttpClient a 45s. 
-        // Esto le da tiempo a Gemini para procesar el JSON inyectado por el AiRouter y devolver la traducción.
+        // 🔥 SPRINT 11 (P0): Timeout bajado a 8 segundos. Si la IA no responde rápido, abortamos.
+        // Las interacciones conversacionales en WhatsApp deben ser inmediatas.
         var rawTimeout = configuration["Gemini:TimeoutSeconds"];
-        var timeout = int.TryParse(rawTimeout, out var t) && t > 0 ? t : 45;
+        var timeout = int.TryParse(rawTimeout, out var t) && t > 0 ? t : 8;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
     }
 
@@ -66,15 +66,19 @@ public class GeminiAiProvider : IAiProvider
             };
         }
 
-        var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        string jsonPayload = JsonSerializer.Serialize(payload);
 
-        int maxRetries = 3;
-        int delayMilliseconds = 1000;
+        int maxRetries = 2; // Bajado a 2 reintentos para no exceder los 15-20 segundos totales
+        int delayMilliseconds = 500; // Backoff base corto
 
         for (int i = 0; i <= maxRetries; i++)
         {
             try
             {
+                // 🔥 SPRINT 11: Se debe instanciar StringContent DENTRO del loop.
+                // HttpContent se "consume" al enviarse; reusarlo en un retry genera una excepción inmediata.
+                using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
                 var response = await _httpClient.PostAsync(url, content, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
@@ -85,12 +89,12 @@ public class GeminiAiProvider : IAiProvider
                     {
                         _logger.LogWarning("Gemini API saturada (Status {StatusCode}). Reintentando {RetryCount}/{MaxRetries} en {Delay}ms...", statusCode, i + 1, maxRetries, delayMilliseconds);
                         await Task.Delay(delayMilliseconds, cancellationToken);
-                        delayMilliseconds *= 2;
+                        delayMilliseconds = 1000; // Backoff fijo corto, no exponencial
                         continue;
                     }
 
                     _logger.LogError("Gemini rejected request. Model={Model}, Status={StatusCode}", _model, statusCode);
-                    response.EnsureSuccessStatusCode();
+                    response.EnsureSuccessStatusCode(); // Lanza excepción para ser capturada abajo
                 }
 
                 var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -104,32 +108,45 @@ public class GeminiAiProvider : IAiProvider
                         return parts[0].GetProperty("text").GetString() ?? string.Empty;
                     }
                 }
-                return useJsonMode ? "{}" : string.Empty;
+
+                // Si la API devolvió HTTP 200 pero sin candidatos, es un fallo semántico del modelo.
+                throw new InvalidOperationException("Respuesta vacía o formato inválido de Gemini.");
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException ex)
             {
-                _logger.LogWarning("Timeout: Gemini tardó más de {TimeoutSeconds} segundos en traducir el JSON a texto.", _httpClient.Timeout.TotalSeconds);
+                // Diferenciamos si el usuario desconectó la llamada (CancellationToken) o si fue un Timeout del HttpClient
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Petición cancelada por el cliente.");
+                    throw; // SPRINT 12: Propagamos hacia el orquestador
+                }
+
+                _logger.LogWarning("Timeout: Gemini tardó más de {TimeoutSeconds} segundos en el intento {Intento}.", _httpClient.Timeout.TotalSeconds, i + 1);
 
                 if (i == maxRetries)
                 {
-                    return useJsonMode ? "{}" : "Lo siento, tuve una demora procesando la información. ¿Me repites tu consulta por favor?";
+                    _logger.LogError(ex, "Timeout agotado tras {MaxRetries} reintentos.", maxRetries);
+                    throw; // SPRINT 12: Propagamos para que el Orquestador devuelva el mensaje amable.
                 }
 
                 await Task.Delay(delayMilliseconds, cancellationToken);
-                delayMilliseconds *= 2;
             }
-            catch (HttpRequestException ex) when (i == maxRetries)
+            catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "Fallo crítico al comunicarse con Gemini después de {MaxRetries} reintentos.", maxRetries);
-                return useJsonMode ? "{}" : "Tuve un error interno de conexión. Vuelve a intentarlo en unos segundos.";
+                if (i == maxRetries)
+                {
+                    _logger.LogError(ex, "Fallo crítico de red al comunicarse con Gemini después de {MaxRetries} reintentos.", maxRetries);
+                    throw; // SPRINT 12
+                }
+                await Task.Delay(delayMilliseconds, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Excepción inesperada en GeminiAiProvider.");
-                return useJsonMode ? "{}" : "Ha ocurrido un fallo inesperado procesando tu mensaje.";
+                _logger.LogError(ex, "Excepción inesperada en GeminiAiProvider en intento {Intento}.", i + 1);
+                throw; // SPRINT 12
             }
         }
 
-        return useJsonMode ? "{}" : string.Empty;
+        throw new Exception("Fallo general en la generación de texto de Gemini.");
     }
 }

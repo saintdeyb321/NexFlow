@@ -29,6 +29,11 @@ public interface IReservationEngine
         Guid reservationId,
         CancellationToken cancellationToken);
 
+    Task<Result<Domain.Entities.Reservation>> CancelActiveReservationAsync(
+        Guid workspaceId, 
+        string customerPhone, 
+        CancellationToken cancellationToken);
+
     Task<Result<ReservationDto>> EditReservationAsync(
         Guid workspaceId, 
         Guid reservationId, 

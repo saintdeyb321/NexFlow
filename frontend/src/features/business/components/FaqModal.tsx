@@ -15,7 +15,8 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
   const [formData, setFormData] = useState<Partial<FaqDto>>({
     question: '',
     answer: '',
-    category: 'General'
+    category: 'General',
+    isActive: true // 🔥 Agregado por defecto
   });
 
   // Cargar datos si estamos en modo edición
@@ -23,7 +24,7 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
     if (initialData) {
       setFormData(initialData);
     } else {
-      setFormData({ question: '', answer: '', category: 'General' });
+      setFormData({ question: '', answer: '', category: 'General', isActive: true });
     }
   }, [initialData, isOpen]);
 
@@ -37,7 +38,8 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
         id: formData.id || crypto.randomUUID(), // El backend respetará el ID si es edición
         question: formData.question,
         answer: formData.answer,
-        category: formData.category || 'General'
+        category: formData.category || 'General',
+        isActive: formData.isActive ?? true // 🔥 SPRINT 20: Requisito estricto del DTO satisfecho
       };
       
       await onSave(faqToSave);

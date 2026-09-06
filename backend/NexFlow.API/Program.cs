@@ -110,10 +110,15 @@ builder.Services.AddCors(options =>
 
 // 8. HEALTH CHECKS REALES DE INFRAESTRUCTURA
 builder.Services.AddHealthChecks()
-    .AddCheck<NexFlow.API.Services.RedisHealthCheck>( 
+    .AddCheck<NexFlow.API.Services.RedisHealthCheck>(
         "Redis",
         failureStatus: HealthStatus.Degraded,
         tags: new[] { "ready", "cache" })
+    // 🔥 CORRECCIÓN P1: HealthCheck para PostgreSQL incluido
+    .AddDbContextCheck<NexFlowDbContext>(
+        "PostgreSQL",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: new[] { "ready", "database" })
     .AddCheck("Firestore", () =>
     {
         if (string.IsNullOrWhiteSpace(builder.Configuration["Firebase:ProjectId"]))
@@ -167,10 +172,12 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowFrontend");
-app.UseRateLimiter();
+
+// 🔥 CORRECCIÓN P0: Orden correcto del pipeline de seguridad
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
 app.UseAuthorization();
+app.UseRateLimiter(); // Ahora el limitador sí puede leer context.User.Identity.IsAuthenticated
 
 // Función formateadora de reporte JSON
 static Task WriteHealthResponse(HttpContext context, HealthReport report)
@@ -212,4 +219,5 @@ app.MapHealthChecks("/health", new HealthCheckOptions
 });
 
 app.MapControllers();
+
 app.Run();

@@ -1,4 +1,4 @@
-﻿using System.Text;
+﻿using System.Text.Json;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Engines.Dispatcher;
 
@@ -15,24 +15,24 @@ public class BusinessHoursModuleHandler : IModuleHandler
 
     public async Task<ModuleExecutionResult> ExecuteCapabilityAsync(Guid workspaceId, CapabilityRequest request, CancellationToken cancellationToken)
     {
-        // 🔥 Auditoría (Sprint 3.1): Leer la sede seleccionada por el Orquestador/Usuario
         string? locationId = null;
         if (request.Parameters.TryGetValue("locationId", out var locObj) && locObj != null)
         {
             locationId = locObj.ToString();
         }
 
-        // Le pasamos el locationId al repositorio en lugar del null que tenías antes
         var hours = await _hoursRepo.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
 
         if (hours == null || !hours.Any())
-            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, "Los horarios comerciales aún no han sido configurados para esta sede.", false, Array.Empty<string>());
+        {
+            // SPRINT 9: Error estandarizado en JSON
+            var errorData = JsonSerializer.Serialize(new { status = "NOT_FOUND", message = "Horarios no configurados." });
+            return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, errorData, false, Array.Empty<string>());
+        }
 
-        // 🔥 Convertimos la data cruda a un texto legible y determinista para evitar alucinaciones
-        var sb = new StringBuilder();
-        sb.AppendLine("Estos son los horarios de atención de la sede:");
-
-        foreach (var day in hours.OrderBy(h => h.DayOfWeek))
+        // 🔥 SPRINT 1 (P0): Lógica corregida.
+        // 🔥 SPRINT 9 y 10 (P0): Eliminamos el StringBuilder/Prompt. Creamos una estructura de datos real.
+        var scheduleList = hours.OrderBy(h => h.DayOfWeek).Select(day =>
         {
             var dayName = day.DayOfWeek switch
             {
@@ -46,18 +46,22 @@ public class BusinessHoursModuleHandler : IModuleHandler
                 _ => "Día Desconocido"
             };
 
-            if (!day.IsClosed)
+            return new
             {
-                sb.AppendLine($"- {dayName}: Cerrado");
-            }
-            else
-            {
-                sb.AppendLine($"- {dayName}: {day.OpenTime} a {day.CloseTime}");
-            }
-        }
+                day = dayName,
+                isClosed = day.IsClosed,
+                // Lógica corregida: Si está cerrado, decimos cerrado. Si no, damos el rango.
+                schedule = day.IsClosed ? "Cerrado" : $"{day.OpenTime} a {day.CloseTime}"
+            };
+        });
 
-        var responseText = $"Responde la consulta del cliente utilizando estrictamente los siguientes horarios. Si el día está marcado como 'Cerrado', indícalo amablemente.\n\n{sb}";
+        // SPRINT 9: El contrato de salida ahora es JSON puro, no texto ni instrucciones.
+        var responseData = JsonSerializer.Serialize(new
+        {
+            status = "SUCCESS",
+            data = scheduleList
+        });
 
-        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, responseText, false, Array.Empty<string>());
+        return new ModuleExecutionResult(true, ModuleCode, request.CapabilityCode, responseData, false, Array.Empty<string>());
     }
 }

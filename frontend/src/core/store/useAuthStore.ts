@@ -74,8 +74,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    await signOut(auth);
-    setActiveWorkspaceId(null); 
-    set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error("Error signing out:", e);
+    } finally {
+      setActiveWorkspaceId(null); 
+      // Si tienes tokens locales, bórralos aquí: localStorage.removeItem('token');
+      set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
+    }
   }
 }));

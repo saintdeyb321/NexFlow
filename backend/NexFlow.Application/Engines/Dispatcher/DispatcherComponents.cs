@@ -1,7 +1,14 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Memory; // 🔥 Requerido para Sprint 13 (Caché)
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Engines.Intent.AI;
+using NexFlow.Application.Features.Business;
 using ConversationContextDto = NexFlow.Application.Abstractions.Cache.ConversationContextDto;
 
 namespace NexFlow.Application.Engines.Dispatcher;
@@ -21,7 +28,7 @@ public class CapabilityResolver : ICapabilityResolver
         IntentType.ServiceInformation => new CapabilityRequest("SERVICES", "READ", intentResult.Parameters),
         IntentType.ProductInformation => new CapabilityRequest("CATALOG", "READ", intentResult.Parameters),
         IntentType.CreateRequest => new CapabilityRequest("REQUESTS", "CREATE", intentResult.Parameters),
-        IntentType.CheckRequestStatus => new CapabilityRequest("REQUESTS", "UPDATE_STATUS", intentResult.Parameters),
+        IntentType.CheckRequestStatus => new CapabilityRequest("REQUESTS", "READ_STATUS", intentResult.Parameters),
         IntentType.FaqQuery => new CapabilityRequest("FAQ", "READ", intentResult.Parameters),
         IntentType.LocationQuery => new CapabilityRequest("LOCATIONS", "READ", intentResult.Parameters),
         IntentType.BusinessHoursQuery => new CapabilityRequest("BUSINESS_HOURS", "READ", intentResult.Parameters),
@@ -32,11 +39,20 @@ public class CapabilityResolver : ICapabilityResolver
     };
 }
 
+// =====================================================================
+// 🔥 SPRINT 6 y 7: INTERFAZ EXTRAÍDA PARA EL PENDING ACTION RESOLVER
+// =====================================================================
+public interface ITextNormalizer
+{
+    Task<string?> GroundLocationAsync(Guid workspaceId, string rawLocationId, CancellationToken ct);
+    Task<string?> GroundServiceAsync(Guid workspaceId, string rawServiceId, string? currentLocationId, CancellationToken ct);
+    Task<string?> GroundDateAsync(Guid workspaceId, string rawDate, CancellationToken ct);
+}
 
-// 2. CONTEXT RESOLVER: Maneja la memoria, fusiones, validación de Sede y GROUNDING
+// 2. CONTEXT RESOLVER: Maneja la memoria, fusiones y reglas de negocio
 public record ContextResolution(ConversationContextDto Context, ModuleExecutionResult? InterceptResult);
 
-public interface IContextResolver
+public interface IContextResolver : ITextNormalizer
 {
     Task<ContextResolution> EvaluateContextAsync(Guid workspaceId, string customerPhone, IntentResultDto intentResult, CapabilityRequest? capability, CancellationToken ct);
     Task SaveContextAsync(Guid workspaceId, string customerPhone, ConversationContextDto context, CancellationToken ct);
@@ -47,18 +63,67 @@ public class ContextResolver : IContextResolver
     private readonly IConversationCache _cache;
     private readonly ILocationRepository _locationRepo;
     private readonly IServiceRepository _serviceRepo;
-    private readonly IBusinessProfileRepository _profileRepo; 
+    private readonly IBusinessProfileRepository _profileRepo;
+    private readonly IMemoryCache _memoryCache; // 🔥 SPRINT 13: Caché L1 inyectado
 
     public ContextResolver(
         IConversationCache cache,
         ILocationRepository locationRepo,
         IServiceRepository serviceRepo,
-        IBusinessProfileRepository profileRepo)
+        IBusinessProfileRepository profileRepo,
+        IMemoryCache memoryCache) // Inyección del Memory Cache
     {
         _cache = cache;
         _locationRepo = locationRepo;
         _serviceRepo = serviceRepo;
         _profileRepo = profileRepo;
+        _memoryCache = memoryCache;
+    }
+
+    // 🔥 SPRINT 13: Métodos con Caché para matar el N+1
+    private async Task<List<LocationDto>> GetCachedLocationsAsync(Guid workspaceId, CancellationToken ct)
+    {
+        var cacheKey = $"workspace:{workspaceId}:locations";
+        if (!_memoryCache.TryGetValue(cacheKey, out List<LocationDto>? locations))
+        {
+            locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+            _memoryCache.Set(cacheKey, locations, TimeSpan.FromMinutes(10));
+        }
+        return locations ?? new List<LocationDto>();
+    }
+
+    private async Task<List<ServiceDto>> GetCachedServicesAsync(Guid workspaceId, CancellationToken ct)
+    {
+        var cacheKey = $"workspace:{workspaceId}:services";
+        if (!_memoryCache.TryGetValue(cacheKey, out List<ServiceDto>? services))
+        {
+            services = (await _serviceRepo.GetActiveServicesAsync(workspaceId, ct)).ToList();
+            _memoryCache.Set(cacheKey, services, TimeSpan.FromMinutes(10));
+        }
+        return services ?? new List<ServiceDto>();
+    }
+
+    // 🔥 SPRINT 14: Lógica Difusa de Levenshtein (Compara similitud de palabras)
+    private static int ComputeLevenshteinDistance(string s, string t)
+    {
+        if (string.IsNullOrEmpty(s)) return string.IsNullOrEmpty(t) ? 0 : t.Length;
+        if (string.IsNullOrEmpty(t)) return s.Length;
+
+        int n = s.Length, m = t.Length;
+        int[,] d = new int[n + 1, m + 1];
+
+        for (int i = 0; i <= n; d[i, 0] = i++) { }
+        for (int j = 0; j <= m; d[0, j] = j++) { }
+
+        for (int i = 1; i <= n; i++)
+        {
+            for (int j = 1; j <= m; j++)
+            {
+                int cost = (t[j - 1] == s[i - 1]) ? 0 : 1;
+                d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
+            }
+        }
+        return d[n, m];
     }
 
     private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
@@ -69,19 +134,15 @@ public class ContextResolver : IContextResolver
         catch { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
     }
 
-    private async Task<string?> GroundDateAsync(Guid workspaceId, string rawDate, CancellationToken ct)
+    public async Task<string?> GroundDateAsync(Guid workspaceId, string rawDate, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rawDate)) return null;
 
         var normalized = rawDate.Trim().ToLowerInvariant();
 
-        // 1. ¿Ya es una fecha en formato YYYY-MM-DD?
         if (DateTime.TryParseExact(normalized, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var exactDate))
-        {
             return exactDate.ToString("yyyy-MM-dd");
-        }
 
-        // 2. Traducción determinista de valores relativos
         var timeZone = await GetWorkspaceTimeZoneAsync(workspaceId, ct);
         var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone).Date;
 
@@ -91,19 +152,17 @@ public class ContextResolver : IContextResolver
 
         if (DateTime.TryParse(normalized, out var parsedDate))
         {
-
             if (parsedDate.Year < localNow.Year) parsedDate = new DateTime(localNow.Year, parsedDate.Month, parsedDate.Day);
             return parsedDate.ToString("yyyy-MM-dd");
         }
 
-        // Si la IA dijo algo ambiguo como "el lunes", obligamos al usuario a ser específico.
         return null;
     }
 
-    private async Task<string?> GroundLocationAsync(Guid workspaceId, string rawLocationId, CancellationToken ct)
+    public async Task<string?> GroundLocationAsync(Guid workspaceId, string rawLocationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rawLocationId)) return null;
-        var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+        var locations = await GetCachedLocationsAsync(workspaceId, ct); // Usamos Caché
 
         var exactMatch = locations.FirstOrDefault(l => l.Id == rawLocationId);
         if (exactMatch != null) return exactMatch.Id;
@@ -115,22 +174,51 @@ public class ContextResolver : IContextResolver
             if (mainLoc != null) return mainLoc.Id;
         }
 
+        // Búsqueda Exacta o Contenida
         var nameMatch = locations.FirstOrDefault(l => l.Name.ToLowerInvariant().Contains(normalizedRaw) || normalizedRaw.Contains(l.Name.ToLowerInvariant()));
         if (nameMatch != null) return nameMatch.Id;
+
+        // 🔥 SPRINT 14: Búsqueda Difusa (Tolerancia a errores tipográficos de hasta 2 letras)
+        var fuzzyMatch = locations
+            .Select(l => new { Loc = l, Dist = ComputeLevenshteinDistance(normalizedRaw, l.Name.ToLowerInvariant()) })
+            .Where(x => x.Dist <= 2 || (x.Dist <= 3 && x.Loc.Name.Length > 8))
+            .OrderBy(x => x.Dist)
+            .FirstOrDefault();
+
+        if (fuzzyMatch != null) return fuzzyMatch.Loc.Id;
 
         return null;
     }
 
-    private async Task<string?> GroundServiceAsync(Guid workspaceId, string rawServiceId, string? currentLocationId, CancellationToken ct)
+    public async Task<string?> GroundServiceAsync(Guid workspaceId, string rawServiceId, string? currentLocationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rawServiceId)) return null;
-        var services = (await _serviceRepo.GetActiveServicesAsync(workspaceId, ct)).ToList();
+        var services = await GetCachedServicesAsync(workspaceId, ct); // Usamos Caché
 
         var exactMatch = services.FirstOrDefault(s => s.Id == rawServiceId);
+        var normalizedRaw = rawServiceId.ToLowerInvariant();
+
         if (exactMatch == null)
         {
-            var normalizedRaw = rawServiceId.ToLowerInvariant();
             exactMatch = services.FirstOrDefault(s => s.Name.ToLowerInvariant().Contains(normalizedRaw) || normalizedRaw.Contains(s.Name.ToLowerInvariant()));
+        }
+
+        // 🔥 SPRINT 14: Búsqueda Difusa en Nombre y Categoría
+        if (exactMatch == null)
+        {
+            var fuzzyMatch = services
+                .Select(s => new
+                {
+                    Srv = s,
+                    Dist = Math.Min(
+                        ComputeLevenshteinDistance(normalizedRaw, s.Name.ToLowerInvariant()),
+                        !string.IsNullOrEmpty(s.Category) ? ComputeLevenshteinDistance(normalizedRaw, s.Category.ToLowerInvariant()) : 999)
+                })
+                .Where(x => x.Dist <= 2 || (x.Dist <= 4 && x.Srv.Name.Length > 10)) // Más tolerancia para nombres largos
+                .OrderBy(x => x.Dist)
+                .FirstOrDefault();
+
+            if (fuzzyMatch != null) exactMatch = fuzzyMatch.Srv;
         }
 
         if (exactMatch != null)
@@ -174,10 +262,7 @@ public class ContextResolver : IContextResolver
                 intentResult.Parameters["locationId"] = groundedLocId;
                 context.SelectedLocationId = groundedLocId;
             }
-            else
-            {
-                intentResult.Parameters.Remove("locationId");
-            }
+            else intentResult.Parameters.Remove("locationId");
         }
         if (!string.IsNullOrEmpty(context.SelectedLocationId) && !intentResult.Parameters.ContainsKey("locationId"))
             intentResult.Parameters["locationId"] = context.SelectedLocationId;
@@ -190,15 +275,11 @@ public class ContextResolver : IContextResolver
                 intentResult.Parameters["serviceId"] = groundedSrvId;
                 context.SelectedServiceId = groundedSrvId;
             }
-            else
-            {
-                intentResult.Parameters.Remove("serviceId");
-            }
+            else intentResult.Parameters.Remove("serviceId");
         }
         if (!string.IsNullOrEmpty(context.SelectedServiceId) && !intentResult.Parameters.ContainsKey("serviceId"))
             intentResult.Parameters["serviceId"] = context.SelectedServiceId;
 
-        // 🔥 SPRINT 4.2: GROUNDING STRICTO DE FECHA
         if (intentResult.Parameters.TryGetValue("date", out var rawDate) && !string.IsNullOrWhiteSpace(rawDate))
         {
             var groundedDate = await GroundDateAsync(workspaceId, rawDate, ct);
@@ -207,11 +288,7 @@ public class ContextResolver : IContextResolver
                 intentResult.Parameters["date"] = groundedDate;
                 context.PendingDate = groundedDate;
             }
-            else
-            {
-                // Si la IA dijo una ambigüedad irremediable, la borramos para obligar a preguntar de nuevo
-                intentResult.Parameters.Remove("date");
-            }
+            else intentResult.Parameters.Remove("date");
         }
         if (!string.IsNullOrEmpty(context.PendingDate) && !intentResult.Parameters.ContainsKey("date"))
             intentResult.Parameters["date"] = context.PendingDate;
@@ -233,10 +310,9 @@ public class ContextResolver : IContextResolver
         bool requiresLocationStrict = capability.ModuleCode == "RESERVATIONS";
         bool locationIsUseful = capability.ModuleCode is "SERVICES" or "CATALOG" or "BUSINESS_HOURS" or "LOCATIONS";
 
-        // 🔥 CORRECCIÓN: Si el módulo EXIGE sede estricta (Reservas), ignoramos si el Scope anterior era "ALL"
         if (string.IsNullOrEmpty(context.SelectedLocationId) && (requiresLocationStrict || context.LocationScope != "ALL"))
         {
-            var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+            var locations = await GetCachedLocationsAsync(workspaceId, ct); // Usamos Caché
             if (locations.Count == 1)
             {
                 context.SelectedLocationId = locations[0].Id;
@@ -250,7 +326,7 @@ public class ContextResolver : IContextResolver
                 if (requiresLocationStrict)
                 {
                     var compactLocs = locations.Select(l => new { id = l.Id, name = l.Name }).ToList();
-                    context.PendingAction = "ASK_LOCATIONID";
+                    context.PendingAction = "ASK_LOCATION";
                     return new ContextResolution(context, new ModuleExecutionResult(true, "SYSTEM", "DISAMBIGUATE_LOCATION", $"El negocio tiene varias sedes. Opciones: {JsonSerializer.Serialize(compactLocs)}. Pregunta amablemente en cuál de estas sedes desea reservar.", false, new[] { "locationId" }));
                 }
                 else if (locationIsUseful)
