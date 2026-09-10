@@ -6,7 +6,7 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Enums;
-using System.Linq; // Aseguramos el uso de Linq
+using System.Linq;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -16,8 +16,7 @@ namespace NexFlow.API.Controllers.Business;
 public class BusinessController : ControllerBase
 {
     private readonly IBusinessProfileRepository _profileRepository;
-    private readonly IServiceRepository _serviceRepository;
-    private readonly ICatalogRepository _catalogRepository;
+    private readonly ICatalogRepository _catalogRepository; // 🔥 SPRINT 3: Reemplaza a IServiceRepository
     private readonly IFaqRepository _faqRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
@@ -28,7 +27,6 @@ public class BusinessController : ControllerBase
 
     public BusinessController(
         IBusinessProfileRepository profileRepository,
-        IServiceRepository serviceRepository,
         ICatalogRepository catalogRepository,
         IFaqRepository faqRepository,
         ILocationRepository locationRepository,
@@ -39,7 +37,6 @@ public class BusinessController : ControllerBase
         IEntitlementService entitlementService)
     {
         _profileRepository = profileRepository;
-        _serviceRepository = serviceRepository;
         _catalogRepository = catalogRepository;
         _faqRepository = faqRepository;
         _locationRepository = locationRepository;
@@ -107,7 +104,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        // 🔥 SPRINT 2.3: Validación Estructural de Límite de Sedes
         var currentLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         bool isNewLocation = string.IsNullOrEmpty(location.Id) || !currentLocations.Any(l => l.Id == location.Id);
 
@@ -116,7 +112,6 @@ public class BusinessController : ControllerBase
             int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
             if (currentLocations.Count() >= maxLocations)
             {
-                // Cumplimiento estricto con la auditoría: 403 BusinessRuleViolation
                 return StatusCode(403, new { code = "BusinessRuleViolation", message = $"Has alcanzado el límite máximo de {maxLocations} sede(s) permitido por tu plan actual." });
             }
         }
@@ -136,7 +131,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        // 🔥 SPRINT 2.3: Prevenir que inyecten un ID falso por PUT para saltarse el límite.
         var currentLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
         bool exists = currentLocations.Any(l => l.Id == locationId);
 
@@ -162,28 +156,19 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Servicios
-        var services = await _serviceRepository.GetServicesAsync(WorkspaceId, cancellationToken);
-        var affectedServices = services.Where(s => s.AvailableAtLocations != null && s.AvailableAtLocations.Contains(locationId)).ToList();
-        foreach (var service in affectedServices)
+        // 🔥 SPRINT 3: Limpieza en Cascada Universal (limpia productos y servicios a la vez)
+        var items = await _catalogRepository.GetActiveItemsAsync(WorkspaceId, cancellationToken);
+        var affectedItems = items.Where(i => i.AvailableAtLocations != null && i.AvailableAtLocations.Contains(locationId)).ToList();
+
+        foreach (var item in affectedItems)
         {
-            service.AvailableAtLocations.Remove(locationId);
-            await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
+            item.AvailableAtLocations.Remove(locationId);
+            await _catalogRepository.SaveItemAsync(WorkspaceId, item, cancellationToken);
         }
 
-        // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Catálogo de Productos
-        var products = await _catalogRepository.GetActiveProductsAsync(WorkspaceId, cancellationToken);
-        var affectedProducts = products.Where(p => p.AvailableAtLocations != null && p.AvailableAtLocations.Contains(locationId)).ToList();
-        foreach (var product in affectedProducts)
-        {
-            product.AvailableAtLocations.Remove(locationId);
-            await _catalogRepository.SaveProductAsync(WorkspaceId, product, cancellationToken);
-        }
-
-        // 🔥 Auditoría (Sprint 3.1): Limpieza en Cascada de Horarios Comerciales
         await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, Array.Empty<BusinessHoursDto>(), cancellationToken);
-
         await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
+
         return NoContent();
     }
 
@@ -201,31 +186,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("BUSINESS_HOURS", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_HOURS no contratado.");
         await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, hours, cancellationToken);
-        return NoContent();
-    }
-
-    // --- SERVICES ---
-    [HttpGet("services")]
-    public async Task<IActionResult> GetServices(CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-        var services = await _serviceRepository.GetServicesAsync(WorkspaceId, cancellationToken);
-        return Ok(services);
-    }
-
-    [HttpPost("services")]
-    public async Task<IActionResult> SaveService([FromBody] ServiceDto service, CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-        var savedService = await _serviceRepository.SaveServiceAsync(WorkspaceId, service, cancellationToken);
-        return Ok(savedService);
-    }
-
-    [HttpDelete("services/{serviceId}")]
-    public async Task<IActionResult> DeleteService(string serviceId, CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-        await _serviceRepository.DeleteServiceAsync(WorkspaceId, serviceId, cancellationToken);
         return NoContent();
     }
 
@@ -261,7 +221,6 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> UpdateFaq(string faqId, [FromBody] FaqDto faq, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
-
         faq.Id = faqId;
         var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
         return Ok(savedFaq);
@@ -272,6 +231,51 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         await _faqRepository.DeleteFaqAsync(WorkspaceId, faqId, cancellationToken);
+        return NoContent();
+    }
+
+    // =======================================================
+    // SERVICES (Módulo Licenciado Separadamente)
+    // =======================================================
+    [HttpGet("services")]
+    public async Task<IActionResult> GetServices(CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
+
+        var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
+        var services = allItems.Where(i => i.Type.ToUpperInvariant() == "SERVICE").ToList();
+
+        return Ok(services);
+    }
+
+    [HttpPost("services")]
+    public async Task<IActionResult> SaveService([FromBody] CatalogItemDto service, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
+
+        // 🔥 ESTRICTO: Obligamos a que sea SERVICE
+        service.Type = "SERVICE";
+        if (string.IsNullOrEmpty(service.Id)) service.Id = Guid.NewGuid().ToString();
+
+        // Si la UI de servicios aún no maneja categorías, le damos una por defecto
+        if (string.IsNullOrEmpty(service.CategoryId)) service.CategoryId = Guid.Empty.ToString();
+
+        await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken);
+        return Ok(service);
+    }
+
+    [HttpDelete("services/{serviceId}")]
+    public async Task<IActionResult> DeleteService(string serviceId, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
+
+        // 🔥 ESTRICTO: Solo borramos si el item es un SERVICIO
+        var item = await _catalogRepository.GetItemByIdAsync(WorkspaceId, serviceId, cancellationToken);
+        if (item != null && item.Type.ToUpperInvariant() == "SERVICE")
+        {
+            await _catalogRepository.DeleteItemAsync(WorkspaceId, serviceId, cancellationToken);
+        }
+
         return NoContent();
     }
 }

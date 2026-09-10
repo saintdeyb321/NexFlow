@@ -1,10 +1,12 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Common;
 using NexFlow.Application.Engines.Dispatcher;
 using NexFlow.Application.Engines.Dispatcher.Handlers;
 using NexFlow.Application.Engines.Reservation;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Importación requerida
+using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Identity.GetMe;
 using NexFlow.Application.Features.Reservations;
@@ -59,6 +61,9 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, BusinessHoursModuleHandler>();
         services.AddScoped<IModuleHandler, BusinessProfileModuleHandler>();
         services.AddScoped<IModuleHandler, LocationModuleHandler>();
+
+        services.AddScoped<ICatalogHashService, CatalogHashService>();
+        services.AddScoped<ICatalogGenerationService, CatalogGenerationService>();
 
         return services;
     }

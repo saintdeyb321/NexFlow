@@ -14,6 +14,7 @@ using NexFlow.Infrastructure.Cache;
 using NexFlow.Infrastructure.Engines.AI;
 using NexFlow.Infrastructure.Engines.Intent;
 using NexFlow.Infrastructure.Gateways;
+using NexFlow.Infrastructure.Gateways.Storage;
 using NexFlow.Infrastructure.Persistence.Firestore;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
@@ -62,6 +63,9 @@ public static class DependencyInjection
             // 🔥 SPRINT 4: Repositorio de Solicitudes
             services.AddScoped<IRequestRepository, FirestoreRequestRepository>();
             services.AddScoped<ITenantCleanupService, FirestoreTenantCleanupService>();
+
+            services.AddScoped<ICatalogArtifactRepository, FirestoreCatalogArtifactRepository>();
+            services.AddScoped<ICatalogGenerationUsageRepository, FirestoreCatalogArtifactRepository>();
         }
 
         // 5. Utilidades y Motores de IA
@@ -74,6 +78,7 @@ public static class DependencyInjection
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();
         services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>();
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
+        services.AddScoped<IFileStorage, CloudinaryFileStorage>();
 
         // 7. Conexión a Redis Resiliente
         var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";

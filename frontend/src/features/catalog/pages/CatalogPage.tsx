@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Package, Plus, Trash2 } from 'lucide-react';
-import { getProducts, saveProduct, deleteProduct } from '../services/catalog.service';
-import type { ProductDto } from '../types/catalog.types';
+import { Package, Plus, Trash2, FolderPlus } from 'lucide-react';
+import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } from '../services/catalog.service';
+import type { CatalogItemDto } from '../types/catalog.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const CatalogPage = () => {
@@ -10,94 +10,87 @@ export const CatalogPage = () => {
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
   const [showModal, setShowModal] = useState(false);
-  const [newProduct, setNewProduct] = useState<ProductDto>({ 
-    name: '', 
-    description: '', 
-    category: 'General',
-    price: 0, 
-    currency: 'PEN',
-    isActive: true 
-  });
+  
+  // Queries
+  const { data: products = [], isLoading } = useQuery({ queryKey: ['catalog', workspaceId], queryFn: getProducts, enabled: !!workspaceId });
+  const { data: categories = [] } = useQuery({ queryKey: ['catalogCategories', workspaceId], queryFn: getCategories, enabled: !!workspaceId });
 
-  // 🔥 Auditoría (Sprint 5.1): Lectura aislada por Workspace
-  const { data: products = [], isLoading } = useQuery({
-    queryKey: ['catalog', workspaceId],
-    queryFn: getProducts,
-    enabled: !!workspaceId,
-    staleTime: 1000 * 60 * 5, // 5 minutos en caché
-  });
+  const [newProduct, setNewProduct] = useState<Partial<CatalogItemDto>>({ name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', isActive: true, type: 'PRODUCT' });
 
+  // Mutations
   const saveMutation = useMutation({
     mutationFn: saveProduct,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
       setShowModal(false);
-      setNewProduct({ name: '', description: '', category: 'General', price: 0, currency: 'PEN', isActive: true });
-    },
-    onError: (error: any) => alert(`Error al guardar: ${error.message || 'Error desconocido'}`)
+      setNewProduct({ name: '', description: '', categoryId: categories[0]?.id || '', priceMinorUnits: 0, currency: 'PEN', isActive: true, type: 'PRODUCT' });
+    }
   });
 
   const deleteMutation = useMutation({
     mutationFn: deleteProduct,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
-    },
-    onError: (error: any) => alert(`Error al eliminar: ${error.message || 'El producto no pudo ser eliminado'}`)
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] })
+  });
+
+  const createCategoryMutation = useMutation({
+    mutationFn: saveCategory,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalogCategories', workspaceId] })
   });
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    saveMutation.mutate(newProduct);
+    if (!newProduct.categoryId) return alert("Debes seleccionar una categoría.");
+    saveMutation.mutate(newProduct as CatalogItemDto);
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm("¿Eliminar este producto?")) {
-      deleteMutation.mutate(id);
+  const handleQuickAddCategory = () => {
+    const catName = window.prompt("Nombre de la nueva categoría (Ej: Bebidas, Postres):");
+    if (catName && catName.trim()) {
+      createCategoryMutation.mutate({ name: catName, isActive: true, displayOrder: 0, description: null });
     }
   };
 
-  if (isLoading) return <div className="animate-pulse p-8 text-center text-gray-500">Cargando catálogo...</div>;
+  if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando catálogo...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2">
+    <div className="max-w-6xl mx-auto animate-in fade-in">
       <div className="mb-6 flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
             <Package className="w-6 h-6 mr-3 text-blue-600" /> Catálogo de Productos
           </h1>
-          <p className="mt-1 text-sm text-gray-500">Administra los productos físicos que la IA ofrecerá a tus clientes.</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
-          <Plus className="w-4 h-4 mr-2" /> Agregar Producto
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handleQuickAddCategory} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200">
+            <FolderPlus className="w-4 h-4 mr-2" /> Categoría
+          </button>
+          <button onClick={() => { setNewProduct({ ...newProduct, categoryId: categories[0]?.id || '' }); setShowModal(true); }} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700">
+            <Plus className="w-4 h-4 mr-2" /> Producto
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.length === 0 ? (
-          <div className="col-span-full p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-xl">
-            Tu catálogo está vacío. Comienza agregando tu primer producto.
-          </div>
+          <div className="col-span-full p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-xl">Tu catálogo está vacío. Comienza agregando una categoría y un producto.</div>
         ) : (
           products.map((prod) => {
-            const displayPrice = (prod as any).priceMinorUnits ? ((prod as any).priceMinorUnits / 100) : (prod.price || 0);
-            
+            const catName = categories.find(c => c.id === prod.categoryId)?.name || 'Sin Categoría';
             return (
-              <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative">
+              <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <h3 className="font-bold text-gray-900 text-lg leading-tight">{prod.name}</h3>
-                    <span className="text-xs text-gray-500">{prod.category}</span>
+                    <h3 className="font-bold text-gray-900 text-lg">{prod.name}</h3>
+                    <span className="text-xs text-gray-500">{catName}</span>
                   </div>
-                  <span className="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-1 rounded-lg">
-                    {prod.currency} {displayPrice.toFixed(2)}
+                  <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded-lg">
+                    {prod.currency} {((prod.priceMinorUnits || 0) / 100).toFixed(2)}
                   </span>
                 </div>
-                <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden text-ellipsis line-clamp-2">{prod.description}</p>
+                <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden line-clamp-2">{prod.description}</p>
                 <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-                  <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>
-                    {prod.isActive ? 'Disponible' : 'Agotado'}
-                  </span>
-                  <button onClick={() => handleDelete(prod.id!)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                  <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>{prod.isActive ? 'Disponible' : 'Agotado'}</span>
+                  <button onClick={() => window.confirm("¿Eliminar?") && deleteMutation.mutate(prod.id!)} className="p-2 text-gray-400 hover:text-red-600">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -108,49 +101,41 @@ export const CatalogPage = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Nuevo Producto</h3>
+            <h3 className="text-xl font-bold mb-4">Nuevo Producto</h3>
             <form onSubmit={handleSave} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Nombre</label>
-                <input type="text" value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                <input type="text" value={newProduct.name || ''} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full border rounded-lg px-3 py-2" required />
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Categoría</label>
-                  <input type="text" placeholder="Ej: Bebidas" value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                  <select value={newProduct.categoryId || ''} onChange={e => setNewProduct({...newProduct, categoryId: e.target.value})} className="w-full border rounded-lg px-3 py-2" required>
+                    <option value="" disabled>Selecciona...</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {categories.length === 0 && <p className="text-xs text-red-500 mt-1">Crea una categoría primero.</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Precio</label>
                   <div className="flex items-center">
-                    <span className="text-gray-500 mr-2 text-sm">{newProduct.currency}</span>
-                    <input 
-                      type="number" 
-                      step="0.10" 
-                      value={(newProduct as any).priceMinorUnits ? (newProduct as any).priceMinorUnits / 100 : (newProduct.price || 0)} 
-                      onChange={e => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setNewProduct({...newProduct, price: val, priceMinorUnits: Math.round(val * 100)} as any);
-                      }} 
-                      className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" 
-                      required 
-                    />
+                    <span className="mr-2 text-gray-500">{newProduct.currency}</span>
+                    <input type="number" step="0.10" value={(newProduct.priceMinorUnits || 0) / 100} onChange={e => setNewProduct({...newProduct, priceMinorUnits: Math.round(parseFloat(e.target.value || '0') * 100)})} className="w-full border rounded-lg px-3 py-2" required />
                   </div>
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-1">Descripción</label>
-                <textarea rows={3} value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required />
+                <textarea rows={2} value={newProduct.description || ''} onChange={e => setNewProduct({...newProduct, description: e.target.value})} className="w-full border rounded-lg px-3 py-2" />
               </div>
               
-              <div className="flex justify-end space-x-3 pt-4 border-t">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium">Cancelar</button>
-                <button type="submit" disabled={saveMutation.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium">
-                  {saveMutation.isPending ? 'Guardando...' : 'Guardar'}
-                </button>
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg">Cancelar</button>
+                <button type="submit" disabled={saveMutation.isPending || categories.length === 0} className="px-4 py-2 bg-blue-600 text-white rounded-lg">Guardar</button>
               </div>
             </form>
           </div>

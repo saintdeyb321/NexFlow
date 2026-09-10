@@ -10,7 +10,7 @@ namespace NexFlow.Application.Engines.Reservation;
 public class ReservationEngine : IReservationEngine
 {
     private readonly IReservationRepository _reservationRepository;
-    private readonly IServiceRepository _serviceRepository;
+    private readonly ICatalogRepository _catalogRepository; // 🔥 SPRINT 3: Reemplazo
     private readonly IBusinessHoursRepository _hoursRepository;
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly ILocationRepository _locationRepository;
@@ -20,7 +20,7 @@ public class ReservationEngine : IReservationEngine
 
     public ReservationEngine(
         IReservationRepository reservationRepository,
-        IServiceRepository serviceRepository,
+        ICatalogRepository catalogRepository,
         IBusinessHoursRepository hoursRepository,
         IBusinessProfileRepository profileRepository,
         ILocationRepository locationRepository,
@@ -29,7 +29,7 @@ public class ReservationEngine : IReservationEngine
         ILogger<ReservationEngine> logger)
     {
         _reservationRepository = reservationRepository;
-        _serviceRepository = serviceRepository;
+        _catalogRepository = catalogRepository;
         _hoursRepository = hoursRepository;
         _profileRepository = profileRepository;
         _locationRepository = locationRepository;
@@ -51,17 +51,18 @@ public class ReservationEngine : IReservationEngine
     {
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
 
-        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == serviceId);
+        // 🔥 SPRINT 3: Validar que exista y que sea de tipo SERVICE
+        var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
+        var targetService = items.FirstOrDefault(s => s.Id == serviceId && s.Type.ToUpperInvariant() == "SERVICE");
 
         if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation ||
             (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId)))
             return new List<TimeSlotDto>();
 
-        if (targetService.DurationInMinutes < 5)
+        if (targetService.DurationInMinutes == null || targetService.DurationInMinutes < 5)
             return new List<TimeSlotDto>();
 
-        var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes);
+        var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes.Value);
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
 
         var localDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
@@ -118,8 +119,9 @@ public class ReservationEngine : IReservationEngine
         var timeOnly = localDateTime.TimeOfDay;
         var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
-        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == serviceId);
+        // 🔥 SPRINT 3
+        var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
+        var targetService = items.FirstOrDefault(s => s.Id == serviceId && s.Type.ToUpperInvariant() == "SERVICE");
 
         if (targetService == null || !targetService.IsActive)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o se encuentra inactivo."));
@@ -127,19 +129,18 @@ public class ReservationEngine : IReservationEngine
         if (!targetService.RequiresReservation)
             return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
 
-        if (targetService.DurationInMinutes < 5)
+        if (targetService.DurationInMinutes == null || targetService.DurationInMinutes < 5)
             return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida para operar una reserva."));
 
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio no se ofrece en la sede seleccionada."));
 
-        var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes);
-        var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes);
+        var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
+        var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes.Value);
 
         if (timeOnly < openTime || localEndTime.TimeOfDay > closeTime)
             return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "La hora solicitada está fuera del horario comercial de la sede."));
 
-        // 🔥 SPRINT 15 (P0): Transacción Atómica Serializada para evitar Double-Booking
         using (var scope = new TransactionScope(TransactionScopeOption.Required,
             new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) },
             TransactionScopeAsyncFlowOption.Enabled))
@@ -181,8 +182,9 @@ public class ReservationEngine : IReservationEngine
         var timeOnly = localDateTime.TimeOfDay;
         var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
-        var services = await _serviceRepository.GetServicesAsync(workspaceId, cancellationToken);
-        var targetService = services.FirstOrDefault(s => s.Id == reservation.ServiceId);
+        // 🔥 SPRINT 3
+        var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
+        var targetService = items.FirstOrDefault(s => s.Id == reservation.ServiceId && s.Type.ToUpperInvariant() == "SERVICE");
 
         if (targetService == null || !targetService.IsActive)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe o se encuentra inactivo."));
@@ -190,19 +192,18 @@ public class ReservationEngine : IReservationEngine
         if (!targetService.RequiresReservation)
             return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
 
-        if (targetService.DurationInMinutes < 5)
+        if (targetService.DurationInMinutes == null || targetService.DurationInMinutes < 5)
             return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida."));
 
         if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(reservation.LocationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual."));
 
-        var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes);
-        var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes);
+        var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
+        var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes.Value);
 
         if (timeOnly < openTime || localEndTime.TimeOfDay > closeTime)
             return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "El nuevo horario solicitado está fuera del horario comercial."));
 
-        // 🔥 SPRINT 15: Transacción Atómica para Reprogramación
         using (var scope = new TransactionScope(TransactionScopeOption.Required,
             new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) },
             TransactionScopeAsyncFlowOption.Enabled))

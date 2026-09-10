@@ -1,9 +1,27 @@
-export interface ProductDto {
+export interface CatalogCategoryDto {
   id?: string;
   name: string;
-  description: string;
-  category: string; // 🔥 NUEVO: Requerido por el backend
-  price: number;
-  currency: string; // 🔥 NUEVO: Requerido por el backend (Ej: 'PEN', 'USD')
+  description?: string | null;
   isActive: boolean;
+  displayOrder: number;
+}
+
+export interface CatalogItemDto {
+  id?: string;
+  categoryId: string;
+  type: 'PRODUCT' | 'SERVICE';
+  name: string;
+  description?: string | null;
+  priceMinorUnits: number;
+  currency: string;
+  isActive: boolean;
+  availableAtLocations?: string[];
+  
+  // Campos exclusivos de Servicios (Nulos para Productos)
+  durationInMinutes?: number | null;
+  requiresReservation?: boolean;
+  
+  // Para el Sprint 7 (Multimedia)
+  imageUrl?: string | null;
+  metadata?: Record<string, unknown>;
 }

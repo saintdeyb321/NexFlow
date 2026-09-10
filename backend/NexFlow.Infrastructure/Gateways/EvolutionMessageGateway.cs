@@ -28,7 +28,6 @@ public class EvolutionMessageGateway : IMessageGateway
         _baseUrl = configuration["Evolution:BaseUrl"]?.TrimEnd('/') ?? throw new ArgumentNullException("Evolution BaseUrl no configurada");
         _apiKey = configuration["Evolution:ApiKey"] ?? string.Empty;
 
-        // 🔥 Auditoría (Sprint 1.3): Reducimos el timeout por defecto a 8 segundos para no bloquear la cola.
         var timeout = int.TryParse(configuration["Evolution:TimeoutSeconds"], out var t) ? t : 8;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
 
@@ -41,18 +40,10 @@ public class EvolutionMessageGateway : IMessageGateway
     public async Task<string> SendTextAsync(Guid workspaceId, string customerIdentifier, string message, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
-
-        if (string.IsNullOrEmpty(instanceName))
-        {
-            _logger.LogError("El workspace {WorkspaceId} intentó enviar un mensaje pero no tiene EvolutionInstanceName configurado.", workspaceId);
-            throw new InvalidOperationException($"El workspace {workspaceId} no tiene una conexión de WhatsApp asignada.");
-        }
+        if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
 
         var url = $"{_baseUrl}/message/sendText/{instanceName}";
-
-        var safeMessage = string.IsNullOrWhiteSpace(message)
-            ? "Lo siento, tuve un pequeño problema procesando la respuesta. ¿Puedes repetir?"
-            : message;
+        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Lo siento, tuve un pequeño problema. ¿Puedes repetir?" : message;
 
         var payload = new
         {
@@ -61,6 +52,36 @@ public class EvolutionMessageGateway : IMessageGateway
             options = new { delay = 1200, presence = "composing" }
         };
 
+        return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
+    }
+
+    // 🔥 SPRINT 9: Nueva capacidad para enviar PDFs nativos por WhatsApp
+    public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, CancellationToken cancellationToken)
+    {
+        var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
+
+        // Evolution API usa sendMedia para enviar URLs directamente como documentos/imágenes
+        var url = $"{_baseUrl}/message/sendMedia/{instanceName}";
+
+        var payload = new
+        {
+            number = customerIdentifier,
+            options = new { delay = 2000, presence = "composing" },
+            mediaMessage = new
+            {
+                mediatype = "document",
+                fileName = fileName,
+                caption = caption,
+                media = documentUrl // Evolution se encarga de descargar el PDF y enviarlo
+            }
+        };
+
+        return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
+    }
+
+    private async Task<string> ExecutePostAsync(string url, object payload, Guid workspaceId, string instanceName, string customerIdentifier, CancellationToken cancellationToken)
+    {
         try
         {
             var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
@@ -68,16 +89,7 @@ public class EvolutionMessageGateway : IMessageGateway
             if (!response.IsSuccessStatusCode)
             {
                 var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
-
-                _logger.LogError(
-                    "Evolution rejected outbound message. Workspace={WorkspaceId}, Instance={InstanceName}, Status={StatusCode}",
-                    workspaceId,
-                    instanceName,
-                    response.StatusCode);
-
-                _logger.LogDebug("Detalle completo del error: {ErrorDetails}", errorDetails);
-
-                // 🔥 Auditoría (Sprint 1.3): Evitamos EnsureSuccessStatusCode para no crashear. Retornamos estado Failed.
+                _logger.LogError("Evolution rejected message. Status={StatusCode}, Error={ErrorDetails}", response.StatusCode, errorDetails);
                 return $"FAILED_{(int)response.StatusCode}_{Guid.NewGuid()}";
             }
 
@@ -91,14 +103,12 @@ public class EvolutionMessageGateway : IMessageGateway
         }
         catch (TaskCanceledException)
         {
-            // 🔥 Auditoría (Sprint 1.3): Timeout controlado. No usamos throw para proteger al background worker.
-            _logger.LogWarning("Timeout: Evolution API no respondió a tiempo al enviar a {Customer}. Estado: Failed.", customerIdentifier);
+            _logger.LogWarning("Timeout: Evolution API no respondió a tiempo. Cliente: {Customer}", customerIdentifier);
             return $"FAILED_TIMEOUT_{Guid.NewGuid()}";
         }
         catch (Exception ex)
         {
-            // 🔥 Auditoría (Sprint 1.3): Fallo atrapado.
-            _logger.LogError(ex, "Fallo crítico en conexión a Evolution. Workspace: {WorkspaceId}, Instancia: {InstanceName}", workspaceId, instanceName);
+            _logger.LogError(ex, "Fallo crítico en conexión a Evolution.");
             return $"FAILED_ERROR_{Guid.NewGuid()}";
         }
     }

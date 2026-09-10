@@ -1,5 +1,5 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { BusinessHoursDto, BusinessProfile, LocationDto, ServiceDto } from '../types/business.types';
+import type { BusinessHoursDto, BusinessProfile, LocationDto, ServiceDto, CatalogCategoryDto } from '../types/business.types';
 
 export const getBusinessProfile = async (): Promise<BusinessProfile> => {
   const { data } = await axiosClient.get<BusinessProfile>('/business/profile');
@@ -8,6 +8,12 @@ export const getBusinessProfile = async (): Promise<BusinessProfile> => {
 
 export const updateBusinessProfile = async (profile: BusinessProfile): Promise<void> => {
   await axiosClient.put('/business/profile', profile);
+};
+
+// 🔥 NUEVO: Para que el ServiceModal liste las categorías
+export const getCategories = async (): Promise<CatalogCategoryDto[]> => {
+  const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories');
+  return data;
 };
 
 // --- SERVICES ---
@@ -31,13 +37,11 @@ export const getLocations = async (): Promise<LocationDto[]> => {
   return data;
 };
 
-// 🔥 Auditoría (Sprint 5.3): Ahora retorna el DTO para inyectarlo en caché
 export const saveLocation = async (location: LocationDto): Promise<LocationDto> => {
   const { data } = await axiosClient.post<LocationDto>('/business/locations', location);
   return data;
 };
 
-// 🔥 Auditoría (Sprint 5.3): Centralizamos la petición de borrado
 export const deleteLocation = async (locationId: string): Promise<void> => {
   await axiosClient.delete(`/business/locations/${locationId}`);
 };

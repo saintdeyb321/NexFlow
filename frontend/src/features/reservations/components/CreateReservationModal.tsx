@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createReservation } from '../services/reservation.service';
-import type { LocationDto } from '../../business/types/business.types';
-import type { ServiceDto } from '../../business/types/business.types';
+import type { LocationDto, ServiceDto } from '../../business/types/business.types';
 
 interface CreateReservationModalProps {
   isOpen: boolean;
@@ -24,13 +23,12 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
     time: '10:00'
   });
 
-  // 🔥 SOLUCIÓN: Efecto que sincroniza los selects cuando abres el modal
   useEffect(() => {
     if (isOpen) {
       setFormData({
-        // Busca la sede principal, si no hay, agarra la primera. Si no hay sedes, lo deja vacío.
         locationId: locations.length > 0 ? (locations.find(l => l.isMain)?.id || locations[0].id || '') : '',
-        serviceId: services.length > 0 ? services[0].id : '',
+        // 🔥 FIX: Garantizamos que sea string agregando el || ''
+        serviceId: services.length > 0 ? (services[0].id || '') : '', 
         customerName: '',
         customerIdentifier: '',
         date: new Date().toISOString().split('T')[0],
@@ -44,7 +42,6 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Verificación de seguridad
     if (!formData.locationId || !formData.serviceId || !formData.customerIdentifier || !formData.customerName) {
       alert("Por favor, selecciona una sede, un servicio y completa los datos del cliente.");
       return;

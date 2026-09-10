@@ -6,18 +6,27 @@ export interface BusinessProfile {
   description: string;
 }
 
-export interface ServiceDto {
-  id: string;
+export interface CatalogCategoryDto {
+  id?: string;
   name: string;
   description?: string | null;
-  category?: string | null;
-  // 🔥 SPRINT 20: Tipado numérico estricto (Minor Units)
-  priceMinorUnits: number; 
+  isActive: boolean;
+  displayOrder: number;
+}
+
+export interface ServiceDto {
+  id?: string;
+  categoryId: string; // 🔥 NUEVO
+  type: 'SERVICE';    // 🔥 NUEVO
+  name: string;
+  description?: string | null;
+  priceMinorUnits: number;
   currency: string;
+  isActive: boolean;
   durationInMinutes: number;
   requiresReservation: boolean;
-  isActive: boolean;
-  availableAtLocations?: string[] | null;
+  availableAtLocations?: string[];
+  imageUrl?: string | null;
 }
 
 export interface FaqDto {
