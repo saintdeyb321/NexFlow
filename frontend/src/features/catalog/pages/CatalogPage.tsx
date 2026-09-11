@@ -4,6 +4,7 @@ import { Package, Plus, Trash2, FolderPlus } from 'lucide-react';
 import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } from '../services/catalog.service';
 import type { CatalogItemDto } from '../types/catalog.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import { ImageUploader } from '../../../components/ui/ImageUploader';
 
 export const CatalogPage = () => {
   const queryClient = useQueryClient();
@@ -11,13 +12,11 @@ export const CatalogPage = () => {
 
   const [showModal, setShowModal] = useState(false);
   
-  // Queries
   const { data: products = [], isLoading } = useQuery({ queryKey: ['catalog', workspaceId], queryFn: getProducts, enabled: !!workspaceId });
   const { data: categories = [] } = useQuery({ queryKey: ['catalogCategories', workspaceId], queryFn: getCategories, enabled: !!workspaceId });
 
   const [newProduct, setNewProduct] = useState<Partial<CatalogItemDto>>({ name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', isActive: true, type: 'PRODUCT' });
 
-  // Mutations
   const saveMutation = useMutation({
     mutationFn: saveProduct,
     onSuccess: () => {
@@ -46,7 +45,8 @@ export const CatalogPage = () => {
   const handleQuickAddCategory = () => {
     const catName = window.prompt("Nombre de la nueva categoría (Ej: Bebidas, Postres):");
     if (catName && catName.trim()) {
-      createCategoryMutation.mutate({ name: catName, isActive: true, displayOrder: 0, description: null });
+      // 🔥 SPRINT 6: Agregamos scope: 'PRODUCT'
+      createCategoryMutation.mutate({ name: catName, isActive: true, displayOrder: 0, description: null, scope: 'PRODUCT' });
     }
   };
 
@@ -126,6 +126,15 @@ export const CatalogPage = () => {
                     <input type="number" step="0.10" value={(newProduct.priceMinorUnits || 0) / 100} onChange={e => setNewProduct({...newProduct, priceMinorUnits: Math.round(parseFloat(e.target.value || '0') * 100)})} className="w-full border rounded-lg px-3 py-2" required />
                   </div>
                 </div>
+              </div>
+
+              {/* 🔥 SPRINT 7: Image Uploader */}
+              <div>
+                <ImageUploader 
+                  value={newProduct.imageUrl} 
+                  onChange={(url) => setNewProduct({ ...newProduct, imageUrl: url })} 
+                  label="Foto del Producto"
+                />
               </div>
 
               <div>

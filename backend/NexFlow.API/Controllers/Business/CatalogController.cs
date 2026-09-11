@@ -34,7 +34,6 @@ public class CatalogController : ControllerBase
         return activeModules.Contains(moduleCode.ToUpperInvariant());
     }
 
-    // Las categorías son necesarias tanto para Productos como para Servicios
     private async Task<bool> HasAccessToCategories(CancellationToken ct)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
@@ -45,10 +44,19 @@ public class CatalogController : ControllerBase
     // CATEGORÍAS (Compartidas)
     // ==========================================
     [HttpGet("categories")]
-    public async Task<IActionResult> GetCategories(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetCategories([FromQuery] string? scope, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "No tienes módulos contratados que utilicen categorías.");
+
         var categories = await _catalogRepository.GetCategoriesAsync(WorkspaceId, cancellationToken);
+
+        // 🔥 CORRECCIÓN: Filtramos las categorías si el Frontend nos pide un scope específico
+        if (!string.IsNullOrWhiteSpace(scope))
+        {
+            var targetScope = scope.ToUpperInvariant();
+            categories = categories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
+        }
+
         return Ok(categories);
     }
 
@@ -77,7 +85,6 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
-        // 🔥 Protección: No borrar si tiene ítems (productos o servicios)
         var items = await _catalogRepository.GetItemsByCategoryAsync(WorkspaceId, categoryId, cancellationToken);
         if (items.Any()) return BadRequest(new { message = "No puedes eliminar una categoría que contiene productos o servicios." });
 
@@ -104,11 +111,22 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        // 🔥 ESTRICTO: Obligamos a que sea PRODUCT
         product.Type = "PRODUCT";
         if (string.IsNullOrEmpty(product.Id)) product.Id = Guid.NewGuid().ToString();
 
-        if (string.IsNullOrEmpty(product.CategoryId)) product.CategoryId = Guid.Empty.ToString();
+        if (string.IsNullOrEmpty(product.CategoryId))
+        {
+            product.CategoryId = Guid.Empty.ToString();
+        }
+        else
+        {
+            var category = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, product.CategoryId, cancellationToken);
+            if (category == null)
+                return BadRequest(new { message = "La categoría asignada no existe." });
+
+            if (category.Scope == "SERVICE")
+                return BadRequest(new { message = "No puedes asignar un Producto a una categoría exclusiva de Servicios." });
+        }
 
         await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken);
         return Ok(product);
@@ -119,7 +137,6 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        // 🔥 ESTRICTO: Solo borramos si el item es un PRODUCTO
         var item = await _catalogRepository.GetItemByIdAsync(WorkspaceId, productId, cancellationToken);
         if (item != null && item.Type.ToUpperInvariant() == "PRODUCT")
         {
@@ -128,8 +145,9 @@ public class CatalogController : ControllerBase
 
         return NoContent();
     }
+
     // ==========================================
-    // ARTEFACTOS Y PDF (Sprints 5 y 6)
+    // ARTEFACTOS Y PDF
     // ==========================================
     [HttpGet("artifact")]
     public async Task<IActionResult> GetArtifactStatus(
@@ -138,7 +156,8 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, cancellationToken);
+        // 🔥 CORRECCIÓN: Solicitamos específicamente el artefacto de PRODUCT
+        var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, "PRODUCT", cancellationToken);
         if (artifact == null)
         {
             return Ok(new { status = "NOT_GENERATED", pdfUrl = (string?)null });
@@ -161,7 +180,8 @@ public class CatalogController : ControllerBase
 
         try
         {
-            var result = await generationService.RequestGenerationAsync(WorkspaceId, cancellationToken);
+            // 🔥 CORRECCIÓN: Solicitamos la generación del scope PRODUCT
+            var result = await generationService.RequestGenerationAsync(WorkspaceId, "PRODUCT", cancellationToken);
             return Ok(new
             {
                 status = result.Status.ToString(),
@@ -171,9 +191,7 @@ public class CatalogController : ControllerBase
         }
         catch (DomainException ex)
         {
-            // Protegido contra spam o exceso del límite diario de 3 generaciones
             return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
         }
     }
-
 }

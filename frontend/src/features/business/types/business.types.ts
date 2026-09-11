@@ -6,28 +6,8 @@ export interface BusinessProfile {
   description: string;
 }
 
-export interface CatalogCategoryDto {
-  id?: string;
-  name: string;
-  description?: string | null;
-  isActive: boolean;
-  displayOrder: number;
-}
-
-export interface ServiceDto {
-  id?: string;
-  categoryId: string; // 🔥 NUEVO
-  type: 'SERVICE';    // 🔥 NUEVO
-  name: string;
-  description?: string | null;
-  priceMinorUnits: number;
-  currency: string;
-  isActive: boolean;
-  durationInMinutes: number;
-  requiresReservation: boolean;
-  availableAtLocations?: string[];
-  imageUrl?: string | null;
-}
+// 🔥 SPRINT 6: Eliminados CatalogCategoryDto y ServiceDto de aquí. 
+// Ahora toda la aplicación consumirá el modelo unificado desde catalog.types.ts
 
 export interface FaqDto {
   id?: string;

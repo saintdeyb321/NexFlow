@@ -1,6 +1,10 @@
-﻿using Google.Cloud.Firestore;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities.Catalog;
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -13,22 +17,29 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
     // ==========================================
     // ARTEFACTOS (PDFs)
     // ==========================================
-    public async Task<CatalogArtifact?> GetCurrentArtifactAsync(Guid workspaceId, CancellationToken cancellationToken)
+    public async Task<CatalogArtifact?> GetCurrentArtifactAsync(Guid workspaceId, string scope, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces")
             .Document(workspaceId.ToString())
             .Collection("catalogArtifacts")
-            .Document("current");
+            .Document($"current_{scope.ToLowerInvariant()}"); // Separamos por PRODUCT, SERVICE o COMBINED
 
         var snapshot = await docRef.GetSnapshotAsync(cancellationToken);
         if (!snapshot.Exists) return null;
 
         var data = snapshot.ConvertTo<FirestoreArtifact>();
 
-        // Reconstruimos la entidad de dominio utilizando reflexión o un mapeo interno
-        var artifact = CatalogArtifact.Initialize(workspaceId);
-        // Mapeamos propiedades internas si es necesario mediante un método de reconstrucción o setters internos.
-        return artifact; // O ajustaremos el mapeador según convenga abajo.
+        // 🔥 SPRINT 4: Reconstrucción perfecta sin perder datos
+        return CatalogArtifact.Restore(
+            Guid.Parse(data.Id),
+            workspaceId,
+            data.Scope,
+            data.SourceHash,
+            data.PdfUrl,
+            Enum.Parse<CatalogArtifactStatus>(data.Status),
+            data.LastGeneratedAt,
+            data.GenerationId
+        );
     }
 
     public async Task SaveArtifactAsync(CatalogArtifact artifact, CancellationToken cancellationToken)
@@ -36,24 +47,26 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
         var docRef = _firestoreDb.Collection("workspaces")
             .Document(artifact.WorkspaceId.ToString())
             .Collection("catalogArtifacts")
-            .Document("current");
+            .Document($"current_{artifact.Scope.ToLowerInvariant()}");
 
         var data = new FirestoreArtifact
         {
             Id = artifact.Id.ToString(),
+            Scope = artifact.Scope,
             SourceHash = artifact.SourceHash,
             PdfUrl = artifact.PdfUrl,
             Status = artifact.Status.ToString(),
-            LastGeneratedAt = artifact.LastGeneratedAt
+            LastGeneratedAt = artifact.LastGeneratedAt,
+            GenerationId = artifact.GenerationId
         };
 
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
     }
 
     // ==========================================
-    // CONTROL DE LÍMITES DIARIOS (3 al día)
+    // CONTROL ATÓMICO DE LÍMITES DIARIOS (Sprint 4)
     // ==========================================
-    public async Task<CatalogGenerationUsage?> GetUsageForTodayAsync(Guid workspaceId, DateTime date, CancellationToken cancellationToken)
+    public async Task IncrementUsageAtomicallyAsync(Guid workspaceId, DateTime date, CancellationToken cancellationToken)
     {
         string dateKey = date.ToString("yyyy-MM-dd");
         var docRef = _firestoreDb.Collection("workspaces")
@@ -61,46 +74,42 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
             .Collection("catalogGenerationUsages")
             .Document(dateKey);
 
-        var snapshot = await docRef.GetSnapshotAsync(cancellationToken);
-        if (!snapshot.Exists) return null;
-
-        var data = snapshot.ConvertTo<FirestoreUsage>();
-        return CatalogGenerationUsage.Create(workspaceId, data.Date); // Ajustado
-    }
-
-    public async Task SaveUsageAsync(CatalogGenerationUsage usage, CancellationToken cancellationToken)
-    {
-        string dateKey = usage.Date.ToString("yyyy-MM-dd");
-        var docRef = _firestoreDb.Collection("workspaces")
-            .Document(usage.WorkspaceId.ToString())
-            .Collection("catalogGenerationUsages")
-            .Document(dateKey);
-
-        var data = new FirestoreUsage
+        // TRANSACCIÓN ATÓMICA: Imposible que 2 hilos se salten el límite.
+        await _firestoreDb.RunTransactionAsync(async transaction =>
         {
-            WorkspaceId = usage.WorkspaceId.ToString(),
-            Date = usage.Date,
-            GenerationCount = usage.GenerationCount
-        };
+            var snapshot = await transaction.GetSnapshotAsync(docRef, cancellationToken);
+            int currentCount = 0;
 
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+            if (snapshot.Exists)
+            {
+                currentCount = snapshot.GetValue<int>("GenerationCount");
+            }
+
+            if (currentCount >= CatalogGenerationUsage.MaxGenerationsPerDay)
+            {
+                throw new DomainException($"Has alcanzado el límite máximo de {CatalogGenerationUsage.MaxGenerationsPerDay} generaciones de PDF por día.");
+            }
+
+            var data = new
+            {
+                WorkspaceId = workspaceId.ToString(),
+                Date = date.ToUniversalTime(),
+                GenerationCount = currentCount + 1
+            };
+
+            transaction.Set(docRef, data, SetOptions.MergeAll);
+        });
     }
 
     [FirestoreData]
     private class FirestoreArtifact
     {
         [FirestoreProperty] public string Id { get; set; } = string.Empty;
+        [FirestoreProperty] public string Scope { get; set; } = "COMBINED";
         [FirestoreProperty] public string SourceHash { get; set; } = string.Empty;
         [FirestoreProperty] public string? PdfUrl { get; set; }
         [FirestoreProperty] public string Status { get; set; } = "NotGenerated";
         [FirestoreProperty] public DateTime? LastGeneratedAt { get; set; }
-    }
-
-    [FirestoreData]
-    private class FirestoreUsage
-    {
-        [FirestoreProperty] public string WorkspaceId { get; set; } = string.Empty;
-        [FirestoreProperty] public DateTime Date { get; set; }
-        [FirestoreProperty] public int GenerationCount { get; set; }
+        [FirestoreProperty] public string? GenerationId { get; set; }
     }
 }

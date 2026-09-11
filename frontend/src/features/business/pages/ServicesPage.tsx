@@ -2,18 +2,18 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Tag, Trash2 } from 'lucide-react';
 import { getServices, saveService, deleteService } from '../services/business.service';
-import type { ServiceDto } from '../types/business.types';
 import { ServiceModal } from '../components/ServiceModal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 
 export const ServicesPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [serviceToEdit, setServiceToEdit] = useState<ServiceDto | null>(null);
+  // 🔥 Usamos CatalogItemDto
+  const [serviceToEdit, setServiceToEdit] = useState<CatalogItemDto | null>(null);
 
-  // 🔥 Auditoría (Sprint 5.1): Aislamiento de Servicios (Removido Zustand)
   const { data: services = [], isLoading: isServicesLoading } = useQuery({
     queryKey: ['services', workspaceId],
     queryFn: getServices,
@@ -30,6 +30,16 @@ export const ServicesPage = () => {
     onError: (error: any) => alert(`Error al guardar: ${error.message}`)
   });
 
+  const handleOpenNew = () => {
+    setServiceToEdit(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEdit = (service: CatalogItemDto) => {
+    setServiceToEdit(service);
+    setIsModalOpen(true);
+  };
+  
   const deleteMutation = useMutation({
     mutationFn: deleteService,
     onSuccess: () => {
@@ -37,16 +47,6 @@ export const ServicesPage = () => {
     },
     onError: (error: any) => alert(`Error al eliminar: ${error.message}`)
   });
-
-  const handleOpenNew = () => {
-    setServiceToEdit(null);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (service: ServiceDto) => {
-    setServiceToEdit(service);
-    setIsModalOpen(true);
-  };
 
   const handleDelete = (serviceId: string) => {
     if (window.confirm('¿Estás seguro de que deseas eliminar este servicio?')) {

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-
-namespace NexFlow.Application.Features.Business;
+﻿namespace NexFlow.Application.Features.Business;
 
 public class CatalogItemDto
 {

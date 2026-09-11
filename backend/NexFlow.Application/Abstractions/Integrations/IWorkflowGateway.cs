@@ -17,4 +17,7 @@ public record N8nEventPayload<T>(
 public interface IWorkflowGateway
 {
     Task TriggerWorkflowAsync<T>(string workflowId, N8nEventPayload<T> payload, CancellationToken cancellationToken);
+
+    // 🔥 SPRINT 8: Nuevo contrato para la generación del catálogo PDF
+    Task TriggerCatalogGenerationAsync(string jsonPayload, CancellationToken cancellationToken);
 }

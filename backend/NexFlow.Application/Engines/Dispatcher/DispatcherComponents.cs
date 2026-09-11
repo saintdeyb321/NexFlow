@@ -62,20 +62,20 @@ public class ContextResolver : IContextResolver
 {
     private readonly IConversationCache _cache;
     private readonly ILocationRepository _locationRepo;
-    private readonly IServiceRepository _serviceRepo;
+    private readonly ICatalogRepository _catalogRepo; // 🔥 SPRINT 11: Reemplazado IServiceRepository
     private readonly IBusinessProfileRepository _profileRepo;
-    private readonly IMemoryCache _memoryCache; // 🔥 SPRINT 13: Caché L1 inyectado
+    private readonly IMemoryCache _memoryCache;
 
     public ContextResolver(
         IConversationCache cache,
         ILocationRepository locationRepo,
-        IServiceRepository serviceRepo,
+        ICatalogRepository catalogRepo, // 🔥 Inyectamos el catálogo unificado
         IBusinessProfileRepository profileRepo,
-        IMemoryCache memoryCache) // Inyección del Memory Cache
+        IMemoryCache memoryCache)
     {
         _cache = cache;
         _locationRepo = locationRepo;
-        _serviceRepo = serviceRepo;
+        _catalogRepo = catalogRepo;
         _profileRepo = profileRepo;
         _memoryCache = memoryCache;
     }
@@ -92,15 +92,16 @@ public class ContextResolver : IContextResolver
         return locations ?? new List<LocationDto>();
     }
 
-    private async Task<List<ServiceDto>> GetCachedServicesAsync(Guid workspaceId, CancellationToken ct)
+    private async Task<List<CatalogItemDto>> GetCachedServicesAsync(Guid workspaceId, CancellationToken ct)
     {
         var cacheKey = $"workspace:{workspaceId}:services";
-        if (!_memoryCache.TryGetValue(cacheKey, out List<ServiceDto>? services))
+        if (!_memoryCache.TryGetValue(cacheKey, out List<CatalogItemDto>? services))
         {
-            services = (await _serviceRepo.GetActiveServicesAsync(workspaceId, ct)).ToList();
+            var activeItems = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
+            services = activeItems.Where(i => i.Type.ToUpperInvariant() == "SERVICE").ToList();
             _memoryCache.Set(cacheKey, services, TimeSpan.FromMinutes(10));
         }
-        return services ?? new List<ServiceDto>();
+        return services ?? new List<CatalogItemDto>();
     }
 
     // 🔥 SPRINT 14: Lógica Difusa de Levenshtein (Compara similitud de palabras)
@@ -162,7 +163,7 @@ public class ContextResolver : IContextResolver
     public async Task<string?> GroundLocationAsync(Guid workspaceId, string rawLocationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rawLocationId)) return null;
-        var locations = await GetCachedLocationsAsync(workspaceId, ct); // Usamos Caché
+        var locations = await GetCachedLocationsAsync(workspaceId, ct);
 
         var exactMatch = locations.FirstOrDefault(l => l.Id == rawLocationId);
         if (exactMatch != null) return exactMatch.Id;
@@ -174,11 +175,9 @@ public class ContextResolver : IContextResolver
             if (mainLoc != null) return mainLoc.Id;
         }
 
-        // Búsqueda Exacta o Contenida
         var nameMatch = locations.FirstOrDefault(l => l.Name.ToLowerInvariant().Contains(normalizedRaw) || normalizedRaw.Contains(l.Name.ToLowerInvariant()));
         if (nameMatch != null) return nameMatch.Id;
 
-        // 🔥 SPRINT 14: Búsqueda Difusa (Tolerancia a errores tipográficos de hasta 2 letras)
         var fuzzyMatch = locations
             .Select(l => new { Loc = l, Dist = ComputeLevenshteinDistance(normalizedRaw, l.Name.ToLowerInvariant()) })
             .Where(x => x.Dist <= 2 || (x.Dist <= 3 && x.Loc.Name.Length > 8))
@@ -193,7 +192,7 @@ public class ContextResolver : IContextResolver
     public async Task<string?> GroundServiceAsync(Guid workspaceId, string rawServiceId, string? currentLocationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rawServiceId)) return null;
-        var services = await GetCachedServicesAsync(workspaceId, ct); // Usamos Caché
+        var services = await GetCachedServicesAsync(workspaceId, ct);
 
         var exactMatch = services.FirstOrDefault(s => s.Id == rawServiceId);
         var normalizedRaw = rawServiceId.ToLowerInvariant();
@@ -203,18 +202,15 @@ public class ContextResolver : IContextResolver
             exactMatch = services.FirstOrDefault(s => s.Name.ToLowerInvariant().Contains(normalizedRaw) || normalizedRaw.Contains(s.Name.ToLowerInvariant()));
         }
 
-        // 🔥 SPRINT 14: Búsqueda Difusa en Nombre y Categoría
         if (exactMatch == null)
         {
             var fuzzyMatch = services
                 .Select(s => new
                 {
                     Srv = s,
-                    Dist = Math.Min(
-                        ComputeLevenshteinDistance(normalizedRaw, s.Name.ToLowerInvariant()),
-                        !string.IsNullOrEmpty(s.Category) ? ComputeLevenshteinDistance(normalizedRaw, s.Category.ToLowerInvariant()) : 999)
+                    Dist = ComputeLevenshteinDistance(normalizedRaw, s.Name.ToLowerInvariant())
                 })
-                .Where(x => x.Dist <= 2 || (x.Dist <= 4 && x.Srv.Name.Length > 10)) // Más tolerancia para nombres largos
+                .Where(x => x.Dist <= 2 || (x.Dist <= 4 && x.Srv.Name.Length > 10))
                 .OrderBy(x => x.Dist)
                 .FirstOrDefault();
 
@@ -253,7 +249,6 @@ public class ContextResolver : IContextResolver
         else if (intentResult.Intent != IntentType.Unknown && intentResult.Intent != IntentType.Ambiguous)
             context.CurrentIntent = intentResult.Intent.ToString();
 
-        // --- GROUNDING ---
         if (intentResult.Parameters.TryGetValue("locationId", out var rawLoc) && !string.IsNullOrWhiteSpace(rawLoc))
         {
             var groundedLocId = await GroundLocationAsync(workspaceId, rawLoc, ct);
@@ -312,7 +307,7 @@ public class ContextResolver : IContextResolver
 
         if (string.IsNullOrEmpty(context.SelectedLocationId) && (requiresLocationStrict || context.LocationScope != "ALL"))
         {
-            var locations = await GetCachedLocationsAsync(workspaceId, ct); // Usamos Caché
+            var locations = await GetCachedLocationsAsync(workspaceId, ct);
             if (locations.Count == 1)
             {
                 context.SelectedLocationId = locations[0].Id;

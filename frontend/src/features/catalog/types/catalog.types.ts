@@ -2,6 +2,7 @@ export interface CatalogCategoryDto {
   id?: string;
   name: string;
   description?: string | null;
+  scope: 'PRODUCT' | 'SERVICE' | 'SHARED'; // 🔥 SPRINT 2 y 6: Agregado el ámbito de negocio
   isActive: boolean;
   displayOrder: number;
 }

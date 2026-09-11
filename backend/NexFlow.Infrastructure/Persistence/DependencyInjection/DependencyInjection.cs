@@ -55,7 +55,6 @@ public static class DependencyInjection
             services.AddScoped<ILocationRepository, FirestoreLocationRepository>();
             services.AddScoped<IBusinessHoursRepository, FirestoreBusinessHoursRepository>();
             services.AddScoped<IFaqRepository, FirestoreFaqRepository>();
-            services.AddScoped<IServiceRepository, FirestoreServiceRepository>();
             services.AddScoped<ICatalogRepository, FirestoreCatalogRepository>();
             services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
             services.AddScoped<IConversationRepository, FirestoreConversationRepository>();

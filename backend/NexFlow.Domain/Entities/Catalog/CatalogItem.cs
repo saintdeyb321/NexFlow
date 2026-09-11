@@ -7,12 +7,12 @@ namespace NexFlow.Domain.Entities.Catalog;
 public class CatalogItem : Entity
 {
     public Guid WorkspaceId { get; private set; }
-    public Guid CategoryId { get; private set; } // 🔥 Ahora es una relación real, no un string
+    public string CategoryId { get; private set; } = string.Empty; // 🔥 Cambiado a string para alineación con Firestore y DTO
     public CatalogItemType Type { get; private set; }
 
     public string Name { get; private set; } = null!;
     public string? Description { get; private set; }
-    public decimal Price { get; private set; }
+    public long PriceMinorUnits { get; private set; } // 🔥 SPRINT 5: Alineado con el DTO para evitar pérdida de precisión
     public string Currency { get; private set; } = "PEN";
     public bool IsActive { get; private set; }
     public List<string> AvailableAtLocations { get; private set; } = new();
@@ -27,11 +27,11 @@ public class CatalogItem : Entity
     private CatalogItem() { }
 
     // Factory Method para PRODUCTOS
-    public static CatalogItem CreateProduct(Guid workspaceId, Guid categoryId, string name, string? description, decimal price, string currency, List<string>? availableAtLocations = null, string? imageUrl = null)
+    public static CatalogItem CreateProduct(Guid workspaceId, string categoryId, string name, string? description, long priceMinorUnits, string currency, List<string>? availableAtLocations = null, string? imageUrl = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("El nombre del producto es obligatorio.");
-        if (price < 0) throw new DomainException("El precio no puede ser negativo.");
-        if (categoryId == Guid.Empty) throw new DomainException("La categoría es obligatoria.");
+        if (priceMinorUnits < 0) throw new DomainException("El precio no puede ser negativo.");
+        if (string.IsNullOrWhiteSpace(categoryId)) throw new DomainException("La categoría es obligatoria.");
 
         return new CatalogItem
         {
@@ -41,7 +41,7 @@ public class CatalogItem : Entity
             Type = CatalogItemType.Product,
             Name = name.Trim(),
             Description = description?.Trim(),
-            Price = price,
+            PriceMinorUnits = priceMinorUnits,
             Currency = string.IsNullOrWhiteSpace(currency) ? "PEN" : currency.ToUpperInvariant(),
             IsActive = true,
             AvailableAtLocations = availableAtLocations ?? new List<string>(),
@@ -50,11 +50,11 @@ public class CatalogItem : Entity
     }
 
     // Factory Method para SERVICIOS
-    public static CatalogItem CreateService(Guid workspaceId, Guid categoryId, string name, string? description, decimal price, string currency, int duration, bool requiresReservation, List<string>? availableAtLocations = null, string? imageUrl = null)
+    public static CatalogItem CreateService(Guid workspaceId, string categoryId, string name, string? description, long priceMinorUnits, string currency, int duration, bool requiresReservation, List<string>? availableAtLocations = null, string? imageUrl = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("El nombre del servicio es obligatorio.");
-        if (price < 0) throw new DomainException("El precio no puede ser negativo.");
-        if (categoryId == Guid.Empty) throw new DomainException("La categoría es obligatoria.");
+        if (priceMinorUnits < 0) throw new DomainException("El precio no puede ser negativo.");
+        if (string.IsNullOrWhiteSpace(categoryId)) throw new DomainException("La categoría es obligatoria.");
         if (duration <= 0) throw new DomainException("La duración del servicio debe ser mayor a 0.");
 
         return new CatalogItem
@@ -65,7 +65,7 @@ public class CatalogItem : Entity
             Type = CatalogItemType.Service,
             Name = name.Trim(),
             Description = description?.Trim(),
-            Price = price,
+            PriceMinorUnits = priceMinorUnits,
             Currency = string.IsNullOrWhiteSpace(currency) ? "PEN" : currency.ToUpperInvariant(),
             IsActive = true,
             AvailableAtLocations = availableAtLocations ?? new List<string>(),
@@ -75,17 +75,17 @@ public class CatalogItem : Entity
         };
     }
 
-    public void Update(Guid categoryId, string name, string? description, decimal price, string currency, bool isActive, List<string>? availableAtLocations = null, string? imageUrl = null, int? duration = null, bool? requiresReservation = null)
+    public void Update(string categoryId, string name, string? description, long priceMinorUnits, string currency, bool isActive, List<string>? availableAtLocations = null, string? imageUrl = null, int? duration = null, bool? requiresReservation = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new DomainException("El nombre del ítem es obligatorio.");
-        if (price < 0) throw new DomainException("El precio no puede ser negativo.");
-        if (categoryId == Guid.Empty) throw new DomainException("La categoría es obligatoria.");
+        if (priceMinorUnits < 0) throw new DomainException("El precio no puede ser negativo.");
+        if (string.IsNullOrWhiteSpace(categoryId)) throw new DomainException("La categoría es obligatoria.");
         if (Type == CatalogItemType.Service && (duration == null || duration <= 0)) throw new DomainException("La duración del servicio debe ser mayor a 0.");
 
         CategoryId = categoryId;
         Name = name.Trim();
         Description = description?.Trim();
-        Price = price;
+        PriceMinorUnits = priceMinorUnits;
         Currency = string.IsNullOrWhiteSpace(currency) ? "PEN" : currency.ToUpperInvariant();
         IsActive = isActive;
         AvailableAtLocations = availableAtLocations ?? new List<string>();

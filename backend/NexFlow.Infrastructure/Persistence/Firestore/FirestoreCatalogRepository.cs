@@ -45,6 +45,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         {
             Name = category.Name,
             Description = category.Description,
+            Scope = category.Scope,
             IsActive = category.IsActive,
             DisplayOrder = category.DisplayOrder
         };
@@ -134,6 +135,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
             Id = doc.Id,
             Name = data.Name,
             Description = data.Description,
+            Scope = data.Scope ?? "SHARED", // 🔥 SPRINT 2: Agregado con fallback
             IsActive = data.IsActive,
             DisplayOrder = data.DisplayOrder
         };
@@ -165,6 +167,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
     {
         [FirestoreProperty] public string Name { get; set; } = string.Empty;
         [FirestoreProperty] public string? Description { get; set; }
+        [FirestoreProperty] public string Scope { get; set; } = "SHARED"; // 🔥 SPRINT 2
         [FirestoreProperty] public bool IsActive { get; set; } = true;
         [FirestoreProperty] public int DisplayOrder { get; set; } = 0;
     }

@@ -1,5 +1,7 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { BusinessHoursDto, BusinessProfile, LocationDto, ServiceDto, CatalogCategoryDto } from '../types/business.types';
+import type { BusinessHoursDto, BusinessProfile, LocationDto } from '../types/business.types';
+// 🔥 SPRINT 6: Importamos los tipos desde catalog
+import type { CatalogCategoryDto, CatalogItemDto } from '../../catalog/types/catalog.types';
 
 export const getBusinessProfile = async (): Promise<BusinessProfile> => {
   const { data } = await axiosClient.get<BusinessProfile>('/business/profile');
@@ -10,20 +12,20 @@ export const updateBusinessProfile = async (profile: BusinessProfile): Promise<v
   await axiosClient.put('/business/profile', profile);
 };
 
-// 🔥 NUEVO: Para que el ServiceModal liste las categorías
 export const getCategories = async (): Promise<CatalogCategoryDto[]> => {
   const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories');
   return data;
 };
 
 // --- SERVICES ---
-export const getServices = async (): Promise<ServiceDto[]> => {
-  const { data } = await axiosClient.get<ServiceDto[]>('/business/services');
+export const getServices = async (): Promise<CatalogItemDto[]> => {
+  // 🔥 Asumiendo que tu endpoint de servicios sigue aquí, o usa /catalog filtrado
+  const { data } = await axiosClient.get<CatalogItemDto[]>('/business/services');
   return data;
 };
 
-export const saveService = async (service: ServiceDto): Promise<ServiceDto> => {
-  const { data } = await axiosClient.post<ServiceDto>('/business/services', service);
+export const saveService = async (service: CatalogItemDto): Promise<CatalogItemDto> => {
+  const { data } = await axiosClient.post<CatalogItemDto>('/business/services', service);
   return data;
 };
 
@@ -31,7 +33,7 @@ export const deleteService = async (serviceId: string): Promise<void> => {
   await axiosClient.delete(`/business/services/${serviceId}`);
 };
 
-// --- LOCATIONS ---
+// --- LOCATIONS & ONBOARDING (Intactos) ---
 export const getLocations = async (): Promise<LocationDto[]> => {
   const { data } = await axiosClient.get<LocationDto[]>('/business/locations');
   return data;
@@ -46,7 +48,6 @@ export const deleteLocation = async (locationId: string): Promise<void> => {
   await axiosClient.delete(`/business/locations/${locationId}`);
 };
 
-// --- HOURS & ONBOARDING ---
 export const getBusinessHours = async (locationId: string): Promise<BusinessHoursDto[]> => {
   const { data } = await axiosClient.get(`/business/locations/${locationId}/hours`);
   return data;

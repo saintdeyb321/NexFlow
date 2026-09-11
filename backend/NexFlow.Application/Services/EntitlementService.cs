@@ -15,11 +15,11 @@ public class EntitlementService : IEntitlementService
     private readonly ICurrentUser _currentUser;
     private readonly ISystemAdministratorRepository _sysAdminRepository;
 
-    // 🔥 SPRINT 4.2: Agregamos SERVICES, CATALOG, FAQ y RESERVATIONS a los módulos base 
-    // para que estén desbloqueados por defecto sin necesidad de sembrarlos en la BD.
+    // 🔥 SPRINT 1 (Corección Comercial): Separación estricta de módulos.
+    // Solo dejamos las funcionalidades básicas/gratuitas. 
+    // CATALOG, SERVICES, RESERVATIONS y REQUESTS ahora requieren licenciamiento explícito en BD.
     private readonly string[] _baseModules = {
-        "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS",
-        "SERVICES", "CATALOG", "FAQ", "RESERVATIONS", "REQUESTS"
+        "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "FAQ"
     };
 
     public EntitlementService(
@@ -78,7 +78,7 @@ public class EntitlementService : IEntitlementService
             if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
                 return snapshot;
 
-            // Agregamos todos los módulos base al snapshot inmediatamente
+            // Agregamos solo los módulos puramente base al snapshot
             foreach (var baseMod in _baseModules)
             {
                 snapshot.ActiveModuleCodes.Add(baseMod);
@@ -87,9 +87,9 @@ public class EntitlementService : IEntitlementService
             var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
             if (license == null || !license.IsValidAt(_clock.UtcNow))
             {
-                // Aunque no tenga licencia en BD, permitimos los módulos base (incluyendo Servicios/Reservas)
+                // Si la licencia expira, o no tiene, solo conserva acceso a los módulos base
                 snapshot.IsValid = true;
-                snapshot.MaxLocations = 1; // Default mínimo
+                snapshot.MaxLocations = 1;
                 return snapshot;
             }
 
@@ -138,6 +138,7 @@ public class EntitlementService : IEntitlementService
     {
         if (await IsSuperAdminAsync(cancellationToken))
         {
+            // El SuperAdmin retiene acceso global para soporte técnico
             return new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "SERVICES", "CATALOG", "FAQ", "REQUESTS", "RESERVATIONS" };
         }
 
@@ -155,9 +156,10 @@ public class EntitlementService : IEntitlementService
 
         var code = moduleCode.ToUpperInvariant();
 
-        // Si el módulo está en los base (ahora incluye SERVICES, RESERVATIONS, etc), le damos acceso.
+        // Si el módulo está en los base (solo básicos), damos acceso directo.
         if (_baseModules.Contains(code)) return true;
 
+        // Si es comercial, comprobamos la licencia en el diccionario cargado desde PostgreSQL.
         if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
         {
             return caps.Contains(capabilityCode.ToUpperInvariant());

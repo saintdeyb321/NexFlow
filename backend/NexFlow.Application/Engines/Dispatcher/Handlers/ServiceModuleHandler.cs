@@ -1,9 +1,10 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Text.Json;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Engines.Dispatcher;
 using System.Linq;
 using System.Collections.Generic;
-using NexFlow.Domain.Entities.Catalog; // 🔥 Requerido
+using NexFlow.Domain.Entities.Catalog;
 
 namespace NexFlow.Application.Engines.Dispatcher.Handlers;
 
@@ -12,7 +13,7 @@ public class ServiceModuleHandler : IModuleHandler
     public string ModuleCode => "SERVICES";
 
     private readonly ICatalogRepository _catalogRepository;
-    private readonly ICatalogArtifactRepository _artifactRepository; // 🔥 Agregado
+    private readonly ICatalogArtifactRepository _artifactRepository;
 
     public ServiceModuleHandler(ICatalogRepository catalogRepository, ICatalogArtifactRepository artifactRepository)
     {
@@ -27,8 +28,7 @@ public class ServiceModuleHandler : IModuleHandler
         if (request.CapabilityCode != "READ")
             return new ModuleExecutionResult(false, ModuleCode, request.CapabilityCode, JsonSerializer.Serialize(new { error = "Capacidad no soportada" }));
 
-        // 🔥 Obtenemos si hay un PDF generado y vigente
-        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, cancellationToken);
+        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, "SERVICE", cancellationToken);
         string? pdfUrl = artifact?.Status == CatalogArtifactStatus.Current ? artifact.PdfUrl : null;
 
         var activeItems = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
@@ -47,16 +47,20 @@ public class ServiceModuleHandler : IModuleHandler
                 s.AvailableAtLocations.Contains(locationId)).ToList();
         }
 
-        if (request.Parameters.TryGetValue("category", out var categoryObj) && !string.IsNullOrWhiteSpace(categoryObj?.ToString()))
-        {
-            var categorySearch = categoryObj.ToString()!.ToLowerInvariant();
+        // 🔥 SPRINT 10: Determinamos si fue una solicitud general o un filtro específico
+        bool hasCategoryFilter = request.Parameters.TryGetValue("category", out var categoryObj) && !string.IsNullOrWhiteSpace(categoryObj?.ToString());
+        bool isFullServicesRequest = !hasCategoryFilter;
 
+        if (hasCategoryFilter)
+        {
+            var categorySearch = categoryObj!.ToString()!.ToLowerInvariant();
             var categoryFiltered = activeServices.Where(s =>
                 categoryMap.ContainsKey(s.CategoryId) &&
                 categoryMap[s.CategoryId].ToLowerInvariant() == categorySearch).ToList();
 
             if (categoryFiltered.Any())
-                return BuildServicesResponse(categoryFiltered, categoryMap, request.CapabilityCode, pdfUrl); // 🔥 Pasamos pdfUrl
+                // Si buscan algo específico, no enviamos el PDF para no saturar el chat
+                return BuildServicesResponse(categoryFiltered, categoryMap, request.CapabilityCode, null);
         }
 
         if (!activeServices.Any())
@@ -74,11 +78,14 @@ public class ServiceModuleHandler : IModuleHandler
                 status = "too_many_results",
                 totalCount = activeServices.Count,
                 categories = activeCategoryNames,
-                pdfUrl = pdfUrl 
+                pdfUrl = pdfUrl // Aquí sí enviamos el PDF por exceso de datos
             }));
         }
 
-        return BuildServicesResponse(activeServices, categoryMap, request.CapabilityCode, pdfUrl);
+        // 🔥 SPRINT 10: Solo adjuntamos el PDF en el 'success' si no buscaban nada en específico.
+        string? pdfToSend = isFullServicesRequest ? pdfUrl : null;
+
+        return BuildServicesResponse(activeServices, categoryMap, request.CapabilityCode, pdfToSend);
     }
 
     private ModuleExecutionResult BuildServicesResponse(List<NexFlow.Application.Features.Business.CatalogItemDto> services, Dictionary<string, string> categoryMap, string capabilityCode, string? pdfUrl)
@@ -93,7 +100,6 @@ public class ServiceModuleHandler : IModuleHandler
             description = s.Description
         });
 
-        // 🔥 Adjuntamos el PDF también en la respuesta exitosa
         return new ModuleExecutionResult(true, ModuleCode, capabilityCode, JsonSerializer.Serialize(new { status = "success", pdfUrl = pdfUrl, services = resultData }));
     }
 }

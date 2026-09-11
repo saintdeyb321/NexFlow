@@ -1,11 +1,18 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using System;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Domain.Entities.Catalog;
 
 namespace NexFlow.Application.Features.Business;
 
 public interface ICatalogGenerationService
 {
-    Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, CancellationToken cancellationToken);
+    Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
 }
 
 public class CatalogGenerationService : ICatalogGenerationService
@@ -14,52 +21,106 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly ICatalogArtifactRepository _artifactRepository;
     private readonly ICatalogGenerationUsageRepository _usageRepository;
     private readonly ICatalogHashService _hashService;
+    private readonly IWorkflowGateway _workflowGateway; // 🔥 SPRINT 8: Inyectamos n8n
+    private readonly IBusinessProfileRepository _profileRepository;
+    private readonly ILogger<CatalogGenerationService> _logger;
 
     public CatalogGenerationService(
         ICatalogRepository catalogRepository,
         ICatalogArtifactRepository artifactRepository,
         ICatalogGenerationUsageRepository usageRepository,
-        ICatalogHashService hashService)
+        ICatalogHashService hashService,
+        IWorkflowGateway workflowGateway,
+        IBusinessProfileRepository profileRepository,
+        ILogger<CatalogGenerationService> logger)
     {
         _catalogRepository = catalogRepository;
         _artifactRepository = artifactRepository;
         _usageRepository = usageRepository;
         _hashService = hashService;
+        _workflowGateway = workflowGateway;
+        _profileRepository = profileRepository;
+        _logger = logger;
     }
 
-    public async Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, CancellationToken cancellationToken)
+    public async Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken)
     {
-        // 1. Obtenemos categorías e ítems actuales para calcular su firma (Hash)
-        var categories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
-        var items = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
+        var targetScope = scope.ToUpperInvariant();
 
-        var currentHash = _hashService.ComputeHash(categories, items);
+        var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
+        var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
 
-        // 2. Verificamos el artefacto actual existente en Firestore
-        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, cancellationToken)
-                       ?? CatalogArtifact.Initialize(workspaceId);
+        var filteredCategories = targetScope == "COMBINED" ? allCategories : allCategories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
+        var filteredItems = targetScope == "COMBINED" ? allItems : allItems.Where(i => i.Type == targetScope).ToList();
 
-        // 3. Si el hash coincide y el estado es Current, no gastamos IA ni recursos
+        var currentHash = _hashService.ComputeHash(filteredCategories, filteredItems);
+
+        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, targetScope, cancellationToken)
+                       ?? CatalogArtifact.Initialize(workspaceId, targetScope);
+
         if (artifact.Status == CatalogArtifactStatus.Current && artifact.SourceHash == currentHash)
         {
-            return artifact; // El PDF existente sigue siendo totalmente válido
+            return artifact;
         }
 
-        // 4. Validamos el límite diario (Máximo 3 por día)
-        var today = DateTime.UtcNow.Date;
-        var usage = await _usageRepository.GetUsageForTodayAsync(workspaceId, today, cancellationToken)
-                    ?? CatalogGenerationUsage.Create(workspaceId, today);
+        await _usageRepository.IncrementUsageAtomicallyAsync(workspaceId, DateTime.UtcNow.Date, cancellationToken);
 
-        usage.Increment(); // Dispara DomainException si supera 3
-
-        // 5. Marcamos el artefacto como en proceso con su nuevo hash
-        artifact.MarkAsGenerating(currentHash);
-
-        // 6. Guardamos los cambios de uso y estado en Firestore
-        await _usageRepository.SaveUsageAsync(usage, cancellationToken);
+        string generationId = Guid.NewGuid().ToString("N");
+        artifact.MarkAsGenerating(currentHash, generationId);
         await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
 
-        // TODO (Sprint 8): Aquí inyectaremos el llamado a n8n para que renderice el PDF en segundo plano.
+        // 🔥 SPRINT 8: Armamos el Contexto Estructurado para Gemini/n8n
+        try
+        {
+            var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
+
+            var payload = new
+            {
+                WorkspaceId = workspaceId,
+                GenerationId = generationId,
+                Scope = targetScope,
+                SourceHash = currentHash,
+                BusinessData = new
+                {
+                    Name = profile?.CommercialName ?? "Negocio sin nombre",
+                    Email = profile?.ContactEmail,
+                    WhatsApp = profile?.WhatsAppNumber
+                },
+                CatalogData = new
+                {
+                    Categories = filteredCategories.Select(c => new { c.Id, c.Name, c.Description }),
+                    Items = filteredItems.Select(i => new {
+                        i.Id,
+                        i.CategoryId,
+                        i.Name,
+                        i.Description,
+                        Price = i.PriceMinorUnits / 100m,
+                        i.Currency,
+                        i.ImageUrl,
+                        i.DurationInMinutes
+                    })
+                }
+            };
+
+            string jsonPayload = JsonSerializer.Serialize(payload);
+
+            // Disparamos la generación en segundo plano sin bloquear el hilo
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _workflowGateway.TriggerCatalogGenerationAsync(jsonPayload, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Fallo al enviar el trigger a n8n para el workspace {WorkspaceId}", workspaceId);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error preparando el payload para n8n");
+        }
 
         return artifact;
     }

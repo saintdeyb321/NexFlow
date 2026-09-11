@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createReservation } from '../services/reservation.service';
-import type { LocationDto, ServiceDto } from '../../business/types/business.types';
+import type { LocationDto } from '../../business/types/business.types';
+// 🔥 SPRINT 6
+import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 
 interface CreateReservationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   locations: LocationDto[];
-  services: ServiceDto[];
+  services: CatalogItemDto[];
 }
 
 export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services }: CreateReservationModalProps) => {
@@ -27,7 +29,6 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
     if (isOpen) {
       setFormData({
         locationId: locations.length > 0 ? (locations.find(l => l.isMain)?.id || locations[0].id || '') : '',
-        // 🔥 FIX: Garantizamos que sea string agregando el || ''
         serviceId: services.length > 0 ? (services[0].id || '') : '', 
         customerName: '',
         customerIdentifier: '',
@@ -107,55 +108,27 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
           <div>
             <label className="block text-sm font-medium mb-1">Nombre del Cliente</label>
-            <input 
-              type="text" 
-              value={formData.customerName} 
-              onChange={e => setFormData({...formData, customerName: e.target.value})}
-              placeholder="Ej: Juan Pérez"
-              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              required
-            />
+            <input type="text" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} placeholder="Ej: Juan Pérez" className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
           </div>
 
           <div>
             <label className="block text-sm font-medium mb-1">Teléfono (WhatsApp)</label>
-            <input 
-              type="text" 
-              value={formData.customerIdentifier} 
-              onChange={e => setFormData({...formData, customerIdentifier: e.target.value})}
-              placeholder="Ej: +51987654321"
-              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              required
-            />
+            <input type="text" value={formData.customerIdentifier} onChange={e => setFormData({...formData, customerIdentifier: e.target.value})} placeholder="Ej: +51987654321" className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Fecha</label>
-              <input 
-                type="date" 
-                value={formData.date} 
-                onChange={e => setFormData({...formData, date: e.target.value})}
-                className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                required
-              />
+              <input type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Hora</label>
-              <input 
-                type="time" 
-                value={formData.time} 
-                onChange={e => setFormData({...formData, time: e.target.value})}
-                className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                required
-              />
+              <input type="time" value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
             </div>
           </div>
 
           <div className="pt-4 flex justify-end space-x-3">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
-              Cancelar
-            </button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">Cancelar</button>
             <button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
               {isSaving ? 'Guardando...' : 'Confirmar Cita'}
             </button>

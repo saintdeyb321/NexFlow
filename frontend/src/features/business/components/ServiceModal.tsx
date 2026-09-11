@@ -2,20 +2,23 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Save } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
-import type { ServiceDto } from '../types/business.types';
 import { getCategories } from '../services/business.service';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import type { CatalogItemDto } from '../../catalog/types/catalog.types'; 
+// 🔥 SPRINT 7: Importar el uploader
+import { ImageUploader } from '../../../components/ui/ImageUploader';
 
 interface ServiceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (service: ServiceDto) => Promise<void>;
-  initialData?: ServiceDto | null;
+  onSave: (service: CatalogItemDto) => Promise<void>;
+  initialData?: CatalogItemDto | null;
 }
 
 export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceModalProps) => {
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   const { data: categories = [] } = useQuery({
     queryKey: ['catalogCategories', workspaceId],
@@ -23,15 +26,15 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
     enabled: !!workspaceId && isOpen,
   });
 
-  const [formData, setFormData] = useState<Partial<ServiceDto>>({
-    name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: '', type: 'SERVICE'
+  const [formData, setFormData] = useState<Partial<CatalogItemDto>>({
+    name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: '', type: 'SERVICE', imageUrl: null
   });
 
   useEffect(() => {
     if (initialData) {
       setFormData(initialData);
     } else {
-      setFormData({ name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: categories[0]?.id || '', type: 'SERVICE' });
+      setFormData({ name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: categories[0]?.id || '', type: 'SERVICE', imageUrl: null });
     }
   }, [initialData, isOpen, categories]);
 
@@ -41,7 +44,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
     setIsSaving(true);
     try {
-      const serviceToSave: ServiceDto = {
+      const serviceToSave: CatalogItemDto = {
         ...formData,
         id: formData.id || crypto.randomUUID(),
         type: 'SERVICE',
@@ -52,7 +55,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
         isActive: formData.isActive ?? true,
         durationInMinutes: formData.durationInMinutes,
         requiresReservation: formData.requiresReservation ?? true,
-      } as ServiceDto;
+      } as CatalogItemDto;
       
       await onSave(serviceToSave);
       onClose();
@@ -71,13 +74,24 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
           <input type="text" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl" required />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Categoría *</label>
-          <select value={formData.categoryId || ''} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl" required>
-            <option value="" disabled>Selecciona una categoría...</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          {categories.length === 0 && <p className="text-xs text-red-500 mt-1">Debes ir a la pestaña Catálogo y crear una categoría primero.</p>}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Categoría *</label>
+            <select value={formData.categoryId || ''} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl" required>
+              <option value="" disabled>Selecciona una categoría...</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          
+          {/* 🔥 SPRINT 7: Input de Imagen */}
+          <div>
+            <ImageUploader 
+              value={formData.imageUrl} 
+              onChange={(url) => setFormData({ ...formData, imageUrl: url })} 
+              onUploadingContext={setIsUploadingImage}
+              label="Foto del Servicio (Opcional)"
+            />
+          </div>
         </div>
 
         <div>
@@ -110,7 +124,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
         <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl">Cancelar</button>
-          <button type="submit" disabled={isSaving || categories.length === 0} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl disabled:opacity-50">
+          <button type="submit" disabled={isSaving || isUploadingImage || categories.length === 0} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl disabled:opacity-50">
             <Save className="w-4 h-4 mr-2" />
             {isSaving ? 'Guardando...' : 'Guardar'}
           </button>

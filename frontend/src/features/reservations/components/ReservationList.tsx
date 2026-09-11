@@ -1,10 +1,10 @@
 import { Search, Pencil, XCircle } from 'lucide-react';
 import type { ReservationDto } from '../types/reservation.types';
-import type { ServiceDto } from '../../business/types/business.types';
+import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 
 interface ReservationListProps {
   reservations: ReservationDto[];
-  services: ServiceDto[];
+  services: CatalogItemDto[];
   onEdit: (res: ReservationDto) => void;
   onCancel: (id: string) => void;
   onComplete: (id: string) => void;
@@ -18,7 +18,6 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
     if (status === 2 || status === '2') return 'COMPLETED';
     if (status === 3 || status === '3') return 'CANCELLED';
     if (status === 4 || status === '4') return 'NOSHOW';
-    
     return String(status || '').toUpperCase();
   };
 
@@ -33,7 +32,7 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
     }
   };
 
-  if (reservations.length === 0) {
+  if (!reservations || reservations.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-gray-500">
         <Search className="w-10 h-10 text-gray-300 mb-3" />
@@ -42,9 +41,12 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
     );
   }
 
-  const sortedReservations = [...reservations].sort((a, b) => 
-    new Date((a as any).startTime || a.dateTime).getTime() - new Date((b as any).startTime || b.dateTime).getTime()
-  );
+  // 🔥 CORRECCIÓN: Evitamos que el sort explote si un registro viene nulo o sin fecha
+  const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
+    const dateA = new Date((a as any).startTime || a.dateTime || new Date()).getTime();
+    const dateB = new Date((b as any).startTime || b.dateTime || new Date()).getTime();
+    return dateA - dateB;
+  });
 
   return (
     <div className="overflow-x-auto">
@@ -61,7 +63,7 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
         <tbody className="divide-y divide-gray-100">
           {sortedReservations.map((res) => {
             const timeStr = (res as any).startTime || res.dateTime;
-            const localTime = new Date(new Date(timeStr).toLocaleString('en-US', { timeZone: 'America/Lima' }));
+            const localTime = timeStr ? new Date(new Date(timeStr).toLocaleString('en-US', { timeZone: 'America/Lima' })) : new Date();
             
             const normalizedStatus = normalizeStatus(res.status);
             const isCancelled = normalizedStatus === 'CANCELLED';
@@ -85,23 +87,16 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
                 <td className="px-6 py-4">
                   {getStatusBadge(res.status)}
                 </td>
-                
-                {/* 🔥 ÚNICA COLUMNA DE ACCIONES LIMPIA */}
                 <td className="px-6 py-4 text-right">
                   {normalizedStatus === 'PENDING' || normalizedStatus === 'CONFIRMED' ? (
                     <div className="flex justify-end gap-2">
-                      {/* Botón Completar */}
-                      <button onClick={() => onComplete(res.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
+                      <button onClick={() => onComplete(res.id!)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                       </button>
-                      
-                      {/* Botón Editar */}
                       <button onClick={() => onEdit(res)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Reagendar">
                         <Pencil className="w-4 h-4" />
                       </button>
-                      
-                      {/* Botón Cancelar */}
-                      <button onClick={() => onCancel(res.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
+                      <button onClick={() => onCancel(res.id!)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
                         <XCircle className="w-4 h-4" />
                       </button>
                     </div>
