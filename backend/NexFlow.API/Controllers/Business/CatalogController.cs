@@ -147,17 +147,24 @@ public class CatalogController : ControllerBase
     }
 
     // ==========================================
-    // ARTEFACTOS Y PDF
+    // ARTEFACTOS Y PDF (Soporta Products y Services)
     // ==========================================
     [HttpGet("artifact")]
     public async Task<IActionResult> GetArtifactStatus(
+        [FromQuery] string? scope,
         [FromServices] ICatalogArtifactRepository artifactRepository,
         CancellationToken cancellationToken)
     {
-        if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
+        // 1. Determinar el alcance y el módulo requerido
+        var targetScope = string.IsNullOrWhiteSpace(scope) ? "PRODUCT" : scope.ToUpperInvariant();
+        var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
-        // 🔥 CORRECCIÓN: Solicitamos específicamente el artefacto de PRODUCT
-        var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, "PRODUCT", cancellationToken);
+        // 2. Validar que tenga el módulo correcto contratado
+        if (!await HasAccessTo(requiredModule, cancellationToken))
+            return StatusCode(403, $"Módulo {requiredModule} no contratado.");
+
+        // 3. Consultar el artefacto correcto
+        var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, targetScope, cancellationToken);
         if (artifact == null)
         {
             return Ok(new { status = "NOT_GENERATED", pdfUrl = (string?)null });
@@ -173,15 +180,19 @@ public class CatalogController : ControllerBase
 
     [HttpPost("artifact/generate")]
     public async Task<IActionResult> GenerateArtifact(
+        [FromBody] GenerateArtifactRequest request,
         [FromServices] ICatalogGenerationService generationService,
         CancellationToken cancellationToken)
     {
-        if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
+        var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "PRODUCT" : request.Scope.ToUpperInvariant();
+        var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
+
+        if (!await HasAccessTo(requiredModule, cancellationToken))
+            return StatusCode(403, $"Módulo {requiredModule} no contratado.");
 
         try
         {
-            // 🔥 CORRECCIÓN: Solicitamos la generación del scope PRODUCT
-            var result = await generationService.RequestGenerationAsync(WorkspaceId, "PRODUCT", cancellationToken);
+            var result = await generationService.RequestGenerationAsync(WorkspaceId, targetScope, cancellationToken);
             return Ok(new
             {
                 status = result.Status.ToString(),
@@ -194,4 +205,10 @@ public class CatalogController : ControllerBase
             return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
         }
     }
+}
+
+// 🔥 Clase auxiliar para recibir el scope en el body del POST
+public class GenerateArtifactRequest
+{
+    public string Scope { get; set; } = string.Empty;
 }

@@ -5,13 +5,13 @@ import { getServices, saveService, deleteService } from '../services/business.se
 import { ServiceModal } from '../components/ServiceModal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { CatalogItemDto } from '../../catalog/types/catalog.types';
+import { ArtifactGenerator } from '../../catalog/components/ArtifactGenerator';
 
 export const ServicesPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  // 🔥 Usamos CatalogItemDto
   const [serviceToEdit, setServiceToEdit] = useState<CatalogItemDto | null>(null);
 
   const { data: services = [], isLoading: isServicesLoading } = useQuery({
@@ -57,7 +57,7 @@ export const ServicesPage = () => {
   if (isServicesLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-5xl mx-auto animate-in fade-in">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
           <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center mr-4">
@@ -74,6 +74,9 @@ export const ServicesPage = () => {
           Nuevo Servicio
         </button>
       </div>
+
+      {/* 🔥 INYECTAMOS EL MOTOR AQUÍ, APUNTANDO A SERVICIOS */}
+      <ArtifactGenerator scope="SERVICE" title="Folleto de Servicios (PDF y WebP)" />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">

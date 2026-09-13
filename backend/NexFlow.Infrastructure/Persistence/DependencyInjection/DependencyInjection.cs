@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>();
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
         services.AddScoped<IFileStorage, CloudinaryFileStorage>();
+        services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>();
 
         // 7. Conexión a Redis Resiliente
         var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";

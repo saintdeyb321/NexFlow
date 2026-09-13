@@ -6,15 +6,12 @@ export interface BusinessProfile {
   description: string;
 }
 
-// 🔥 SPRINT 6: Eliminados CatalogCategoryDto y ServiceDto de aquí. 
-// Ahora toda la aplicación consumirá el modelo unificado desde catalog.types.ts
-
 export interface FaqDto {
   id?: string;
   question: string;
   answer: string;
   category?: string | null;
-  isActive: boolean; // En C# el default es true, pero no es opcional
+  isActive: boolean;
 }
 
 export interface LocationDto {
@@ -31,4 +28,15 @@ export interface BusinessHoursDto {
   openTime: string; 
   closeTime: string; 
   isClosed: boolean; 
+}
+
+// WHATSAPP (Evolution API) - SPRINT 5
+export type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_AVAILABLE' | 'CONNECTED' | 'ERROR';
+
+export interface WhatsAppStatusResponse {
+  status: ConnectionStatus;
+}
+
+export interface WhatsAppConnectResponse {
+  qrBase64: string;
 }

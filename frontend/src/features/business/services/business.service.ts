@@ -60,3 +60,20 @@ export const saveBusinessHours = async (locationId: string, hours: BusinessHours
 export const completeBusinessOnboarding = async (): Promise<void> => {
   await axiosClient.post('/business/complete-onboarding');
 };
+
+// WHATSAPP (Evolution API) - SPRINT 5
+import type { WhatsAppStatusResponse, WhatsAppConnectResponse } from '../types/business.types';
+
+export const getWhatsAppStatus = async (): Promise<WhatsAppStatusResponse> => {
+  const { data } = await axiosClient.get<WhatsAppStatusResponse>('/business/whatsapp/status');
+  return data;
+};
+
+export const connectWhatsApp = async (): Promise<WhatsAppConnectResponse> => {
+  const { data } = await axiosClient.post<WhatsAppConnectResponse>('/business/whatsapp/connect');
+  return data;
+};
+
+export const disconnectWhatsApp = async (): Promise<void> => {
+  await axiosClient.post('/business/whatsapp/disconnect');
+};

@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Save } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
-import { getCategories } from '../services/business.service';
+import { axiosClient } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import type { CatalogItemDto } from '../../catalog/types/catalog.types'; 
-// 🔥 SPRINT 7: Importar el uploader
+import type { CatalogItemDto, CatalogCategoryDto } from '../../catalog/types/catalog.types'; 
 import { ImageUploader } from '../../../components/ui/ImageUploader';
 
 interface ServiceModalProps {
@@ -20,9 +19,14 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
+  const fetchServiceCategories = async (): Promise<CatalogCategoryDto[]> => {
+    const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories?scope=SERVICE');
+    return data;
+  };
+
   const { data: categories = [] } = useQuery({
-    queryKey: ['catalogCategories', workspaceId],
-    queryFn: getCategories,
+    queryKey: ['serviceCategories', workspaceId],
+    queryFn: fetchServiceCategories,
     enabled: !!workspaceId && isOpen,
   });
 
@@ -30,13 +34,18 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
     name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: '', type: 'SERVICE', imageUrl: null
   });
 
+  // 🔥 CORRECCIÓN DEL LOOP INFINITO: 
+  // Solo actualizamos el estado cuando el modal se ABRE (isOpen cambia a true)
   useEffect(() => {
-    if (initialData) {
-      setFormData(initialData);
-    } else {
-      setFormData({ name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: categories[0]?.id || '', type: 'SERVICE', imageUrl: null });
+    if (isOpen) {
+      if (initialData) {
+        setFormData(initialData);
+      } else {
+        setFormData({ name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: categories[0]?.id || '', type: 'SERVICE', imageUrl: null });
+      }
     }
-  }, [initialData, isOpen, categories]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialData]); // 🛑 JAMÁS pongas 'categories' aquí, eso causa el loop infinito.
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,15 +90,15 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
               <option value="" disabled>Selecciona una categoría...</option>
               {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {categories.length === 0 && <p className="text-xs text-orange-500 mt-1">⚠️ Crea una categoría primero.</p>}
           </div>
           
-          {/* 🔥 SPRINT 7: Input de Imagen */}
           <div>
             <ImageUploader 
               value={formData.imageUrl} 
               onChange={(url) => setFormData({ ...formData, imageUrl: url })} 
               onUploadingContext={setIsUploadingImage}
-              label="Foto del Servicio (Opcional)"
+              label="Foto del Servicio"
             />
           </div>
         </div>

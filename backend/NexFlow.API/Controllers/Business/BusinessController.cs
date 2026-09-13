@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
@@ -277,5 +278,41 @@ public class BusinessController : ControllerBase
         }
 
         return NoContent();
+    }
+
+    // =======================================================
+    // WHATSAPP (Evolution API)
+    // =======================================================
+    [HttpGet("whatsapp/status")]
+    public async Task<IActionResult> GetWhatsAppStatus(
+        [FromServices] IEvolutionConnectionService evolutionService,
+        CancellationToken cancellationToken)
+    {
+        var status = await evolutionService.GetConnectionStatusAsync(WorkspaceId, cancellationToken);
+        return Ok(new { status });
+    }
+
+    [HttpPost("whatsapp/connect")]
+    public async Task<IActionResult> ConnectWhatsApp(
+        [FromServices] IEvolutionConnectionService evolutionService,
+        CancellationToken cancellationToken)
+    {
+        var qrBase64 = await evolutionService.ConnectAndGetQrAsync(WorkspaceId, cancellationToken);
+
+        if (string.IsNullOrEmpty(qrBase64))
+            return StatusCode(500, new { message = "No se pudo generar el código QR." });
+
+        return Ok(new { qrBase64 });
+    }
+
+    [HttpPost("whatsapp/disconnect")]
+    public async Task<IActionResult> DisconnectWhatsApp(
+        [FromServices] IEvolutionConnectionService evolutionService,
+        CancellationToken cancellationToken)
+    {
+        var success = await evolutionService.DisconnectAsync(WorkspaceId, cancellationToken);
+        if (!success) return StatusCode(500, new { message = "Fallo al desconectar la instancia." });
+
+        return Ok(new { message = "Instancia desconectada." });
     }
 }

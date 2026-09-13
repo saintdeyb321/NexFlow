@@ -29,3 +29,21 @@ export const saveProduct = async (product: CatalogItemDto): Promise<void> => {
 export const deleteProduct = async (id: string): Promise<void> => {
   await axiosClient.delete(`/catalog/${id}`);
 };
+
+export interface ArtifactStatusDto {
+  status: 'NOT_GENERATED' | 'GENERATING' | 'CURRENT' | 'STALE' | 'FAILED';
+  pdfUrl?: string | null;
+  lastGeneratedAt?: string | null;
+}
+
+// 🔥 CORRECCIÓN: Agregamos scope obligatorio
+export const getArtifactStatus = async (scope: 'PRODUCT' | 'SERVICE'): Promise<ArtifactStatusDto> => {
+  const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`);
+  return data;
+};
+
+// 🔥 CORRECCIÓN: Enviamos el scope en el body
+export const generateArtifact = async (scope: 'PRODUCT' | 'SERVICE'): Promise<{ status: string, message: string }> => {
+  const { data } = await axiosClient.post('/catalog/artifact/generate', { scope });
+  return data;
+};

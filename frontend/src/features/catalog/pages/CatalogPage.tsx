@@ -5,6 +5,7 @@ import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } 
 import type { CatalogItemDto } from '../types/catalog.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { ImageUploader } from '../../../components/ui/ImageUploader';
+import { ArtifactGenerator } from '../components/ArtifactGenerator';
 
 export const CatalogPage = () => {
   const queryClient = useQueryClient();
@@ -69,6 +70,10 @@ export const CatalogPage = () => {
           </button>
         </div>
       </div>
+      
+      {/* 🔥 Scope PRODUCT */}
+      <ArtifactGenerator scope="PRODUCT" title="Catálogo de Productos (PDF y WebP)" />
+      
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.length === 0 ? (
