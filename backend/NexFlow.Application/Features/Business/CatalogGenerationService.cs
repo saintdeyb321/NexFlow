@@ -17,7 +17,7 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly ICatalogArtifactRepository _artifactRepository;
     private readonly ICatalogGenerationUsageRepository _usageRepository;
     private readonly ICatalogHashService _hashService;
-    private readonly IWorkflowGateway _workflowGateway; // 🔥 SPRINT 8: Inyectamos n8n
+    private readonly IWorkflowGateway _workflowGateway;
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly ILogger<CatalogGenerationService> _logger;
 
@@ -65,7 +65,6 @@ public class CatalogGenerationService : ICatalogGenerationService
         artifact.MarkAsGenerating(currentHash, generationId);
         await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
 
-        // 🔥 SPRINT 8: Armamos el Contexto Estructurado para Gemini/n8n
         try
         {
             var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
@@ -93,14 +92,15 @@ public class CatalogGenerationService : ICatalogGenerationService
                         Price = i.PriceMinorUnits / 100m,
                         i.Currency,
                         i.ImageUrl,
-                        i.DurationInMinutes
+                        i.DurationInMinutes,
+                        i.LocationScope, // 🔥 SPRINT 15: n8n debe conocer las sedes para pintarlas en el PDF
+                        i.LocationIds
                     })
                 }
             };
 
             string jsonPayload = JsonSerializer.Serialize(payload);
 
-            // Disparamos la generación en segundo plano sin bloquear el hilo
             _ = Task.Run(async () =>
             {
                 try

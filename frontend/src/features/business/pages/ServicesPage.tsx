@@ -10,13 +10,15 @@ import { ArtifactGenerator } from '../../catalog/components/ArtifactGenerator';
 export const ServicesPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  
+  const selectedLocationId = useAuthStore((state) => state.selectedLocationId); // 🔥 Contexto global
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState<CatalogItemDto | null>(null);
 
+  // 🔥 Inyectamos selectedLocationId
   const { data: services = [], isLoading: isServicesLoading } = useQuery({
-    queryKey: ['services', workspaceId],
-    queryFn: getServices,
+    queryKey: ['services', workspaceId, selectedLocationId],
+    queryFn: () => getServices(selectedLocationId),
     enabled: !!workspaceId,
     staleTime: 1000 * 60 * 10,
   });
@@ -42,17 +44,9 @@ export const ServicesPage = () => {
   
   const deleteMutation = useMutation({
     mutationFn: deleteService,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['services', workspaceId] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services', workspaceId] }),
     onError: (error: any) => alert(`Error al eliminar: ${error.message}`)
   });
-
-  const handleDelete = (serviceId: string) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar este servicio?')) {
-      deleteMutation.mutate(serviceId);
-    }
-  };
 
   if (isServicesLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
 
@@ -75,7 +69,6 @@ export const ServicesPage = () => {
         </button>
       </div>
 
-      {/* 🔥 INYECTAMOS EL MOTOR AQUÍ, APUNTANDO A SERVICIOS */}
       <ArtifactGenerator scope="SERVICE" title="Folleto de Servicios (PDF y WebP)" />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -85,13 +78,10 @@ export const ServicesPage = () => {
         
         <div className="space-y-3">
           {services.length === 0 ? (
-            <div className="text-center py-10 text-gray-500">Aún no tienes servicios registrados.</div>
+            <div className="text-center py-10 text-gray-500">No hay servicios disponibles en esta sede.</div>
           ) : (
             services.map((service) => (
-              <div 
-                key={service.id} 
-                className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all"
-              >
+              <div key={service.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all">
                 <div className="flex items-center">
                   <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center mr-4">
                     <Tag className="w-5 h-5 text-blue-500" />
@@ -99,11 +89,10 @@ export const ServicesPage = () => {
                   <div>
                     <h4 className="font-bold text-gray-900 text-sm md:text-base">{service.name}</h4>
                     <div className="flex items-center mt-1">
-                      {service.isActive ? (
-                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">● ACTIVO</span>
-                      ) : (
-                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">INACTIVO</span>
-                      )}
+                      {service.isActive 
+                         ? <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">● ACTIVO</span>
+                         : <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">INACTIVO</span>
+                      }
                       <span className="ml-3 text-xs text-gray-500 border-l border-gray-200 pl-3">
                         {service.durationInMinutes} min • S/ {service.priceMinorUnits ? (service.priceMinorUnits / 100).toFixed(2) : '0.00'}
                       </span>
@@ -112,18 +101,10 @@ export const ServicesPage = () => {
                 </div>
 
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => handleOpenEdit(service)}
-                    className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors"
-                    title="Editar"
-                  >
+                  <button onClick={() => handleOpenEdit(service)} className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => handleDelete(service.id!)}
-                    className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
-                    title="Eliminar"
-                  >
+                  <button onClick={() => window.confirm('¿Eliminar?') && deleteMutation.mutate(service.id!)} className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -136,9 +117,7 @@ export const ServicesPage = () => {
       <ServiceModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
-        onSave={async (service) => {
-          await saveMutation.mutateAsync(service);
-        }}
+        onSave={async (service) => { await saveMutation.mutateAsync(service); }}
         initialData={serviceToEdit}
       />
     </div>

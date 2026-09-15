@@ -1,37 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, Clock, CheckCircle, XCircle, Loader2, ThumbsUp, Ban } from 'lucide-react';
 import { getRequests, updateRequestStatus } from '../services/request.service';
-import type { RequestRecord, RequestStatus } from '../types/request.types';
+import type { RequestStatus } from '../types/request.types';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const RequestsPage = () => {
-  const [requests, setRequests] = useState<RequestRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  const selectedLocationId = useAuthStore(state => state.selectedLocationId); // 🔥 Contexto Global
 
-  useEffect(() => {
-    loadRequests();
-  }, []);
+  // Inyectamos la sede actual en la consulta
+  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
 
-  const loadRequests = async () => {
-    try {
-      const data = await getRequests();
-      setRequests(data);
-    } catch (error) {
-      console.error("Error al cargar solicitudes", error);
-    } finally {
-      setIsLoading(false);
-    }
+  // 🔥 SPRINT 08: Migración a TanStack Query
+  const { data: requests = [], isLoading } = useQuery({
+    queryKey: ['requests', workspaceId, queryLocation],
+    queryFn: () => getRequests(queryLocation), // Deberás asegurar que tu getRequests reciba este id
+    enabled: !!workspaceId,
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string, status: string }) => updateRequestStatus(id, status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] }),
+    onError: (error: any) => alert(`Error actualizando estado: ${error.message}`)
+  });
+
+  const handleStatusChange = (id: string, newStatus: string) => {
+    updateStatusMutation.mutate({ id, status: newStatus });
   };
 
-  const handleStatusChange = async (id: string, newStatus: string) => {
-    try {
-      await updateRequestStatus(id, newStatus);
-      setRequests(requests.map(r => r.id === id ? { ...r, status: newStatus as RequestStatus } : r));
-    } catch (error: any) {
-      alert(`Error actualizando el estado: ${error.message || 'Error desconocido'}`);
-    }
-  };
-
-  // 🔥 CORRECCIÓN: Badges mapeados exactamente al Enum de C#
   const getStatusBadge = (status: RequestStatus | string) => {
     switch (status) {
       case 'Pending': return <span className="flex items-center px-2.5 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium"><Clock className="w-3 h-3 mr-1" /> Pendiente</span>;
@@ -52,7 +49,7 @@ export const RequestsPage = () => {
         <h1 className="text-2xl font-bold text-gray-900 flex items-center">
           <ClipboardList className="w-6 h-6 mr-3 text-blue-600" /> Bandeja de Trámites
         </h1>
-        <p className="mt-1 text-sm text-gray-500">Gestiona las solicitudes, afiliaciones o requerimientos creados por la IA.</p>
+        <p className="mt-1 text-sm text-gray-500">Gestiona las solicitudes o requerimientos creados por la IA para esta sede.</p>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -68,7 +65,7 @@ export const RequestsPage = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {requests.length === 0 ? (
-              <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No hay trámites registrados.</td></tr>
+              <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No hay trámites registrados para esta sede.</td></tr>
             ) : (
               requests.map((req) => (
                 <tr key={req.id} className="hover:bg-gray-50">
@@ -80,7 +77,8 @@ export const RequestsPage = () => {
                     <select 
                       value={req.status} 
                       onChange={(e) => handleStatusChange(req.id, e.target.value)}
-                      className="text-sm border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={updateStatusMutation.isPending}
+                      className="text-sm border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                     >
                       <option value="Pending">Pendiente</option>
                       <option value="InReview">En Revisión</option>

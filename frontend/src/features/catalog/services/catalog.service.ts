@@ -2,8 +2,10 @@ import { axiosClient } from '../../../core/api/axiosClient';
 import type { CatalogCategoryDto, CatalogItemDto } from '../types/catalog.types';
 
 // --- CATEGORÍAS (Usadas por Productos y Servicios) ---
-export const getCategories = async (): Promise<CatalogCategoryDto[]> => {
-  const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories');
+// 🔥 SPRINT 03: Parámetro scope para no mezclar categorías de productos y servicios
+export const getCategories = async (scope?: 'PRODUCT' | 'SERVICE' | 'SHARED'): Promise<CatalogCategoryDto[]> => {
+  const params = scope ? { scope } : {};
+  const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories', { params });
   return data;
 };
 
@@ -17,8 +19,10 @@ export const saveCategory = async (category: CatalogCategoryDto): Promise<Catalo
 };
 
 // --- PRODUCTOS (Módulo Catalog) ---
-export const getProducts = async (): Promise<CatalogItemDto[]> => {
-  const { data } = await axiosClient.get<CatalogItemDto[]>('/catalog');
+// 🔥 SPRINT 04: Inyectamos locationId para aislar la data por sede
+export const getProducts = async (locationId?: string): Promise<CatalogItemDto[]> => {
+  const params = locationId && locationId !== 'all' ? { locationId } : {};
+  const { data } = await axiosClient.get<CatalogItemDto[]>('/catalog', { params });
   return data;
 };
 
@@ -30,19 +34,18 @@ export const deleteProduct = async (id: string): Promise<void> => {
   await axiosClient.delete(`/catalog/${id}`);
 };
 
+// --- ARTEFACTOS (Motor de Generación PDF/WebP) ---
 export interface ArtifactStatusDto {
   status: 'NOT_GENERATED' | 'GENERATING' | 'CURRENT' | 'STALE' | 'FAILED';
   pdfUrl?: string | null;
   lastGeneratedAt?: string | null;
 }
 
-// 🔥 CORRECCIÓN: Agregamos scope obligatorio
 export const getArtifactStatus = async (scope: 'PRODUCT' | 'SERVICE'): Promise<ArtifactStatusDto> => {
   const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`);
   return data;
 };
 
-// 🔥 CORRECCIÓN: Enviamos el scope en el body
 export const generateArtifact = async (scope: 'PRODUCT' | 'SERVICE'): Promise<{ status: string, message: string }> => {
   const { data } = await axiosClient.post('/catalog/artifact/generate', { scope });
   return data;

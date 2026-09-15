@@ -55,26 +55,35 @@ public class EvolutionMessageGateway : IMessageGateway
         return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
     }
 
-    // 🔥 SPRINT 9: Nueva capacidad para enviar PDFs nativos por WhatsApp
+    // 🔥 SPRINT 17: Soporte para PDFs
     public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
         if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
 
-        // Evolution API usa sendMedia para enviar URLs directamente como documentos/imágenes
         var url = $"{_baseUrl}/message/sendMedia/{instanceName}";
-
         var payload = new
         {
             number = customerIdentifier,
             options = new { delay = 2000, presence = "composing" },
-            mediaMessage = new
-            {
-                mediatype = "document",
-                fileName = fileName,
-                caption = caption,
-                media = documentUrl // Evolution se encarga de descargar el PDF y enviarlo
-            }
+            mediaMessage = new { mediatype = "document", fileName = fileName, caption = caption, media = documentUrl }
+        };
+
+        return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
+    }
+
+    // 🔥 SPRINT 17: Soporte Nativo para Imágenes (WebP/JPG)
+    public async Task<string> SendImageAsync(Guid workspaceId, string customerIdentifier, string imageUrl, string caption, CancellationToken cancellationToken)
+    {
+        var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
+
+        var url = $"{_baseUrl}/message/sendMedia/{instanceName}";
+        var payload = new
+        {
+            number = customerIdentifier,
+            options = new { delay = 1500, presence = "composing" },
+            mediaMessage = new { mediatype = "image", caption = caption, media = imageUrl }
         };
 
         return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
@@ -85,26 +94,17 @@ public class EvolutionMessageGateway : IMessageGateway
         try
         {
             var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
-
             if (!response.IsSuccessStatusCode)
             {
                 var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("Evolution rejected message. Status={StatusCode}, Error={ErrorDetails}", response.StatusCode, errorDetails);
                 return $"FAILED_{(int)response.StatusCode}_{Guid.NewGuid()}";
             }
-
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
             if (jsonResponse.TryGetProperty("key", out var keyProp) && keyProp.TryGetProperty("id", out var idProp))
-            {
                 return idProp.GetString() ?? Guid.NewGuid().ToString();
-            }
 
             return Guid.NewGuid().ToString();
-        }
-        catch (TaskCanceledException)
-        {
-            _logger.LogWarning("Timeout: Evolution API no respondió a tiempo. Cliente: {Customer}", customerIdentifier);
-            return $"FAILED_TIMEOUT_{Guid.NewGuid()}";
         }
         catch (Exception ex)
         {

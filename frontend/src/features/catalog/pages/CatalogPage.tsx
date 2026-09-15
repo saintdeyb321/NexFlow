@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, Trash2, FolderPlus } from 'lucide-react';
 import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } from '../services/catalog.service';
-import type { CatalogItemDto } from '../types/catalog.types';
+import type { CatalogItemDto, CatalogCategoryDto } from '../types/catalog.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { ImageUploader } from '../../../components/ui/ImageUploader';
 import { ArtifactGenerator } from '../components/ArtifactGenerator';
@@ -10,11 +10,23 @@ import { ArtifactGenerator } from '../components/ArtifactGenerator';
 export const CatalogPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const selectedLocationId = useAuthStore((state) => state.selectedLocationId); // 🔥 Contexto global de Sede
 
   const [showModal, setShowModal] = useState(false);
   
-  const { data: products = [], isLoading } = useQuery({ queryKey: ['catalog', workspaceId], queryFn: getProducts, enabled: !!workspaceId });
-  const { data: categories = [] } = useQuery({ queryKey: ['catalogCategories', workspaceId], queryFn: getCategories, enabled: !!workspaceId });
+  // 🔥 Inyectamos selectedLocationId en la key y en la función
+  const { data: products = [] as CatalogItemDto[], isLoading } = useQuery({ 
+    queryKey: ['catalog', workspaceId, selectedLocationId], 
+    queryFn: () => getProducts(selectedLocationId), 
+    enabled: !!workspaceId 
+  });
+  
+  // 🔥 CORRECCIÓN TYPESCRIPT: Forzamos el tipo y pasamos el scope explícitamente
+  const { data: categories = [] as CatalogCategoryDto[] } = useQuery({ 
+    queryKey: ['catalogCategories', workspaceId, 'PRODUCT'], 
+    queryFn: () => getCategories('PRODUCT'), 
+    enabled: !!workspaceId 
+  });
 
   const [newProduct, setNewProduct] = useState<Partial<CatalogItemDto>>({ name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', isActive: true, type: 'PRODUCT' });
 
@@ -46,8 +58,7 @@ export const CatalogPage = () => {
   const handleQuickAddCategory = () => {
     const catName = window.prompt("Nombre de la nueva categoría (Ej: Bebidas, Postres):");
     if (catName && catName.trim()) {
-      // 🔥 SPRINT 6: Agregamos scope: 'PRODUCT'
-      createCategoryMutation.mutate({ name: catName, isActive: true, displayOrder: 0, description: null, scope: 'PRODUCT' });
+      createCategoryMutation.mutate({ name: catName, isActive: true, displayOrder: 0, description: null, scope: 'PRODUCT' } as CatalogCategoryDto);
     }
   };
 
@@ -71,16 +82,14 @@ export const CatalogPage = () => {
         </div>
       </div>
       
-      {/* 🔥 Scope PRODUCT */}
       <ArtifactGenerator scope="PRODUCT" title="Catálogo de Productos (PDF y WebP)" />
-      
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.length === 0 ? (
-          <div className="col-span-full p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-xl">Tu catálogo está vacío. Comienza agregando una categoría y un producto.</div>
+          <div className="col-span-full p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-xl">No hay productos para esta sede.</div>
         ) : (
           products.map((prod) => {
-            const catName = categories.find(c => c.id === prod.categoryId)?.name || 'Sin Categoría';
+            const catName = categories.find((c: CatalogCategoryDto) => c.id === prod.categoryId)?.name || 'Sin Categoría';
             return (
               <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
                 <div className="flex justify-between items-start mb-2">
@@ -120,9 +129,8 @@ export const CatalogPage = () => {
                   <label className="block text-sm font-medium mb-1">Categoría</label>
                   <select value={newProduct.categoryId || ''} onChange={e => setNewProduct({...newProduct, categoryId: e.target.value})} className="w-full border rounded-lg px-3 py-2" required>
                     <option value="" disabled>Selecciona...</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {categories.map((c: CatalogCategoryDto) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
-                  {categories.length === 0 && <p className="text-xs text-red-500 mt-1">Crea una categoría primero.</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Precio</label>
@@ -133,7 +141,6 @@ export const CatalogPage = () => {
                 </div>
               </div>
 
-              {/* 🔥 SPRINT 7: Image Uploader */}
               <div>
                 <ImageUploader 
                   value={newProduct.imageUrl} 

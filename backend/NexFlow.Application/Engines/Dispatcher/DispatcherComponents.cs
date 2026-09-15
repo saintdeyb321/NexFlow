@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Caching.Memory; // 🔥 Requerido para Sprint 13 (Caché)
+using Microsoft.Extensions.Caching.Memory;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Engines.Intent.AI;
@@ -14,7 +14,7 @@ using ConversationContextDto = NexFlow.Application.Abstractions.Cache.Conversati
 namespace NexFlow.Application.Engines.Dispatcher;
 
 // =====================================================================
-// 1. CAPABILITY RESOLVER: Traduce el Intent de la IA a operaciones del sistema
+// 1. CAPABILITY RESOLVER
 // =====================================================================
 public interface ICapabilityResolver { CapabilityRequest? Resolve(IntentResultDto intentResult); }
 
@@ -40,7 +40,7 @@ public class CapabilityResolver : ICapabilityResolver
 }
 
 // =====================================================================
-// 🔥 SPRINT 6 y 7: INTERFAZ EXTRAÍDA PARA EL PENDING ACTION RESOLVER
+// 2. CONTEXT RESOLVER
 // =====================================================================
 public interface ITextNormalizer
 {
@@ -49,7 +49,6 @@ public interface ITextNormalizer
     Task<string?> GroundDateAsync(Guid workspaceId, string rawDate, CancellationToken ct);
 }
 
-// 2. CONTEXT RESOLVER: Maneja la memoria, fusiones y reglas de negocio
 public record ContextResolution(ConversationContextDto Context, ModuleExecutionResult? InterceptResult);
 
 public interface IContextResolver : ITextNormalizer
@@ -62,14 +61,14 @@ public class ContextResolver : IContextResolver
 {
     private readonly IConversationCache _cache;
     private readonly ILocationRepository _locationRepo;
-    private readonly ICatalogRepository _catalogRepo; // 🔥 SPRINT 11: Reemplazado IServiceRepository
+    private readonly ICatalogRepository _catalogRepo;
     private readonly IBusinessProfileRepository _profileRepo;
     private readonly IMemoryCache _memoryCache;
 
     public ContextResolver(
         IConversationCache cache,
         ILocationRepository locationRepo,
-        ICatalogRepository catalogRepo, // 🔥 Inyectamos el catálogo unificado
+        ICatalogRepository catalogRepo,
         IBusinessProfileRepository profileRepo,
         IMemoryCache memoryCache)
     {
@@ -80,7 +79,6 @@ public class ContextResolver : IContextResolver
         _memoryCache = memoryCache;
     }
 
-    // 🔥 SPRINT 13: Métodos con Caché para matar el N+1
     private async Task<List<LocationDto>> GetCachedLocationsAsync(Guid workspaceId, CancellationToken ct)
     {
         var cacheKey = $"workspace:{workspaceId}:locations";
@@ -98,13 +96,12 @@ public class ContextResolver : IContextResolver
         if (!_memoryCache.TryGetValue(cacheKey, out List<CatalogItemDto>? services))
         {
             var activeItems = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
-            services = activeItems.Where(i => i.Type.ToUpperInvariant() == "SERVICE").ToList();
+            services = activeItems.Where(i => string.Equals(i.Type, "SERVICE", StringComparison.OrdinalIgnoreCase)).ToList();
             _memoryCache.Set(cacheKey, services, TimeSpan.FromMinutes(10));
         }
         return services ?? new List<CatalogItemDto>();
     }
 
-    // 🔥 SPRINT 14: Lógica Difusa de Levenshtein (Compara similitud de palabras)
     private static int ComputeLevenshteinDistance(string s, string t)
     {
         if (string.IsNullOrEmpty(s)) return string.IsNullOrEmpty(t) ? 0 : t.Length;
@@ -219,12 +216,12 @@ public class ContextResolver : IContextResolver
 
         if (exactMatch != null)
         {
+            // 🔥 CORRECCIÓN: Adaptado a la nueva estructura de DTO de Catálogo (Sprints 02/03)
             if (!string.IsNullOrEmpty(currentLocationId) &&
-                exactMatch.AvailableAtLocations != null &&
-                exactMatch.AvailableAtLocations.Any() &&
-                !exactMatch.AvailableAtLocations.Contains(currentLocationId))
+                !string.Equals(exactMatch.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase) &&
+                (exactMatch.LocationIds == null || !exactMatch.LocationIds.Contains(currentLocationId)))
             {
-                return null;
+                return null; // El servicio existe, pero no está disponible en la sede que el usuario está consultando
             }
             return exactMatch.Id;
         }
@@ -339,7 +336,9 @@ public class ContextResolver : IContextResolver
         => await _cache.SetContextAsync(workspaceId, customerPhone, context, ct);
 }
 
-// 3. MODULE AUTHORIZER: Verifica licencias (Entitlements)
+// =====================================================================
+// 3. MODULE AUTHORIZER
+// =====================================================================
 public interface IModuleAuthorizer { Task<bool> IsAuthorizedAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken ct); }
 
 public class ModuleAuthorizer : IModuleAuthorizer
@@ -352,7 +351,7 @@ public class ModuleAuthorizer : IModuleAuthorizer
 }
 
 // =====================================================================
-// 4. MODULE EXECUTOR: Ejecuta el handler final
+// 4. MODULE EXECUTOR
 // =====================================================================
 public interface IModuleExecutor { Task<ModuleExecutionResult> ExecuteAsync(Guid workspaceId, CapabilityRequest request, CancellationToken ct); }
 

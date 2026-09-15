@@ -8,6 +8,8 @@ import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { ReservationDto } from '../types/reservation.types';
+import type { CatalogItemDto } from '../../catalog/types/catalog.types';
+import type { LocationDto } from '../../business/types/business.types';
 
 export const ReservationsPage = () => {
   const queryClient = useQueryClient();
@@ -25,22 +27,23 @@ export const ReservationsPage = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
 
-  // 🔥 Sprint 5.1/5.2: Migración completa a TanStack Query
-  const { data: services = [] } = useQuery({
-    queryKey: ['services', workspaceId],
-    queryFn: getServices,
+  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
+
+  // 🔥 CORRECCIÓN TYPESCRIPT: Invocamos explícitamente con parámetro y tipamos el retorno
+  const { data: services = [] as CatalogItemDto[] } = useQuery({
+    queryKey: ['services', workspaceId, queryLocation],
+    queryFn: () => getServices(queryLocation),
     enabled: !!workspaceId,
     staleTime: 1000 * 60 * 10,
   });
 
-  const { data: locations = [] } = useQuery({
+  const { data: locations = [] as LocationDto[] } = useQuery({
     queryKey: ['locations', workspaceId],
     queryFn: getLocations,
     enabled: !!workspaceId,
   });
 
-  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
-  const { data: reservations = [], isLoading } = useQuery({
+  const { data: reservations = [] as ReservationDto[], isLoading } = useQuery({
     queryKey: ['reservations', workspaceId, queryLocation, selectedDate],
     queryFn: () => getReservations(queryLocation, selectedDate),
     enabled: !!workspaceId,
@@ -67,7 +70,7 @@ export const ReservationsPage = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto animate-in fade-in">
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
@@ -118,7 +121,7 @@ export const ReservationsPage = () => {
         ) : viewMode === 'list' ? (
           <ReservationList 
             reservations={reservations} 
-            services={services || []} 
+            services={services} 
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
             onCancel={handleCancel} 
             onComplete={handleComplete}
@@ -137,7 +140,7 @@ export const ReservationsPage = () => {
         onClose={() => setIsCreateModalOpen(false)} 
         onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })} 
         locations={locations} 
-        services={services || []} 
+        services={services} 
       />
 
       <EditReservationModal 

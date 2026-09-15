@@ -18,10 +18,10 @@ export const SettingsPage = () => {
     setTimeout(() => setMessage({ text: '', type: '' }), 4000);
   };
 
-  if (!workspaceId) return <div className="text-center p-8">Sin negocio asignado</div>;
+  if (!workspaceId) return <div className="text-center p-8 text-gray-500">Sin negocio asignado</div>;
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-2">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 flex items-center">Configuración del Negocio</h1>
         <p className="mt-1 text-sm text-gray-500">Administra la identidad, ubicaciones, horarios de atención y tu conexión a WhatsApp.</p>

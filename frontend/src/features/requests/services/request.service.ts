@@ -1,8 +1,10 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { RequestRecord } from '../types/request.types';
 
-export const getRequests = async (): Promise<RequestRecord[]> => {
-  const { data } = await axiosClient.get<RequestRecord[]>('/requests');
+// 🔥 SPRINT 08: Añadimos locationId para aislar la data por sede
+export const getRequests = async (locationId?: string): Promise<RequestRecord[]> => {
+  const params = locationId && locationId !== 'all' && locationId !== 'global' ? { locationId } : {};
+  const { data } = await axiosClient.get<RequestRecord[]>('/requests', { params });
   return data;
 };
 

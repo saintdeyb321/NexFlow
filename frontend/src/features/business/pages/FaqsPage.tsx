@@ -9,16 +9,19 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 export const FaqsPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const selectedLocationId = useAuthStore(state => state.selectedLocationId); // 🔥 Contexto Global
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [faqToEdit, setFaqToEdit] = useState<FaqDto | null>(null);
 
-  // 🔥 Auditoría (Sprint 5.1): Lectura aislada por Workspace (Removido Zustand)
+  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
+
+  // 🔥 SPRINT 09: Lectura aislada por Workspace y Sede
   const { data: faqs = [], isLoading: isFaqsLoading } = useQuery({
-    queryKey: ['faqs', workspaceId],
-    queryFn: faqService.getFaqs,
+    queryKey: ['faqs', workspaceId, queryLocation],
+    queryFn: () => faqService.getFaqs(queryLocation), // Deberás actualizar faq.service.ts
     enabled: !!workspaceId,
-    staleTime: 1000 * 60 * 10, // 10 minutos en caché
+    staleTime: 1000 * 60 * 10,
   });
 
   const saveMutation = useMutation({
@@ -66,7 +69,7 @@ export const FaqsPage = () => {
   if (isFaqsLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando base de conocimiento...</div>;
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-5xl mx-auto animate-in fade-in">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
@@ -90,7 +93,7 @@ export const FaqsPage = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex justify-between items-center border-b border-gray-100 mb-4 pb-2">
           <h3 className="text-sm font-semibold text-gray-700">
-            Preguntas Activas ({faqs.length}/30)
+            Preguntas Activas para esta Sede ({faqs.length}/30)
           </h3>
         </div>
         
@@ -98,7 +101,7 @@ export const FaqsPage = () => {
           {faqs.length === 0 ? (
             <div className="text-center py-10 text-gray-500 flex flex-col items-center">
               <MessageSquare className="w-12 h-12 text-gray-200 mb-3" />
-              <p>Tu IA aún no tiene conocimientos específicos.</p>
+              <p>Tu IA aún no tiene conocimientos específicos para esta sede.</p>
               <p className="text-sm mt-1">Haz clic en "Nueva Pregunta" para entrenarla.</p>
             </div>
           ) : (
@@ -122,18 +125,10 @@ export const FaqsPage = () => {
                 </div>
 
                 <div className="flex items-center space-x-2 md:self-start">
-                  <button
-                    onClick={() => handleOpenEdit(faq)}
-                    className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors"
-                    title="Editar"
-                  >
+                  <button onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => handleDelete(faq.id!)}
-                    className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
-                    title="Eliminar"
-                  >
+                  <button onClick={() => handleDelete(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -146,9 +141,7 @@ export const FaqsPage = () => {
       <FaqModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
-        onSave={async (faq) => {
-          await saveMutation.mutateAsync(faq);
-        }}
+        onSave={async (faq) => { await saveMutation.mutateAsync(faq); }}
         initialData={faqToEdit}
       />
     </div>

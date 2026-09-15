@@ -1,7 +1,6 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { BusinessHoursDto, BusinessProfile, LocationDto } from '../types/business.types';
-// 🔥 SPRINT 6: Importamos los tipos desde catalog
-import type { CatalogCategoryDto, CatalogItemDto } from '../../catalog/types/catalog.types';
+import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 
 export const getBusinessProfile = async (): Promise<BusinessProfile> => {
   const { data } = await axiosClient.get<BusinessProfile>('/business/profile');
@@ -12,19 +11,19 @@ export const updateBusinessProfile = async (profile: BusinessProfile): Promise<v
   await axiosClient.put('/business/profile', profile);
 };
 
-export const getCategories = async (): Promise<CatalogCategoryDto[]> => {
-  const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories');
-  return data;
-};
-
 // --- SERVICES ---
-export const getServices = async (): Promise<CatalogItemDto[]> => {
-  // 🔥 Asumiendo que tu endpoint de servicios sigue aquí, o usa /catalog filtrado
-  const { data } = await axiosClient.get<CatalogItemDto[]>('/business/services');
+// 🔥 SPRINT 04: Inyectamos locationId para aislar la data por sede
+export const getServices = async (locationId?: string): Promise<CatalogItemDto[]> => {
+  const params = locationId && locationId !== 'all' ? { locationId } : {};
+  const { data } = await axiosClient.get<CatalogItemDto[]>('/business/services', { params });
   return data;
 };
 
 export const saveService = async (service: CatalogItemDto): Promise<CatalogItemDto> => {
+  if (service.id) {
+    const { data } = await axiosClient.put<CatalogItemDto>(`/business/services/${service.id}`, service);
+    return data;
+  }
   const { data } = await axiosClient.post<CatalogItemDto>('/business/services', service);
   return data;
 };
@@ -33,7 +32,7 @@ export const deleteService = async (serviceId: string): Promise<void> => {
   await axiosClient.delete(`/business/services/${serviceId}`);
 };
 
-// --- LOCATIONS & ONBOARDING (Intactos) ---
+// --- LOCATIONS & ONBOARDING ---
 export const getLocations = async (): Promise<LocationDto[]> => {
   const { data } = await axiosClient.get<LocationDto[]>('/business/locations');
   return data;
@@ -61,7 +60,7 @@ export const completeBusinessOnboarding = async (): Promise<void> => {
   await axiosClient.post('/business/complete-onboarding');
 };
 
-// WHATSAPP (Evolution API) - SPRINT 5
+// --- WHATSAPP (Evolution API) ---
 import type { WhatsAppStatusResponse, WhatsAppConnectResponse } from '../types/business.types';
 
 export const getWhatsAppStatus = async (): Promise<WhatsAppStatusResponse> => {

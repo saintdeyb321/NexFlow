@@ -2,6 +2,7 @@
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Common;
+using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Reservations;
 using System.Transactions;
 
@@ -10,7 +11,7 @@ namespace NexFlow.Application.Engines.Reservation;
 public class ReservationEngine : IReservationEngine
 {
     private readonly IReservationRepository _reservationRepository;
-    private readonly ICatalogRepository _catalogRepository; // 🔥 SPRINT 3: Reemplazo
+    private readonly ICatalogRepository _catalogRepository;
     private readonly IBusinessHoursRepository _hoursRepository;
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly ILocationRepository _locationRepository;
@@ -38,6 +39,14 @@ public class ReservationEngine : IReservationEngine
         _logger = logger;
     }
 
+    // 🔥 Helper privado para aislar la lógica de validación sobre el DTO
+    private static bool IsServiceAvailableAtLocation(CatalogItemDto serviceDto, string locationId)
+    {
+        if (string.Equals(serviceDto.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.IsNullOrWhiteSpace(locationId)) return false;
+        return serviceDto.LocationIds != null && serviceDto.LocationIds.Contains(locationId);
+    }
+
     private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
     {
         var profile = await _profileRepository.GetProfileAsync(workspaceId, ct);
@@ -51,15 +60,14 @@ public class ReservationEngine : IReservationEngine
     {
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
 
-        // 🔥 SPRINT 3: Validar que exista y que sea de tipo SERVICE
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
-        var targetService = items.FirstOrDefault(s => s.Id == serviceId && s.Type.ToUpperInvariant() == "SERVICE");
+        var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
-        if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation ||
-            (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId)))
+        // Validación estricta sin dereferencias nulas
+        if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation || !IsServiceAvailableAtLocation(targetService, locationId))
             return new List<TimeSlotDto>();
 
-        if (targetService.DurationInMinutes == null || targetService.DurationInMinutes < 5)
+        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5)
             return new List<TimeSlotDto>();
 
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes.Value);
@@ -119,9 +127,8 @@ public class ReservationEngine : IReservationEngine
         var timeOnly = localDateTime.TimeOfDay;
         var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
-        // 🔥 SPRINT 3
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
-        var targetService = items.FirstOrDefault(s => s.Id == serviceId && s.Type.ToUpperInvariant() == "SERVICE");
+        var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
         if (targetService == null || !targetService.IsActive)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o se encuentra inactivo."));
@@ -129,10 +136,10 @@ public class ReservationEngine : IReservationEngine
         if (!targetService.RequiresReservation)
             return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
 
-        if (targetService.DurationInMinutes == null || targetService.DurationInMinutes < 5)
+        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5)
             return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida para operar una reserva."));
 
-        if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(locationId))
+        if (!IsServiceAvailableAtLocation(targetService, locationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio no se ofrece en la sede seleccionada."));
 
         var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
@@ -182,9 +189,8 @@ public class ReservationEngine : IReservationEngine
         var timeOnly = localDateTime.TimeOfDay;
         var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
-        // 🔥 SPRINT 3
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
-        var targetService = items.FirstOrDefault(s => s.Id == reservation.ServiceId && s.Type.ToUpperInvariant() == "SERVICE");
+        var targetService = items.FirstOrDefault(s => s.Id == reservation.ServiceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
         if (targetService == null || !targetService.IsActive)
             return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe o se encuentra inactivo."));
@@ -192,10 +198,10 @@ public class ReservationEngine : IReservationEngine
         if (!targetService.RequiresReservation)
             return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
 
-        if (targetService.DurationInMinutes == null || targetService.DurationInMinutes < 5)
+        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5)
             return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida."));
 
-        if (targetService.AvailableAtLocations != null && targetService.AvailableAtLocations.Any() && !targetService.AvailableAtLocations.Contains(reservation.LocationId))
+        if (!IsServiceAvailableAtLocation(targetService, reservation.LocationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual."));
 
         var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);

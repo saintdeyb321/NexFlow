@@ -40,9 +40,9 @@ public class CatalogModuleHandler : IModuleHandler
         if (request.Parameters.TryGetValue("locationId", out var locObj) && locObj is string locationId && !string.IsNullOrWhiteSpace(locationId))
         {
             productsList = productsList.Where(p =>
-                p.AvailableAtLocations == null ||
-                !p.AvailableAtLocations.Any() ||
-                p.AvailableAtLocations.Contains(locationId)).ToList();
+                string.Equals(p.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase) ||
+                (p.LocationIds != null && p.LocationIds.Contains(locationId))
+            ).ToList();
         }
 
         if (!productsList.Any())

@@ -61,6 +61,7 @@ public static class DependencyInjection
         services.AddScoped<IModuleHandler, BusinessHoursModuleHandler>();
         services.AddScoped<IModuleHandler, BusinessProfileModuleHandler>();
         services.AddScoped<IModuleHandler, LocationModuleHandler>();
+        services.AddScoped<IReservationParameterResolver, ReservationParameterResolver>();
 
         services.AddScoped<ICatalogHashService, CatalogHashService>();
         services.AddScoped<ICatalogGenerationService, CatalogGenerationService>();

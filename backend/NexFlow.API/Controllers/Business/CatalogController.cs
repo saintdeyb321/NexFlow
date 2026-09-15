@@ -96,14 +96,23 @@ public class CatalogController : ControllerBase
     // PRODUCTS (Módulo Licenciado Separadamente)
     // =======================================================
     [HttpGet]
-    public async Task<IActionResult> GetProducts(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetProducts([FromQuery] string? locationId, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
         var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
-        var products = allItems.Where(i => i.Type.ToUpperInvariant() == "PRODUCT").ToList();
+        var products = allItems.Where(i => i.Type.ToUpperInvariant() == "PRODUCT");
 
-        return Ok(products);
+        // 🔥 SPRINT 03: Validación rigurosa de sede en el Backend usando las propiedades del DTO
+        if (!string.IsNullOrWhiteSpace(locationId))
+        {
+            products = products.Where(p =>
+                string.Equals(p.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase) ||
+                (p.LocationIds != null && p.LocationIds.Contains(locationId))
+            );
+        }
+
+        return Ok(products.ToList());
     }
 
     [HttpPost]

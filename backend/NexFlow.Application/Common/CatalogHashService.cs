@@ -10,7 +10,7 @@ public class CatalogHashService : ICatalogHashService
 {
     public string ComputeHash(IEnumerable<CatalogCategoryDto> categories, IEnumerable<CatalogItemDto> items)
     {
-        // 1. Ordenamos todo de forma determinista para que el JSON siempre se arme igual
+        // 1. Ordenamos de forma determinista
         var orderedCategories = categories
             .OrderBy(c => c.Id)
             .Select(c => new { c.Id, c.Name, c.DisplayOrder, c.IsActive })
@@ -21,11 +21,16 @@ public class CatalogHashService : ICatalogHashService
             .Select(i => new {
                 i.Id,
                 i.Name,
+                i.Description, // 🔥 SPRINT 13: Detectar cambios en texto
                 i.CategoryId,
                 i.Type,
                 i.PriceMinorUnits,
+                i.Currency,    // 🔥 SPRINT 13: Detectar cambios en moneda
                 i.IsActive,
-                i.ImageUrl
+                i.ImageUrl,
+                i.DurationInMinutes, // 🔥 SPRINT 13: Detectar cambios en duración
+                i.LocationScope,     // 🔥 SPRINT 13: Detectar cambios de Sedes
+                LocationIds = i.LocationIds != null ? string.Join(",", i.LocationIds.OrderBy(l => l)) : ""
             })
             .ToList();
 
@@ -43,7 +48,7 @@ public class CatalogHashService : ICatalogHashService
         var bytes = Encoding.UTF8.GetBytes(json);
         var hashBytes = sha256.ComputeHash(bytes);
 
-        // 4. Lo convertimos a un texto legible (Ej: "A72F91...")
+        // 4. Lo convertimos a texto hexadecimal
         var stringBuilder = new StringBuilder();
         foreach (var b in hashBytes)
         {

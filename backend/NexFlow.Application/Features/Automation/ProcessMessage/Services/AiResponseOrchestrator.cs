@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Engines.AI;
 using NexFlow.Application.Engines.Dispatcher;
@@ -9,7 +8,10 @@ using NexFlow.Application.Engines.Intent.AI;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Domain.Enums;
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using NexFlow.Application.Abstractions.Cache;
+
+// 🔥 CORRECCIÓN DE AMBIGÜEDAD: Creamos un alias explícito para el DTO correcto.
+using CacheContextDto = NexFlow.Application.Abstractions.Cache.ConversationContextDto;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -26,33 +28,35 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IConversationRepository _conversationRepo;
     private readonly IConversationCache _conversationCache;
     private readonly IMessageGateway _messageGateway;
-    private readonly IContextResolver _contextResolver;
+    private readonly IReservationParameterResolver _parameterResolver; // Inyectamos el nuevo especialista
     private readonly ILogger<AiResponseOrchestrator> _logger;
 
     public AiResponseOrchestrator(
         IIntentEngine intentEngine, IModuleDispatcher moduleDispatcher, IAiRouter aiRouter,
         IConversationRepository conversationRepo, IConversationCache conversationCache,
-        IMessageGateway messageGateway, IContextResolver contextResolver, ILogger<AiResponseOrchestrator> logger)
+        IMessageGateway messageGateway, IReservationParameterResolver parameterResolver, ILogger<AiResponseOrchestrator> logger)
     {
         _intentEngine = intentEngine; _moduleDispatcher = moduleDispatcher; _aiRouter = aiRouter;
         _conversationRepo = conversationRepo; _conversationCache = conversationCache;
-        _messageGateway = messageGateway; _contextResolver = contextResolver; _logger = logger;
+        _messageGateway = messageGateway; _parameterResolver = parameterResolver; _logger = logger;
     }
 
     public async Task RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
     {
         if (conversation.Mode != ConversationMode.Automatic) return;
 
-        // 🔥 CORRECCIÓN: Ruta absoluta para evitar la ambigüedad del DTO
-        var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new NexFlow.Application.Abstractions.Cache.ConversationContextDto();
+        // Utilizamos el alias para evitar la ambigüedad
+        CacheContextDto context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new CacheContextDto();
 
         IntentResultDto? intentResult = null;
 
+        // 1. Fase Resolutiva: Si hay una acción pendiente, el especialista intenta extraer el dato.
         if (!string.IsNullOrEmpty(context.PendingAction))
         {
-            intentResult = await TryResolvePendingActionAsync(workspaceId, request.MessageText, context, cancellationToken);
+            intentResult = await _parameterResolver.ResolveAsync(workspaceId, request.MessageText, context, cancellationToken);
         }
 
+        // 2. Fase Analítica: Si no estábamos a la mitad de algo, IA analiza la intención.
         if (intentResult == null)
         {
             intentResult = await _intentEngine.AnalyzeAsync(request.MessageText, context, cancellationToken);
@@ -108,7 +112,7 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
                     {
                         finalResponse = await _aiRouter.GenerateResponseAsync(workspaceId, systemContext, context, cancellationToken);
                     }
-                    catch (Exception) // 🔥 CORRECCIÓN: Quitamos el 'ex' para evitar el warning
+                    catch (Exception)
                     {
                         _logger.LogError("Fallo crítico en GeminiAiProvider durante orquestación.");
                         finalResponse = "Tuve una pequeña demora procesando tu solicitud. ¿Podrías repetirla por favor?";
@@ -133,73 +137,19 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
         {
             string extId;
             if (!string.IsNullOrEmpty(documentUrlToSend))
-            {
                 extId = await _messageGateway.SendDocumentAsync(workspaceId, normalizedPhone, documentUrlToSend, "Documento.pdf", finalResponse, cancellationToken);
-            }
             else
-            {
                 extId = await _messageGateway.SendTextAsync(workspaceId, normalizedPhone, finalResponse, cancellationToken);
-            }
 
             await _conversationCache.MarkMessageAsAiGeneratedAsync(workspaceId, extId, cancellationToken);
             await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversation.Id, pendingId, MessageStatus.Sent, extId, cancellationToken);
         }
-        catch (Exception) // 🔥 CORRECCIÓN: Quitamos el 'ex' para evitar el warning
+        catch (Exception)
         {
             _logger.LogError("Fallo al enviar mensaje a través del Gateway.");
             await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversation.Id, pendingId, MessageStatus.Failed, null, cancellationToken);
             throw;
         }
-    }
-
-    // 🔥 CORRECCIÓN: Ruta absoluta en la firma de este método
-    private async Task<IntentResultDto?> TryResolvePendingActionAsync(Guid workspaceId, string userMessage, NexFlow.Application.Abstractions.Cache.ConversationContextDto context, CancellationToken ct)
-    {
-        var msg = userMessage.Trim().ToLowerInvariant();
-        if (msg == "cancelar" || msg == "salir" || msg == "detener") return new IntentResultDto(IntentType.CancelReservation, 1.0, new Dictionary<string, string>());
-        var currentIntent = Enum.TryParse<IntentType>(context.CurrentIntent, true, out var parsed) ? parsed : IntentType.Unknown;
-        if (currentIntent == IntentType.Unknown) return null;
-
-        var parameters = new Dictionary<string, string>();
-        switch (context.PendingAction)
-        {
-            case "ASK_LOCATION":
-                var locId = await _contextResolver.GroundLocationAsync(workspaceId, userMessage, ct);
-                if (locId != null) parameters["locationId"] = locId;
-                break;
-            case "ASK_SERVICE":
-                var srvId = await _contextResolver.GroundServiceAsync(workspaceId, userMessage, context.SelectedLocationId, ct);
-                if (srvId != null) parameters["serviceId"] = srvId;
-                break;
-            case "ASK_DATE":
-                var date = await _contextResolver.GroundDateAsync(workspaceId, userMessage, ct);
-                if (date != null) parameters["date"] = date;
-                break;
-            case "ASK_TIME":
-                var time = ExtractTimeFast(userMessage);
-                if (time != null) parameters["time"] = time;
-                break;
-            case "ASK_NAME":
-                if (userMessage.Length > 2) parameters["name"] = userMessage.Trim();
-                break;
-        }
-        if (parameters.Any()) return new IntentResultDto(currentIntent, 1.0, parameters);
-        return null;
-    }
-
-    private string? ExtractTimeFast(string text)
-    {
-        var match = Regex.Match(text.ToLower(), @"(\d{1,2})(?::(\d{2}))?\s*(am|pm|de la mañana|de la tarde|de la noche)?");
-        if (match.Success)
-        {
-            int hour = int.Parse(match.Groups[1].Value);
-            int min = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0;
-            string period = match.Groups[3].Value;
-            if (period.Contains("pm") || period.Contains("tarde") || period.Contains("noche")) { if (hour < 12) hour += 12; }
-            else if (period.Contains("am") || period.Contains("mañana")) { if (hour == 12) hour = 0; }
-            return $"{hour:D2}:{min:D2}";
-        }
-        return null;
     }
 
     private string? TryFormatDeterministicResponse(string moduleCode, string? jsonData)
@@ -233,9 +183,7 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
                 {
                     var sb = new System.Text.StringBuilder("🕒 *Nuestros horarios de atención son:*\n\n");
                     foreach (var day in daysArray.EnumerateArray())
-                    {
                         sb.AppendLine($"• *{day.GetProperty("day").GetString()}:* {day.GetProperty("schedule").GetString()}");
-                    }
                     return sb.ToString();
                 }
             }
@@ -261,7 +209,6 @@ public class AiResponseOrchestrator : IAiResponseOrchestrator
             }
         }
         catch { return null; }
-
         return null;
     }
 }

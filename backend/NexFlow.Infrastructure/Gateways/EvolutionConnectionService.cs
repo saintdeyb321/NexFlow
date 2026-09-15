@@ -12,6 +12,8 @@ public class EvolutionConnectionService : IEvolutionConnectionService
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
     private readonly string _apiKey;
+    private readonly string _webhookUrl;
+    private readonly string _webhookKey;
     private readonly IInstanceResolver _instanceResolver;
     private readonly ILogger<EvolutionConnectionService> _logger;
 
@@ -27,6 +29,10 @@ public class EvolutionConnectionService : IEvolutionConnectionService
 
         _baseUrl = configuration["Evolution:BaseUrl"]?.TrimEnd('/') ?? throw new ArgumentNullException("Evolution BaseUrl no configurada");
         _apiKey = configuration["Evolution:ApiKey"] ?? string.Empty;
+
+        // 🔥 SPRINT 18: Obtenemos configuración de Webhook
+        _webhookUrl = configuration["Evolution:WebhookUrl"] ?? string.Empty;
+        _webhookKey = configuration["Evolution:WebhookKey"] ?? string.Empty;
 
         if (!string.IsNullOrEmpty(_apiKey))
         {
@@ -64,18 +70,32 @@ public class EvolutionConnectionService : IEvolutionConnectionService
     public async Task<string?> ConnectAndGetQrAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
-        if (string.IsNullOrEmpty(instanceName))
+        if (string.IsNullOrEmpty(instanceName)) return null;
+
+        // 🔥 SPRINT 18 (Regla fundamental): Bloquear una segunda conexión únicamente cuando CONNECTED
+        var currentStatus = await GetConnectionStatusAsync(workspaceId, cancellationToken);
+        if (currentStatus == "CONNECTED")
         {
-            _logger.LogError("El Workspace {WorkspaceId} no tiene un EvolutionInstanceName asignado en la BD.", workspaceId);
-            return null;
+            _logger.LogWarning("Intento de reconexión bloqueado. La instancia {Instance} ya está CONNECTED.", instanceName);
+            return null; // O lanzar excepción de dominio según prefieras
         }
 
         var url = $"{_baseUrl}/instance/create";
+
+        // 🔥 SPRINT 18: Inyección segura del Webhook al momento de crear
         var payload = new
         {
             instanceName = instanceName,
             token = Guid.NewGuid().ToString("N"),
-            qrcode = true
+            qrcode = true,
+            webhook = string.IsNullOrEmpty(_webhookUrl) ? null : new
+            {
+                url = _webhookUrl,
+                byEvents = false,
+                base64 = false,
+                events = new[] { "MESSAGES_UPSERT" },
+                headers = new Dictionary<string, string> { { "X-NexFlow-Webhook-Key", _webhookKey } }
+            }
         };
 
         try
@@ -85,10 +105,9 @@ public class EvolutionConnectionService : IEvolutionConnectionService
 
             if (json.TryGetProperty("qrcode", out var qrNode) && qrNode.TryGetProperty("base64", out var base64Node))
             {
-                return base64Node.GetString(); // Retorna la imagen del QR
+                return base64Node.GetString();
             }
 
-            // Si la instancia ya existía pero está desconectada, forzamos un connect
             if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
             {
                 var connectUrl = $"{_baseUrl}/instance/connect/{instanceName}";
@@ -99,7 +118,6 @@ public class EvolutionConnectionService : IEvolutionConnectionService
                     return fallbackBase64.GetString();
                 }
             }
-
             return null;
         }
         catch (Exception ex)
