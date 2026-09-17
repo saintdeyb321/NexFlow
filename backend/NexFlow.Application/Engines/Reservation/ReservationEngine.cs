@@ -20,26 +20,17 @@ public class ReservationEngine : IReservationEngine
     private readonly ILogger<ReservationEngine> _logger;
 
     public ReservationEngine(
-        IReservationRepository reservationRepository,
-        ICatalogRepository catalogRepository,
-        IBusinessHoursRepository hoursRepository,
-        IBusinessProfileRepository profileRepository,
-        ILocationRepository locationRepository,
-        IUnitOfWork unitOfWork,
-        IWorkflowGateway workflowGateway,
-        ILogger<ReservationEngine> logger)
+        IReservationRepository reservationRepository, ICatalogRepository catalogRepository,
+        IBusinessHoursRepository hoursRepository, IBusinessProfileRepository profileRepository,
+        ILocationRepository locationRepository, IUnitOfWork unitOfWork,
+        IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger)
     {
-        _reservationRepository = reservationRepository;
-        _catalogRepository = catalogRepository;
-        _hoursRepository = hoursRepository;
-        _profileRepository = profileRepository;
-        _locationRepository = locationRepository;
-        _unitOfWork = unitOfWork;
-        _workflowGateway = workflowGateway;
-        _logger = logger;
+        _reservationRepository = reservationRepository; _catalogRepository = catalogRepository;
+        _hoursRepository = hoursRepository; _profileRepository = profileRepository;
+        _locationRepository = locationRepository; _unitOfWork = unitOfWork;
+        _workflowGateway = workflowGateway; _logger = logger;
     }
 
-    // 🔥 Helper privado para aislar la lógica de validación sobre el DTO
     private static bool IsServiceAvailableAtLocation(CatalogItemDto serviceDto, string locationId)
     {
         if (string.Equals(serviceDto.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)) return true;
@@ -59,11 +50,9 @@ public class ReservationEngine : IReservationEngine
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
     {
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
-
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
         var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
-        // Validación estricta sin dereferencias nulas
         if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation || !IsServiceAvailableAtLocation(targetService, locationId))
             return new List<TimeSlotDto>();
 
@@ -95,10 +84,7 @@ public class ReservationEngine : IReservationEngine
             bool isOccupied = existingReservations.Any(r => r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
             bool isPast = currentSlotStartLocal <= localNow;
 
-            if (!isOccupied && !isPast)
-            {
-                availableSlots.Add(new TimeSlotDto(currentSlotStartLocal, currentSlotEndLocal, true));
-            }
+            if (!isOccupied && !isPast) availableSlots.Add(new TimeSlotDto(currentSlotStartLocal, currentSlotEndLocal, true));
             currentSlotStartLocal = currentSlotEndLocal;
         }
 
@@ -109,7 +95,7 @@ public class ReservationEngine : IReservationEngine
     {
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (locations == null || !locations.Any(l => l.Id == locationId))
-            return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe o no es válida."));
+            return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe."));
 
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         var localDateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified);
@@ -117,12 +103,8 @@ public class ReservationEngine : IReservationEngine
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDateTime.DayOfWeek);
 
-        if (todayHours == null || todayHours.IsClosed ||
-            !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) ||
-            !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
-        {
+        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
             return Result<ReservationDto>.Failure(new Error("Reservation.Closed", "El negocio se encuentra cerrado en el día y horario seleccionado."));
-        }
 
         var timeOnly = localDateTime.TimeOfDay;
         var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
@@ -130,27 +112,18 @@ public class ReservationEngine : IReservationEngine
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
         var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
-        if (targetService == null || !targetService.IsActive)
-            return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o se encuentra inactivo."));
-
-        if (!targetService.RequiresReservation)
-            return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
-
-        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5)
-            return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida para operar una reserva."));
-
-        if (!IsServiceAvailableAtLocation(targetService, locationId))
-            return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio no se ofrece en la sede seleccionada."));
+        if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o está inactivo."));
+        if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere reservas."));
+        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
+        if (!IsServiceAvailableAtLocation(targetService, locationId)) return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en esta sede."));
 
         var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
         var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes.Value);
 
         if (timeOnly < openTime || localEndTime.TimeOfDay > closeTime)
-            return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "La hora solicitada está fuera del horario comercial de la sede."));
+            return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "La hora solicitada está fuera del horario comercial."));
 
-        using (var scope = new TransactionScope(TransactionScopeOption.Required,
-            new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) },
-            TransactionScopeAsyncFlowOption.Enabled))
+        using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
         {
             var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, startTimeUtc, endTimeUtc, null, cancellationToken);
             if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario ya fue tomado por otro cliente."));
@@ -162,7 +135,7 @@ public class ReservationEngine : IReservationEngine
             scope.Complete();
 
             var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
-            _ = TriggerN8nSafeAsync("RESERVATION_CREATED", workspaceId, dto, reservation.Id, cancellationToken);
+            TriggerN8nSafeBackground("RESERVATION_CREATED", workspaceId, dto, reservation.Id);
 
             return Result<ReservationDto>.Success(dto);
         }
@@ -179,12 +152,8 @@ public class ReservationEngine : IReservationEngine
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, reservation.LocationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDateTime.DayOfWeek);
 
-        if (todayHours == null || todayHours.IsClosed ||
-            !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) ||
-            !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
-        {
-            return Result<ReservationDto>.Failure(new Error("Reservation.Closed", "El negocio se encuentra cerrado en el día y horario seleccionado para la reprogramación."));
-        }
+        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
+            return Result<ReservationDto>.Failure(new Error("Reservation.Closed", "El negocio se encuentra cerrado en el día y horario seleccionado."));
 
         var timeOnly = localDateTime.TimeOfDay;
         var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
@@ -192,30 +161,21 @@ public class ReservationEngine : IReservationEngine
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
         var targetService = items.FirstOrDefault(s => s.Id == reservation.ServiceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
-        if (targetService == null || !targetService.IsActive)
-            return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio original no existe o se encuentra inactivo."));
-
-        if (!targetService.RequiresReservation)
-            return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere ni acepta reservas."));
-
-        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5)
-            return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "La duración del servicio es inválida."));
-
-        if (!IsServiceAvailableAtLocation(targetService, reservation.LocationId))
-            return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Este servicio ya no se ofrece en la sede actual."));
+        if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "Servicio no válido."));
+        if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Servicio no reservable."));
+        if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
+        if (!IsServiceAvailableAtLocation(targetService, reservation.LocationId)) return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en sede."));
 
         var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
         var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes.Value);
 
         if (timeOnly < openTime || localEndTime.TimeOfDay > closeTime)
-            return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "El nuevo horario solicitado está fuera del horario comercial."));
+            return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "Fuera del horario comercial."));
 
-        using (var scope = new TransactionScope(TransactionScopeOption.Required,
-            new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) },
-            TransactionScopeAsyncFlowOption.Enabled))
+        using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
         {
             var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
-            if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado por otro cliente."));
+            if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado."));
 
             reservation.Reschedule(newStartTimeUtc, newEndTimeUtc);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -223,7 +183,7 @@ public class ReservationEngine : IReservationEngine
         }
 
         var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
-        _ = TriggerN8nSafeAsync("RESERVATION_RESCHEDULED", workspaceId, dto, reservation.Id, cancellationToken);
+        TriggerN8nSafeBackground("RESERVATION_RESCHEDULED", workspaceId, dto, reservation.Id);
 
         return Result<ReservationDto>.Success(dto);
     }
@@ -236,22 +196,19 @@ public class ReservationEngine : IReservationEngine
         reservation.Cancel();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _ = TriggerN8nSafeAsync("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id, cancellationToken);
-
+        TriggerN8nSafeBackground("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id);
         return Result.Success();
     }
 
     public async Task<Result<Domain.Entities.Reservation>> CancelActiveReservationAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
         var reservation = await _reservationRepository.GetActiveReservationByPhoneAsync(workspaceId, customerPhone, cancellationToken);
-        if (reservation == null)
-            return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.NotFound", "No tienes ninguna reserva activa para cancelar en este momento."));
+        if (reservation == null) return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.NotFound", "No tienes ninguna reserva activa."));
 
         reservation.Cancel();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _ = TriggerN8nSafeAsync("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id, cancellationToken);
-
+        TriggerN8nSafeBackground("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id);
         return Result<Domain.Entities.Reservation>.Success(reservation);
     }
 
@@ -263,21 +220,24 @@ public class ReservationEngine : IReservationEngine
         reservation.Complete();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _ = TriggerN8nSafeAsync("RESERVATION_COMPLETED", workspaceId, new { ReservationId = reservation.Id, Status = "COMPLETED" }, reservation.Id, cancellationToken);
-
+        TriggerN8nSafeBackground("RESERVATION_COMPLETED", workspaceId, new { ReservationId = reservation.Id, Status = "COMPLETED" }, reservation.Id);
         return Result.Success();
     }
 
-    private async Task TriggerN8nSafeAsync(string eventType, Guid workspaceId, object data, Guid reservationId, CancellationToken cancellationToken)
+    // 🔥 CORRECCIÓN: Task.Run aísla el llamado y CancellationToken.None asegura que n8n reciba el payload aunque la API de NexFlow ya le haya respondido a WhatsApp.
+    private void TriggerN8nSafeBackground(string eventType, Guid workspaceId, object data, Guid reservationId)
     {
-        try
+        _ = Task.Run(async () =>
         {
-            var payload = new N8nEventPayload<object>(workspaceId, eventType, Guid.NewGuid().ToString(), $"{eventType}_{reservationId}", DateTime.UtcNow, data);
-            await _workflowGateway.TriggerWorkflowAsync("nexflow-events", payload, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Alerta: Falló n8n para la reserva {ReservationId}.", reservationId);
-        }
+            try
+            {
+                var payload = new N8nEventPayload<object>(workspaceId, eventType, Guid.NewGuid().ToString(), $"{eventType}_{reservationId}", DateTime.UtcNow, data);
+                await _workflowGateway.TriggerWorkflowAsync("nexflow-events", payload, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Alerta: Falló n8n para la reserva {ReservationId}.", reservationId);
+            }
+        });
     }
 }

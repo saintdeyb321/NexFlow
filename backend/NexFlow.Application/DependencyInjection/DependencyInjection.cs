@@ -1,9 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
-using NexFlow.Application.Engines.Dispatcher;
-using NexFlow.Application.Engines.Dispatcher.Handlers;
-using NexFlow.Application.Engines.Reservation;
+
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Importación requerida
 using NexFlow.Application.Features.Business;
@@ -35,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<IIncomingMessageGuard, IncomingMessageGuard>();
         services.AddScoped<IConversationStateService, ConversationStateService>();
         services.AddScoped<IAiResponseOrchestrator, AiResponseOrchestrator>();
+        services.AddScoped<ICapabilityExecutor, CapabilityExecutor>();
 
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();
@@ -43,25 +42,6 @@ public static class DependencyInjection
         services.AddScoped<GetSystemWorkspacesQueryHandler>();
         services.AddScoped<ReactivateClientCommandHandler>();
         services.AddScoped<DeleteClientCommandHandler>();
-
-        // 3. Registrar Handlers del Motor Conversacional (Module Dispatcher)
-        services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
-
-        services.AddScoped<ICapabilityResolver, CapabilityResolver>();
-        services.AddScoped<IContextResolver, ContextResolver>();
-        services.AddScoped<IModuleAuthorizer, ModuleAuthorizer>();
-        services.AddScoped<IModuleExecutor, ModuleExecutor>();
-        services.AddScoped<IModuleDispatcher, ModuleDispatcher>();
-
-        services.AddScoped<IModuleHandler, ReservationModuleHandler>();
-        services.AddScoped<IModuleHandler, FaqModuleHandler>();
-        services.AddScoped<IModuleHandler, CatalogModuleHandler>();
-        services.AddScoped<IModuleHandler, ServiceModuleHandler>();
-        services.AddScoped<IModuleHandler, RequestModuleHandler>();
-        services.AddScoped<IModuleHandler, BusinessHoursModuleHandler>();
-        services.AddScoped<IModuleHandler, BusinessProfileModuleHandler>();
-        services.AddScoped<IModuleHandler, LocationModuleHandler>();
-        services.AddScoped<IReservationParameterResolver, ReservationParameterResolver>();
 
         services.AddScoped<ICatalogHashService, CatalogHashService>();
         services.AddScoped<ICatalogGenerationService, CatalogGenerationService>();

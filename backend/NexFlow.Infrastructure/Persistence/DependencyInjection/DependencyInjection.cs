@@ -7,12 +7,8 @@ using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Engines.AI;
-using NexFlow.Application.Engines.Dispatcher;
-using NexFlow.Application.Engines.Dispatcher.Handlers;
-using NexFlow.Application.Engines.Intent;
 using NexFlow.Infrastructure.Cache;
 using NexFlow.Infrastructure.Engines.AI;
-using NexFlow.Infrastructure.Engines.Intent;
 using NexFlow.Infrastructure.Gateways;
 using NexFlow.Infrastructure.Gateways.Storage;
 using NexFlow.Infrastructure.Persistence.Firestore;
@@ -70,8 +66,7 @@ public static class DependencyInjection
         // 5. Utilidades y Motores de IA
         services.AddSingleton<IClock, SystemClock>();
         services.AddHttpClient<IAiProvider, GeminiAiProvider>();
-        services.AddScoped<IIntentEngine, IntentEngine>();
-        services.AddScoped<IAiRouter, AiRouter>();
+
 
         // 6. Gateways Externos
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();

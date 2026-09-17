@@ -27,6 +27,7 @@ public class RedisConversationCache : IConversationCache
             var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
             context.LastUpdated = DateTime.UtcNow;
 
+            // 🔥 CORRECCIÓN: Guardado sin riesgo
             var json = JsonSerializer.Serialize(context);
             await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30));
         }
@@ -46,14 +47,14 @@ public class RedisConversationCache : IConversationCache
             if (!value.HasValue || string.IsNullOrWhiteSpace(value.ToString()))
                 return null;
 
-            // 🔥 SPRINT 1.1: El operador "!" asegura al compilador que si fallara, caería en el catch.
+            // 🔥 NEXFLOW 2.0: Deserialización Type-Safe. Si falla o es nulo, devuelve null de forma segura, sin explotar.
             var context = JsonSerializer.Deserialize<ConversationContextDto>(value.ToString());
-            return context!;
+            return context;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: Redis no disponible o JSON inválido. Devolviendo contexto vacío para {Phone}.", customerPhone);
-            return null; // El despachador asumirá una conversación nueva
+            _logger.LogWarning(ex, "Degradación: Redis no disponible o JSON inválido para {Phone}.", customerPhone);
+            return null;
         }
     }
 

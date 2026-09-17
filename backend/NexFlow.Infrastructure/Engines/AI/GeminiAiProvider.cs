@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
@@ -10,91 +11,176 @@ public class GeminiAiProvider : IAiProvider
 {
     private readonly HttpClient _httpClient;
     private readonly string _apiKey;
-    private readonly string _model;
+    private readonly string _primaryModel;
+    private readonly string _fallbackModel;
     private readonly ILogger<GeminiAiProvider> _logger;
 
     public GeminiAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiAiProvider> logger)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? throw new ArgumentNullException("Falta la API Key de Gemini");
+        _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? throw new ArgumentNullException("Falta la API Key de Gemini en la configuración.");
 
-        var rawModel = configuration["Gemini:Model"] ?? "gemini-1.5-flash";
-        _model = rawModel.Trim().Replace("models/", "");
+        var rawModel = configuration["Gemini:Model"] ?? "gemini-3.8-flash";
+        _primaryModel = rawModel.Trim().Replace("models/", "");
 
-        // 🔥 CORRECCIÓN: Le damos a la IA 25 segundos para respirar y pensar.
+        var rawFallback = configuration["Gemini:FallbackModel"] ?? "gemini-flash-latest";
+        _fallbackModel = rawFallback.Trim().Replace("models/", "");
+
         var rawTimeout = configuration["Gemini:TimeoutSeconds"];
-        var timeout = int.TryParse(rawTimeout, out var t) && t > 0 ? t : 25;
+        var timeout = int.TryParse(rawTimeout, out var t) && t >= 30 ? t : 45;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
     }
 
     public async Task<string> GenerateTextAsync(string systemPrompt, string userMessage, bool useJsonMode = false, CancellationToken cancellationToken = default)
     {
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
+        var response = await GenerateChatResponseAsync(systemPrompt, new List<AiMessage> { new("user", userMessage) }, null, cancellationToken);
+        return response.Text ?? string.Empty;
+    }
 
+    public async Task<AiResponse> GenerateChatResponseAsync(string systemPrompt, List<AiMessage> history, List<AiTool>? tools = null, CancellationToken cancellationToken = default)
+    {
         var safeSystemPrompt = string.IsNullOrWhiteSpace(systemPrompt) ? "Eres un asistente virtual corporativo." : systemPrompt;
-        var safeUserMessage = string.IsNullOrWhiteSpace(userMessage) ? "Hola" : userMessage;
 
-        object payload;
-        var systemInstructionObj = new { parts = new[] { new { text = safeSystemPrompt } } };
-        var contentsObj = new[] { new { role = "user", parts = new[] { new { text = safeUserMessage } } } };
+        var payloadContents = new List<Dictionary<string, object>>();
+        string? currentRole = null;
+        string currentText = string.Empty;
 
-        if (useJsonMode)
+        foreach (var msg in history)
         {
-            payload = new { system_instruction = systemInstructionObj, contents = contentsObj, generationConfig = new { response_mime_type = "application/json" } };
+            var role = msg.Role.ToLowerInvariant() == "assistant" ? "model" : "user";
+
+            if (currentRole == role)
+            {
+                currentText += $"\n{msg.Text}";
+            }
+            else
+            {
+                if (currentRole != null)
+                {
+                    payloadContents.Add(new Dictionary<string, object> { { "role", currentRole }, { "parts", new[] { new { text = currentText } } } });
+                }
+                currentRole = role;
+                currentText = msg.Text;
+            }
         }
-        else
+        if (currentRole != null)
         {
-            payload = new { system_instruction = systemInstructionObj, contents = contentsObj };
+            payloadContents.Add(new Dictionary<string, object> { { "role", currentRole }, { "parts", new[] { new { text = currentText } } } });
+        }
+
+        if (payloadContents.Any() && payloadContents.First()["role"].ToString() == "model")
+        {
+            payloadContents.Insert(0, new Dictionary<string, object> { { "role", "user" }, { "parts", new[] { new { text = "Continuemos." } } } });
+        }
+
+        var payload = new Dictionary<string, object>
+        {
+            { "system_instruction", new { parts = new[] { new { text = safeSystemPrompt } } } },
+            { "contents", payloadContents }
+        };
+
+        if (tools != null && tools.Any())
+        {
+            payload["tools"] = new[] { new { functionDeclarations = tools.Select(t => new { name = t.Name, description = t.Description, parameters = t.ParametersSchema }).ToList() } };
         }
 
         string jsonPayload = JsonSerializer.Serialize(payload);
 
-        int maxRetries = 2;
-        int delayMilliseconds = 1000;
+        try
+        {
+            return await ExecuteRequestAsync(_primaryModel, jsonPayload, cancellationToken);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable || (int?)ex.StatusCode == 429)
+        {
+            _logger.LogWarning("Modelo principal {Model} saturado. Activando fallback a {Fallback}", _primaryModel, _fallbackModel);
+            return await ExecuteRequestAsync(_fallbackModel, jsonPayload, cancellationToken);
+        }
+    }
 
+    private async Task<AiResponse> ExecuteRequestAsync(string modelName, string jsonPayload, CancellationToken cancellationToken)
+    {
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={_apiKey}";
+        using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+        int maxRetries = 1;
         for (int i = 0; i <= maxRetries; i++)
         {
             try
             {
-                using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
                 var response = await _httpClient.PostAsync(url, content, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    int statusCode = (int)response.StatusCode;
-                    if ((statusCode == 503 || statusCode == 429) && i < maxRetries)
+                    var error = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                    if ((int)response.StatusCode == 429 && i < maxRetries)
                     {
-                        await Task.Delay(delayMilliseconds, cancellationToken);
+                        await Task.Delay(1500, cancellationToken);
                         continue;
                     }
+
+                    _logger.LogError("Gemini API Error {StatusCode} en modelo {Model}: {ErrorDetails}", response.StatusCode, modelName, error);
                     response.EnsureSuccessStatusCode();
                 }
 
                 var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
-                using var jsonDocument = JsonDocument.Parse(responseString);
+                var jsonNode = JsonNode.Parse(responseString);
+                var parts = jsonNode?["candidates"]?[0]?["content"]?["parts"];
 
-                if (jsonDocument.RootElement.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
+                if (parts != null && parts.AsArray().Count > 0)
                 {
-                    if (candidates[0].TryGetProperty("content", out var resContent) && resContent.TryGetProperty("parts", out var parts) && parts.GetArrayLength() > 0)
+                    // 1. Canal Oficial: Gemini usó la herramienta correctamente
+                    var functionCall = parts[0]["functionCall"];
+                    if (functionCall != null)
                     {
-                        return parts[0].GetProperty("text").GetString() ?? string.Empty;
+                        var name = functionCall["name"]?.ToString();
+                        var args = functionCall["args"]?.AsObject();
+                        if (name != null) return new AiResponse(null, new AiToolCall(name, args ?? new JsonObject()));
                     }
+
+                    var text = parts[0]["text"]?.ToString();
+
+                    // 2. 🔥 INTERCEPTOR: Gemini alucinó y escribió la herramienta como texto JSON RAW
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        var cleanText = text.Trim();
+                        // Limpiar formato Markdown si existe
+                        if (cleanText.StartsWith("```json")) cleanText = cleanText.Replace("```json", "").Replace("```", "").Trim();
+
+                        // Si parece una herramienta, la secuestramos y la ejecutamos
+                        if (cleanText.StartsWith("{") && cleanText.Contains("\"name\"") && cleanText.Contains("\"arguments\""))
+                        {
+                            try
+                            {
+                                var parsedJson = JsonNode.Parse(cleanText);
+                                var toolName = parsedJson?["name"]?.ToString();
+                                var toolArgs = parsedJson?["arguments"]?.AsObject();
+
+                                if (toolName != null)
+                                {
+                                    _logger.LogInformation("Interceptor activado: Se capturó JSON RAW y se convirtió en ToolCall para {ToolName}", toolName);
+                                    return new AiResponse(null, new AiToolCall(toolName, toolArgs ?? new JsonObject()));
+                                }
+                            }
+                            catch
+                            {
+                                // Si falla el parseo, lo ignoramos y lo mandamos como texto normal
+                            }
+                        }
+                    }
+
+                    return new AiResponse(text, null);
                 }
-                throw new InvalidOperationException("Respuesta vacía o formato inválido de Gemini.");
+
+                throw new InvalidOperationException($"Respuesta vacía o formato inválido de Gemini ({modelName}).");
             }
-            catch (TaskCanceledException ex)
+            catch (TaskCanceledException)
             {
                 if (cancellationToken.IsCancellationRequested) throw;
-                _logger.LogWarning("Timeout: Gemini tardó más de {TimeoutSeconds} segundos en el intento {Intento}.", _httpClient.Timeout.TotalSeconds, i + 1);
-                if (i == maxRetries) throw;
-            }
-            catch (HttpRequestException ex)
-            {
-                if (i == maxRetries) throw;
-                await Task.Delay(delayMilliseconds, cancellationToken);
+                if (i == maxRetries) throw new TimeoutException($"Gemini ({modelName}) excedió el tiempo de espera de {_httpClient.Timeout.TotalSeconds}s.");
             }
         }
-        throw new Exception("Fallo general en la generación de texto de Gemini.");
+        throw new Exception($"Fallo general en la generación de Gemini ({modelName}).");
     }
 }
