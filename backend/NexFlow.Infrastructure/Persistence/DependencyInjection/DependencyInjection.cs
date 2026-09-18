@@ -7,6 +7,7 @@ using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Engines.AI;
+using NexFlow.Application.Features.AI.Router;
 using NexFlow.Infrastructure.Cache;
 using NexFlow.Infrastructure.Engines.AI;
 using NexFlow.Infrastructure.Gateways;
@@ -42,6 +43,7 @@ public static class DependencyInjection
         services.AddStackExchangeRedisCache(options => { options.Configuration = configuration.GetConnectionString("Redis"); });
         services.AddScoped<IConversationCache, RedisConversationCache>();
 
+
         // 4. Base de Datos Documental (Firestore)
         var firebaseProjectId = configuration["Firebase:ProjectId"];
         if (!string.IsNullOrEmpty(firebaseProjectId))
@@ -66,7 +68,8 @@ public static class DependencyInjection
         // 5. Utilidades y Motores de IA
         services.AddSingleton<IClock, SystemClock>();
         services.AddHttpClient<IAiProvider, GeminiAiProvider>();
-
+        services.AddHttpClient<IAiProvider, GroqAiProvider>();
+        services.AddScoped<IAiRouter, AiRouter>();
 
         // 6. Gateways Externos
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();

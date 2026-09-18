@@ -176,6 +176,7 @@ app.UseCors("AllowFrontend");
 // 🔥 CORRECCIÓN P0: Orden correcto del pipeline de seguridad
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
+app.UseMiddleware<NexFlow.API.Middleware.TenantIsolationMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter(); // Ahora el limitador sí puede leer context.User.Identity.IsAuthenticated
 

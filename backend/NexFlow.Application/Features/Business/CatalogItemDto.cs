@@ -15,8 +15,6 @@ public class CatalogItemDto
     public string LocationScope { get; set; } = "ALL"; // ALL o SPECIFIC
     public List<string> LocationIds { get; set; } = new();
 
-    public List<string> AvailableAtLocations { get; set; } = new();
-
     // 🔥 Campos de Servicios (Vendrán nulos o false si es producto)
     public int? DurationInMinutes { get; set; }
     public bool RequiresReservation { get; set; }

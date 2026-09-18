@@ -19,7 +19,7 @@ public class GeminiAiProvider : IAiProvider
     {
         _httpClient = httpClient;
         _logger = logger;
-        _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? throw new ArgumentNullException("Falta la API Key de Gemini en la configuración.");
+        _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? throw new ArgumentNullException("Falta la API Key de Gemini.");
 
         var rawModel = configuration["Gemini:Model"] ?? "gemini-3.8-flash";
         _primaryModel = rawModel.Trim().Replace("models/", "");
@@ -64,14 +64,16 @@ public class GeminiAiProvider : IAiProvider
                 currentText = msg.Text;
             }
         }
+
         if (currentRole != null)
         {
             payloadContents.Add(new Dictionary<string, object> { { "role", currentRole }, { "parts", new[] { new { text = currentText } } } });
         }
 
-        if (payloadContents.Any() && payloadContents.First()["role"].ToString() == "model")
+        // Gemini requiere que el último mensaje de la historia no sea del modelo para poder generar una respuesta
+        if (payloadContents.Any() && payloadContents.Last()["role"].ToString() == "model")
         {
-            payloadContents.Insert(0, new Dictionary<string, object> { { "role", "user" }, { "parts", new[] { new { text = "Continuemos." } } } });
+            payloadContents.Add(new Dictionary<string, object> { { "role", "user" }, { "parts", new[] { new { text = "Continuemos." } } } });
         }
 
         var payload = new Dictionary<string, object>
@@ -80,10 +82,7 @@ public class GeminiAiProvider : IAiProvider
             { "contents", payloadContents }
         };
 
-        if (tools != null && tools.Any())
-        {
-            payload["tools"] = new[] { new { functionDeclarations = tools.Select(t => new { name = t.Name, description = t.Description, parameters = t.ParametersSchema }).ToList() } };
-        }
+        // Si en el futuro añadimos useJsonMode real nativo, iría en generationConfig aquí.
 
         string jsonPayload = JsonSerializer.Serialize(payload);
 
@@ -126,59 +125,25 @@ public class GeminiAiProvider : IAiProvider
 
                 var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
                 var jsonNode = JsonNode.Parse(responseString);
-                var parts = jsonNode?["candidates"]?[0]?["content"]?["parts"];
 
-                if (parts != null && parts.AsArray().Count > 0)
+                // 🔥 NAVEGACIÓN SEGURA DE JSON PARA EVITAR NULL REFERENCE EXCEPTIONS
+                var candidates = jsonNode?["candidates"]?.AsArray();
+                if (candidates != null && candidates.Count > 0)
                 {
-                    // 1. Canal Oficial: Gemini usó la herramienta correctamente
-                    var functionCall = parts[0]["functionCall"];
-                    if (functionCall != null)
+                    var parts = candidates[0]?["content"]?["parts"]?.AsArray();
+                    if (parts != null && parts.Count > 0)
                     {
-                        var name = functionCall["name"]?.ToString();
-                        var args = functionCall["args"]?.AsObject();
-                        if (name != null) return new AiResponse(null, new AiToolCall(name, args ?? new JsonObject()));
+                        var text = parts[0]?["text"]?.ToString();
+                        return new AiResponse(text, null);
                     }
-
-                    var text = parts[0]["text"]?.ToString();
-
-                    // 2. 🔥 INTERCEPTOR: Gemini alucinó y escribió la herramienta como texto JSON RAW
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        var cleanText = text.Trim();
-                        // Limpiar formato Markdown si existe
-                        if (cleanText.StartsWith("```json")) cleanText = cleanText.Replace("```json", "").Replace("```", "").Trim();
-
-                        // Si parece una herramienta, la secuestramos y la ejecutamos
-                        if (cleanText.StartsWith("{") && cleanText.Contains("\"name\"") && cleanText.Contains("\"arguments\""))
-                        {
-                            try
-                            {
-                                var parsedJson = JsonNode.Parse(cleanText);
-                                var toolName = parsedJson?["name"]?.ToString();
-                                var toolArgs = parsedJson?["arguments"]?.AsObject();
-
-                                if (toolName != null)
-                                {
-                                    _logger.LogInformation("Interceptor activado: Se capturó JSON RAW y se convirtió en ToolCall para {ToolName}", toolName);
-                                    return new AiResponse(null, new AiToolCall(toolName, toolArgs ?? new JsonObject()));
-                                }
-                            }
-                            catch
-                            {
-                                // Si falla el parseo, lo ignoramos y lo mandamos como texto normal
-                            }
-                        }
-                    }
-
-                    return new AiResponse(text, null);
                 }
 
-                throw new InvalidOperationException($"Respuesta vacía o formato inválido de Gemini ({modelName}).");
+                throw new InvalidOperationException($"Respuesta vacía o bloqueada por filtros de seguridad en Gemini ({modelName}).");
             }
             catch (TaskCanceledException)
             {
                 if (cancellationToken.IsCancellationRequested) throw;
-                if (i == maxRetries) throw new TimeoutException($"Gemini ({modelName}) excedió el tiempo de espera de {_httpClient.Timeout.TotalSeconds}s.");
+                if (i == maxRetries) throw new TimeoutException($"Gemini ({modelName}) excedió el tiempo de espera.");
             }
         }
         throw new Exception($"Fallo general en la generación de Gemini ({modelName}).");

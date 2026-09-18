@@ -2,10 +2,12 @@
 
 public class ConversationContextDto
 {
-    // 🔥 NEXFLOW 2.0: Memoria Limpia. Solo guardamos contexto real.
     public string? SelectedLocationId { get; set; }
+    public string? CurrentGoal { get; set; } // Ej: "BOOKING", "SUPPORT", "INFO"
+    public string? SelectedServiceId { get; set; }
+    public string? TargetDate { get; set; }
+    public string? TargetTime { get; set; }
 
-    // Podremos expandir esto en el futuro si necesitamos rastrear carritos de compra o IDs de transacciones.
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
 

@@ -108,7 +108,11 @@ public class FirestoreCatalogRepository : ICatalogRepository
             PriceMinorUnits = item.PriceMinorUnits,
             Currency = item.Currency,
             IsActive = item.IsActive,
-            AvailableAtLocations = item.AvailableAtLocations ?? new List<string>(),
+
+            // 🔥 CORRECCIÓN: Usamos LocationScope y LocationIds en lugar del obsoleto AvailableAtLocations
+            LocationScope = item.LocationScope ?? "ALL",
+            LocationIds = item.LocationIds ?? new List<string>(),
+
             DurationInMinutes = item.Type == "SERVICE" ? item.DurationInMinutes : null,
             RequiresReservation = item.Type == "SERVICE" && item.RequiresReservation,
             ImageUrl = item.ImageUrl,
@@ -135,7 +139,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
             Id = doc.Id,
             Name = data.Name,
             Description = data.Description,
-            Scope = data.Scope ?? "SHARED", // 🔥 SPRINT 2: Agregado con fallback
+            Scope = data.Scope ?? "SHARED",
             IsActive = data.IsActive,
             DisplayOrder = data.DisplayOrder
         };
@@ -154,7 +158,11 @@ public class FirestoreCatalogRepository : ICatalogRepository
             PriceMinorUnits = data.PriceMinorUnits,
             Currency = data.Currency,
             IsActive = data.IsActive,
-            AvailableAtLocations = data.AvailableAtLocations ?? new List<string>(),
+
+            // 🔥 CORRECCIÓN
+            LocationScope = data.LocationScope ?? "ALL",
+            LocationIds = data.LocationIds ?? new List<string>(),
+
             DurationInMinutes = data.DurationInMinutes,
             RequiresReservation = data.RequiresReservation,
             ImageUrl = data.ImageUrl,
@@ -167,7 +175,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
     {
         [FirestoreProperty] public string Name { get; set; } = string.Empty;
         [FirestoreProperty] public string? Description { get; set; }
-        [FirestoreProperty] public string Scope { get; set; } = "SHARED"; // 🔥 SPRINT 2
+        [FirestoreProperty] public string Scope { get; set; } = "SHARED";
         [FirestoreProperty] public bool IsActive { get; set; } = true;
         [FirestoreProperty] public int DisplayOrder { get; set; } = 0;
     }
@@ -182,7 +190,11 @@ public class FirestoreCatalogRepository : ICatalogRepository
         [FirestoreProperty] public long PriceMinorUnits { get; set; }
         [FirestoreProperty] public string Currency { get; set; } = "PEN";
         [FirestoreProperty] public bool IsActive { get; set; } = true;
-        [FirestoreProperty] public List<string> AvailableAtLocations { get; set; } = new();
+
+        // 🔥 CORRECCIÓN: Mapeo nativo de Firebase
+        [FirestoreProperty] public string LocationScope { get; set; } = "ALL";
+        [FirestoreProperty] public List<string> LocationIds { get; set; } = new();
+
         [FirestoreProperty] public int? DurationInMinutes { get; set; }
         [FirestoreProperty] public bool RequiresReservation { get; set; }
         [FirestoreProperty] public string? ImageUrl { get; set; }
