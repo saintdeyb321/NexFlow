@@ -1,6 +1,4 @@
-﻿using System;
-using System.Linq;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using NexFlow.Application.Abstractions;
 
 namespace NexFlow.API.Services;
@@ -21,10 +19,13 @@ public class WorkspaceContext : IWorkspaceContext
             var httpContext = _httpContextAccessor.HttpContext;
             if (httpContext == null) return Guid.Empty;
 
-            var routeValue = httpContext.Request.RouteValues["workspaceId"]?.ToString();
-            var headerValue = httpContext.Request.Headers["X-Workspace-Id"].FirstOrDefault();
+            // 🔥 SPRINT 9: Ya no leemos Headers ni Rutas. Leemos el sello de aprobación del Middleware.
+            if (httpContext.Items.TryGetValue("VerifiedWorkspaceId", out var verifiedId) && verifiedId is Guid workspaceId)
+            {
+                return workspaceId;
+            }
 
-            return Guid.TryParse(routeValue ?? headerValue, out var workspaceId) ? workspaceId : Guid.Empty;
+            return Guid.Empty;
         }
     }
 

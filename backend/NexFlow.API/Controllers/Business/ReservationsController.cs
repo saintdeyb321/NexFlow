@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Reservations;
 
 namespace NexFlow.API.Controllers.Reservations;
@@ -32,12 +33,28 @@ public class ReservationsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetReservations([FromQuery] string locationId, [FromQuery] DateTime date, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetReservations(
+        [FromQuery] string locationId,
+        [FromQuery] DateTime date,
+        [FromServices] IBusinessProfileRepository profileRepo, // <-- Inyectado para calcular UTC local
+        CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
         if (string.IsNullOrEmpty(locationId)) return BadRequest(new { code = "Validation.Error", message = "LocationId es requerido" });
 
-        var reservations = await _reservationRepository.GetReservationsForDateAsync(WorkspaceId, locationId, date, cancellationToken);
+        // 🔥 CORRECCIÓN SPRINT 6: Calculamos startUtc y endUtc para pasarlos al repositorio
+        var profile = await profileRepo.GetProfileAsync(WorkspaceId, cancellationToken);
+        var tzId = string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone;
+
+        TimeZoneInfo workspaceZone;
+        try { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById(tzId); }
+        catch { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+
+        var localDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localDate, workspaceZone);
+        var endUtc = startUtc.AddDays(1);
+
+        var reservations = await _reservationRepository.GetReservationsForDateAsync(WorkspaceId, locationId, startUtc, endUtc, cancellationToken);
         return Ok(reservations);
     }
 
@@ -74,7 +91,6 @@ public class ReservationsController : ControllerBase
         return Ok(result.Value);
     }
 
-    // 🔥 SPRINT 4.1: Endpoint faltante para actualizar estado (Completar reserva)
     [HttpPut("{id}/status")]
     public async Task<IActionResult> UpdateReservationStatus(Guid id, [FromBody] UpdateReservationStatusRequest request, CancellationToken cancellationToken)
     {

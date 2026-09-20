@@ -5,6 +5,7 @@ namespace NexFlow.Application.Abstractions;
 
 public interface IConversationRepository
 {
+    Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string externalMessageId, CancellationToken cancellationToken);
     Task<ConversationRecord?> GetActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken);
     Task<ConversationRecord> GetOrCreateActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken);
 

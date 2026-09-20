@@ -15,7 +15,6 @@ public class Reservation : Entity
     public DateTime EndTime { get; private set; }
     public ReservationStatus Status { get; private set; }
     public byte[] RowVersion { get; private set; } = null!;
-    
 
     private Reservation() { }
 
@@ -34,29 +33,38 @@ public class Reservation : Entity
             CustomerName = customerName,
             StartTime = startTime,
             EndTime = endTime,
-            Status = ReservationStatus.Confirmed
+            Status = ReservationStatus.Confirmed // Iniciamos en Confirmed
         };
     }
 
-    public void Complete() { 
-        Status = ReservationStatus.Completed; 
+    public void Complete()
+    {
+        if (Status != ReservationStatus.Confirmed)
+            throw new DomainException($"Transición inválida: No se puede completar una reserva en estado {Status}.");
+
+        Status = ReservationStatus.Completed;
     }
+
     public void Cancel()
     {
-        if (Status == ReservationStatus.Completed || Status == ReservationStatus.NoShow)
-            throw new DomainException("No es posible cancelar una reserva que ya ha finalizado su ciclo.");
+        if (Status == ReservationStatus.Completed || Status == ReservationStatus.NoShow || Status == ReservationStatus.Cancelled)
+            throw new DomainException($"Transición inválida: No es posible cancelar una reserva en estado {Status}.");
 
         Status = ReservationStatus.Cancelled;
     }
 
-    // 🔥 SPRINT 3: Reagendamiento con validaciones de Dominio estrictas
+    public void MarkAsNoShow()
+    {
+        if (Status != ReservationStatus.Confirmed)
+            throw new DomainException($"Transición inválida: Solo las reservas confirmadas pueden marcarse como No-Show.");
+
+        Status = ReservationStatus.NoShow;
+    }
+
     public void Reschedule(DateTime newStartTime, DateTime newEndTime)
     {
-        if (Status == ReservationStatus.Cancelled)
-            throw new DomainException("Operación denegada: No se puede reagendar una reserva previamente cancelada.");
-
-        if (Status == ReservationStatus.Completed)
-            throw new DomainException("Operación denegada: No se puede reagendar una reserva que ya fue completada.");
+        if (Status != ReservationStatus.Confirmed)
+            throw new DomainException($"Operación denegada: Solo se pueden reagendar reservas en estado Confirmed (Actual: {Status}).");
 
         if (newEndTime <= newStartTime)
             throw new DomainException("La nueva fecha de finalización debe ser estrictamente posterior a la de inicio.");

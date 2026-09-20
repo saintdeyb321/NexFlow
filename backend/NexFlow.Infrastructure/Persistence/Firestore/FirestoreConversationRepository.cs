@@ -151,6 +151,35 @@ public class FirestoreConversationRepository : IConversationRepository
         return !snapshot.Exists ? null : MapToConversation(snapshot);
     }
 
+    public async Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string externalMessageId, CancellationToken cancellationToken)
+    {
+        // 1. Obtenemos todas las conversaciones activas o recientes (optimización: podríamos indexar externalMessageId a nivel raíz si fuera necesario, pero por ahora buscaremos en las colecciones anidadas)
+        var convQuery = GetCollection(workspaceId).Limit(50);
+        var convSnapshot = await convQuery.GetSnapshotAsync(cancellationToken);
+
+        foreach (var convDoc in convSnapshot.Documents)
+        {
+            var msgQuery = convDoc.Reference.Collection("messages").WhereEqualTo("externalMessageId", externalMessageId).Limit(1);
+            var msgSnapshot = await msgQuery.GetSnapshotAsync(cancellationToken);
+            var msgDoc = msgSnapshot.Documents.FirstOrDefault();
+
+            if (msgDoc != null)
+            {
+                return new MessageRecord
+                {
+                    Id = msgDoc.Id,
+                    Direction = msgDoc.GetValue<string>("direction"),
+                    Sender = Enum.Parse<SenderType>(msgDoc.GetValue<string>("sender")),
+                    Content = msgDoc.GetValue<string>("content"),
+                    Status = msgDoc.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent,
+                    ExternalMessageId = msgDoc.TryGetValue("externalMessageId", out string extId) ? extId : null,
+                    Timestamp = msgDoc.GetValue<Timestamp>("timestamp").ToDateTime()
+                };
+            }
+        }
+        return null;
+    }
+
     public async Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
     {
         // 🔥 SPRINT 1.3: Limpieza síncrona en Lotes (Bulk Write) para evitar datos huérfanos.

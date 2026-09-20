@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Application.Common; // 🔥 Para N8nEventPayload
 using NexFlow.Domain.Entities.Catalog;
 
 namespace NexFlow.Application.Features.Business;
@@ -69,9 +70,8 @@ public class CatalogGenerationService : ICatalogGenerationService
         {
             var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
 
-            var payload = new
+            var rawPayload = new
             {
-                WorkspaceId = workspaceId,
                 GenerationId = generationId,
                 Scope = targetScope,
                 SourceHash = currentHash,
@@ -91,21 +91,26 @@ public class CatalogGenerationService : ICatalogGenerationService
                         i.Description,
                         Price = i.PriceMinorUnits / 100m,
                         i.Currency,
-                        i.ImageUrl,
-                        i.DurationInMinutes,
-                        i.LocationScope, // 🔥 SPRINT 15: n8n debe conocer las sedes para pintarlas en el PDF
-                        i.LocationIds
+                        i.DurationInMinutes
                     })
                 }
             };
 
-            string jsonPayload = JsonSerializer.Serialize(payload);
+            // 🔥 SPRINT 15: Empaquetamos en el estándar seguro que diseñaste para NexFlow
+            var wrappedPayload = new N8nEventPayload<object>(
+                workspaceId,
+                "CATALOG_GENERATION_REQUESTED",
+                Guid.NewGuid().ToString(),
+                $"catalog_{generationId}",
+                DateTime.UtcNow,
+                rawPayload);
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await _workflowGateway.TriggerCatalogGenerationAsync(jsonPayload, CancellationToken.None);
+                    // Disparamos hacia el webhook "nexflow-events" (el mismo que usa reservas)
+                    await _workflowGateway.TriggerWorkflowAsync("nexflow-events", wrappedPayload, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {

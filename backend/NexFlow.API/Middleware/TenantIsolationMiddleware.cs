@@ -16,20 +16,20 @@ public class TenantIsolationMiddleware
 
     public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, IMembershipRepository membershipRepo)
     {
-        // 1. Omitimos webhooks porque ya están blindados por el IncomingMessageGuard
         if (context.Request.Path.StartsWithSegments("/api/webhooks"))
         {
             await _next(context);
             return;
         }
 
-        // 2. Extraemos el WorkspaceId que el frontend está intentando consultar
-        if (context.Request.Headers.TryGetValue("X-Workspace-Id", out var workspaceHeader) &&
-            Guid.TryParse(workspaceHeader, out var workspaceId))
+        // 🔥 SPRINT 9: Extraemos de la URL o del Header de forma unificada
+        var routeValue = context.Request.RouteValues["workspaceId"]?.ToString();
+        var headerValue = context.Request.Headers["X-Workspace-Id"].FirstOrDefault();
+
+        if (Guid.TryParse(routeValue ?? headerValue, out var workspaceId))
         {
             if (currentUser.IsAuthenticated && currentUser.UserId != Guid.Empty)
             {
-                // 🔥 CORRECCIÓN: Usando la firma exacta de tu repositorio
                 var membership = await membershipRepo.GetUserMembershipAsync(currentUser.UserId, workspaceId, context.RequestAborted);
 
                 if (membership == null)
@@ -42,7 +42,8 @@ public class TenantIsolationMiddleware
                     return;
                 }
 
-                context.Items["WorkspaceId"] = workspaceId;
+                // Guardamos el ID verificado en los Items. Esta será la ÚNICA fuente de verdad.
+                context.Items["VerifiedWorkspaceId"] = workspaceId;
             }
         }
 

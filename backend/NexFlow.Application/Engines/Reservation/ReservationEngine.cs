@@ -3,6 +3,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Business.LocationAvailability;
 using NexFlow.Application.Features.Reservations;
 using System.Transactions;
 
@@ -18,24 +19,23 @@ public class ReservationEngine : IReservationEngine
     private readonly IUnitOfWork _unitOfWork;
     private readonly IWorkflowGateway _workflowGateway;
     private readonly ILogger<ReservationEngine> _logger;
+    private readonly ILocationAvailabilityService _locationAvailabilityService;
+    private readonly IClock _clock;
 
     public ReservationEngine(
         IReservationRepository reservationRepository, ICatalogRepository catalogRepository,
         IBusinessHoursRepository hoursRepository, IBusinessProfileRepository profileRepository,
         ILocationRepository locationRepository, IUnitOfWork unitOfWork,
-        IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger)
+        IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger,
+        ILocationAvailabilityService locationAvailabilityService,
+        IClock clock)
     {
         _reservationRepository = reservationRepository; _catalogRepository = catalogRepository;
         _hoursRepository = hoursRepository; _profileRepository = profileRepository;
         _locationRepository = locationRepository; _unitOfWork = unitOfWork;
         _workflowGateway = workflowGateway; _logger = logger;
-    }
-
-    private static bool IsServiceAvailableAtLocation(CatalogItemDto serviceDto, string locationId)
-    {
-        if (string.Equals(serviceDto.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)) return true;
-        if (string.IsNullOrWhiteSpace(locationId)) return false;
-        return serviceDto.LocationIds != null && serviceDto.LocationIds.Contains(locationId);
+        _locationAvailabilityService = locationAvailabilityService;
+        _clock = clock;
     }
 
     private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
@@ -53,7 +53,7 @@ public class ReservationEngine : IReservationEngine
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
         var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
 
-        if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation || !IsServiceAvailableAtLocation(targetService, locationId))
+        if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation || !_locationAvailabilityService.IsOfferingAvailableAtLocation(targetService, locationId))
             return new List<TimeSlotDto>();
 
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5)
@@ -68,12 +68,16 @@ public class ReservationEngine : IReservationEngine
         if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
             return new List<TimeSlotDto>();
 
-        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, localDate, cancellationToken);
+        // 🔥 SPRINT 6: Calculamos los límites del día en UTC usando el TimeZone del Workspace
+        var startOfDayUtc = TimeZoneInfo.ConvertTimeToUtc(localDate, workspaceZone);
+        var endOfDayUtc = startOfDayUtc.AddDays(1);
+
+        var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, startOfDayUtc, endOfDayUtc, cancellationToken);
         var availableSlots = new List<TimeSlotDto>();
 
         var currentSlotStartLocal = localDate.Date.Add(openTime);
         var endOfDayLocal = localDate.Date.Add(closeTime);
-        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, workspaceZone);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone); // <-- Asegúrate de inyectar IClock en ReservationEngine también si deseas usarlo aquí, o usa DateTime.UtcNow que será convertido.
 
         while (currentSlotStartLocal.Add(slotDuration) <= endOfDayLocal)
         {
@@ -115,7 +119,10 @@ public class ReservationEngine : IReservationEngine
         if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o está inactivo."));
         if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere reservas."));
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
-        if (!IsServiceAvailableAtLocation(targetService, locationId)) return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en esta sede."));
+
+        // 🔥 SPRINT A2: Uso del LocationAvailabilityService inyectado
+        if (!_locationAvailabilityService.IsOfferingAvailableAtLocation(targetService, locationId))
+            return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en esta sede."));
 
         var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
         var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes.Value);
@@ -164,7 +171,10 @@ public class ReservationEngine : IReservationEngine
         if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "Servicio no válido."));
         if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Servicio no reservable."));
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
-        if (!IsServiceAvailableAtLocation(targetService, reservation.LocationId)) return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en sede."));
+
+        // 🔥 SPRINT A2: Uso del LocationAvailabilityService inyectado
+        if (!_locationAvailabilityService.IsOfferingAvailableAtLocation(targetService, reservation.LocationId))
+            return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en sede."));
 
         var newEndTimeUtc = newStartTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
         var localEndTime = localDateTime.AddMinutes(targetService.DurationInMinutes.Value);
@@ -224,7 +234,6 @@ public class ReservationEngine : IReservationEngine
         return Result.Success();
     }
 
-    // 🔥 CORRECCIÓN: Task.Run aísla el llamado y CancellationToken.None asegura que n8n reciba el payload aunque la API de NexFlow ya le haya respondido a WhatsApp.
     private void TriggerN8nSafeBackground(string eventType, Guid workspaceId, object data, Guid reservationId)
     {
         _ = Task.Run(async () =>

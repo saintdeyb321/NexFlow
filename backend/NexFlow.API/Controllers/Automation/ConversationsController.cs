@@ -15,6 +15,7 @@ public class ConversationsController : ControllerBase
     private readonly IConversationRepository _conversationRepository;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+    public record SendManualMessageRequest(string Content);
 
     public ConversationsController(
         IConversationRepository conversationRepository,
@@ -56,7 +57,6 @@ public class ConversationsController : ControllerBase
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para asumir el control humano.");
 
-        // 🔥 Sprint 4.1: ManualIntervention
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
         return Ok(new { message = "Control humano asumido. La IA ha sido silenciada temporalmente.", mode = ConversationMode.Human.ToString() });
     }
@@ -66,7 +66,6 @@ public class ConversationsController : ControllerBase
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para liberar el chat.");
 
-        // 🔥 Sprint 4.1: Se resetea el Handoff a None
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Automatic, HandoffReason.None, cancellationToken);
         return Ok(new { message = "Chat liberado. La Inteligencia Artificial vuelve a tomar el control.", mode = ConversationMode.Automatic.ToString() });
     }
@@ -83,12 +82,13 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        // 🔥 Sprint 4.1: Captura de ExternalId y Set a MessageStatus.Sent
-        var externalId = await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, cancellationToken);
+        // 🔥 CORRECCIÓN: Generamos el ID de idempotencia y lo pasamos al Gateway
+        var pendingId = Guid.NewGuid().ToString();
+        var externalId = await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, pendingId, cancellationToken);
 
         var messageRecord = new MessageRecord
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = pendingId,
             Direction = "outbound",
             Sender = SenderType.BusinessUser,
             Content = request.Content,
@@ -119,4 +119,3 @@ public class ConversationsController : ControllerBase
         return NoContent();
     }
 }
-public record SendManualMessageRequest(string Content);

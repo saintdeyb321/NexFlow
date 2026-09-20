@@ -109,7 +109,6 @@ public class FirestoreCatalogRepository : ICatalogRepository
             Currency = item.Currency,
             IsActive = item.IsActive,
 
-            // 🔥 CORRECCIÓN: Usamos LocationScope y LocationIds en lugar del obsoleto AvailableAtLocations
             LocationScope = item.LocationScope ?? "ALL",
             LocationIds = item.LocationIds ?? new List<string>(),
 
@@ -119,6 +118,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
             Metadata = item.Metadata ?? new Dictionary<string, object>()
         };
 
+        // Al usar SetOptions.MergeAll, eventualmente se podría usar Update para borrar AvailableAtLocations,
+        // pero escribir la nueva estructura es suficiente por ahora.
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
     }
 
@@ -148,6 +149,26 @@ public class FirestoreCatalogRepository : ICatalogRepository
     private static CatalogItemDto MapToItemDto(DocumentSnapshot doc)
     {
         var data = doc.ConvertTo<FirestoreCatalogItem>();
+
+        // 🔥 SPRINT A1: Migración al vuelo (On-The-Fly Migration)
+        string finalScope = data.LocationScope ?? "ALL";
+        List<string> finalIds = data.LocationIds ?? new List<string>();
+
+        // Si el documento es legacy (no tiene LocationScope pero sí tiene AvailableAtLocations)
+        if (!doc.ContainsField("LocationScope") && doc.ContainsField("AvailableAtLocations"))
+        {
+            if (data.LegacyAvailableAtLocations != null && data.LegacyAvailableAtLocations.Any())
+            {
+                finalScope = "SPECIFIC";
+                finalIds = data.LegacyAvailableAtLocations;
+            }
+            else
+            {
+                finalScope = "ALL";
+                finalIds = new List<string>();
+            }
+        }
+
         return new CatalogItemDto
         {
             Id = doc.Id,
@@ -158,11 +179,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
             PriceMinorUnits = data.PriceMinorUnits,
             Currency = data.Currency,
             IsActive = data.IsActive,
-
-            // 🔥 CORRECCIÓN
-            LocationScope = data.LocationScope ?? "ALL",
-            LocationIds = data.LocationIds ?? new List<string>(),
-
+            LocationScope = finalScope,
+            LocationIds = finalIds,
             DurationInMinutes = data.DurationInMinutes,
             RequiresReservation = data.RequiresReservation,
             ImageUrl = data.ImageUrl,
@@ -191,9 +209,11 @@ public class FirestoreCatalogRepository : ICatalogRepository
         [FirestoreProperty] public string Currency { get; set; } = "PEN";
         [FirestoreProperty] public bool IsActive { get; set; } = true;
 
-        // 🔥 CORRECCIÓN: Mapeo nativo de Firebase
         [FirestoreProperty] public string LocationScope { get; set; } = "ALL";
         [FirestoreProperty] public List<string> LocationIds { get; set; } = new();
+
+        // 🔥 Retenemos el campo legacy solo para lectura durante la migración
+        [FirestoreProperty("AvailableAtLocations")] public List<string>? LegacyAvailableAtLocations { get; set; }
 
         [FirestoreProperty] public int? DurationInMinutes { get; set; }
         [FirestoreProperty] public bool RequiresReservation { get; set; }

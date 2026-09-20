@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Exceptions;
+using NexFlow.Domain.Entities.Catalog;
 using System.Linq;
 
 namespace NexFlow.API.Controllers.Business;
@@ -50,7 +51,6 @@ public class CatalogController : ControllerBase
 
         var categories = await _catalogRepository.GetCategoriesAsync(WorkspaceId, cancellationToken);
 
-        // 🔥 CORRECCIÓN: Filtramos las categorías si el Frontend nos pide un scope específico
         if (!string.IsNullOrWhiteSpace(scope))
         {
             var targetScope = scope.ToUpperInvariant();
@@ -103,7 +103,6 @@ public class CatalogController : ControllerBase
         var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
         var products = allItems.Where(i => i.Type.ToUpperInvariant() == "PRODUCT");
 
-        // 🔥 SPRINT 03: Validación rigurosa de sede en el Backend usando las propiedades del DTO
         if (!string.IsNullOrWhiteSpace(locationId))
         {
             products = products.Where(p =>
@@ -164,15 +163,12 @@ public class CatalogController : ControllerBase
         [FromServices] ICatalogArtifactRepository artifactRepository,
         CancellationToken cancellationToken)
     {
-        // 1. Determinar el alcance y el módulo requerido
         var targetScope = string.IsNullOrWhiteSpace(scope) ? "PRODUCT" : scope.ToUpperInvariant();
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
-        // 2. Validar que tenga el módulo correcto contratado
         if (!await HasAccessTo(requiredModule, cancellationToken))
             return StatusCode(403, $"Módulo {requiredModule} no contratado.");
 
-        // 3. Consultar el artefacto correcto
         var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, targetScope, cancellationToken);
         if (artifact == null)
         {
@@ -214,9 +210,43 @@ public class CatalogController : ControllerBase
             return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
         }
     }
+
+    [HttpPost("artifact/callback")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ArtifactCallback(
+        [FromBody] ArtifactCallbackRequest request,
+        [FromServices] ICatalogArtifactRepository artifactRepo,
+        CancellationToken cancellationToken)
+    {
+        var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "SERVICE" : request.Scope.ToUpperInvariant();
+        var artifact = await artifactRepo.GetCurrentArtifactAsync(request.WorkspaceId, targetScope, cancellationToken);
+
+        if (artifact != null)
+        {
+            // 🔥 CORRECCIÓN: Usamos el método de dominio (DDD) en vez de modificar las propiedades directamente
+            try
+            {
+                artifact.CompleteGeneration(request.PdfUrl);
+                await artifactRepo.SaveArtifactAsync(artifact, cancellationToken);
+                return Ok(new { message = "PDF guardado exitosamente en Firestore." });
+            }
+            catch (DomainException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        return BadRequest(new { message = "Artefacto no encontrado." });
+    }
 }
 
-// 🔥 Clase auxiliar para recibir el scope en el body del POST
+public class ArtifactCallbackRequest
+{
+    public Guid WorkspaceId { get; set; }
+    public string GenerationId { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string PdfUrl { get; set; } = string.Empty;
+}
+
 public class GenerateArtifactRequest
 {
     public string Scope { get; set; } = string.Empty;

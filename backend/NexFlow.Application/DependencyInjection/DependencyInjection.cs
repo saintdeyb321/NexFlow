@@ -5,7 +5,9 @@ using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Importación requerida
+using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Business.LocationAvailability;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Business.Offerings;
 using NexFlow.Application.Features.Identity.GetMe;
@@ -50,6 +52,13 @@ public static class DependencyInjection
         services.AddScoped<IKnowledgeService, KnowledgeService>();
         services.AddScoped<IOfferingService, OfferingService>();
         services.AddScoped<IAiInterpreter, AiInterpreter>();
+        services.AddScoped<ILocationAvailabilityService, LocationAvailabilityService>();
+
+        // 🔥 Registro de los flujos de conversación extraídos del Orchestrator
+        services.AddScoped<IBookingFlow, BookingFlow>();
+        services.AddScoped<IRequestFlow, RequestFlow>();
+        services.AddScoped<ISupportFlow, SupportFlow>();
+        services.AddScoped<IChatFlow, ChatFlow>();
 
         services.AddScoped<ILocationResolverService, LocationResolverService>();
         services.AddScoped<IRequestService, RequestService>();

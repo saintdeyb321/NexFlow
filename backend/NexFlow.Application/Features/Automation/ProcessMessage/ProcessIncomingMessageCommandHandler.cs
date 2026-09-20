@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Abstractions;
+﻿using Microsoft.Extensions.Logging;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
@@ -17,6 +18,8 @@ public class ProcessIncomingMessageCommandHandler
     private readonly IKnowledgeService _knowledgeService;
     private readonly IMessageGateway _messageGateway;
     private readonly IConversationRepository _conversationRepo;
+    private readonly IProcessedMessageRepository _processedMessageRepo;
+    private readonly ILogger<ProcessIncomingMessageCommandHandler> _logger;
 
     public ProcessIncomingMessageCommandHandler(
         IIncomingMessageGuard guard,
@@ -24,7 +27,9 @@ public class ProcessIncomingMessageCommandHandler
         IAiResponseOrchestrator aiOrchestrator,
         IKnowledgeService knowledgeService,
         IMessageGateway messageGateway,
-        IConversationRepository conversationRepo)
+        IConversationRepository conversationRepo,
+        IProcessedMessageRepository processedMessageRepo,
+        ILogger<ProcessIncomingMessageCommandHandler> logger)
     {
         _guard = guard;
         _stateService = stateService;
@@ -32,53 +37,66 @@ public class ProcessIncomingMessageCommandHandler
         _knowledgeService = knowledgeService;
         _messageGateway = messageGateway;
         _conversationRepo = conversationRepo;
+        _processedMessageRepo = processedMessageRepo;
+        _logger = logger;
     }
 
     public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
-        // 1. Filtrar, Validar Idempotencia y Licencia
         var guardResult = await _guard.CheckMessageAsync(request, cancellationToken);
         if (!guardResult.IsValid) return Result.Success();
 
-        // 2. Gestionar Estado (Intervención humana, guardar consumidor y mensaje)
-        var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
-        if (stateResult.FastReply != null)
+        try
         {
-            await PersistAndSendAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, stateResult.Record.Id, stateResult.FastReply, cancellationToken);
+            var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
+            if (stateResult.FastReply != null)
+            {
+                await PersistAndSendAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, stateResult.Record.Id, stateResult.FastReply, cancellationToken);
+                return Result.Success();
+            }
+
+            if (!stateResult.ShouldAiRespond) return Result.Success();
+
+            // 3. INTERCEPTOR ZERO-TOKEN KNOWLEDGE
+            if (await TryHandleZeroTokenKnowledgeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request.MessageText, stateResult.Record, cancellationToken))
+            {
+                return Result.Success();
+            }
+
+            // 4. Orquestación principal con IA/Negocio
+            await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
+
             return Result.Success();
         }
-
-        if (!stateResult.ShouldAiRespond) return Result.Success();
-
-        // 3. 🔥 SPRINT 14: INTERCEPTOR ZERO-TOKEN KNOWLEDGE
-        // Si es una pregunta estática simple, respondemos en 0ms sin gastar tokens de Gemini.
-        if (await TryHandleZeroTokenKnowledgeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request.MessageText, stateResult.Record, cancellationToken))
+        catch (Exception ex)
         {
-            return Result.Success();
+            _logger.LogError(ex, "Error crítico procesando el mensaje {MessageId}. Liberando candado de idempotencia para permitir reintento.", request.MessageId);
+            await _processedMessageRepo.ReleaseLockAsync(guardResult.WorkspaceId, request.MessageId, CancellationToken.None);
+            throw;
         }
-
-        // 4. Si la consulta es compleja o es una transacción (reserva), orquestamos a Gemini
-        await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
-
-        return Result.Success();
     }
 
     private async Task<bool> TryHandleZeroTokenKnowledgeAsync(Guid workspaceId, string phone, string message, ConversationRecord conversation, CancellationToken ct)
     {
-        var text = message.ToLowerInvariant();
+        // 🔥 SPRINT 4: Normalización estricta (sinónimos, sin tildes, sin signos)
+        var normalizedText = message.ToLowerInvariant()
+            .Replace("á", "a").Replace("é", "e").Replace("í", "i").Replace("ó", "o").Replace("ú", "u")
+            .Replace("¿", "").Replace("?", "").Trim();
+
         KnowledgeTopic? topic = null;
 
-        // Heurística de Reglas Rápidas (Fast Rules)
-        if (text.Contains("donde estan") || text.Contains("ubicacion") || text.Contains("direccion") || text.Contains("sedes"))
+        var locationKeywords = new[] { "donde estan", "ubicacion", "direccion", "sedes", "sucursal", "como llego", "donde atienden" };
+        var hoursKeywords = new[] { "horario", "a que hora", "dias de atencion", "cuando abren", "hasta que hora", "cuando cierran" };
+
+        if (locationKeywords.Any(k => normalizedText.Contains(k)))
         {
             topic = KnowledgeTopic.Locations;
         }
-        else if (text.Contains("horario") || text.Contains("a que hora") || text.Contains("dias de atencion"))
+        else if (hoursKeywords.Any(k => normalizedText.Contains(k)))
         {
             topic = KnowledgeTopic.BusinessHours;
         }
 
-        // Si detectamos un tópico simple, disparamos el Snapshot
         if (topic.HasValue)
         {
             var snapshot = await _knowledgeService.GetSnapshotAsync(workspaceId, ct);
@@ -88,11 +106,11 @@ public class ProcessIncomingMessageCommandHandler
             {
                 string reply = $"Aquí tienes la información solicitada:\n\n{result.Facts}\n¿En qué más te puedo ayudar?";
                 await PersistAndSendAsync(workspaceId, phone, conversation.Id, reply, ct);
-                return true; // Se interceptó con éxito. Gemini nunca se enteró.
+                return true;
             }
         }
 
-        return false; // La pregunta es compleja, que trabaje la IA.
+        return false;
     }
 
     private async Task PersistAndSendAsync(Guid workspaceId, string phone, string conversationId, string text, CancellationToken ct)
@@ -101,7 +119,8 @@ public class ProcessIncomingMessageCommandHandler
         await _conversationRepo.AddMessageAsync(workspaceId, conversationId, new MessageRecord { Id = pendingId, ExternalMessageId = pendingId, Direction = "outbound", Sender = SenderType.AI, Content = text, Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow }, ct);
         try
         {
-            var extId = await _messageGateway.SendTextAsync(workspaceId, phone, text, ct);
+            // 🔥 CORRECCIÓN SPRINT 13: Pasamos pendingId como llave de idempotencia al Gateway
+            var extId = await _messageGateway.SendTextAsync(workspaceId, phone, text, pendingId, ct);
             await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, extId, ct);
         }
         catch

@@ -9,7 +9,6 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 public interface IConversationStateService
 {
-    // 🔥 NUEVA FIRMA: Ahora devuelve un 'FastReply' si la regla determinista se cumple
     Task<(bool ShouldAiRespond, ConversationRecord Record, string? FastReply)> ProcessStateAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, CancellationToken cancellationToken);
 }
 
@@ -42,6 +41,16 @@ public sealed class ConversationStateService : IConversationStateService
             if (conversation == null) return (false, null!, null);
 
             bool isAiMessage = await _conversationCache.IsMessageAiGeneratedAsync(workspaceId, request.MessageId, cancellationToken);
+
+            if (!isAiMessage)
+            {
+                var dbMessage = await _conversationRepo.GetMessageByExternalIdAsync(workspaceId, request.MessageId, cancellationToken);
+                if (dbMessage != null && dbMessage.Sender == SenderType.AI)
+                {
+                    isAiMessage = true;
+                }
+            }
+
             if (isAiMessage) return (false, conversation, null);
 
             if (conversation.Mode != ConversationMode.Human)
@@ -69,9 +78,15 @@ public sealed class ConversationStateService : IConversationStateService
 
         string? fastResponse = null;
         if (wordCount <= 3 && Regex.IsMatch(txt, @"^(hola|buenas|ola|buenos dias|buenas tardes|hey)$"))
+        {
+            // 🔥 UX FIX: Borramos la memoria fantasma de reservas anteriores al saludar
+            await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
             fastResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
+        }
         else if (wordCount <= 3 && Regex.IsMatch(txt, @"^(gracias|ok|perfecto|entendido|vale|listo)$"))
+        {
             fastResponse = "¡Con gusto! Si necesitas algo más, aquí estoy.";
+        }
 
         if (fastResponse != null)
         {

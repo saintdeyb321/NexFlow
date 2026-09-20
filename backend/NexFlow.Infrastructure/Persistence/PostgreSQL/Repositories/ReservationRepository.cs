@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
@@ -9,10 +10,14 @@ namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
 public class ReservationRepository : IReservationRepository
 {
     private readonly NexFlowDbContext _context;
+    private readonly IClock _clock;
 
-    public ReservationRepository(NexFlowDbContext context) => _context = context;
+    public ReservationRepository(NexFlowDbContext context, IClock clock)
+    {
+        _context = context;
+        _clock = clock;
+    }
 
-    // CORRECCIÓN: Volvemos a la normalidad, respetando la encapsulación de DDD.
     public void Add(Reservation reservation) => _context.Reservations.Add(reservation);
 
     public async Task<Reservation?> GetByIdAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
@@ -21,27 +26,23 @@ public class ReservationRepository : IReservationRepository
             .FirstOrDefaultAsync(r => r.Id == reservationId && r.WorkspaceId == workspaceId, cancellationToken);
     }
 
-    // 🔥 SPRINT 3: Implementación faltante para cancelar reservas reales
     public async Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 6: Usamos IClock inyectado en lugar de DateTime.UtcNow
+        var nowUtc = _clock.UtcNow;
+
         return await _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
                      && r.CustomerIdentifier == customerIdentifier
-                     && r.Status == ReservationStatus.Confirmed // Solo buscamos reservas activas
-                     && r.StartTime >= DateTime.UtcNow) // Que sean para el futuro
-            .OrderBy(r => r.StartTime) // Traemos la más próxima
+                     && r.Status == ReservationStatus.Confirmed
+                     && r.StartTime >= nowUtc)
+            .OrderBy(r => r.StartTime)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime date, CancellationToken cancellationToken)
+    public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
     {
-        // 🔥 CORRECCIÓN (Fallo #9): Calculamos el día exacto en Perú y lo pasamos a UTC
-        var peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
-        var peruDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
-
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(peruDate, peruZone);
-        var endUtc = startUtc.AddDays(1);
-
+        // 🔥 SPRINT 6: El repositorio ya no adivina el TimeZone. Compara directamente en UTC.
         return await _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
                      && r.LocationId == locationId
@@ -52,21 +53,14 @@ public class ReservationRepository : IReservationRepository
             .ToListAsync(cancellationToken);
     }
 
-    // 🔥 CORRECCIÓN (Fallo #7 y #45): Quitamos serviceId (el recurso físico es la sede) y añadimos excludeReservationId
     public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, DateTime startTime, DateTime endTime, Guid? excludeReservationId = null, CancellationToken cancellationToken = default)
     {
-        var utcStartTime = startTime.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(startTime, DateTimeKind.Utc)
-            : startTime.ToUniversalTime();
-
-        var utcEndTime = endTime.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(endTime, DateTimeKind.Utc)
-            : endTime.ToUniversalTime();
+        var utcStartTime = startTime.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(startTime, DateTimeKind.Utc) : startTime.ToUniversalTime();
+        var utcEndTime = endTime.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(endTime, DateTimeKind.Utc) : endTime.ToUniversalTime();
 
         var query = _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
                      && r.LocationId == locationId
-                     // ELIMINADO: && r.ServiceId == serviceId (para bloquear la sede completa)
                      && r.Status != ReservationStatus.Cancelled
                      && r.StartTime < utcEndTime
                      && r.EndTime > utcStartTime);
@@ -77,7 +71,6 @@ public class ReservationRepository : IReservationRepository
         }
 
         bool hasOverlap = await query.AnyAsync(cancellationToken);
-
         return !hasOverlap;
     }
 }

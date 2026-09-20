@@ -37,7 +37,8 @@ public class EvolutionMessageGateway : IMessageGateway
         }
     }
 
-    public async Task<string> SendTextAsync(Guid workspaceId, string customerIdentifier, string message, CancellationToken cancellationToken)
+    // 🔥 SPRINT 13: Añadido parámetro messageId para idempotencia
+    public async Task<string> SendTextAsync(Guid workspaceId, string customerIdentifier, string message, string messageId, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
         if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
@@ -49,14 +50,14 @@ public class EvolutionMessageGateway : IMessageGateway
         {
             number = customerIdentifier,
             text = safeMessage,
-            options = new { delay = 1200, presence = "composing" }
+            options = new { delay = 1200, presence = "composing", messageId = messageId } // <-- Llave de idempotencia
         };
 
         return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
     }
 
-    // 🔥 SPRINT 17: Soporte para PDFs
-    public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, CancellationToken cancellationToken)
+    // 🔥 SPRINT 13: Añadido parámetro messageId
+    public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, string messageId, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
         if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
@@ -65,15 +66,15 @@ public class EvolutionMessageGateway : IMessageGateway
         var payload = new
         {
             number = customerIdentifier,
-            options = new { delay = 2000, presence = "composing" },
+            options = new { delay = 2000, presence = "composing", messageId = messageId },
             mediaMessage = new { mediatype = "document", fileName = fileName, caption = caption, media = documentUrl }
         };
 
         return await ExecutePostAsync(url, payload, workspaceId, instanceName, customerIdentifier, cancellationToken);
     }
 
-    // 🔥 SPRINT 17: Soporte Nativo para Imágenes (WebP/JPG)
-    public async Task<string> SendImageAsync(Guid workspaceId, string customerIdentifier, string imageUrl, string caption, CancellationToken cancellationToken)
+    // 🔥 SPRINT 13: Añadido parámetro messageId
+    public async Task<string> SendImageAsync(Guid workspaceId, string customerIdentifier, string imageUrl, string caption, string messageId, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
         if (string.IsNullOrEmpty(instanceName)) return $"FAILED_NO_INSTANCE_{Guid.NewGuid()}";
@@ -82,7 +83,7 @@ public class EvolutionMessageGateway : IMessageGateway
         var payload = new
         {
             number = customerIdentifier,
-            options = new { delay = 1500, presence = "composing" },
+            options = new { delay = 1500, presence = "composing", messageId = messageId },
             mediaMessage = new { mediatype = "image", caption = caption, media = imageUrl }
         };
 
