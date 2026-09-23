@@ -19,7 +19,8 @@ public class N8nWebhookController : ControllerBase
     public N8nWebhookController(ICatalogArtifactRepository artifactRepository, IConfiguration config)
     {
         _artifactRepository = artifactRepository;
-        _webhookSecret = config["N8n:WebhookSecret"] ?? "nexflow-dev-secret-123";
+        // 🔥 SPRINT 3: Secreto estricto. Obliga a que la variable de entorno exista en producción.[cite: 1]
+        _webhookSecret = config["N8n:WebhookSecret"] ?? throw new InvalidOperationException("Falta configurar N8n:WebhookSecret en appsettings o variables de entorno.");
     }
 
     [HttpPost("catalog-ready")]
@@ -32,10 +33,10 @@ public class N8nWebhookController : ControllerBase
         var payloadJson = JsonSerializer.Serialize(payload);
         var expectedSignature = ComputeHmacSha256(payloadJson, _webhookSecret);
 
-        // En producción, n8n debe generar el HMACSHA256 del JSON usando el mismo secret
-        if (providedSignature != expectedSignature && providedSignature != _webhookSecret) // Fallback temporal al secret directo para facilitar tus pruebas
+        // 🔥 SPRINT 3: Eliminado el fallback inseguro (providedSignature != _webhookSecret). SOLO se acepta HMAC válido.[cite: 1]
+        if (providedSignature != expectedSignature)
         {
-            return Unauthorized(new { message = "Firma HMAC inválida." });
+            return Unauthorized(new { message = "Firma HMAC inválida. Intento de inyección bloqueado." });
         }
 
         // 2. Validación de completitud estructural
@@ -66,7 +67,7 @@ public class N8nWebhookController : ControllerBase
             }
 
             // 4. Marcamos el artefacto como vigente
-            artifact.CompleteGeneration(payload.PdfUrl); // Si tu dominio soporta ImageUrl, agrégalo aquí
+            artifact.CompleteGeneration(payload.PdfUrl);
             await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
 
             return Ok(new { message = "Artefacto enlazado y asegurado con éxito." });

@@ -5,12 +5,13 @@ import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 interface ReservationListProps {
   reservations: ReservationDto[];
   services: CatalogItemDto[];
+  timeZone: string; // 🔥 SPRINT 7: Prop obligatoria para zona horaria[cite: 1]
   onEdit: (res: ReservationDto) => void;
   onCancel: (id: string) => void;
   onComplete: (id: string) => void;
 }
 
-export const ReservationList = ({ reservations, services, onEdit, onCancel, onComplete }: ReservationListProps) => {
+export const ReservationList = ({ reservations, services, timeZone, onEdit, onCancel, onComplete }: ReservationListProps) => {
   
   const normalizeStatus = (status: string | number) => {
     if (status === 0 || status === '0') return 'PENDING';
@@ -41,7 +42,6 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
     );
   }
 
-  // 🔥 CORRECCIÓN: Evitamos que el sort explote si un registro viene nulo o sin fecha
   const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
     const dateA = new Date((a as any).startTime || a.dateTime || new Date()).getTime();
     const dateB = new Date((b as any).startTime || b.dateTime || new Date()).getTime();
@@ -63,7 +63,9 @@ export const ReservationList = ({ reservations, services, onEdit, onCancel, onCo
         <tbody className="divide-y divide-gray-100">
           {sortedReservations.map((res) => {
             const timeStr = (res as any).startTime || res.dateTime;
-            const localTime = timeStr ? new Date(new Date(timeStr).toLocaleString('en-US', { timeZone: 'America/Lima' })) : new Date();
+            
+            // 🔥 SPRINT 7: Uso dinámico de timeZone en lugar del 'America/Lima' quemado[cite: 1]
+            const localTime = timeStr ? new Date(new Date(timeStr).toLocaleString('en-US', { timeZone })) : new Date();
             
             const normalizedStatus = normalizeStatus(res.status);
             const isCancelled = normalizedStatus === 'CANCELLED';

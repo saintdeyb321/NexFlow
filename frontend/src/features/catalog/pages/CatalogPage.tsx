@@ -28,7 +28,10 @@ export const CatalogPage = () => {
     enabled: !!workspaceId 
   });
 
-  const [newProduct, setNewProduct] = useState<Partial<CatalogItemDto>>({ name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', isActive: true, type: 'PRODUCT' });
+  const [newProduct, setNewProduct] = useState<Partial<CatalogItemDto>>({ 
+    name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', 
+    isActive: true, type: 'PRODUCT', locationScope: 'ALL', locationIds: [] 
+  });
 
   const saveMutation = useMutation({
     mutationFn: saveProduct,
@@ -52,8 +55,15 @@ export const CatalogPage = () => {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProduct.categoryId) return alert("Debes seleccionar una categoría.");
-    saveMutation.mutate(newProduct as CatalogItemDto);
-  };
+    
+    // Forzamos los valores correctos de la dimensión de sede antes de enviar
+    const productToSave: CatalogItemDto = {
+        ...(newProduct as CatalogItemDto),
+        locationScope: newProduct.locationScope || 'ALL',
+        locationIds: newProduct.locationScope === 'ALL' ? [] : (newProduct.locationIds || [])
+    };
+    saveMutation.mutate(productToSave);
+};
 
   const handleQuickAddCategory = () => {
     const catName = window.prompt("Nombre de la nueva categoría (Ej: Bebidas, Postres):");

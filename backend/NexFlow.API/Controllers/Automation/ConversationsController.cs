@@ -82,28 +82,52 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        // 🔥 CORRECCIÓN: Generamos el ID de idempotencia y lo pasamos al Gateway
+        // 1. Guardamos como PENDING primero
         var pendingId = Guid.NewGuid().ToString();
-        var externalId = await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, pendingId, cancellationToken);
-
-        var messageRecord = new MessageRecord
+        var initialRecord = new MessageRecord
         {
             Id = pendingId,
             Direction = "outbound",
             Sender = SenderType.BusinessUser,
             Content = request.Content,
-            ExternalMessageId = externalId,
-            Status = MessageStatus.Sent,
+            ExternalMessageId = pendingId,
+            Status = MessageStatus.Pending,
             Timestamp = DateTime.UtcNow
         };
+        await _conversationRepository.AddMessageAsync(WorkspaceId, conversation.Id, initialRecord, cancellationToken);
 
-        await _conversationRepository.AddMessageAsync(WorkspaceId, conversation.Id, messageRecord, cancellationToken);
+        MessageRecord finalRecord;
+
+        // 2. Intentamos enviar y actualizamos según el resultado
+        try
+        {
+            var externalId = await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, pendingId, cancellationToken);
+            await _conversationRepository.UpdateMessageStatusAsync(WorkspaceId, conversation.Id, pendingId, MessageStatus.Sent, externalId, cancellationToken);
+
+            // 🔥 CORRECCIÓN: Creamos una nueva instancia limpia para la respuesta del frontend respetando los 'init'
+            finalRecord = new MessageRecord
+            {
+                Id = initialRecord.Id,
+                Direction = initialRecord.Direction,
+                Sender = initialRecord.Sender,
+                Content = initialRecord.Content,
+                ExternalMessageId = externalId,
+                Status = MessageStatus.Sent,
+                Timestamp = initialRecord.Timestamp
+            };
+        }
+        catch (Exception)
+        {
+            await _conversationRepository.UpdateMessageStatusAsync(WorkspaceId, conversation.Id, pendingId, MessageStatus.Failed, null, cancellationToken);
+            return StatusCode(500, new { message = "No se pudo entregar el mensaje a WhatsApp." });
+        }
 
         if (conversation.Mode != ConversationMode.Human)
         {
             await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
         }
-        return Ok(messageRecord);
+
+        return Ok(finalRecord);
     }
 
     [HttpDelete("{conversationId}")]

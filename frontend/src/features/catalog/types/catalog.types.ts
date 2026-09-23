@@ -2,7 +2,7 @@ export interface CatalogCategoryDto {
   id?: string;
   name: string;
   description?: string | null;
-  scope: 'PRODUCT' | 'SERVICE' | 'SHARED'; // 🔥 SPRINT 2 y 6: Agregado el ámbito de negocio
+  scope: 'PRODUCT' | 'SERVICE' | 'SHARED';
   isActive: boolean;
   displayOrder: number;
 }
@@ -16,13 +16,16 @@ export interface CatalogItemDto {
   priceMinorUnits: number;
   currency: string;
   isActive: boolean;
-  availableAtLocations?: string[];
   
-  // Campos exclusivos de Servicios (Nulos para Productos)
+  // 🔥 SPRINT 6: Contrato sincronizado con el Backend (Reemplaza availableAtLocations)
+  locationScope: 'ALL' | 'SPECIFIC';
+  locationIds: string[];
+  
+  // Campos exclusivos de Servicios
   durationInMinutes?: number | null;
   requiresReservation?: boolean;
   
-  // Para el Sprint 7 (Multimedia)
+  // Multimedia
   imageUrl?: string | null;
   metadata?: Record<string, unknown>;
 }

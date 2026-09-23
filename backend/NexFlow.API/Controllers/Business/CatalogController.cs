@@ -61,27 +61,37 @@ public class CatalogController : ControllerBase
     }
 
     [HttpPost("categories")]
-    public async Task<IActionResult> CreateCategory([FromBody] CatalogCategoryDto category, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateCategory([FromBody] CatalogCategoryDto category, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
         if (string.IsNullOrEmpty(category.Id)) category.Id = Guid.NewGuid().ToString();
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
+
+        // 🔥 SPRINT 4: Disparador de invalidación STALE
+        var currentWorkspaceId = WorkspaceId;
+        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+
         return Ok(category);
     }
 
     [HttpPut("categories/{categoryId}")]
-    public async Task<IActionResult> UpdateCategory(string categoryId, [FromBody] CatalogCategoryDto category, CancellationToken cancellationToken)
+    public async Task<IActionResult> UpdateCategory(string categoryId, [FromBody] CatalogCategoryDto category, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
         category.Id = categoryId;
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
+
+        // 🔥 SPRINT 4: Disparador de invalidación STALE
+        var currentWorkspaceId = WorkspaceId;
+        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+
         return Ok(category);
     }
 
     [HttpDelete("categories/{categoryId}")]
-    public async Task<IActionResult> DeleteCategory(string categoryId, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteCategory(string categoryId, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
@@ -89,6 +99,11 @@ public class CatalogController : ControllerBase
         if (items.Any()) return BadRequest(new { message = "No puedes eliminar una categoría que contiene productos o servicios." });
 
         await _catalogRepository.DeleteCategoryAsync(WorkspaceId, categoryId, cancellationToken);
+
+        // 🔥 SPRINT 4: Disparador de invalidación STALE
+        var currentWorkspaceId = WorkspaceId;
+        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+
         return NoContent();
     }
 
@@ -115,7 +130,7 @@ public class CatalogController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> SaveProduct([FromBody] CatalogItemDto product, CancellationToken cancellationToken)
+    public async Task<IActionResult> SaveProduct([FromBody] CatalogItemDto product, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
@@ -137,11 +152,16 @@ public class CatalogController : ControllerBase
         }
 
         await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken);
+
+        // 🔥 SPRINT 4: Disparador de invalidación STALE
+        var currentWorkspaceId = WorkspaceId;
+        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+
         return Ok(product);
     }
 
     [HttpDelete("{productId}")]
-    public async Task<IActionResult> DeleteProduct(string productId, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteProduct(string productId, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
@@ -149,6 +169,10 @@ public class CatalogController : ControllerBase
         if (item != null && item.Type.ToUpperInvariant() == "PRODUCT")
         {
             await _catalogRepository.DeleteItemAsync(WorkspaceId, productId, cancellationToken);
+
+            // 🔥 SPRINT 4: Disparador de invalidación STALE
+            var currentWorkspaceId = WorkspaceId;
+            _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
         }
 
         return NoContent();
@@ -210,41 +234,6 @@ public class CatalogController : ControllerBase
             return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
         }
     }
-
-    [HttpPost("artifact/callback")]
-    [AllowAnonymous]
-    public async Task<IActionResult> ArtifactCallback(
-        [FromBody] ArtifactCallbackRequest request,
-        [FromServices] ICatalogArtifactRepository artifactRepo,
-        CancellationToken cancellationToken)
-    {
-        var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "SERVICE" : request.Scope.ToUpperInvariant();
-        var artifact = await artifactRepo.GetCurrentArtifactAsync(request.WorkspaceId, targetScope, cancellationToken);
-
-        if (artifact != null)
-        {
-            // 🔥 CORRECCIÓN: Usamos el método de dominio (DDD) en vez de modificar las propiedades directamente
-            try
-            {
-                artifact.CompleteGeneration(request.PdfUrl);
-                await artifactRepo.SaveArtifactAsync(artifact, cancellationToken);
-                return Ok(new { message = "PDF guardado exitosamente en Firestore." });
-            }
-            catch (DomainException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-        }
-        return BadRequest(new { message = "Artefacto no encontrado." });
-    }
-}
-
-public class ArtifactCallbackRequest
-{
-    public Guid WorkspaceId { get; set; }
-    public string GenerationId { get; set; } = string.Empty;
-    public string Scope { get; set; } = string.Empty;
-    public string PdfUrl { get; set; } = string.Empty;
 }
 
 public class GenerateArtifactRequest

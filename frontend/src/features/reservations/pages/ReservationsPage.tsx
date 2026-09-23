@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calendar as CalendarIcon, List, CalendarDays, AlertCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, List, CalendarDays, AlertCircle, MapPin } from 'lucide-react';
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
 import { getLocations, getServices } from '../../business/services/business.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
@@ -15,6 +15,9 @@ export const ReservationsPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
+  
+  // 🔥 SPRINT 7: Extraemos la zona horaria real del backend, con un fallback seguro
+  const timeZone = useAuthStore(state => (state.me as any)?.businessProfile?.timeZone) || 'America/Lima';
 
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     const today = new Date();
@@ -27,26 +30,26 @@ export const ReservationsPage = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
 
-  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
+  // 🔥 SPRINT 7: Validación estricta, NUNCA enviamos 'global' al backend
+  const isValidLocationSelected = Boolean(selectedLocationId && selectedLocationId !== 'all');
 
-  // 🔥 CORRECCIÓN TYPESCRIPT: Invocamos explícitamente con parámetro y tipamos el retorno
-  const { data: services = [] as CatalogItemDto[] } = useQuery({
-    queryKey: ['services', workspaceId, queryLocation],
-    queryFn: () => getServices(queryLocation),
-    enabled: !!workspaceId,
+  const { data: services = [] } = useQuery<CatalogItemDto[]>({
+    queryKey: ['services', workspaceId, selectedLocationId],
+    queryFn: () => getServices(selectedLocationId),
+    enabled: Boolean(workspaceId) && isValidLocationSelected,
     staleTime: 1000 * 60 * 10,
   });
 
-  const { data: locations = [] as LocationDto[] } = useQuery({
+  const { data: locations = [] } = useQuery<LocationDto[]>({
     queryKey: ['locations', workspaceId],
     queryFn: getLocations,
-    enabled: !!workspaceId,
+    enabled: Boolean(workspaceId),
   });
 
-  const { data: reservations = [] as ReservationDto[], isLoading } = useQuery({
-    queryKey: ['reservations', workspaceId, queryLocation, selectedDate],
-    queryFn: () => getReservations(queryLocation, selectedDate),
-    enabled: !!workspaceId,
+  const { data: reservations = [], isLoading } = useQuery<ReservationDto[]>({
+    queryKey: ['reservations', workspaceId, selectedLocationId, selectedDate],
+    queryFn: () => getReservations(selectedLocationId, selectedDate),
+    enabled: Boolean(workspaceId) && isValidLocationSelected, 
   });
 
   const cancelMutation = useMutation({
@@ -86,6 +89,7 @@ export const ReservationsPage = () => {
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
               className="bg-transparent text-sm outline-none text-gray-700"
+              disabled={!isValidLocationSelected}
             />
           </div>
 
@@ -97,15 +101,15 @@ export const ReservationsPage = () => {
           <div className="relative group">
             <button 
               onClick={() => setIsCreateModalOpen(true)}
-              disabled={selectedLocationId === 'all'}
+              disabled={!isValidLocationSelected}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 flex items-center transition-colors"
             >
               Nueva Reserva
             </button>
-            {selectedLocationId === 'all' && (
+            {!isValidLocationSelected && (
               <div className="absolute top-full mt-2 right-0 w-64 bg-gray-900 text-white text-xs rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none flex items-start">
                 <AlertCircle className="w-4 h-4 mr-2 shrink-0 text-yellow-400" />
-                Debes seleccionar una sede específica en el panel lateral para poder crear una reserva.
+                Debes seleccionar una sede específica en el panel lateral para poder crear o ver reservas.
               </div>
             )}
           </div>
@@ -113,7 +117,14 @@ export const ReservationsPage = () => {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        {isLoading ? (
+        {!isValidLocationSelected ? (
+          // 🔥 SPRINT 7: UI Amigable que bloquea la tabla hasta que elijan una sede
+          <div className="flex flex-col items-center justify-center h-64 text-gray-400 bg-gray-50">
+            <MapPin className="w-12 h-12 text-blue-300 mb-3" />
+            <h3 className="text-lg font-medium text-gray-600">Selecciona una Sede</h3>
+            <p className="text-sm mt-1 max-w-md text-center">Para gestionar las citas, elige una ubicación específica en el selector superior.</p>
+          </div>
+        ) : isLoading ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-400">
             <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
             <p className="text-sm">Cargando agenda...</p>
@@ -122,6 +133,7 @@ export const ReservationsPage = () => {
           <ReservationList 
             reservations={reservations} 
             services={services} 
+            timeZone={timeZone} // 🔥 SPRINT 7: Inyección del TimeZone[cite: 1]
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
             onCancel={handleCancel} 
             onComplete={handleComplete}
@@ -140,7 +152,8 @@ export const ReservationsPage = () => {
         onClose={() => setIsCreateModalOpen(false)} 
         onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })} 
         locations={locations} 
-        services={services} 
+        services={services}
+        timeZone={timeZone} 
       />
 
       <EditReservationModal 
@@ -148,6 +161,7 @@ export const ReservationsPage = () => {
         onClose={() => { setIsEditModalOpen(false); setEditingRes(null); }}
         onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })}
         reservation={editingRes}
+        timeZone={timeZone}
       />
     </div>
   );

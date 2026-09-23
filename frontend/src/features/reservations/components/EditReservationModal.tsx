@@ -7,9 +7,10 @@ interface EditReservationModalProps {
   onClose: () => void;
   onSuccess: () => void;
   reservation: ReservationDto | null;
+  timeZone: string; // 🔥 SPRINT 7: Inyectamos la zona horaria real
 }
 
-export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation }: EditReservationModalProps) => {
+export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, timeZone }: EditReservationModalProps) => {
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -17,12 +18,14 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation }
   useEffect(() => {
     if (reservation) {
       const timeStr = (reservation as any).startTime || reservation.dateTime;
-      const localTime = new Date(new Date(timeStr).toLocaleString('en-US', { timeZone: 'America/Lima' }));
+      
+      // 🔥 SPRINT 7: Usamos la zona horaria del perfil de negocio en lugar de un string estático[cite: 1]
+      const localTime = new Date(new Date(timeStr).toLocaleString('en-US', { timeZone }));
       
       setEditDate(localTime.toISOString().split('T')[0]);
       setEditTime(`${localTime.getHours().toString().padStart(2, '0')}:${localTime.getMinutes().toString().padStart(2, '0')}`);
     }
-  }, [reservation]);
+  }, [reservation, timeZone]);
 
   if (!isOpen || !reservation) return null;
 
@@ -71,17 +74,10 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation }
         </div>
 
         <div className="mt-8 flex justify-end gap-3">
-          <button 
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          >
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
             Cancelar
           </button>
-          <button 
-            onClick={handleSaveEdit}
-            disabled={isSaving}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-          >
+          <button onClick={handleSaveEdit} disabled={isSaving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
             {isSaving ? 'Guardando...' : 'Confirmar Cambio'}
           </button>
         </div>

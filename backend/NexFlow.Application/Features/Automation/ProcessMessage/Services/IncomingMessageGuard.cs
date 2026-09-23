@@ -22,7 +22,10 @@ public class IncomingMessageGuard : IIncomingMessageGuard
 
     public IncomingMessageGuard(IInstanceResolver instanceResolver, IProcessedMessageRepository processedMessageRepo, IEntitlementService entitlementService, ILogger<IncomingMessageGuard> logger)
     {
-        _instanceResolver = instanceResolver; _processedMessageRepo = processedMessageRepo; _entitlementService = entitlementService; _logger = logger;
+        _instanceResolver = instanceResolver;
+        _processedMessageRepo = processedMessageRepo;
+        _entitlementService = entitlementService;
+        _logger = logger;
     }
 
     private static string NormalizePhone(string phone)
@@ -34,29 +37,31 @@ public class IncomingMessageGuard : IIncomingMessageGuard
 
     public async Task<(bool IsValid, Guid WorkspaceId, string NormalizedPhone)> CheckMessageAsync(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
-        var resolvedId = await _instanceResolver.ResolveInstanceAsync(request.InstanceName, cancellationToken);
-        if (resolvedId == null || resolvedId == Guid.Empty)
-        {
-            _logger.LogWarning("Incoming message rejected because the instance '{InstanceName}' could not be resolved.", request.InstanceName);
-            return (false, Guid.Empty, string.Empty);
-        }
-
-        if (!await _processedMessageRepo.TryAcquireLockAsync(resolvedId.Value, request.MessageId, cancellationToken))
-        {
-            _logger.LogWarning("Incoming message {MessageId} for workspace {WorkspaceId} was rejected because it is already locked or processed.", request.MessageId, resolvedId.Value);
-            return (false, Guid.Empty, string.Empty);
-        }
-
+        // 1. Validaciones puras en memoria (Sin tocar la BD de idempotencia todavía)
         var normalizedPhone = NormalizePhone(request.CustomerPhone);
         if (string.IsNullOrEmpty(normalizedPhone))
         {
-            _logger.LogWarning("Incoming message {MessageId} from instance '{InstanceName}' was rejected because the phone was invalid or empty.", request.MessageId, request.InstanceName);
+            _logger.LogWarning("Incoming message {MessageId} rejected: phone invalid or empty.", request.MessageId);
+            return (false, Guid.Empty, string.Empty);
+        }
+
+        var resolvedId = await _instanceResolver.ResolveInstanceAsync(request.InstanceName, cancellationToken);
+        if (resolvedId == null || resolvedId == Guid.Empty)
+        {
+            _logger.LogWarning("Incoming message rejected: instance '{InstanceName}' not resolved.", request.InstanceName);
             return (false, Guid.Empty, string.Empty);
         }
 
         if (!await _entitlementService.IsLicenseValidAsync(resolvedId.Value, cancellationToken))
         {
-            _logger.LogWarning("Incoming message {MessageId} was rejected because the license for workspace {WorkspaceId} is not valid.", request.MessageId, resolvedId.Value);
+            _logger.LogWarning("Incoming message {MessageId} rejected: license for workspace {WorkspaceId} invalid.", request.MessageId, resolvedId.Value);
+            return (false, Guid.Empty, string.Empty);
+        }
+
+        // 2. ÚLTIMO PASO: Adquirir el candado solo si todas las validaciones previas pasaron
+        if (!await _processedMessageRepo.BeginProcessingAsync(resolvedId.Value, request.MessageId, cancellationToken))
+        {
+            _logger.LogWarning("Incoming message {MessageId} for workspace {WorkspaceId} rejected: already processed or processing.", request.MessageId, resolvedId.Value);
             return (false, Guid.Empty, string.Empty);
         }
 

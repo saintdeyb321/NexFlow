@@ -2,7 +2,7 @@
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
-using NexFlow.Application.Common; // 🔥 Para N8nEventPayload
+using NexFlow.Application.Common;
 using NexFlow.Domain.Entities.Catalog;
 
 namespace NexFlow.Application.Features.Business;
@@ -10,6 +10,9 @@ namespace NexFlow.Application.Features.Business;
 public interface ICatalogGenerationService
 {
     Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
+
+    // 🔥 SPRINT 4: Nuevo método para invalidación automática
+    Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken);
 }
 
 public class CatalogGenerationService : ICatalogGenerationService
@@ -38,6 +41,36 @@ public class CatalogGenerationService : ICatalogGenerationService
         _workflowGateway = workflowGateway;
         _profileRepository = profileRepository;
         _logger = logger;
+    }
+
+    // 🔥 SPRINT 4: Lógica de invalidación STALE determinista[cite: 1]
+    public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        var scopesToVerify = new[] { "PRODUCT", "SERVICE" };
+
+        var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
+        var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
+
+        foreach (var scope in scopesToVerify)
+        {
+            var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, cancellationToken);
+
+            // Solo invalidamos si existe y actualmente se considera vigente (Current)
+            if (artifact != null && artifact.Status == CatalogArtifactStatus.Current)
+            {
+                var filteredCategories = allCategories.Where(c => c.Scope == scope || c.Scope == "SHARED").ToList();
+                var filteredItems = allItems.Where(i => i.Type == scope).ToList();
+
+                var currentHash = _hashService.ComputeHash(filteredCategories, filteredItems);
+
+                if (artifact.SourceHash != currentHash)
+                {
+                    artifact.MarkAsStale();
+                    await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
+                    _logger.LogInformation("El catálogo '{Scope}' del workspace {WorkspaceId} ha mutado. Artefacto invalidado (STALE).", scope, workspaceId);
+                }
+            }
+        }
     }
 
     public async Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken)
@@ -96,7 +129,6 @@ public class CatalogGenerationService : ICatalogGenerationService
                 }
             };
 
-            // 🔥 SPRINT 15: Empaquetamos en el estándar seguro que diseñaste para NexFlow
             var wrappedPayload = new N8nEventPayload<object>(
                 workspaceId,
                 "CATALOG_GENERATION_REQUESTED",
@@ -109,7 +141,6 @@ public class CatalogGenerationService : ICatalogGenerationService
             {
                 try
                 {
-                    // Disparamos hacia el webhook "nexflow-events" (el mismo que usa reservas)
                     await _workflowGateway.TriggerWorkflowAsync("nexflow-events", wrappedPayload, CancellationToken.None);
                 }
                 catch (Exception ex)

@@ -14,6 +14,7 @@ public class GroqAiProvider : IAiProvider
     private readonly string _apiKey;
     private readonly string _model;
     private readonly ILogger<GroqAiProvider> _logger;
+    public AiProviderType ProviderType => AiProviderType.Groq;
 
     public GroqAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GroqAiProvider> logger)
     {

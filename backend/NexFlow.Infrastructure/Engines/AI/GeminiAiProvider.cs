@@ -14,6 +14,7 @@ public class GeminiAiProvider : IAiProvider
     private readonly string _primaryModel;
     private readonly string _fallbackModel;
     private readonly ILogger<GeminiAiProvider> _logger;
+    public AiProviderType ProviderType => AiProviderType.Gemini;
 
     public GeminiAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiAiProvider> logger)
     {

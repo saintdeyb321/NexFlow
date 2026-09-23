@@ -51,8 +51,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         if ((interpretation.Intent == "BOOKING" || context.CurrentGoal == "BOOKING") && activeModules.Contains("RESERVATIONS"))
         {
-            // 🔥 CORRECCIÓN: Le pasamos 'interpretation' completa y el fallbackName
-            finalResponse = await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, context, interpretation, request.CustomerName, cancellationToken);
+            finalResponse = await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, cancellationToken);
         }
         else if (interpretation.Intent == "REQUEST" && activeModules.Contains("REQUESTS"))
         {
@@ -64,7 +63,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         else
         {
-            finalResponse = await _chatFlow.ProcessAsync(request.MessageText, cancellationToken);
+            // 🔥 RAG FIX: Ahora le pasamos el workspaceId al ChatFlow para que pueda consultar la base de datos
+            finalResponse = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, cancellationToken);
         }
 
         await _cache.SetContextAsync(workspaceId, normalizedPhone, context, cancellationToken);

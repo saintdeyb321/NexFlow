@@ -17,13 +17,32 @@ public class ProcessedMessageRepository : IProcessedMessageRepository
         _logger = logger;
     }
 
-    public async Task<bool> TryAcquireLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
+    public async Task<bool> BeginProcessingAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
+        var existingRecord = await _dbContext.ProcessedMessages
+            .FirstOrDefaultAsync(p => p.WorkspaceId == workspaceId && p.MessageId == messageId, cancellationToken);
+
+        if (existingRecord != null)
+        {
+            // Si ya se procesó o se está procesando ahora mismo, rechazamos el duplicado
+            if (existingRecord.Status == "PROCESSED" || existingRecord.Status == "PROCESSING")
+                return false;
+
+            // Si falló anteriormente, permitimos el reintento
+            existingRecord.Status = "PROCESSING";
+            existingRecord.Attempts += 1;
+            existingRecord.LastError = null;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
         var record = new ProcessedMessage
         {
             WorkspaceId = workspaceId,
             MessageId = messageId,
-            ProcessedAt = DateTime.UtcNow
+            Status = "PROCESSING",
+            ReceivedAt = DateTime.UtcNow,
+            Attempts = 1
         };
 
         _dbContext.ProcessedMessages.Add(record);
@@ -31,28 +50,46 @@ public class ProcessedMessageRepository : IProcessedMessageRepository
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
-            return true; // Éxito: el candado es nuestro
+            return true;
         }
         catch (DbUpdateException)
         {
-            // Fallo: llave duplicada (Evolution envió el mismo webhook dos veces concurrentemente)
+            // Colisión por concurrencia exacta (dos webhooks idénticos al mismo milisegundo)
             return false;
         }
     }
 
-    public async Task ReleaseLockAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
+    public async Task MarkAsProcessedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 1: Liberamos el candado eliminando el registro para que Evolution pueda reintentar.
-        await _dbContext.ProcessedMessages
-            .Where(p => p.WorkspaceId == workspaceId && p.MessageId == messageId)
-            .ExecuteDeleteAsync(cancellationToken);
+        var record = await _dbContext.ProcessedMessages
+            .FirstOrDefaultAsync(p => p.WorkspaceId == workspaceId && p.MessageId == messageId, cancellationToken);
+
+        if (record != null)
+        {
+            record.Status = "PROCESSED";
+            record.ProcessedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task MarkAsFailedAsync(Guid workspaceId, string messageId, string error, CancellationToken cancellationToken)
+    {
+        var record = await _dbContext.ProcessedMessages
+            .FirstOrDefaultAsync(p => p.WorkspaceId == workspaceId && p.MessageId == messageId, cancellationToken);
+
+        if (record != null)
+        {
+            record.Status = "FAILED";
+            record.LastError = error;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task CleanupOldMessagesAsync(int retentionDays, CancellationToken cancellationToken)
     {
         var threshold = DateTime.UtcNow.AddDays(-retentionDays);
         var deletedCount = await _dbContext.ProcessedMessages
-            .Where(p => p.ProcessedAt < threshold)
+            .Where(p => p.ReceivedAt < threshold)
             .ExecuteDeleteAsync(cancellationToken);
 
         _logger.LogInformation("Limpieza de Idempotencia completada: {Count} mensajes antiguos eliminados.", deletedCount);

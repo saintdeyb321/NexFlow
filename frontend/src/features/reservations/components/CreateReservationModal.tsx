@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createReservation } from '../services/reservation.service';
 import type { LocationDto } from '../../business/types/business.types';
-// 🔥 SPRINT 6
 import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 
 interface CreateReservationModalProps {
@@ -11,9 +10,10 @@ interface CreateReservationModalProps {
   onSuccess: () => void;
   locations: LocationDto[];
   services: CatalogItemDto[];
+  timeZone: string; // 🔥 SPRINT 7: Inyección de Zona Horaria[cite: 1]
 }
 
-export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services }: CreateReservationModalProps) => {
+export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
   const [isSaving, setIsSaving] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -21,22 +21,26 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
     serviceId: '',
     customerName: '',
     customerIdentifier: '',
-    date: new Date().toISOString().split('T')[0],
+    date: '',
     time: '10:00'
   });
 
   useEffect(() => {
     if (isOpen) {
+      // 🔥 SPRINT 7: Obtenemos el 'Hoy' correcto según el país del Workspace
+      const nowInWorkspace = new Date(new Date().toLocaleString('en-US', { timeZone }));
+      const todayString = nowInWorkspace.toISOString().split('T')[0];
+
       setFormData({
         locationId: locations.length > 0 ? (locations.find(l => l.isMain)?.id || locations[0].id || '') : '',
         serviceId: services.length > 0 ? (services[0].id || '') : '', 
         customerName: '',
         customerIdentifier: '',
-        date: new Date().toISOString().split('T')[0],
+        date: todayString,
         time: '10:00'
       });
     }
-  }, [isOpen, locations, services]);
+  }, [isOpen, locations, services, timeZone]);
 
   if (!isOpen) return null;
 
@@ -82,12 +86,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Sede</label>
-            <select 
-              value={formData.locationId} 
-              onChange={e => setFormData({...formData, locationId: e.target.value})}
-              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
-              required
-            >
+            <select value={formData.locationId} onChange={e => setFormData({...formData, locationId: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white" required>
               <option value="" disabled>Selecciona una sede...</option>
               {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
             </select>
@@ -95,12 +94,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
           <div>
             <label className="block text-sm font-medium mb-1">Servicio</label>
-            <select 
-              value={formData.serviceId} 
-              onChange={e => setFormData({...formData, serviceId: e.target.value})}
-              className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
-              required
-            >
+            <select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white" required>
               <option value="" disabled>Selecciona un servicio...</option>
               {services.map(srv => <option key={srv.id} value={srv.id}>{srv.name} ({srv.durationInMinutes} min)</option>)}
             </select>

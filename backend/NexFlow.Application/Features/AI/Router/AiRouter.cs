@@ -11,7 +11,6 @@ public enum AiTaskType
 
 public interface IAiRouter
 {
-    // 🔥 SPRINT 11: Ahora el router devuelve el resultado garantizado (ejecutando Primary y haciendo Fallback si es necesario)
     Task<string> ExecuteTaskAsync(AiTaskType taskType, string systemPrompt, string userPrompt, bool useJsonMode, CancellationToken ct);
 }
 
@@ -28,30 +27,24 @@ public class AiRouter : IAiRouter
 
     public async Task<string> ExecuteTaskAsync(AiTaskType taskType, string systemPrompt, string userPrompt, bool useJsonMode, CancellationToken ct)
     {
-        IAiProvider primaryProvider;
-        IAiProvider fallbackProvider;
+        // 🔥 SPRINT 10: Enrutamiento seguro por Enum, inmune a refactorizaciones de clases
+        IAiProvider primaryProvider = taskType == AiTaskType.IntentExtraction
+            ? GetProvider(AiProviderType.Groq)
+            : GetProvider(AiProviderType.Gemini);
 
-        // 1. Definir Políticas de Enrutamiento Explícitas
-        if (taskType == AiTaskType.IntentExtraction)
-        {
-            primaryProvider = GetProvider("GroqAiProvider");
-            fallbackProvider = GetProvider("GeminiAiProvider");
-        }
-        else // ComplexChat
-        {
-            primaryProvider = GetProvider("GeminiAiProvider");
-            fallbackProvider = GetProvider("GroqAiProvider"); // (O podrías usar Claude si lo integras)
-        }
+        IAiProvider fallbackProvider = taskType == AiTaskType.IntentExtraction
+            ? GetProvider(AiProviderType.Gemini)
+            : GetProvider(AiProviderType.Groq);
 
-        // 2. Ejecutar con Fallback Robusto
         try
         {
-            _logger.LogDebug("Intentando ejecutar tarea {TaskType} con {Provider}", taskType, primaryProvider.GetType().Name);
+            _logger.LogDebug("Intentando ejecutar tarea {TaskType} con {Provider}", taskType, primaryProvider.ProviderType);
             return await primaryProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct);
         }
-        catch (Exception ex) when (ex is not TaskCanceledException) // No reintentamos si el usuario/timeout canceló la petición
+        catch (Exception ex) when (IsTransientError(ex))
         {
-            _logger.LogWarning(ex, "Fallo en el proveedor primario {Provider} para tarea {TaskType}. Iniciando Fallback a {FallbackProvider}.", primaryProvider.GetType().Name, taskType, fallbackProvider.GetType().Name);
+            // 🔥 SPRINT 10: Solo ejecutamos Fallback si el error es transitorio (caída temporal)
+            _logger.LogWarning(ex, "Fallo transitorio (Timeout/RateLimit) en {Provider}. Tarea {TaskType}. Iniciando Fallback a {FallbackProvider}.", primaryProvider.ProviderType, taskType, fallbackProvider.ProviderType);
 
             try
             {
@@ -59,15 +52,44 @@ public class AiRouter : IAiRouter
             }
             catch (Exception fallbackEx)
             {
-                _logger.LogError(fallbackEx, "Fallo catastrófico. Ambos proveedores de IA ({Primary} y {Fallback}) fallaron para la tarea {TaskType}.", primaryProvider.GetType().Name, fallbackProvider.GetType().Name, taskType);
-                throw new InvalidOperationException("Todos los servicios de inteligencia artificial están inactivos.");
+                _logger.LogError(fallbackEx, "Fallo catastrófico. Ambos proveedores IA ({Primary} y {Fallback}) fallaron para la tarea {TaskType}.", primaryProvider.ProviderType, fallbackProvider.ProviderType, taskType);
+                throw new InvalidOperationException("Todos los servicios de inteligencia artificial están inactivos.", fallbackEx);
             }
+        }
+        catch (Exception ex)
+        {
+            // 🔥 SPRINT 10: Si el error es 400 (Bad Request), 401 (Auth) o formato JSON, abortamos sin gastar saldo en el fallback.
+            _logger.LogError(ex, "Error de cliente o no recuperable en {Provider}. Tarea abortada sin fallback para evitar sobrecostos.", primaryProvider.ProviderType);
+            throw;
         }
     }
 
-    private IAiProvider GetProvider(string className)
+    private IAiProvider GetProvider(AiProviderType type)
     {
-        return _providers.FirstOrDefault(p => p.GetType().Name == className)
-               ?? _providers.First(); // Safe fallback por si no se inyectó correctamente
+        return _providers.FirstOrDefault(p => p.ProviderType == type)
+               ?? _providers.First();
+    }
+
+    // Clasificador determinista de excepciones de API
+    private static bool IsTransientError(Exception ex)
+    {
+        if (ex is TimeoutException || ex is TaskCanceledException) return true;
+
+        if (ex is HttpRequestException httpEx)
+        {
+            var code = (int?)httpEx.StatusCode;
+            // 429: Too Many Requests (Rate Limit). 5xx: Server Errors de la IA.
+            if (code == 429 || (code >= 500 && code <= 599)) return true;
+
+            // 400, 401, 403, 404 NO son transitorios (son culpa nuestra, no de Groq/Gemini).
+            return false;
+        }
+
+        // Red de seguridad por si los SDKs (como Gemini SDK) envuelven la excepción HTTP
+        var msg = ex.Message.ToLowerInvariant();
+        if (msg.Contains("429") || msg.Contains("too many requests") || msg.Contains("500") || msg.Contains("503") || msg.Contains("timeout"))
+            return true;
+
+        return false;
     }
 }

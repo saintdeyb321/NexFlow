@@ -52,33 +52,34 @@ public class ProcessIncomingMessageCommandHandler
             if (stateResult.FastReply != null)
             {
                 await PersistAndSendAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, stateResult.Record.Id, stateResult.FastReply, cancellationToken);
+                await _processedMessageRepo.MarkAsProcessedAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken);
                 return Result.Success();
             }
 
-            if (!stateResult.ShouldAiRespond) return Result.Success();
-
-            // 3. INTERCEPTOR ZERO-TOKEN KNOWLEDGE
-            if (await TryHandleZeroTokenKnowledgeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request.MessageText, stateResult.Record, cancellationToken))
+            if (stateResult.ShouldAiRespond)
             {
-                return Result.Success();
+                if (!await TryHandleZeroTokenKnowledgeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request.MessageText, stateResult.Record, cancellationToken))
+                {
+                    await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
+                }
             }
 
-            // 4. Orquestación principal con IA/Negocio
-            await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
-
+            // 🔥 SPRINT 1: Marcamos el mensaje como procesado exitosamente al final del flujo
+            await _processedMessageRepo.MarkAsProcessedAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken);
             return Result.Success();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error crítico procesando el mensaje {MessageId}. Liberando candado de idempotencia para permitir reintento.", request.MessageId);
-            await _processedMessageRepo.ReleaseLockAsync(guardResult.WorkspaceId, request.MessageId, CancellationToken.None);
+            _logger.LogError(ex, "Error crítico procesando el mensaje {MessageId}. Marcando como FAILED para permitir reintento.", request.MessageId);
+
+            // 🔥 SPRINT 1: El mensaje queda documentado como fallido y habilitado para reintentos
+            await _processedMessageRepo.MarkAsFailedAsync(guardResult.WorkspaceId, request.MessageId, ex.Message, CancellationToken.None);
             throw;
         }
     }
 
     private async Task<bool> TryHandleZeroTokenKnowledgeAsync(Guid workspaceId, string phone, string message, ConversationRecord conversation, CancellationToken ct)
     {
-        // 🔥 SPRINT 4: Normalización estricta (sinónimos, sin tildes, sin signos)
         var normalizedText = message.ToLowerInvariant()
             .Replace("á", "a").Replace("é", "e").Replace("í", "i").Replace("ó", "o").Replace("ú", "u")
             .Replace("¿", "").Replace("?", "").Trim();
@@ -119,7 +120,6 @@ public class ProcessIncomingMessageCommandHandler
         await _conversationRepo.AddMessageAsync(workspaceId, conversationId, new MessageRecord { Id = pendingId, ExternalMessageId = pendingId, Direction = "outbound", Sender = SenderType.AI, Content = text, Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow }, ct);
         try
         {
-            // 🔥 CORRECCIÓN SPRINT 13: Pasamos pendingId como llave de idempotencia al Gateway
             var extId = await _messageGateway.SendTextAsync(workspaceId, phone, text, pendingId, ct);
             await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, extId, ct);
         }
