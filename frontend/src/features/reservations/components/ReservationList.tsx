@@ -1,11 +1,11 @@
 import { Search, Pencil, XCircle } from 'lucide-react';
 import type { ReservationDto } from '../types/reservation.types';
-import type { CatalogItemDto } from '../../catalog/types/catalog.types';
+import type { ServiceDto } from '../../services/types/services.types'; // 🔥 SPRINT 1: Reemplazo a ServiceDto
 
 interface ReservationListProps {
   reservations: ReservationDto[];
-  services: CatalogItemDto[];
-  timeZone: string; // 🔥 SPRINT 7: Prop obligatoria para zona horaria[cite: 1]
+  services: ServiceDto[]; // 🔥 Actualizado a ServiceDto
+  timeZone: string; 
   onEdit: (res: ReservationDto) => void;
   onCancel: (id: string) => void;
   onComplete: (id: string) => void;
@@ -64,7 +64,6 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
           {sortedReservations.map((res) => {
             const timeStr = (res as any).startTime || res.dateTime;
             
-            // 🔥 SPRINT 7: Uso dinámico de timeZone en lugar del 'America/Lima' quemado[cite: 1]
             const localTime = timeStr ? new Date(new Date(timeStr).toLocaleString('en-US', { timeZone })) : new Date();
             
             const normalizedStatus = normalizeStatus(res.status);

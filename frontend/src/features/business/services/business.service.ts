@@ -1,6 +1,5 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { BusinessHoursDto, BusinessProfile, LocationDto } from '../types/business.types';
-import type { CatalogItemDto } from '../../catalog/types/catalog.types';
 
 export const getBusinessProfile = async (): Promise<BusinessProfile> => {
   const { data } = await axiosClient.get<BusinessProfile>('/business/profile');
@@ -9,27 +8,6 @@ export const getBusinessProfile = async (): Promise<BusinessProfile> => {
 
 export const updateBusinessProfile = async (profile: BusinessProfile): Promise<void> => {
   await axiosClient.put('/business/profile', profile);
-};
-
-// --- SERVICES ---
-// 🔥 SPRINT 04: Inyectamos locationId para aislar la data por sede
-export const getServices = async (locationId?: string): Promise<CatalogItemDto[]> => {
-  const params = locationId && locationId !== 'all' ? { locationId } : {};
-  const { data } = await axiosClient.get<CatalogItemDto[]>('/business/services', { params });
-  return data;
-};
-
-export const saveService = async (service: CatalogItemDto): Promise<CatalogItemDto> => {
-  if (service.id) {
-    const { data } = await axiosClient.put<CatalogItemDto>(`/business/services/${service.id}`, service);
-    return data;
-  }
-  const { data } = await axiosClient.post<CatalogItemDto>('/business/services', service);
-  return data;
-};
-
-export const deleteService = async (serviceId: string): Promise<void> => {
-  await axiosClient.delete(`/business/services/${serviceId}`);
 };
 
 // --- LOCATIONS & ONBOARDING ---

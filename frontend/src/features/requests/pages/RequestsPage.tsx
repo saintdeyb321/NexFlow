@@ -1,98 +1,133 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Clock, CheckCircle, XCircle, Loader2, ThumbsUp, Ban } from 'lucide-react';
+import { ClipboardList, Clock, PlayCircle, CheckCircle, XCircle, FileText } from 'lucide-react';
 import { getRequests, updateRequestStatus } from '../services/request.service';
 import type { RequestStatus } from '../types/request.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const RequestsPage = () => {
   const queryClient = useQueryClient();
-  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
-  const selectedLocationId = useAuthStore(state => state.selectedLocationId); // 🔥 Contexto Global
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const [filterStatus, setFilterStatus] = useState<RequestStatus | 'ALL'>('ALL');
 
-  // Inyectamos la sede actual en la consulta
-  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
-
-  // 🔥 SPRINT 08: Migración a TanStack Query
-  const { data: requests = [], isLoading } = useQuery({
-    queryKey: ['requests', workspaceId, queryLocation],
-    queryFn: () => getRequests(queryLocation), // Deberás asegurar que tu getRequests reciba este id
+  const { data: requests = [], isLoading, isError } = useQuery({
+    queryKey: ['requests', workspaceId],
+    queryFn: getRequests,
     enabled: !!workspaceId,
+    refetchInterval: 30000, // Refresca cada 30 seg
   });
 
-  const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string, status: string }) => updateRequestStatus(id, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] }),
-    onError: (error: any) => alert(`Error actualizando estado: ${error.message}`)
+  const updateMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: RequestStatus }) => updateRequestStatus(id, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
+    },
   });
 
-  const handleStatusChange = (id: string, newStatus: string) => {
-    updateStatusMutation.mutate({ id, status: newStatus });
-  };
-
-  const getStatusBadge = (status: RequestStatus | string) => {
+  const getStatusBadge = (status: RequestStatus) => {
     switch (status) {
-      case 'Pending': return <span className="flex items-center px-2.5 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium"><Clock className="w-3 h-3 mr-1" /> Pendiente</span>;
-      case 'InReview': return <span className="flex items-center px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> En Revisión</span>;
-      case 'Approved': return <span className="flex items-center px-2.5 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-medium"><ThumbsUp className="w-3 h-3 mr-1" /> Aprobado</span>;
-      case 'Rejected': return <span className="flex items-center px-2.5 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium"><Ban className="w-3 h-3 mr-1" /> Rechazado</span>;
-      case 'Completed': return <span className="flex items-center px-2.5 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"><CheckCircle className="w-3 h-3 mr-1" /> Completado</span>;
-      case 'Cancelled': return <span className="flex items-center px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"><XCircle className="w-3 h-3 mr-1" /> Cancelado</span>;
-      default: return <span>{status}</span>;
+      case 'Pending': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full"><Clock className="w-3 h-3 mr-1" /> Pendiente</span>;
+      case 'InReview': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full"><PlayCircle className="w-3 h-3 mr-1" /> En Revisión</span>;
+      case 'Approved': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full"><CheckCircle className="w-3 h-3 mr-1" /> Aprobada</span>;
+      case 'Completed': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full"><CheckCircle className="w-3 h-3 mr-1" /> Completada</span>;
+      case 'Rejected': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full"><XCircle className="w-3 h-3 mr-1" /> Rechazada</span>;
+      case 'Cancelled': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full"><XCircle className="w-3 h-3 mr-1" /> Cancelada</span>;
+      default: return <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full">{status}</span>;
     }
   };
 
-  if (isLoading) return <div className="animate-pulse p-8 text-center text-gray-500">Cargando solicitudes...</div>;
+  const handleStatusChange = (id: string, newStatus: RequestStatus) => {
+    updateMutation.mutate({ id, status: newStatus });
+  };
+
+  const filteredRequests = filterStatus === 'ALL' 
+    ? requests 
+    : requests.filter(r => r.status === filterStatus);
+
+  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar las solicitudes.</div>;
+  if (isLoading) return <div className="p-8 text-center text-gray-500 animate-pulse">Cargando solicitudes...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-          <ClipboardList className="w-6 h-6 mr-3 text-blue-600" /> Bandeja de Trámites
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">Gestiona las solicitudes o requerimientos creados por la IA para esta sede.</p>
+    <div className="max-w-6xl mx-auto animate-in fade-in">
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+            <ClipboardList className="w-6 h-6 mr-3 text-blue-600" /> Solicitudes Comerciales
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Gestiona los requerimientos, pedidos especiales y trámites derivados por la IA.
+          </p>
+        </div>
+        
+        <select 
+          value={filterStatus} 
+          onChange={(e) => setFilterStatus(e.target.value as RequestStatus | 'ALL')}
+          className="border border-gray-200 rounded-lg px-4 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+        >
+          <option value="ALL">Todas las solicitudes</option>
+          <option value="Pending">Pendientes</option>
+          <option value="InReview">En Revisión</option>
+          <option value="Completed">Completadas</option>
+        </select>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cliente (Teléfono)</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Detalle</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Acción</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {requests.length === 0 ? (
-              <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No hay trámites registrados para esta sede.</td></tr>
-            ) : (
-              requests.map((req) => (
-                <tr key={req.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm text-gray-500">{new Date(req.createdAt).toLocaleDateString()}</td>
-                  <td className="px-6 py-4 font-medium text-gray-900">{req.consumerPhone}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={req.description}>{req.description}</td>
-                  <td className="px-6 py-4">{getStatusBadge(req.status)}</td>
-                  <td className="px-6 py-4 text-center">
-                    <select 
-                      value={req.status} 
-                      onChange={(e) => handleStatusChange(req.id, e.target.value)}
-                      disabled={updateStatusMutation.isPending}
-                      className="text-sm border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                      <option value="Pending">Pendiente</option>
-                      <option value="InReview">En Revisión</option>
-                      <option value="Approved">Aprobado</option>
-                      <option value="Rejected">Rechazado</option>
-                      <option value="Completed">Completado</option>
-                      <option value="Cancelled">Cancelar</option>
-                    </select>
-                  </td>
+        {filteredRequests.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+            <FileText className="w-12 h-12 mb-4 text-gray-300" />
+            <p className="text-lg font-medium text-gray-600">No hay solicitudes</p>
+            <p className="text-sm">Las solicitudes creadas por tus clientes aparecerán aquí.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
+                  <th className="px-6 py-4">Fecha</th>
+                  <th className="px-6 py-4">Cliente (Teléfono)</th>
+                  <th className="px-6 py-4">Descripción</th>
+                  <th className="px-6 py-4">Estado</th>
+                  <th className="px-6 py-4 text-right">Acción</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredRequests.map((req) => (
+                  <tr key={req.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {new Date(req.createdAt).toLocaleDateString()} <br/>
+                      <span className="text-xs text-gray-400">{new Date(req.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">
+                      {req.consumerPhone}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={req.description}>
+                      <span className="font-semibold block text-gray-900">{req.title}</span>
+                      {req.description}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {getStatusBadge(req.status)}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <select
+                        disabled={updateMutation.isPending}
+                        value={req.status}
+                        onChange={(e) => handleStatusChange(req.id, e.target.value as RequestStatus)}
+                        className="text-sm border border-gray-200 rounded-lg px-2 py-1 bg-white hover:bg-gray-50 outline-none"
+                      >
+                        <option value="Pending">Marcar Pendiente</option>
+                        <option value="InReview">En Revisión</option>
+                        <option value="Approved">Aprobar</option>
+                        <option value="Completed">Completar</option>
+                        <option value="Rejected">Rechazar</option>
+                        <option value="Cancelled">Cancelar</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

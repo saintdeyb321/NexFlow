@@ -1,8 +1,6 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { CatalogCategoryDto, CatalogItemDto } from '../types/catalog.types';
+import type { CatalogCategoryDto, ProductDto } from '../types/catalog.types';
 
-// --- CATEGORÍAS (Usadas por Productos y Servicios) ---
-// 🔥 SPRINT 03: Parámetro scope para no mezclar categorías de productos y servicios
 export const getCategories = async (scope?: 'PRODUCT' | 'SERVICE' | 'SHARED'): Promise<CatalogCategoryDto[]> => {
   const params = scope ? { scope } : {};
   const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories', { params });
@@ -18,23 +16,21 @@ export const saveCategory = async (category: CatalogCategoryDto): Promise<Catalo
   return data;
 };
 
-// --- PRODUCTOS (Módulo Catalog) ---
-// 🔥 SPRINT 04: Inyectamos locationId para aislar la data por sede
-export const getProducts = async (locationId?: string): Promise<CatalogItemDto[]> => {
+export const getProducts = async (locationId?: string): Promise<ProductDto[]> => {
   const params = locationId && locationId !== 'all' ? { locationId } : {};
-  const { data } = await axiosClient.get<CatalogItemDto[]>('/catalog', { params });
+  const { data } = await axiosClient.get<ProductDto[]>('/catalog', { params });
   return data;
 };
 
-export const saveProduct = async (product: CatalogItemDto): Promise<void> => {
-  await axiosClient.post('/catalog', product);
+export const saveProduct = async (product: ProductDto): Promise<ProductDto> => {
+  const { data } = await axiosClient.post<ProductDto>('/catalog', product);
+  return data;
 };
 
 export const deleteProduct = async (id: string): Promise<void> => {
   await axiosClient.delete(`/catalog/${id}`);
 };
 
-// --- ARTEFACTOS (Motor de Generación PDF/WebP) ---
 export interface ArtifactStatusDto {
   status: 'NOT_GENERATED' | 'GENERATING' | 'CURRENT' | 'STALE' | 'FAILED';
   pdfUrl?: string | null;

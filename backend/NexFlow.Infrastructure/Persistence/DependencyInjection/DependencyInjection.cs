@@ -15,6 +15,7 @@ using NexFlow.Infrastructure.Gateways.Storage;
 using NexFlow.Infrastructure.Persistence.Firestore;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
+using NexFlow.Infrastructure.Workers;
 using StackExchange.Redis;
 
 namespace NexFlow.Infrastructure.DependencyInjection;
@@ -70,6 +71,9 @@ public static class DependencyInjection
         services.AddHttpClient<IAiProvider, GeminiAiProvider>();
         services.AddHttpClient<IAiProvider, GroqAiProvider>();
         services.AddScoped<IAiRouter, AiRouter>();
+
+        services.AddScoped<IOutboxRepository, FirestoreOutboxRepository>();
+        services.AddHostedService<OutboxProcessorWorker>();
 
         // 6. Gateways Externos
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();

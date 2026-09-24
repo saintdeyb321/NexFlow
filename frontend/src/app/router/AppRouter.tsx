@@ -3,7 +3,7 @@ import { ProtectedRoute } from './ProtectedRoute';
 import { WorkspaceLayout } from '../../layouts/WorkspaceLayout';
 import { LoginPage } from '../../auth/pages/LoginPage';
 import { SettingsPage } from '../../features/business/pages/SettingsPage';
-import { ServicesPage } from '../../features/business/pages/ServicesPage';
+import { ServicesPage } from '../../features/services/pages/ServicesPage';
 import { FaqsPage } from '../../features/business/pages/FaqsPage';
 import { ReservationsPage } from '../../features/reservations/pages/ReservationsPage';
 import { SuperAdminPage } from '../../features/admin/pages/SuperAdminPage';

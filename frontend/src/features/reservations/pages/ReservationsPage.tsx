@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar as CalendarIcon, List, CalendarDays, AlertCircle, MapPin } from 'lucide-react';
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
-import { getLocations, getServices } from '../../business/services/business.service';
+import { getLocations } from '../../business/services/business.service';
+import { getServices } from '../../services/services/services.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
 import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { ReservationDto } from '../types/reservation.types';
-import type { CatalogItemDto } from '../../catalog/types/catalog.types';
+import type { ServiceDto } from '../../services/types/services.types'; // 🔥 SPRINT 1: Separación estricta
 import type { LocationDto } from '../../business/types/business.types';
 
 export const ReservationsPage = () => {
@@ -30,10 +31,10 @@ export const ReservationsPage = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
 
-  // 🔥 SPRINT 7: Validación estricta, NUNCA enviamos 'global' al backend
   const isValidLocationSelected = Boolean(selectedLocationId && selectedLocationId !== 'all');
 
-  const { data: services = [] } = useQuery<CatalogItemDto[]>({
+  // 🔥 SPRINT 1: Tipado estricto con ServiceDto
+  const { data: services = [] } = useQuery<ServiceDto[]>({
     queryKey: ['services', workspaceId, selectedLocationId],
     queryFn: () => getServices(selectedLocationId),
     enabled: Boolean(workspaceId) && isValidLocationSelected,
@@ -118,7 +119,6 @@ export const ReservationsPage = () => {
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         {!isValidLocationSelected ? (
-          // 🔥 SPRINT 7: UI Amigable que bloquea la tabla hasta que elijan una sede
           <div className="flex flex-col items-center justify-center h-64 text-gray-400 bg-gray-50">
             <MapPin className="w-12 h-12 text-blue-300 mb-3" />
             <h3 className="text-lg font-medium text-gray-600">Selecciona una Sede</h3>
@@ -133,7 +133,7 @@ export const ReservationsPage = () => {
           <ReservationList 
             reservations={reservations} 
             services={services} 
-            timeZone={timeZone} // 🔥 SPRINT 7: Inyección del TimeZone[cite: 1]
+            timeZone={timeZone} 
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
             onCancel={handleCancel} 
             onComplete={handleComplete}

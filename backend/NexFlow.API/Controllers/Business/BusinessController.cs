@@ -7,7 +7,6 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Enums;
-using System.Linq;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -194,15 +193,7 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> GetFaqs([FromQuery] string? locationId, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
-
         var faqs = await _faqRepository.GetFaqsAsync(WorkspaceId, cancellationToken);
-
-        // 🔥 SPRINT 09: Aislamiento por Sede (Se asume que FaqDto tiene propiedades de sede. Si no, esto requerirá actualizar la Entidad FAQ).
-        // if (!string.IsNullOrWhiteSpace(locationId))
-        // {
-        //     faqs = faqs.Where(f => f.LocationScope == "ALL" || (f.LocationIds != null && f.LocationIds.Contains(locationId)));
-        // }
-
         return Ok(faqs);
     }
 
@@ -239,56 +230,6 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         await _faqRepository.DeleteFaqAsync(WorkspaceId, faqId, cancellationToken);
-        return NoContent();
-    }
-
-    // =======================================================
-    // SERVICES (Módulo Licenciado Separadamente)
-    // =======================================================
-    [HttpGet("services")]
-    public async Task<IActionResult> GetServices([FromQuery] string? locationId, CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-
-        var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
-        var services = allItems.Where(i => i.Type.ToUpperInvariant() == "SERVICE");
-
-        // 🔥 SPRINT 04: Aislamiento por Sede en Servicios usando propiedades del DTO
-        if (!string.IsNullOrWhiteSpace(locationId))
-        {
-            services = services.Where(p =>
-                string.Equals(p.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase) ||
-                (p.LocationIds != null && p.LocationIds.Contains(locationId))
-            );
-        }
-
-        return Ok(services.ToList());
-    }
-
-    [HttpPost("services")]
-    public async Task<IActionResult> SaveService([FromBody] CatalogItemDto service, CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-
-        service.Type = "SERVICE";
-        if (string.IsNullOrEmpty(service.Id)) service.Id = Guid.NewGuid().ToString();
-        if (string.IsNullOrEmpty(service.CategoryId)) service.CategoryId = Guid.Empty.ToString();
-
-        await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken);
-        return Ok(service);
-    }
-
-    [HttpDelete("services/{serviceId}")]
-    public async Task<IActionResult> DeleteService(string serviceId, CancellationToken cancellationToken)
-    {
-        if (!await HasAccessTo("SERVICES", cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
-
-        var item = await _catalogRepository.GetItemByIdAsync(WorkspaceId, serviceId, cancellationToken);
-        if (item != null && item.Type.ToUpperInvariant() == "SERVICE")
-        {
-            await _catalogRepository.DeleteItemAsync(WorkspaceId, serviceId, cancellationToken);
-        }
-
         return NoContent();
     }
 

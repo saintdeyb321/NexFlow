@@ -60,16 +60,16 @@ public class FirestoreCatalogRepository : ICatalogRepository
     }
 
     // =========================================================
-    // ÍTEMS (PRODUCTOS Y SERVICIOS)
+    // ÍTEMS (PRODUCTOS Y SERVICIOS) - INFRAESTRUCTURA COMPARTIDA
     // =========================================================
-    public async Task<IEnumerable<CatalogItemDto>> GetItemsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    public async Task<IEnumerable<BusinessOfferingDto>> GetItemsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems");
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
         return snapshot.Documents.Select(MapToItemDto);
     }
 
-    public async Task<IEnumerable<CatalogItemDto>> GetActiveItemsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    public async Task<IEnumerable<BusinessOfferingDto>> GetActiveItemsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems")
             .WhereEqualTo("IsActive", true);
@@ -77,7 +77,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToItemDto);
     }
 
-    public async Task<CatalogItemDto?> GetItemByIdAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken)
+    public async Task<BusinessOfferingDto?> GetItemByIdAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(itemId)) return null;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(itemId);
@@ -85,7 +85,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Exists ? MapToItemDto(snapshot) : null;
     }
 
-    public async Task<IEnumerable<CatalogItemDto>> GetItemsByCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken)
+    public async Task<IEnumerable<BusinessOfferingDto>> GetItemsByCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems")
             .WhereEqualTo("CategoryId", categoryId)
@@ -94,10 +94,13 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToItemDto);
     }
 
-    public async Task SaveItemAsync(Guid workspaceId, CatalogItemDto item, CancellationToken cancellationToken)
+    public async Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken)
     {
         var docId = string.IsNullOrEmpty(item.Id) ? Guid.NewGuid().ToString() : item.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(docId);
+
+        // Cast seguro para extraer propiedades de servicios sin romper los productos
+        var serviceData = item as ServiceDto;
 
         var data = new FirestoreCatalogItem
         {
@@ -112,14 +115,12 @@ public class FirestoreCatalogRepository : ICatalogRepository
             LocationScope = item.LocationScope ?? "ALL",
             LocationIds = item.LocationIds ?? new List<string>(),
 
-            DurationInMinutes = item.Type == "SERVICE" ? item.DurationInMinutes : null,
-            RequiresReservation = item.Type == "SERVICE" && item.RequiresReservation,
+            DurationInMinutes = serviceData?.DurationInMinutes,
+            RequiresReservation = serviceData?.RequiresReservation ?? false,
             ImageUrl = item.ImageUrl,
             Metadata = item.Metadata ?? new Dictionary<string, object>()
         };
 
-        // Al usar SetOptions.MergeAll, eventualmente se podría usar Update para borrar AvailableAtLocations,
-        // pero escribir la nueva estructura es suficiente por ahora.
         await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
     }
 
@@ -146,15 +147,14 @@ public class FirestoreCatalogRepository : ICatalogRepository
         };
     }
 
-    private static CatalogItemDto MapToItemDto(DocumentSnapshot doc)
+    // 🔥 SPRINT 1: Constructor dinámico según el Type almacenado
+    private static BusinessOfferingDto MapToItemDto(DocumentSnapshot doc)
     {
         var data = doc.ConvertTo<FirestoreCatalogItem>();
 
-        // 🔥 SPRINT A1: Migración al vuelo (On-The-Fly Migration)
         string finalScope = data.LocationScope ?? "ALL";
         List<string> finalIds = data.LocationIds ?? new List<string>();
 
-        // Si el documento es legacy (no tiene LocationScope pero sí tiene AvailableAtLocations)
         if (!doc.ContainsField("LocationScope") && doc.ContainsField("AvailableAtLocations"))
         {
             if (data.LegacyAvailableAtLocations != null && data.LegacyAvailableAtLocations.Any())
@@ -169,11 +169,32 @@ public class FirestoreCatalogRepository : ICatalogRepository
             }
         }
 
-        return new CatalogItemDto
+        string type = (data.Type ?? "PRODUCT").ToUpperInvariant();
+
+        if (type == "SERVICE")
+        {
+            return new ServiceDto
+            {
+                Id = doc.Id,
+                CategoryId = data.CategoryId,
+                Name = data.Name,
+                Description = data.Description,
+                PriceMinorUnits = data.PriceMinorUnits,
+                Currency = data.Currency,
+                IsActive = data.IsActive,
+                LocationScope = finalScope,
+                LocationIds = finalIds,
+                DurationInMinutes = data.DurationInMinutes,
+                RequiresReservation = data.RequiresReservation,
+                ImageUrl = data.ImageUrl,
+                Metadata = data.Metadata ?? new Dictionary<string, object>()
+            };
+        }
+
+        return new ProductDto
         {
             Id = doc.Id,
             CategoryId = data.CategoryId,
-            Type = data.Type ?? "PRODUCT",
             Name = data.Name,
             Description = data.Description,
             PriceMinorUnits = data.PriceMinorUnits,
@@ -181,8 +202,6 @@ public class FirestoreCatalogRepository : ICatalogRepository
             IsActive = data.IsActive,
             LocationScope = finalScope,
             LocationIds = finalIds,
-            DurationInMinutes = data.DurationInMinutes,
-            RequiresReservation = data.RequiresReservation,
             ImageUrl = data.ImageUrl,
             Metadata = data.Metadata ?? new Dictionary<string, object>()
         };
@@ -212,7 +231,6 @@ public class FirestoreCatalogRepository : ICatalogRepository
         [FirestoreProperty] public string LocationScope { get; set; } = "ALL";
         [FirestoreProperty] public List<string> LocationIds { get; set; } = new();
 
-        // 🔥 Retenemos el campo legacy solo para lectura durante la migración
         [FirestoreProperty("AvailableAtLocations")] public List<string>? LegacyAvailableAtLocations { get; set; }
 
         [FirestoreProperty] public int? DurationInMinutes { get; set; }

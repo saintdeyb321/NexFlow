@@ -19,7 +19,6 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 public interface IBookingFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct); }
 public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, CancellationToken ct); }
 public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, string conversationId, CancellationToken ct); }
-// 🔥 RAG FIX: Añadimos WorkspaceId para que la IA sepa a qué empresa pertenece el catálogo
 public interface IChatFlow { Task<string> ProcessAsync(Guid workspaceId, string text, CancellationToken ct); }
 
 // --- IMPLEMENTACIONES ---
@@ -51,9 +50,6 @@ public class BookingFlow : IBookingFlow
         context.CurrentGoal = "BOOKING";
         context.LastIntent = interpretation.Intent;
 
-        // =================================================================
-        // 1. ACTUALIZACIÓN DE MEMORIA Y DETECCIÓN DE CORRECCIONES HUMANAS
-        // =================================================================
         bool requiresTimeReset = false;
 
         if (!string.IsNullOrWhiteSpace(interpretation.CustomerName))
@@ -82,17 +78,12 @@ public class BookingFlow : IBookingFlow
         }
 
         if (requiresTimeReset && string.IsNullOrWhiteSpace(interpretation.Time))
-        {
             context.TargetTime = null;
-        }
 
         if (!string.IsNullOrWhiteSpace(interpretation.Time))
             context.TargetTime = interpretation.Time;
 
 
-        // =================================================================
-        // 2. EVALUACIÓN DE RANURAS (SLOTS) FALTANTES
-        // =================================================================
         context.MissingFields.Clear();
         if (string.IsNullOrWhiteSpace(context.RealCustomerName)) context.MissingFields.Add("CustomerName");
         if (string.IsNullOrWhiteSpace(context.SelectedServiceId)) context.MissingFields.Add("Service");
@@ -106,9 +97,6 @@ public class BookingFlow : IBookingFlow
             context.CurrentStep = $"COLLECT_{context.MissingFields.First().ToUpper()}";
 
 
-        // =================================================================
-        // 3. MÁQUINA DE ESTADOS
-        // =================================================================
         switch (context.CurrentStep)
         {
             case "COLLECT_CUSTOMERNAME":
@@ -116,35 +104,22 @@ public class BookingFlow : IBookingFlow
                 return $"¡Excelente! Te ayudaré a agendar tu cita. 📅\n\nPara poder registrarte correctamente, {context.LastQuestion}";
 
             case "COLLECT_SERVICE":
-                var artifact = await _artifactRepo.GetCurrentArtifactAsync(workspaceId, "SERVICE", ct);
-                bool pdfSentSuccessfully = false;
+                // ⚠️ Nota: Los PDFs comerciales son exclusivos de Productos, pero el folleto de reservas podría enviarse si existe, omitido por ahora por SPRINT 6.
 
-                if (artifact != null && artifact.Status == CatalogArtifactStatus.Current && !string.IsNullOrWhiteSpace(artifact.PdfUrl))
-                {
-                    var docPendingId = Guid.NewGuid().ToString();
-                    await _conversationRepo.AddMessageAsync(workspaceId, conversationId, new MessageRecord { Id = docPendingId, ExternalMessageId = docPendingId, Direction = "outbound", Sender = SenderType.AI, Content = "DOCUMENTO PDF ENVIADO", Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow }, ct);
-
-                    try
-                    {
-                        var extId = await _messageGateway.SendDocumentAsync(workspaceId, phone, artifact.PdfUrl, "Catalogo_Servicios.pdf", "Aquí tienes nuestro catálogo detallado de servicios 📄", docPendingId, ct);
-                        await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, docPendingId, MessageStatus.Sent, extId, ct);
-                        pdfSentSuccessfully = true;
-                    }
-                    catch { await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, docPendingId, MessageStatus.Failed, null, ct); }
-                }
-
-                var availableServices = await _offeringService.SearchOfferingsAsync(workspaceId, null, "SERVICE", null, ct);
+                // 🔥 SPRINT 1: Usamos GetServicesAsync porque Booking es exclusivo de servicios[cite: 1]
+                var availableServices = await _offeringService.GetServicesAsync(workspaceId, null, null, ct);
                 if (!availableServices.Any()) return "Actualmente no contamos con servicios habilitados para reservas. Por favor, intenta más tarde.";
 
                 var serviceList = string.Join("\n", availableServices.Take(5).Select(s => $"- {s.Name}"));
-                var introText = pdfSentSuccessfully ? "Te acabo de enviar nuestro catálogo completo." : "Tuvimos un pequeño problema al cargar el PDF, pero aquí tienes";
-                string extra = (pdfSentSuccessfully && availableServices.Count() > 5) ? "\n*(Y más servicios en nuestro catálogo PDF)*" : "";
+                var introText = "Aquí tienes";
+                string extra = availableServices.Count() > 5 ? "\n*(Y otros más en nuestra sede)*" : "";
 
                 context.LastQuestion = "¿qué servicio deseas reservar?";
                 return $"¡Gracias, {context.RealCustomerName}! \n\n{introText} algunos de los servicios más solicitados:\n{serviceList}{extra}\n\n👉 *Por favor, {context.LastQuestion}*";
 
             case "COLLECT_LOCATION":
-                var targetSrv = (await _offeringService.SearchOfferingsAsync(workspaceId, null, "SERVICE", context.SelectedServiceId, ct)).FirstOrDefault();
+                // 🔥 SPRINT 1: Usamos GetServiceByIdAsync[cite: 1]
+                var targetSrv = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
                 if (targetSrv == null)
                 {
                     context.SelectedServiceId = null;
@@ -158,8 +133,9 @@ public class BookingFlow : IBookingFlow
                 return $"Has elegido *{targetSrv.Name}*.\n\n{context.LastQuestion}\n{locationList}\n\n👉 *Escribe tu sede preferida.*";
 
             case "COLLECT_DATE":
-                var validSrv = (await _offeringService.SearchOfferingsAsync(workspaceId, null, "SERVICE", context.SelectedServiceId, ct)).First();
-                bool isAvailable = await _offeringService.IsAvailableAtLocationAsync(workspaceId, validSrv.Id, context.SelectedLocationId!, ct);
+                var validSrv = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
+                // 🔥 SPRINT 1: Usamos IsServiceAvailableAtLocationAsync[cite: 1]
+                bool isAvailable = await _offeringService.IsServiceAvailableAtLocationAsync(workspaceId, validSrv!.Id, context.SelectedLocationId!, ct);
 
                 if (!isAvailable)
                 {
@@ -197,12 +173,12 @@ public class BookingFlow : IBookingFlow
                 return $"Para el *{parsedDate:dd/MM/yyyy}*, nuestro horario de atención es de *{dayHours.OpenTime} a {dayHours.CloseTime}*.\n\n👉 *Tenemos turnos disponibles, {context.LastQuestion} (Ej: 'a las 10:00 am')*";
 
             case "CONFIRM":
-                var finalSrv = (await _offeringService.SearchOfferingsAsync(workspaceId, null, "SERVICE", context.SelectedServiceId, ct)).First();
+                var finalSrv = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
                 var rawDateTime = $"{context.TargetDate} {context.TargetTime}";
 
                 if (DateTime.TryParse(rawDateTime, out var exactDateTime))
                 {
-                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv.Id, phone, context.RealCustomerName!, exactDateTime, ct);
+                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv!.Id, phone, context.RealCustomerName!, exactDateTime, ct);
                     if (result.IsSuccess)
                     {
                         context.CurrentGoal = null;
@@ -274,31 +250,30 @@ public class ChatFlow : IChatFlow
 
         try
         {
-            // 1. Obtenemos el nombre comercial real del negocio
             var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
             if (profile != null && !string.IsNullOrWhiteSpace(profile.CommercialName))
             {
                 businessName = profile.CommercialName;
             }
 
-            // 2. Traemos TODO el catálogo (Productos y Servicios) del Tenant actual
-            var offerings = await _offeringService.SearchOfferingsAsync(workspaceId, null, null, null, ct);
+            // 🔥 SPRINT 1: El ChatFlow tiene visión global (RAG) combinando productos y servicios separados[cite: 1]
+            var products = await _offeringService.GetProductsAsync(workspaceId, null, null, ct);
+            var services = await _offeringService.GetServicesAsync(workspaceId, null, null, ct);
 
-            if (offerings != null && offerings.Any())
+            var allOfferings = products.Cast<NexFlow.Application.Features.Business.BusinessOfferingDto>()
+                               .Concat(services.Cast<NexFlow.Application.Features.Business.BusinessOfferingDto>());
+
+            if (allOfferings.Any())
             {
-                // Blindaje: Solo pasamos los primeros 50 ítems. 
-                // Convertimos PriceMinorUnits a moneda real (dividimos entre 100m)
-                catalogContext = string.Join("\n", offerings.Take(50).Select(o =>
-                    $"- {o.Name}: {(o.Currency ?? "PEN")} {(o.PriceMinorUnits / 100m):0.00}. {(string.IsNullOrWhiteSpace(o.Description) ? "" : $"Detalles: {o.Description}")}"));
+                catalogContext = string.Join("\n", allOfferings.Take(50).Select(o =>
+                    $"- {o.Name} ({(o.Type == "PRODUCT" ? "Producto" : "Servicio")}): {(o.Currency ?? "PEN")} {(o.PriceMinorUnits / 100m):0.00}. {(string.IsNullOrWhiteSpace(o.Description) ? "" : $"Detalles: {o.Description}")}"));
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error al recuperar el catálogo o perfil para el workspace {WorkspaceId} en ChatFlow.", workspaceId);
-            // No bloqueamos, permitimos que el Chat continúe de forma genérica
         }
 
-        // 3. System Prompt con Inyección de Contexto RAG
         var systemPrompt = $@"Eres el asistente virtual de ventas y atención al cliente de '{businessName}'.
 Tu objetivo es responder de forma amable, persuasiva y concisa a las dudas del cliente.
 
@@ -307,7 +282,7 @@ AQUÍ ESTÁ NUESTRO CATÁLOGO ACTUAL DE PRODUCTOS Y SERVICIOS CON PRECIOS REALES
 
 REGLAS ESTRICTAS:
 1. SIEMPRE responde basándote en los datos del catálogo de arriba.
-2. Si el cliente pregunta por un precio (Ej: concreto, limpieza, etc.), dale el precio exacto extraído de la lista.
+2. Si el cliente pregunta por un precio, dale el precio exacto extraído de la lista.
 3. Si el cliente pregunta por un producto o servicio que NO está en la lista, indícale educadamente que no contamos con ello por el momento. ¡NUNCA INVENTES PRECIOS!
 4. Mantén tus respuestas precisas, cálidas y cortas (ideales para leer en WhatsApp).";
 

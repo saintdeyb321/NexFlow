@@ -1,4 +1,5 @@
 ﻿using NexFlow.Application.Abstractions;
+using System.Text.Json;
 
 namespace NexFlow.Application.Features.Business.Offerings;
 
@@ -11,17 +12,56 @@ public sealed class OfferingService : IOfferingService
         _catalogRepo = catalogRepo;
     }
 
-    public async Task<IEnumerable<CatalogItemDto>> SearchOfferingsAsync(Guid workspaceId, string? locationId, string? type, string? query, CancellationToken ct)
+    public async Task<IEnumerable<ProductDto>> GetProductsAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct)
     {
         var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
 
-        // 1. Filtro por tipo (PRODUCT o SERVICE)
-        if (!string.IsNullOrWhiteSpace(type) && type != "ALL")
-        {
-            items = items.Where(i => string.Equals(i.Type, type, StringComparison.OrdinalIgnoreCase));
-        }
+        var products = items
+            .Where(i => i.Type == "PRODUCT")
+            .Select(i => MapToSpecific<ProductDto>(i));
 
-        // 2. 🔥 SPRINT 2: Location Isolation (Aislamiento por Sede)
+        return FilterItems(products, locationId, query);
+    }
+
+    public async Task<IEnumerable<ServiceDto>> GetServicesAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct)
+    {
+        var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
+
+        var services = items
+            .Where(i => i.Type == "SERVICE")
+            .Select(i => MapToSpecific<ServiceDto>(i));
+
+        return FilterItems(services, locationId, query);
+    }
+
+    public async Task<ProductDto?> GetProductByIdAsync(Guid workspaceId, string productId, CancellationToken ct)
+    {
+        var item = await _catalogRepo.GetItemByIdAsync(workspaceId, productId, ct);
+        if (item == null || item.Type != "PRODUCT") return null;
+        return MapToSpecific<ProductDto>(item);
+    }
+
+    public async Task<ServiceDto?> GetServiceByIdAsync(Guid workspaceId, string serviceId, CancellationToken ct)
+    {
+        var item = await _catalogRepo.GetItemByIdAsync(workspaceId, serviceId, ct);
+        if (item == null || item.Type != "SERVICE") return null;
+        return MapToSpecific<ServiceDto>(item);
+    }
+
+    public async Task<bool> IsServiceAvailableAtLocationAsync(Guid workspaceId, string serviceId, string locationId, CancellationToken ct)
+    {
+        var item = await GetServiceByIdAsync(workspaceId, serviceId, ct);
+        if (item == null || !item.IsActive) return false;
+
+        if (string.Equals(item.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return item.LocationIds != null && item.LocationIds.Contains(locationId);
+    }
+
+    // --- Helpers de Infraestructura Compartida ---
+    private IEnumerable<T> FilterItems<T>(IEnumerable<T> items, string? locationId, string? query) where T : BusinessOfferingDto
+    {
         if (!string.IsNullOrWhiteSpace(locationId))
         {
             items = items.Where(i =>
@@ -29,7 +69,6 @@ public sealed class OfferingService : IOfferingService
                 (i.LocationIds != null && i.LocationIds.Contains(locationId)));
         }
 
-        // 3. Filtro por búsqueda de texto
         if (!string.IsNullOrWhiteSpace(query))
         {
             var term = query.ToLowerInvariant();
@@ -41,19 +80,10 @@ public sealed class OfferingService : IOfferingService
         return items;
     }
 
-    public async Task<CatalogItemDto?> GetOfferingByIdAsync(Guid workspaceId, string itemId, CancellationToken ct)
+    // Mapeo seguro de la clase base a la clase concreta
+    private static T MapToSpecific<T>(BusinessOfferingDto baseItem) where T : BusinessOfferingDto
     {
-        return await _catalogRepo.GetItemByIdAsync(workspaceId, itemId, ct);
-    }
-
-    public async Task<bool> IsAvailableAtLocationAsync(Guid workspaceId, string itemId, string locationId, CancellationToken ct)
-    {
-        var item = await GetOfferingByIdAsync(workspaceId, itemId, ct);
-        if (item == null || !item.IsActive) return false;
-
-        if (string.Equals(item.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        return item.LocationIds != null && item.LocationIds.Contains(locationId);
+        var json = JsonSerializer.Serialize(baseItem);
+        return JsonSerializer.Deserialize<T>(json)!;
     }
 }

@@ -5,7 +5,7 @@ export interface RequestRecord {
   consumerPhone: string;
   title: string;
   description: string;
-  status: RequestStatus; 
+  status: RequestStatus;
   createdAt: string;
   updatedAt: string;
 }

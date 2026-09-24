@@ -8,5 +8,5 @@ public interface ILocationAvailabilityService
     Task<bool> IsOfferingAvailableAtLocationAsync(Guid workspaceId, string offeringId, string locationId, CancellationToken cancellationToken);
 
     // Validación síncrona en memoria para cuando ya tienes el DTO cargado
-    bool IsOfferingAvailableAtLocation(CatalogItemDto offering, string locationId);
+    bool IsOfferingAvailableAtLocation(BusinessOfferingDto offering, string locationId);
 }

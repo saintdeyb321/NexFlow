@@ -1,21 +1,20 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Tag, Trash2 } from 'lucide-react';
-import { getServices, saveService, deleteService } from '../services/business.service';
+import { Plus, Pencil, Tag, Trash2, Scissors } from 'lucide-react';
+import { getServices, saveService, deleteService } from '../services/services.service';
 import { ServiceModal } from '../components/ServiceModal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import type { CatalogItemDto } from '../../catalog/types/catalog.types';
+import type { ServiceDto } from '../types/services.types';
 import { ArtifactGenerator } from '../../catalog/components/ArtifactGenerator';
 
 export const ServicesPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  const selectedLocationId = useAuthStore((state) => state.selectedLocationId); // 🔥 Contexto global
+  const selectedLocationId = useAuthStore((state) => state.selectedLocationId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [serviceToEdit, setServiceToEdit] = useState<CatalogItemDto | null>(null);
+  const [serviceToEdit, setServiceToEdit] = useState<ServiceDto | null>(null);
 
-  // 🔥 Inyectamos selectedLocationId
   const { data: services = [], isLoading: isServicesLoading } = useQuery({
     queryKey: ['services', workspaceId, selectedLocationId],
     queryFn: () => getServices(selectedLocationId),
@@ -29,7 +28,13 @@ export const ServicesPage = () => {
       queryClient.invalidateQueries({ queryKey: ['services', workspaceId] });
       setIsModalOpen(false);
     },
-    onError: (error: any) => alert(`Error al guardar: ${error.message}`)
+    onError: (error: any) => alert(`Error al guardar: ${error.message || 'Error desconocido'}`)
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteService,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services', workspaceId] }),
+    onError: (error: any) => alert(`Error al eliminar: ${error.message || 'Error desconocido'}`)
   });
 
   const handleOpenNew = () => {
@@ -37,41 +42,40 @@ export const ServicesPage = () => {
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (service: CatalogItemDto) => {
+  const handleOpenEdit = (service: ServiceDto) => {
     setServiceToEdit(service);
     setIsModalOpen(true);
   };
-  
-  const deleteMutation = useMutation({
-    mutationFn: deleteService,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['services', workspaceId] }),
-    onError: (error: any) => alert(`Error al eliminar: ${error.message}`)
-  });
 
-  if (isServicesLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
+  if (isServicesLoading) {
+    return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando servicios...</div>;
+  }
 
   return (
     <div className="max-w-5xl mx-auto animate-in fade-in">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
-          <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center mr-4">
-             <Tag className="w-5 h-5 text-yellow-600" />
+          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
+             <Scissors className="w-5 h-5 text-purple-600" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Servicios</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Servicios</h1>
+            <p className="text-sm text-gray-500 mt-1">Configura las prestaciones y su duración para las reservas.</p>
+          </div>
         </div>
         
         <button 
           onClick={handleOpenNew}
-          className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm"
+          className="flex items-center px-5 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nuevo Servicio
         </button>
       </div>
 
-      <ArtifactGenerator scope="SERVICE" title="Folleto de Servicios (PDF y WebP)" />
+      <ArtifactGenerator scope="SERVICE" title="Folleto de Servicios (PDF)" />
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
           Lista de Servicios ({services.length})
         </h3>
@@ -94,7 +98,7 @@ export const ServicesPage = () => {
                          : <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">INACTIVO</span>
                       }
                       <span className="ml-3 text-xs text-gray-500 border-l border-gray-200 pl-3">
-                        {service.durationInMinutes} min • S/ {service.priceMinorUnits ? (service.priceMinorUnits / 100).toFixed(2) : '0.00'}
+                        {service.durationInMinutes} min • {service.currency} {service.priceMinorUnits ? (service.priceMinorUnits / 100).toFixed(2) : '0.00'}
                       </span>
                     </div>
                   </div>
@@ -104,7 +108,7 @@ export const ServicesPage = () => {
                   <button onClick={() => handleOpenEdit(service)} className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button onClick={() => window.confirm('¿Eliminar?') && deleteMutation.mutate(service.id!)} className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
+                  <button onClick={() => window.confirm('¿Estás seguro de eliminar este servicio?') && deleteMutation.mutate(service.id!)} className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

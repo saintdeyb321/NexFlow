@@ -4,7 +4,12 @@ namespace NexFlow.Application.Features.Business.Offerings;
 
 public interface IOfferingService
 {
-    Task<IEnumerable<CatalogItemDto>> SearchOfferingsAsync(Guid workspaceId, string? locationId, string? type, string? query, CancellationToken ct);
-    Task<CatalogItemDto?> GetOfferingByIdAsync(Guid workspaceId, string itemId, CancellationToken ct);
-    Task<bool> IsAvailableAtLocationAsync(Guid workspaceId, string itemId, string locationId, CancellationToken ct);
+    // Rutas Módulo Catálogo
+    Task<IEnumerable<ProductDto>> GetProductsAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct);
+    Task<ProductDto?> GetProductByIdAsync(Guid workspaceId, string productId, CancellationToken ct);
+
+    // Rutas Módulo Servicios
+    Task<IEnumerable<ServiceDto>> GetServicesAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct);
+    Task<ServiceDto?> GetServiceByIdAsync(Guid workspaceId, string serviceId, CancellationToken ct);
+    Task<bool> IsServiceAvailableAtLocationAsync(Guid workspaceId, string serviceId, string locationId, CancellationToken ct);
 }

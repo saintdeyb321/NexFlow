@@ -2,16 +2,16 @@
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Domain.Entities.Catalog;
+using NexFlow.Domain.Entities.System;
 
 namespace NexFlow.Application.Features.Business;
 
 public interface ICatalogGenerationService
 {
     Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
-
-    // 🔥 SPRINT 4: Nuevo método para invalidación automática
     Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken);
 }
 
@@ -21,8 +21,8 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly ICatalogArtifactRepository _artifactRepository;
     private readonly ICatalogGenerationUsageRepository _usageRepository;
     private readonly ICatalogHashService _hashService;
-    private readonly IWorkflowGateway _workflowGateway;
     private readonly IBusinessProfileRepository _profileRepository;
+    private readonly IOutboxRepository _outboxRepository;
     private readonly ILogger<CatalogGenerationService> _logger;
 
     public CatalogGenerationService(
@@ -30,20 +30,19 @@ public class CatalogGenerationService : ICatalogGenerationService
         ICatalogArtifactRepository artifactRepository,
         ICatalogGenerationUsageRepository usageRepository,
         ICatalogHashService hashService,
-        IWorkflowGateway workflowGateway,
         IBusinessProfileRepository profileRepository,
+        IOutboxRepository outboxRepository,
         ILogger<CatalogGenerationService> logger)
     {
         _catalogRepository = catalogRepository;
         _artifactRepository = artifactRepository;
         _usageRepository = usageRepository;
         _hashService = hashService;
-        _workflowGateway = workflowGateway;
         _profileRepository = profileRepository;
+        _outboxRepository = outboxRepository;
         _logger = logger;
     }
 
-    // 🔥 SPRINT 4: Lógica de invalidación STALE determinista[cite: 1]
     public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var scopesToVerify = new[] { "PRODUCT", "SERVICE" };
@@ -55,7 +54,6 @@ public class CatalogGenerationService : ICatalogGenerationService
         {
             var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, cancellationToken);
 
-            // Solo invalidamos si existe y actualmente se considera vigente (Current)
             if (artifact != null && artifact.Status == CatalogArtifactStatus.Current)
             {
                 var filteredCategories = allCategories.Where(c => c.Scope == scope || c.Scope == "SHARED").ToList();
@@ -124,7 +122,7 @@ public class CatalogGenerationService : ICatalogGenerationService
                         i.Description,
                         Price = i.PriceMinorUnits / 100m,
                         i.Currency,
-                        i.DurationInMinutes
+                        DurationInMinutes = (i as ServiceDto)?.DurationInMinutes
                     })
                 }
             };
@@ -137,17 +135,15 @@ public class CatalogGenerationService : ICatalogGenerationService
                 DateTime.UtcNow,
                 rawPayload);
 
-            _ = Task.Run(async () =>
+            // 🔥 SPRINT 16: Guardado Transaccional en Outbox
+            var outboxMessage = new OutboxMessage
             {
-                try
-                {
-                    await _workflowGateway.TriggerWorkflowAsync("nexflow-events", wrappedPayload, CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Fallo al enviar el trigger a n8n para el workspace {WorkspaceId}", workspaceId);
-                }
-            });
+                WorkspaceId = workspaceId,
+                EventType = "CATALOG_GENERATION_REQUESTED",
+                PayloadJson = JsonSerializer.Serialize(wrappedPayload)
+            };
+
+            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
         }
         catch (Exception ex)
         {

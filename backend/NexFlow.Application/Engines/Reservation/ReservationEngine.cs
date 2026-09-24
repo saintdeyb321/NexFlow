@@ -1,10 +1,12 @@
 ﻿using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.LocationAvailability;
 using NexFlow.Application.Features.Reservations;
+using NexFlow.Domain.Entities.System;
 using System.Transactions;
 
 namespace NexFlow.Application.Engines.Reservation;
@@ -21,6 +23,7 @@ public class ReservationEngine : IReservationEngine
     private readonly ILogger<ReservationEngine> _logger;
     private readonly ILocationAvailabilityService _locationAvailabilityService;
     private readonly IClock _clock;
+    private readonly IOutboxRepository _outboxRepository;
 
     public ReservationEngine(
         IReservationRepository reservationRepository, ICatalogRepository catalogRepository,
@@ -28,7 +31,7 @@ public class ReservationEngine : IReservationEngine
         ILocationRepository locationRepository, IUnitOfWork unitOfWork,
         IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger,
         ILocationAvailabilityService locationAvailabilityService,
-        IClock clock)
+        IClock clock, IOutboxRepository outboxRepository)
     {
         _reservationRepository = reservationRepository; _catalogRepository = catalogRepository;
         _hoursRepository = hoursRepository; _profileRepository = profileRepository;
@@ -36,6 +39,7 @@ public class ReservationEngine : IReservationEngine
         _workflowGateway = workflowGateway; _logger = logger;
         _locationAvailabilityService = locationAvailabilityService;
         _clock = clock;
+        _outboxRepository = outboxRepository;
     }
 
     private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
@@ -51,7 +55,8 @@ public class ReservationEngine : IReservationEngine
     {
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
-        var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
+
+        var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase)) as ServiceDto;
 
         if (targetService == null || !targetService.IsActive || !targetService.RequiresReservation || !_locationAvailabilityService.IsOfferingAvailableAtLocation(targetService, locationId))
             return new List<TimeSlotDto>();
@@ -68,7 +73,6 @@ public class ReservationEngine : IReservationEngine
         if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
             return new List<TimeSlotDto>();
 
-        // 🔥 SPRINT 6: Calculamos los límites del día en UTC usando el TimeZone del Workspace
         var startOfDayUtc = TimeZoneInfo.ConvertTimeToUtc(localDate, workspaceZone);
         var endOfDayUtc = startOfDayUtc.AddDays(1);
 
@@ -77,7 +81,7 @@ public class ReservationEngine : IReservationEngine
 
         var currentSlotStartLocal = localDate.Date.Add(openTime);
         var endOfDayLocal = localDate.Date.Add(closeTime);
-        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone); // <-- Asegúrate de inyectar IClock en ReservationEngine también si deseas usarlo aquí, o usa DateTime.UtcNow que será convertido.
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
 
         while (currentSlotStartLocal.Add(slotDuration) <= endOfDayLocal)
         {
@@ -114,13 +118,12 @@ public class ReservationEngine : IReservationEngine
         var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
-        var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
+        var targetService = items.FirstOrDefault(s => s.Id == serviceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase)) as ServiceDto;
 
         if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o está inactivo."));
         if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere reservas."));
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
 
-        // 🔥 SPRINT A2: Uso del LocationAvailabilityService inyectado
         if (!_locationAvailabilityService.IsOfferingAvailableAtLocation(targetService, locationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en esta sede."));
 
@@ -142,7 +145,11 @@ public class ReservationEngine : IReservationEngine
             scope.Complete();
 
             var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
-            TriggerN8nSafeBackground("RESERVATION_CREATED", workspaceId, dto, reservation.Id);
+
+            // 🔥 SPRINT 16: Guardado Transaccional en Outbox
+            var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CREATED", Guid.NewGuid().ToString(), $"res_{reservation.Id}", DateTime.UtcNow, dto);
+            var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CREATED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
 
             return Result<ReservationDto>.Success(dto);
         }
@@ -166,13 +173,12 @@ public class ReservationEngine : IReservationEngine
         var newStartTimeUtc = TimeZoneInfo.ConvertTimeToUtc(localDateTime, workspaceZone);
 
         var items = await _catalogRepository.GetActiveItemsAsync(workspaceId, cancellationToken);
-        var targetService = items.FirstOrDefault(s => s.Id == reservation.ServiceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase));
+        var targetService = items.FirstOrDefault(s => s.Id == reservation.ServiceId && string.Equals(s.Type, "SERVICE", StringComparison.OrdinalIgnoreCase)) as ServiceDto;
 
         if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "Servicio no válido."));
         if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Servicio no reservable."));
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
 
-        // 🔥 SPRINT A2: Uso del LocationAvailabilityService inyectado
         if (!_locationAvailabilityService.IsOfferingAvailableAtLocation(targetService, reservation.LocationId))
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en sede."));
 
@@ -193,7 +199,11 @@ public class ReservationEngine : IReservationEngine
         }
 
         var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
-        TriggerN8nSafeBackground("RESERVATION_RESCHEDULED", workspaceId, dto, reservation.Id);
+
+        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
+        var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_RESCHEDULED", Guid.NewGuid().ToString(), $"res_upd_{reservation.Id}", DateTime.UtcNow, dto);
+        var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_RESCHEDULED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
 
         return Result<ReservationDto>.Success(dto);
     }
@@ -206,7 +216,11 @@ public class ReservationEngine : IReservationEngine
         reservation.Cancel();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        TriggerN8nSafeBackground("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id);
+        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
+        var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
+        var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+
         return Result.Success();
     }
 
@@ -218,7 +232,11 @@ public class ReservationEngine : IReservationEngine
         reservation.Cancel();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        TriggerN8nSafeBackground("RESERVATION_CANCELLED", workspaceId, new { ReservationId = reservation.Id, Status = "CANCELLED" }, reservation.Id);
+        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
+        var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
+        var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+
         return Result<Domain.Entities.Reservation>.Success(reservation);
     }
 
@@ -230,23 +248,11 @@ public class ReservationEngine : IReservationEngine
         reservation.Complete();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        TriggerN8nSafeBackground("RESERVATION_COMPLETED", workspaceId, new { ReservationId = reservation.Id, Status = "COMPLETED" }, reservation.Id);
-        return Result.Success();
-    }
+        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
+        var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_COMPLETED", Guid.NewGuid().ToString(), $"res_comp_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "COMPLETED" });
+        var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_COMPLETED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
 
-    private void TriggerN8nSafeBackground(string eventType, Guid workspaceId, object data, Guid reservationId)
-    {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var payload = new N8nEventPayload<object>(workspaceId, eventType, Guid.NewGuid().ToString(), $"{eventType}_{reservationId}", DateTime.UtcNow, data);
-                await _workflowGateway.TriggerWorkflowAsync("nexflow-events", payload, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Alerta: Falló n8n para la reserva {ReservationId}.", reservationId);
-            }
-        });
+        return Result.Success();
     }
 }

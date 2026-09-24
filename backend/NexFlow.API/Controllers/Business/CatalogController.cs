@@ -38,11 +38,12 @@ public class CatalogController : ControllerBase
     private async Task<bool> HasAccessToCategories(CancellationToken ct)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
+        // Las categorías son infraestructura compartida
         return activeModules.Contains("CATALOG") || activeModules.Contains("SERVICES");
     }
 
     // ==========================================
-    // CATEGORÍAS (Compartidas)
+    // CATEGORÍAS (Infraestructura Compartida)
     // ==========================================
     [HttpGet("categories")]
     public async Task<IActionResult> GetCategories([FromQuery] string? scope, CancellationToken cancellationToken)
@@ -68,7 +69,6 @@ public class CatalogController : ControllerBase
         if (string.IsNullOrEmpty(category.Id)) category.Id = Guid.NewGuid().ToString();
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
 
-        // 🔥 SPRINT 4: Disparador de invalidación STALE
         var currentWorkspaceId = WorkspaceId;
         _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
 
@@ -83,7 +83,6 @@ public class CatalogController : ControllerBase
         category.Id = categoryId;
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
 
-        // 🔥 SPRINT 4: Disparador de invalidación STALE
         var currentWorkspaceId = WorkspaceId;
         _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
 
@@ -100,7 +99,6 @@ public class CatalogController : ControllerBase
 
         await _catalogRepository.DeleteCategoryAsync(WorkspaceId, categoryId, cancellationToken);
 
-        // 🔥 SPRINT 4: Disparador de invalidación STALE
         var currentWorkspaceId = WorkspaceId;
         _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
 
@@ -108,7 +106,7 @@ public class CatalogController : ControllerBase
     }
 
     // =======================================================
-    // PRODUCTS (Módulo Licenciado Separadamente)
+    // PRODUCTS (Módulo CATALOG estrictamente)
     // =======================================================
     [HttpGet]
     public async Task<IActionResult> GetProducts([FromQuery] string? locationId, CancellationToken cancellationToken)
@@ -130,11 +128,10 @@ public class CatalogController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> SaveProduct([FromBody] CatalogItemDto product, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> SaveProduct([FromBody] ProductDto product, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        product.Type = "PRODUCT";
         if (string.IsNullOrEmpty(product.Id)) product.Id = Guid.NewGuid().ToString();
 
         if (string.IsNullOrEmpty(product.CategoryId))
@@ -144,16 +141,13 @@ public class CatalogController : ControllerBase
         else
         {
             var category = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, product.CategoryId, cancellationToken);
-            if (category == null)
-                return BadRequest(new { message = "La categoría asignada no existe." });
-
-            if (category.Scope == "SERVICE")
-                return BadRequest(new { message = "No puedes asignar un Producto a una categoría exclusiva de Servicios." });
+            if (category == null) return BadRequest(new { message = "La categoría asignada no existe." });
+            if (category.Scope == "SERVICE") return BadRequest(new { message = "No puedes asignar un Producto a una categoría exclusiva de Servicios." });
         }
 
+        // Se guarda explícitamente como ProductDto
         await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken);
 
-        // 🔥 SPRINT 4: Disparador de invalidación STALE
         var currentWorkspaceId = WorkspaceId;
         _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
 
@@ -170,7 +164,6 @@ public class CatalogController : ControllerBase
         {
             await _catalogRepository.DeleteItemAsync(WorkspaceId, productId, cancellationToken);
 
-            // 🔥 SPRINT 4: Disparador de invalidación STALE
             var currentWorkspaceId = WorkspaceId;
             _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
         }
@@ -179,7 +172,7 @@ public class CatalogController : ControllerBase
     }
 
     // ==========================================
-    // ARTEFACTOS Y PDF (Soporta Products y Services)
+    // ARTEFACTOS Y PDF (EXCLUSIVO DE PRODUCTOS)
     // ==========================================
     [HttpGet("artifact")]
     public async Task<IActionResult> GetArtifactStatus(
@@ -194,10 +187,9 @@ public class CatalogController : ControllerBase
             return StatusCode(403, $"Módulo {requiredModule} no contratado.");
 
         var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, targetScope, cancellationToken);
+
         if (artifact == null)
-        {
             return Ok(new { status = "NOT_GENERATED", pdfUrl = (string?)null });
-        }
 
         return Ok(new
         {
@@ -213,6 +205,7 @@ public class CatalogController : ControllerBase
         [FromServices] ICatalogGenerationService generationService,
         CancellationToken cancellationToken)
     {
+        // Se determina dinámicamente si es PRODUCT o SERVICE
         var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "PRODUCT" : request.Scope.ToUpperInvariant();
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
@@ -225,7 +218,7 @@ public class CatalogController : ControllerBase
             return Ok(new
             {
                 status = result.Status.ToString(),
-                message = "Generación de artefacto solicitada exitosamente.",
+                message = "Generación de documento solicitada exitosamente.",
                 sourceHash = result.SourceHash
             });
         }

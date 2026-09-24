@@ -2,15 +2,15 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createReservation } from '../services/reservation.service';
 import type { LocationDto } from '../../business/types/business.types';
-import type { CatalogItemDto } from '../../catalog/types/catalog.types';
+import type { ServiceDto } from '../../services/types/services.types'; // 🔥 SPRINT 1: Reemplazo a ServiceDto
 
 interface CreateReservationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   locations: LocationDto[];
-  services: CatalogItemDto[];
-  timeZone: string; // 🔥 SPRINT 7: Inyección de Zona Horaria[cite: 1]
+  services: ServiceDto[]; // 🔥 Actualizado a ServiceDto
+  timeZone: string;
 }
 
 export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
@@ -27,7 +27,6 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
   useEffect(() => {
     if (isOpen) {
-      // 🔥 SPRINT 7: Obtenemos el 'Hoy' correcto según el país del Workspace
       const nowInWorkspace = new Date(new Date().toLocaleString('en-US', { timeZone }));
       const todayString = nowInWorkspace.toISOString().split('T')[0];
 

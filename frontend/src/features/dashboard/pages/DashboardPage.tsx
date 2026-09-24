@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Users, Calendar, Activity, Zap } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import { getServices, getLocations } from '../../business/services/business.service';
+import { getLocations } from '../../business/services/business.service';
 import { getReservations } from '../../reservations/services/reservation.service';
+import { getServices } from '../../services/services/services.service'; // 🔥 Importación extraída correctamente
 
 export const DashboardPage = () => {
   const { me } = useAuthStore();
   const [stats, setStats] = useState({ services: 0, todayReservations: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
-  // Extraemos los permisos (módulos) de la sesión
   const entitlements = me?.entitlements || [];
 
   useEffect(() => {
@@ -20,7 +20,6 @@ export const DashboardPage = () => {
         let servicesCount = 0;
         let reservationsCount = 0;
 
-        // 🔥 CORRECCIÓN (Fase 2): Solo llamamos a los endpoints si la licencia lo permite
         if (entitlements.includes('SERVICES')) {
           const services = await getServices().catch(() => []);
           servicesCount = services.length;

@@ -4,7 +4,8 @@ import { Save, MapPin } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { axiosClient } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import type { CatalogItemDto, CatalogCategoryDto } from '../../catalog/types/catalog.types'; 
+import type { CatalogCategoryDto } from '../../catalog/types/catalog.types'; 
+import type { ServiceDto } from '../types/services.types'; // 🔥 Usamos el contrato estricto de servicios
 import { ImageUploader } from '../../../components/ui/ImageUploader';
 
 interface LocationDto { id: string; name: string; }
@@ -12,12 +13,12 @@ interface LocationDto { id: string; name: string; }
 interface ServiceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (service: CatalogItemDto) => Promise<void>;
-  initialData?: CatalogItemDto | null;
+  onSave: (service: ServiceDto) => Promise<void>;
+  initialData?: ServiceDto | null;
 }
 
 export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceModalProps) => {
-  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const workspaceId = useAuthStore((state: any) => state.me?.workspace?.id);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
@@ -27,16 +28,15 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
     enabled: !!workspaceId && isOpen,
   });
 
-  // 🔥 SPRINT 6: Obtenemos las sedes del negocio para el selector
   const { data: locations = [] } = useQuery({
     queryKey: ['locations', workspaceId],
     queryFn: async () => (await axiosClient.get<LocationDto[]>('/business/locations')).data,
     enabled: !!workspaceId && isOpen,
   });
 
-  const [formData, setFormData] = useState<Partial<CatalogItemDto>>({
+  const [formData, setFormData] = useState<Partial<ServiceDto>>({
     name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: '', type: 'SERVICE', imageUrl: null,
-    locationScope: 'ALL', locationIds: [] // Valores por defecto
+    locationScope: 'ALL', locationIds: []
   });
 
   useEffect(() => {
@@ -55,7 +55,8 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
   const toggleLocation = (locId: string) => {
     const current = formData.locationIds || [];
-    const updated = current.includes(locId) ? current.filter(id => id !== locId) : [...current, locId];
+    // 🔥 Solucionado el error TS7006 tipando 'id' como string
+    const updated = current.includes(locId) ? current.filter((id: string) => id !== locId) : [...current, locId];
     setFormData({ ...formData, locationIds: updated });
   };
 
@@ -66,7 +67,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
     setIsSaving(true);
     try {
-      const serviceToSave: CatalogItemDto = {
+      const serviceToSave: ServiceDto = {
         ...formData,
         id: formData.id || crypto.randomUUID(),
         type: 'SERVICE',
@@ -79,7 +80,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
         requiresReservation: formData.requiresReservation ?? true,
         locationScope: formData.locationScope || 'ALL',
         locationIds: formData.locationScope === 'ALL' ? [] : (formData.locationIds || [])
-      } as CatalogItemDto;
+      } as ServiceDto;
       
       await onSave(serviceToSave);
       onClose();
@@ -93,7 +94,6 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={initialData ? 'Editar Servicio' : 'Nuevo Servicio'}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* ... (Sección de Nombre, Categoría e Imagen se mantienen exactamente igual) ... */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Servicio *</label>
           <input type="text" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl" required />
@@ -131,7 +131,6 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
           </div>
         </div>
 
-        {/* 🔥 SPRINT 6: Controles UI para Sedes */}
         <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
           <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
             <MapPin className="w-4 h-4 mr-2 text-gray-500" /> Disponibilidad en Sedes

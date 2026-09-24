@@ -6,6 +6,7 @@ import {
   LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
   ShieldAlert, MessageCircle, Package, ClipboardList, MapPin 
 } from 'lucide-react';
+import { NotificationBell } from '../components/ui/NotificationBell';
 
 const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: React.ElementType }> = {
   'RESERVATIONS': { route: '/reservations', label: 'Reservas', icon: Calendar },
@@ -24,12 +25,11 @@ export const WorkspaceLayout = () => {
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
   const workspaceId = me?.workspace?.id;
 
-  // 🔥 Sprint 5.2: Obtenemos las sedes para el selector global
   const { data: locations = [] } = useQuery({
     queryKey: ['locations', workspaceId],
     queryFn: getLocations,
     enabled: !!workspaceId,
-    staleTime: 1000 * 60 * 15, // 15 min caché
+    staleTime: 1000 * 60 * 15, 
   });
 
   const navItemClass = (path: string) => 
@@ -45,12 +45,11 @@ export const WorkspaceLayout = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
+      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col z-20">
         <div className="h-16 flex items-center px-6 border-b border-gray-200">
           <span className="font-bold text-xl text-blue-600 tracking-tight">NexFlow</span>
         </div>
         
-        {/* 🔥 Sprint 5.2: Selector Global de Sedes */}
         <div className="p-4 border-b border-gray-100 bg-gray-50/50">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Sede Activa</label>
           <div className="relative">
@@ -118,8 +117,14 @@ export const WorkspaceLayout = () => {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-8 max-w-7xl mx-auto">
+      <main className="flex-1 flex flex-col overflow-hidden bg-gray-50">
+        {/* 🔥 Header Superior con Notificaciones */}
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-8 shadow-sm shrink-0 z-10">
+           <NotificationBell />
+        </header>
+
+        {/* Contenido de la Página */}
+        <div className="p-8 max-w-7xl mx-auto w-full overflow-y-auto">
           <Outlet />
         </div>
       </main>

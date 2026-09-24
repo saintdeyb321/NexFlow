@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Business;
 
 namespace NexFlow.Application.Features.Knowledge;
 
@@ -48,7 +49,7 @@ public sealed class KnowledgeService : IKnowledgeService
             Locations = locationsTask.Result?.ToList() ?? new(),
             Hours = hoursTask.Result?.ToList() ?? new(),
             Faqs = faqsTask.Result?.ToList() ?? new(),
-            CatalogItems = catalogTask.Result?.ToList() ?? new()
+            Offerings = catalogTask.Result?.ToList() ?? new() // 🔥 SPRINT 1: Renombrado a Offerings
         };
     }
 
@@ -88,9 +89,8 @@ public sealed class KnowledgeService : IKnowledgeService
 
     private static KnowledgeResult QueryOfferings(BusinessKnowledgeSnapshot snapshot, string? locationId, string? searchTerm)
     {
-        var items = snapshot.CatalogItems.AsEnumerable();
+        var items = snapshot.Offerings.AsEnumerable(); // 🔥 SPRINT 1: Usando la propiedad correcta
 
-        // 1. Filtrar por Sede (Location Isolation)
         if (!string.IsNullOrWhiteSpace(locationId))
         {
             items = items.Where(i =>
@@ -98,7 +98,6 @@ public sealed class KnowledgeService : IKnowledgeService
                 (i.LocationIds != null && i.LocationIds.Contains(locationId)));
         }
 
-        // 2. Filtrar por término de búsqueda (Fuzzy)
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
             var term = searchTerm.ToLowerInvariant();
@@ -111,12 +110,16 @@ public sealed class KnowledgeService : IKnowledgeService
         if (!resultList.Any()) return new KnowledgeResult { Found = false, Source = KnowledgeTopic.Offerings, LocationId = locationId };
 
         var sb = new StringBuilder();
-        foreach (var item in resultList.Take(10)) // Limitamos a 10 para no saturar contextos
+        foreach (var item in resultList.Take(10))
         {
             sb.AppendLine($"- {item.Name} ({item.Type})");
             if (!string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Descripción: {item.Description}");
             sb.AppendLine($"  Precio: {item.PriceMinorUnits / 100.0m} {item.Currency}");
-            if (item.DurationInMinutes.HasValue) sb.AppendLine($"  Duración: {item.DurationInMinutes} minutos");
+
+            // 🔥 SPRINT 1: Cast seguro a ServiceDto para extraer propiedades únicas de los servicios
+            if (item is ServiceDto srv && srv.DurationInMinutes.HasValue)
+                sb.AppendLine($"  Duración: {srv.DurationInMinutes} minutos");
+
             sb.AppendLine();
         }
 
@@ -154,7 +157,7 @@ public sealed class KnowledgeService : IKnowledgeService
         if (!resultList.Any()) return new KnowledgeResult { Found = false, Source = KnowledgeTopic.Faqs };
 
         var sb = new StringBuilder();
-        foreach (var f in resultList.Take(5)) // Solo las mejores coincidencias
+        foreach (var f in resultList.Take(5))
         {
             sb.AppendLine($"P: {f.Question}");
             sb.AppendLine($"R: {f.Answer}");
