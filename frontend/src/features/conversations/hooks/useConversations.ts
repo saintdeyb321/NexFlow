@@ -33,22 +33,22 @@ export const useConversations = () => {
   const takeOverMutation = useMutation({
     mutationFn: async () => {
       if (!selectedChat) throw new Error("No chat selected");
-      await takeOverConversation(selectedChat.id);
+      return await takeOverConversation(selectedChat.id);
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
-      if (selectedChat) setSelectedChat({ ...selectedChat, mode: 'Human' });
+      if (selectedChat) setSelectedChat({ ...selectedChat, mode: response.mode });
     }
   });
 
   const releaseMutation = useMutation({
     mutationFn: async () => {
       if (!selectedChat) throw new Error("No chat selected");
-      await releaseConversation(selectedChat.id);
+      return await releaseConversation(selectedChat.id);
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
-      if (selectedChat) setSelectedChat({ ...selectedChat, mode: 'Automatic' });
+      if (selectedChat) setSelectedChat({ ...selectedChat, mode: response.mode });
     }
   });
 
@@ -85,7 +85,6 @@ export const useConversations = () => {
     conversations,
     selectedChat,
     messages,
-    // 🔥 SOLUCIÓN: isLoadingConversations (con "s" al final) || isLoadingMessages
     isLoading: isLoadingConversations || isLoadingMessages,
     isError: isErrorConversations,
     isChangingMode: takeOverMutation.isPending || releaseMutation.isPending,

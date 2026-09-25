@@ -20,6 +20,12 @@ public static class SystemCatalogSeeder
             new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar servicios" } } },
             new { Code = "CATALOG", Name = "Catálogo de Productos", Desc = "Productos físicos o consumibles.", Caps = new[] { new { Code = "READ", Desc = "Consultar productos" } } },
 
+            // 🔥 SPRINT 17: Nuevo Módulo de Pedidos (Coordinación)
+            new { Code = "ORDERS", Name = "Gestión de Pedidos", Desc = "Coordinación y revisión de listas de compra.", Caps = new[] {
+                new { Code = "READ", Desc = "Consultar pedidos" },
+                new { Code = "UPDATE_STATUS", Desc = "Aprobar o rechazar pedidos" }
+            } },
+
             new { Code = "RESERVATIONS", Name = "Motor de Reservas", Desc = "Gestión de citas.", Caps = new[] {
                 new { Code = "CHECK_AVAILABILITY", Desc = "Consultar horarios libres" },
                 new { Code = "CREATE", Desc = "Crear nueva reserva" },
@@ -36,7 +42,6 @@ public static class SystemCatalogSeeder
                 new { Code = "SEND_MESSAGE", Desc = "Enviar mensaje manual" },
                 new { Code = "TAKEOVER", Desc = "Asumir control humano" }
             } }
-            // 🔥 SPRINT 4.3: Eliminamos "NOTIFICATIONS" y "CUSTOMERS" del catálogo comercial para no vender aire.
         };
 
         var existingModules = await context.Modules.Include(m => m.Capabilities).ToListAsync();
@@ -91,14 +96,19 @@ public static class SystemCatalogSeeder
         existingTemplates = await context.Templates.ToListAsync();
         var existingTemplateModules = await context.TemplateModules.ToListAsync();
 
-        // 🔥 SPRINT 4.3: Depuramos las plantillas para no amarrar módulos inexistentes
+        // 🔥 SPRINT 17: Ajustamos las plantillas para incluir "ORDERS" donde corresponda
         var templateConfig = new Dictionary<string, string[]>
         {
             { "SUPPORT", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CONVERSATIONS" } },
             { "BOOKING", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "RESERVATIONS", "CONVERSATIONS" } },
-            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "CONVERSATIONS" } },
+            
+            // 🔥 El plan Comercial ahora incluye Catálogo y la Gestión de Pedidos
+            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "ORDERS", "CONVERSATIONS" } },
+
             { "REQUESTS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "REQUESTS", "CONVERSATIONS" } },
-            { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "RESERVATIONS", "REQUESTS", "CONVERSATIONS" } }
+            
+            // 🔥 El plan Full lo tiene absolutamente todo
+            { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "ORDERS", "RESERVATIONS", "REQUESTS", "CONVERSATIONS" } }
         };
 
         foreach (var config in templateConfig)
@@ -117,7 +127,7 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 🔥 SPRINT 4.4: Reconciliación total del Seeder del SuperAdmin
+        // 🔥 SPRINT 4.4 / 17: Reconciliación total del Seeder del SuperAdmin
         var internalWorkspace = await context.Workspaces.FirstOrDefaultAsync(w => w.Name == "NexFlow Internal");
         if (internalWorkspace == null)
         {
@@ -143,7 +153,7 @@ public static class SystemCatalogSeeder
         }
         else
         {
-            // Reconciliación: Asegurar que la licencia interna siempre tiene TODOS los módulos vigentes
+            // Reconciliación: Asegurar que la licencia interna siempre tiene TODOS los módulos vigentes (incluyendo el nuevo ORDERS)
             var license = await context.Licenses.Include(l => l.LicenseModules).FirstOrDefaultAsync(l => l.WorkspaceId == internalWorkspace.Id);
             if (license != null)
             {

@@ -4,8 +4,8 @@ import { Save, MapPin } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { axiosClient } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import type { CatalogCategoryDto } from '../../catalog/types/catalog.types'; 
-import type { ServiceDto } from '../types/services.types'; // 🔥 Usamos el contrato estricto de servicios
+import type { ServiceDto, ServiceCategoryDto } from '../types/services.types'; // 🔥 Usamos tipos puros
+import { getServiceCategories } from '../services/services.service'; // 🔥 Consumimos de nuestro propio servicio
 import { ImageUploader } from '../../../components/ui/ImageUploader';
 
 interface LocationDto { id: string; name: string; }
@@ -22,9 +22,10 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
+  // 🔥 Consumimos categorías estrictamente de servicios
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories', workspaceId],
-    queryFn: async () => (await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories?scope=SERVICE')).data,
+    queryFn: getServiceCategories,
     enabled: !!workspaceId && isOpen,
   });
 
@@ -55,7 +56,6 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
   const toggleLocation = (locId: string) => {
     const current = formData.locationIds || [];
-    // 🔥 Solucionado el error TS7006 tipando 'id' como string
     const updated = current.includes(locId) ? current.filter((id: string) => id !== locId) : [...current, locId];
     setFormData({ ...formData, locationIds: updated });
   };
@@ -104,7 +104,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
             <label className="block text-sm font-medium text-gray-700 mb-1">Categoría *</label>
             <select value={formData.categoryId || ''} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl" required>
               <option value="" disabled>Selecciona una categoría...</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.map((c: ServiceCategoryDto) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>

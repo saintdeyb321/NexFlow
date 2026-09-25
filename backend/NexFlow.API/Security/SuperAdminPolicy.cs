@@ -1,6 +1,7 @@
-﻿using System.Security.Claims;
+﻿using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 
 namespace NexFlow.API.Security;
@@ -9,26 +10,22 @@ public class SuperAdminRequirement : IAuthorizationRequirement { }
 
 public class SuperAdminHandler : AuthorizationHandler<SuperAdminRequirement>
 {
-    private readonly IUserRepository _userRepository;
+    private readonly ICurrentUser _currentUser; 
     private readonly ISystemAdministratorRepository _sysAdminRepository;
 
-    public SuperAdminHandler(IUserRepository userRepository, ISystemAdministratorRepository sysAdminRepository)
+    public SuperAdminHandler(ICurrentUser currentUser, ISystemAdministratorRepository sysAdminRepository)
     {
-        _userRepository = userRepository;
+        _currentUser = currentUser;
         _sysAdminRepository = sysAdminRepository;
     }
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, SuperAdminRequirement requirement)
     {
-        var emailClaim = context.User.FindFirst("email")?.Value
-                      ?? context.User.FindFirst(ClaimTypes.Email)?.Value;
+        var userId = _currentUser.UserId;
 
-        if (string.IsNullOrEmpty(emailClaim)) return;
+        if (userId == Guid.Empty) return;
 
-        var user = await _userRepository.GetByEmailAsync(emailClaim, System.Threading.CancellationToken.None);
-        if (user == null) return;
-
-        bool isGod = await _sysAdminRepository.IsUserSuperAdminAsync(user.Id, System.Threading.CancellationToken.None);
+        bool isGod = await _sysAdminRepository.IsUserSuperAdminAsync(userId, System.Threading.CancellationToken.None);
 
         if (isGod)
         {

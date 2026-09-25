@@ -1,18 +1,17 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { CatalogCategoryDto, ProductDto } from '../types/catalog.types';
+import type { ProductCategoryDto, ProductDto } from '../types/catalog.types';
 
-export const getCategories = async (scope?: 'PRODUCT' | 'SERVICE' | 'SHARED'): Promise<CatalogCategoryDto[]> => {
-  const params = scope ? { scope } : {};
-  const { data } = await axiosClient.get<CatalogCategoryDto[]>('/catalog/categories', { params });
+export const getCategories = async (scope: 'PRODUCT' | 'SHARED' = 'PRODUCT'): Promise<ProductCategoryDto[]> => {
+  const { data } = await axiosClient.get<ProductCategoryDto[]>('/catalog/categories', { params: { scope } });
   return data;
 };
 
-export const saveCategory = async (category: CatalogCategoryDto): Promise<CatalogCategoryDto> => {
+export const saveCategory = async (category: ProductCategoryDto): Promise<ProductCategoryDto> => {
   if (category.id) {
-    const { data } = await axiosClient.put<CatalogCategoryDto>(`/catalog/categories/${category.id}`, category);
+    const { data } = await axiosClient.put<ProductCategoryDto>(`/catalog/categories/${category.id}`, category);
     return data;
   }
-  const { data } = await axiosClient.post<CatalogCategoryDto>('/catalog/categories', category);
+  const { data } = await axiosClient.post<ProductCategoryDto>('/catalog/categories', category);
   return data;
 };
 
@@ -29,20 +28,4 @@ export const saveProduct = async (product: ProductDto): Promise<ProductDto> => {
 
 export const deleteProduct = async (id: string): Promise<void> => {
   await axiosClient.delete(`/catalog/${id}`);
-};
-
-export interface ArtifactStatusDto {
-  status: 'NOT_GENERATED' | 'GENERATING' | 'CURRENT' | 'STALE' | 'FAILED';
-  pdfUrl?: string | null;
-  lastGeneratedAt?: string | null;
-}
-
-export const getArtifactStatus = async (scope: 'PRODUCT' | 'SERVICE'): Promise<ArtifactStatusDto> => {
-  const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`);
-  return data;
-};
-
-export const generateArtifact = async (scope: 'PRODUCT' | 'SERVICE'): Promise<{ status: string, message: string }> => {
-  const { data } = await axiosClient.post('/catalog/artifact/generate', { scope });
-  return data;
 };

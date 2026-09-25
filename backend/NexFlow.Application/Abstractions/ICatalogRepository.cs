@@ -1,16 +1,16 @@
-﻿using NexFlow.Application.Features.Business;
+﻿using NexFlow.Application.Features.Shared.DTOs;
 
 namespace NexFlow.Application.Abstractions;
 
 public interface ICatalogRepository
 {
     // ==========================================
-    // GESTIÓN DE CATEGORÍAS
+    // GESTIÓN DE CATEGORÍAS (Infraestructura Compartida)
     // ==========================================
-    Task<IEnumerable<CatalogCategoryDto>> GetCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken);
-    Task<IEnumerable<CatalogCategoryDto>> GetActiveCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken);
-    Task<CatalogCategoryDto?> GetCategoryByIdAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
-    Task SaveCategoryAsync(Guid workspaceId, CatalogCategoryDto category, CancellationToken cancellationToken);
+    Task<IEnumerable<BusinessCategoryDto>> GetCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken);
+    Task<IEnumerable<BusinessCategoryDto>> GetActiveCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken);
+    Task<BusinessCategoryDto?> GetCategoryByIdAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
+    Task SaveCategoryAsync(Guid workspaceId, BusinessCategoryDto category, CancellationToken cancellationToken);
     Task DeleteCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
 
     // ==========================================

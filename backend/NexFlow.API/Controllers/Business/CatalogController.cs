@@ -1,10 +1,10 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Exceptions;
-using NexFlow.Domain.Entities.Catalog;
-using System.Linq;
+using NexFlow.API.Services.BackgroundServices;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -16,15 +16,18 @@ public class CatalogController : ControllerBase
     private readonly ICatalogRepository _catalogRepository;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+    private readonly IBackgroundTaskQueue _taskQueue; // 🔥 SPRINT 16: Cola segura inyectada
 
     public CatalogController(
         ICatalogRepository catalogRepository,
         IWorkspaceContext workspaceContext,
-        IEntitlementService entitlementService)
+        IEntitlementService entitlementService,
+        IBackgroundTaskQueue taskQueue)
     {
         _catalogRepository = catalogRepository;
         _workspaceContext = workspaceContext;
         _entitlementService = entitlementService;
+        _taskQueue = taskQueue;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -38,7 +41,6 @@ public class CatalogController : ControllerBase
     private async Task<bool> HasAccessToCategories(CancellationToken ct)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
-        // Las categorías son infraestructura compartida
         return activeModules.Contains("CATALOG") || activeModules.Contains("SERVICES");
     }
 
@@ -62,35 +64,33 @@ public class CatalogController : ControllerBase
     }
 
     [HttpPost("categories")]
-    public async Task<IActionResult> CreateCategory([FromBody] CatalogCategoryDto category, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateCategory([FromBody] ProductCategoryDto category, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
         if (string.IsNullOrEmpty(category.Id)) category.Id = Guid.NewGuid().ToString();
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
 
-        var currentWorkspaceId = WorkspaceId;
-        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+        QueueArtifactInvalidation(WorkspaceId); // 🔥 SPRINT 16: Llamada segura a la cola
 
         return Ok(category);
     }
 
     [HttpPut("categories/{categoryId}")]
-    public async Task<IActionResult> UpdateCategory(string categoryId, [FromBody] CatalogCategoryDto category, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> UpdateCategory(string categoryId, [FromBody] ProductCategoryDto category, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
         category.Id = categoryId;
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
 
-        var currentWorkspaceId = WorkspaceId;
-        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+        QueueArtifactInvalidation(WorkspaceId);
 
         return Ok(category);
     }
 
     [HttpDelete("categories/{categoryId}")]
-    public async Task<IActionResult> DeleteCategory(string categoryId, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteCategory(string categoryId, CancellationToken cancellationToken)
     {
         if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
 
@@ -99,8 +99,7 @@ public class CatalogController : ControllerBase
 
         await _catalogRepository.DeleteCategoryAsync(WorkspaceId, categoryId, cancellationToken);
 
-        var currentWorkspaceId = WorkspaceId;
-        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+        QueueArtifactInvalidation(WorkspaceId);
 
         return NoContent();
     }
@@ -128,7 +127,7 @@ public class CatalogController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> SaveProduct([FromBody] ProductDto product, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> SaveProduct([FromBody] ProductDto product, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
@@ -145,17 +144,15 @@ public class CatalogController : ControllerBase
             if (category.Scope == "SERVICE") return BadRequest(new { message = "No puedes asignar un Producto a una categoría exclusiva de Servicios." });
         }
 
-        // Se guarda explícitamente como ProductDto
         await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken);
 
-        var currentWorkspaceId = WorkspaceId;
-        _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+        QueueArtifactInvalidation(WorkspaceId);
 
         return Ok(product);
     }
 
     [HttpDelete("{productId}")]
-    public async Task<IActionResult> DeleteProduct(string productId, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteProduct(string productId, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
@@ -163,16 +160,14 @@ public class CatalogController : ControllerBase
         if (item != null && item.Type.ToUpperInvariant() == "PRODUCT")
         {
             await _catalogRepository.DeleteItemAsync(WorkspaceId, productId, cancellationToken);
-
-            var currentWorkspaceId = WorkspaceId;
-            _ = Task.Run(() => generationService.CheckAndInvalidateStaleArtifactsAsync(currentWorkspaceId, CancellationToken.None));
+            QueueArtifactInvalidation(WorkspaceId);
         }
 
         return NoContent();
     }
 
     // ==========================================
-    // ARTEFACTOS Y PDF (EXCLUSIVO DE PRODUCTOS)
+    // ARTEFACTOS Y PDF
     // ==========================================
     [HttpGet("artifact")]
     public async Task<IActionResult> GetArtifactStatus(
@@ -205,7 +200,6 @@ public class CatalogController : ControllerBase
         [FromServices] ICatalogGenerationService generationService,
         CancellationToken cancellationToken)
     {
-        // Se determina dinámicamente si es PRODUCT o SERVICE
         var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "PRODUCT" : request.Scope.ToUpperInvariant();
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
@@ -226,6 +220,19 @@ public class CatalogController : ControllerBase
         {
             return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
         }
+    }
+
+    // 🔥 SPRINT 16: Método Helper para encolar de forma segura resolviendo el Scope
+    private void QueueArtifactInvalidation(Guid workspaceId)
+    {
+        _taskQueue.QueueBackgroundWorkItemAsync(async (serviceProvider, token) =>
+        {
+            // Creamos un nuevo Scope porque la petición HTTP original ya habrá terminado
+            using var scope = serviceProvider.CreateScope();
+            var generationService = scope.ServiceProvider.GetRequiredService<ICatalogGenerationService>();
+
+            await generationService.CheckAndInvalidateStaleArtifactsAsync(workspaceId, token);
+        });
     }
 }
 

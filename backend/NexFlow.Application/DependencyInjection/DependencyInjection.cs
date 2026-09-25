@@ -10,8 +10,10 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.LocationAvailability;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Business.Offerings;
+using NexFlow.Application.Features.Dashboard;
 using NexFlow.Application.Features.Identity.GetMe;
 using NexFlow.Application.Features.Knowledge;
+using NexFlow.Application.Features.Notifications;
 using NexFlow.Application.Features.Requests;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Application.Features.SuperAdmin.Licenses;
@@ -66,6 +68,9 @@ public static class DependencyInjection
 
         services.AddScoped<ICatalogHashService, CatalogHashService>();
         services.AddScoped<ICatalogGenerationService, CatalogGenerationService>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IOutboundMessageService, OutboundMessageService>();
 
         return services;
     }

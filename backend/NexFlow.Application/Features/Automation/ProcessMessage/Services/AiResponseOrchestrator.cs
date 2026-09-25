@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
-using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
@@ -23,20 +22,19 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IRequestFlow _requestFlow;
     private readonly ISupportFlow _supportFlow;
     private readonly IChatFlow _chatFlow;
-    private readonly IConversationRepository _conversationRepo;
     private readonly IConversationCache _cache;
-    private readonly IMessageGateway _messageGateway;
+    private readonly IOutboundMessageService _outboundMessageService; // 🔥 SPRINT 14: Servicio centralizado
     private readonly ILogger<AiResponseOrchestrator> _logger;
 
     public AiResponseOrchestrator(
         IAiInterpreter interpreter, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
-        IConversationRepository conversationRepo, IConversationCache cache, IMessageGateway messageGateway,
+        IConversationCache cache, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger)
     {
         _interpreter = interpreter; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _supportFlow = supportFlow; _chatFlow = chatFlow;
-        _conversationRepo = conversationRepo; _cache = cache; _messageGateway = messageGateway;
+        _cache = cache; _outboundMessageService = outboundMessageService;
         _logger = logger;
     }
 
@@ -63,26 +61,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         else
         {
-            // 🔥 RAG FIX: Ahora le pasamos el workspaceId al ChatFlow para que pueda consultar la base de datos
-            finalResponse = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, cancellationToken);
+            finalResponse = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, cancellationToken);
         }
 
         await _cache.SetContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
-        await PersistAndSendAsync(workspaceId, normalizedPhone, conversation.Id, finalResponse, cancellationToken);
-    }
 
-    private async Task PersistAndSendAsync(Guid workspaceId, string phone, string conversationId, string text, CancellationToken ct)
-    {
-        var pendingId = Guid.NewGuid().ToString();
-        await _conversationRepo.AddMessageAsync(workspaceId, conversationId, new MessageRecord { Id = pendingId, ExternalMessageId = pendingId, Direction = "outbound", Sender = SenderType.AI, Content = text, Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow }, ct);
-        try
-        {
-            var extId = await _messageGateway.SendTextAsync(workspaceId, phone, text, pendingId, ct);
-            await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, extId, ct);
-        }
-        catch
-        {
-            await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Failed, null, ct);
-        }
+        // 🔥 SPRINT 14: Delegamos toda la responsabilidad de entrega al OutboundMessageService
+        await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, SenderType.AI, cancellationToken);
     }
 }

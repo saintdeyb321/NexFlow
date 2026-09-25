@@ -1,25 +1,7 @@
-export interface CatalogCategoryDto {
-  id?: string;
-  name: string;
-  description?: string | null;
-  scope: 'PRODUCT' | 'SERVICE' | 'SHARED';
-  isActive: boolean;
-  displayOrder: number;
-}
+import type { BusinessOfferingDto, BusinessCategoryDto } from '../../shared/types/business-offering.types';
 
-export interface BusinessOfferingDto {
-  id?: string;
-  categoryId: string;
-  name: string;
-  description?: string | null;
-  priceMinorUnits: number;
-  currency: string;
-  isActive: boolean;
-  locationScope: 'ALL' | 'SPECIFIC';
-  locationIds: string[];
-  imageUrl?: string | null;
-  metadata?: Record<string, unknown>;
-}
+// Alias para mantener la semántica limpia dentro del módulo de Catálogo
+export type ProductCategoryDto = BusinessCategoryDto;
 
 export interface ProductDto extends BusinessOfferingDto {
   type: 'PRODUCT';

@@ -2,13 +2,15 @@
 using System.Text;
 using System.Text.Json;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Business;
+// 🔥 NUEVOS NAMESPACES
+using NexFlow.Application.Features.Shared.DTOs;
+using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.Application.Common;
 
 public class CatalogHashService : ICatalogHashService
 {
-    public string ComputeHash(IEnumerable<CatalogCategoryDto> categories, IEnumerable<BusinessOfferingDto> items)
+    public string ComputeHash(IEnumerable<BusinessCategoryDto> categories, IEnumerable<BusinessOfferingDto> items)
     {
         var orderedCategories = categories
             .OrderBy(c => c.Id)
@@ -28,7 +30,8 @@ public class CatalogHashService : ICatalogHashService
                 i.IsActive,
                 i.ImageUrl,
                 i.LocationScope,
-                DurationInMinutes = (i as ServiceDto)?.DurationInMinutes, // Si es servicio, toma la duración
+                // 🔥 Cast seguro al nuevo ServiceDto
+                DurationInMinutes = (i as ServiceDto)?.DurationInMinutes,
                 RequiresReservation = (i as ServiceDto)?.RequiresReservation,
                 LocationIds = i.LocationIds != null ? string.Join(",", i.LocationIds.OrderBy(l => l)) : ""
             })

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileText, RefreshCw, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
-import { getArtifactStatus, generateArtifact } from '../services/catalog.service';
+import { getArtifactStatus, generateArtifact } from '../services/artifact.service';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
 interface ArtifactGeneratorProps {
@@ -15,7 +15,7 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const { data: artifact, isLoading } = useQuery({
-    queryKey: ['catalogArtifact', workspaceId, scope], 
+    queryKey: ['artifact', workspaceId, scope], 
     queryFn: () => getArtifactStatus(scope),
     enabled: !!workspaceId,
     refetchInterval: (query) => (query.state.data?.status === 'GENERATING' ? 5000 : false)
@@ -25,7 +25,7 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
     mutationFn: () => generateArtifact(scope),
     onSuccess: () => {
       setErrorMessage(null);
-      queryClient.invalidateQueries({ queryKey: ['catalogArtifact', workspaceId, scope] });
+      queryClient.invalidateQueries({ queryKey: ['artifact', workspaceId, scope] });
     },
     onError: (error: any) => setErrorMessage(error.message || 'Error al solicitar la generación.')
   });
@@ -42,7 +42,6 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
           <FileText className="w-6 h-6" />
         </div>
         <div>
-          {/* 🔥 SOLUCIÓN: Aquí usamos la variable title */}
           <h3 className="font-bold text-gray-900">{title}</h3>
           <div className="flex items-center mt-1 text-sm">
             {status === 'CURRENT' && <span className="text-green-600 flex items-center font-medium"><CheckCircle2 className="w-4 h-4 mr-1"/> Actualizado</span>}

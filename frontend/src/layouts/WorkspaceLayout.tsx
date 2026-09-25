@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '../features/business/services/business.service';
 import { 
   LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
-  ShieldAlert, MessageCircle, Package, ClipboardList, MapPin 
+  ShieldAlert, MessageCircle, Package, ClipboardList, MapPin, ShoppingBag 
 } from 'lucide-react';
 import { NotificationBell } from '../components/ui/NotificationBell';
 
@@ -14,6 +14,7 @@ const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: Reac
   'FAQ': { route: '/faqs', label: 'Base (FAQ)', icon: BookOpen },
   'SERVICES': { route: '/services', label: 'Servicios', icon: Scissors },
   'CATALOG': { route: '/catalog', label: 'Catálogo', icon: Package },
+  'ORDERS': { route: '/orders', label: 'Pedidos', icon: ShoppingBag }, // 🔥 Nuevo Módulo en el Menú
   'REQUESTS': { route: '/requests', label: 'Solicitudes', icon: ClipboardList }
 };
 

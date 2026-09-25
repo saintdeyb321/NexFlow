@@ -2,6 +2,11 @@
 
 public class ConversationContextDto
 {
+    // 🔥 SPRINT 07: Nuevos campos para gestionar el Takeover sin borrar la memoria
+    public string Mode { get; set; } = "Automatic"; // Automatic, Human
+    public string? HandoffReason { get; set; }
+    public DateTime? HandoffAt { get; set; }
+
     // 1. Estado de la Transacción
     public string? CurrentGoal { get; set; }
     public string? CurrentStep { get; set; }

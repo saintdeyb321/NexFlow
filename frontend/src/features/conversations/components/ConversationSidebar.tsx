@@ -1,4 +1,4 @@
-import { Phone, Bot, User } from 'lucide-react';
+import { Phone, Bot, User, BellRing } from 'lucide-react';
 import type { Conversation } from '../types/conversation.types';
 
 interface ConversationSidebarProps {
@@ -34,13 +34,20 @@ export const ConversationSidebar = ({ conversations, selectedChat, onSelectChat 
                   {new Date(chat.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
-              <div className="flex items-center mt-2">
+              <div className="flex items-center mt-2 justify-between">
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center ${
                   chat.mode === 'Automatic' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
                 }`}>
                   {chat.mode === 'Automatic' ? <Bot className="w-3 h-3 mr-1" /> : <User className="w-3 h-3 mr-1" />}
                   {chat.mode === 'Automatic' ? 'IA' : 'Humano'}
                 </span>
+                
+                {/* 🔥 Alerta Crítica: La IA escaló el chat a un humano */}
+                {chat.mode === 'Human' && chat.handoffReason === 'AiEscalation' && (
+                  <span className="flex items-center text-[10px] text-red-600 font-bold animate-pulse">
+                    <BellRing className="w-3 h-3 mr-1" /> Requiere Atención
+                  </span>
+                )}
               </div>
             </button>
           ))

@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bell, Calendar, MessageCircle, ClipboardList, AlertTriangle } from 'lucide-react'; // 🔥 Quitamos 'Check'
-import { getNotifications, markNotificationAsRead } from '../../features/notifications/services/notification.service';
-import type { NotificationDto } from '../../features/notifications/services/notification.service'; // 🔥 Importamos el tipo correctamente
-import { useAuthStore } from '../../core/store/useAuthStore';
+import { Bell, Calendar, MessageCircle, ClipboardList, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { getNotifications, markNotificationAsRead, type NotificationDto } from '../../features/notifications/services/notification.service';
+import { useAuthStore } from '../../core/store/useAuthStore';
 
 export const NotificationBell = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -17,19 +16,27 @@ export const NotificationBell = () => {
     queryKey: ['notifications', workspaceId],
     queryFn: getNotifications,
     enabled: !!workspaceId,
-    refetchInterval: 15000, // Consulta cada 15 segundos
+    refetchInterval: 15000, 
   });
 
   const readMutation = useMutation({
     mutationFn: markNotificationAsRead,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onSuccess: (_, notificationId) => {
+      // Actualización optimista instantánea
+      queryClient.setQueryData<NotificationDto[]>(['notifications', workspaceId], (old) => {
+        if (!old) return [];
+        return old.map(n => n.id === notificationId ? { ...n, isRead: true } : n);
+      });
+    },
   });
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -45,9 +52,19 @@ export const NotificationBell = () => {
   };
 
   const handleNotificationClick = (n: NotificationDto) => {
-    if (!n.isRead) readMutation.mutate(n.id);
+    if (!n.isRead) {
+      readMutation.mutate(n.id);
+    }
     setIsOpen(false);
-    if (n.actionUrl) navigate(n.actionUrl);
+    
+    // Navegar de forma segura dentro de la app
+    if (n.actionUrl) {
+      if (n.actionUrl.startsWith('http')) {
+        window.location.href = n.actionUrl;
+      } else {
+        navigate(n.actionUrl);
+      }
+    }
   };
 
   return (
@@ -65,7 +82,7 @@ export const NotificationBell = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-50 animate-in fade-in slide-in-from-top-2 origin-top-right">
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-gray-200 rounded-xl shadow-xl z-50 animate-in fade-in slide-in-from-top-2 origin-top-right">
           <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-gray-50/50 rounded-t-xl">
             <h3 className="font-bold text-gray-800">Notificaciones</h3>
             {unreadCount > 0 && (
@@ -75,7 +92,7 @@ export const NotificationBell = () => {
             )}
           </div>
           
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-[28rem] overflow-y-auto">
             {notifications.length === 0 ? (
               <div className="p-8 text-center text-gray-500 text-sm">
                 <Bell className="w-8 h-8 mx-auto text-gray-300 mb-2" />
@@ -102,7 +119,7 @@ export const NotificationBell = () => {
                       </p>
                     </div>
                     {!n.isRead && (
-                      <div className="flex-shrink-0 ml-2">
+                      <div className="flex-shrink-0 ml-2 mt-1">
                         <span className="flex h-2 w-2 rounded-full bg-blue-600"></span>
                       </div>
                     )}

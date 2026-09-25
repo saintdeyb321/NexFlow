@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, User, Send, Clock, AlertTriangle } from 'lucide-react';
+import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon } from 'lucide-react';
 import type { Conversation, Message } from '../types/conversation.types';
 
 interface ConversationThreadProps {
@@ -46,16 +46,29 @@ export const ConversationThread = ({
         </div>
       </div>
 
-      {/* 🔥 SOLUCIÓN FALLO #59: Banner Visual del Estado de la IA */}
+      {/* 🔥 Banner Visual Inteligente del Estado */}
       {chat.mode === 'Automatic' ? (
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2.5 flex items-center justify-center text-blue-700 text-sm font-medium">
           <Bot className="w-4 h-4 mr-2 animate-pulse" />
           IA en Piloto Automático. El asistente virtual está gestionando al cliente.
         </div>
       ) : (
-        <div className="bg-orange-50 border-b border-orange-200 px-4 py-2.5 flex items-center justify-center text-orange-700 text-sm font-medium">
-          <AlertTriangle className="w-4 h-4 mr-2" />
-          Modo Manual Activo. Estás chateando directamente; la IA está en pausa.
+        <div className={`border-b px-4 py-2.5 flex items-center justify-center text-sm font-medium ${
+          chat.handoffReason === 'AiEscalation' 
+            ? 'bg-red-50 border-red-200 text-red-700' 
+            : 'bg-orange-50 border-orange-200 text-orange-700'
+        }`}>
+          {chat.handoffReason === 'AiEscalation' ? (
+            <>
+              <AlertOctagon className="w-4 h-4 mr-2" />
+              Alerta de la IA: El bot no pudo resolver la solicitud y necesita tu asistencia inmediata.
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Modo Manual Activo. Estás chateando directamente; la IA está en pausa.
+            </>
+          )}
         </div>
       )}
 

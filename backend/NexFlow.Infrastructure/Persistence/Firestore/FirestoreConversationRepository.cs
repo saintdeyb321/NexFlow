@@ -196,4 +196,13 @@ public class FirestoreConversationRepository : IConversationRepository
 
         await batch.CommitAsync(cancellationToken);
     }
+
+    public async Task CloseConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
+    {
+        var docRef = GetCollection(workspaceId).Document(conversationId);
+        await docRef.UpdateAsync(new Dictionary<string, object>
+        {
+            { "status", "closed" }
+        }, cancellationToken: cancellationToken);
+    }
 }

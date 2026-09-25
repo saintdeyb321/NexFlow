@@ -1,20 +1,20 @@
 ﻿using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.AI.Router;
 
 namespace NexFlow.Application.Features.AI.Interpretation;
 
 public class AiInterpretation
 {
-    public string Intent { get; set; } = "CHAT";
+    public string Intent { get; set; } = "GENERAL";
     public string? Service { get; set; }
     public string? Location { get; set; }
     public string? Date { get; set; }
     public string? Time { get; set; }
-    // 🔥 UX FIX: El bot ahora debe saber buscar el nombre real de la persona
     public string? CustomerName { get; set; }
+    // 🔥 SPRINT 03: Para buscar productos, servicios o FAQs específicos sin cargar todo
+    public string? SearchTerm { get; set; }
 }
 
 public interface IAiInterpreter
@@ -47,23 +47,24 @@ public class AiInterpreter : IAiInterpreter
         catch { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
 
         var localBusinessTime = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
-
         var activeModulesList = string.Join(", ", activeModules);
+
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
 Tu ÚNICO trabajo es extraer intenciones y entidades en JSON.
 MÓDULOS PAGADOS POR ESTE NEGOCIO: {activeModulesList}
-(CRÍTICO: Si el negocio NO tiene el módulo 'RESERVATIONS', no puedes devolver el Intent 'BOOKING'. Si no tiene 'REQUESTS', no devuelvas 'REQUEST').
+(CRÍTICO: Si el negocio NO tiene 'RESERVATIONS', no puedes devolver 'RESERVATION'. Si no tiene 'CATALOG', no devuelvas 'PRODUCT_QUERY').
 
 FECHA ACTUAL: {localBusinessTime:yyyy-MM-dd}
 HORA ACTUAL: {localBusinessTime:HH:mm}
 OBJETIVO ACTUAL: {(string.IsNullOrWhiteSpace(currentGoal) ? "NINGUNO" : currentGoal)}
 
-- Intent: 'BOOKING', 'INFO', 'REQUEST', 'SUPPORT' o 'CHAT'.
-- Service: Nombre del servicio (Solo si Intent es BOOKING).
+- Intent: 'PRODUCT_QUERY', 'SERVICE_QUERY', 'RESERVATION', 'REQUEST', 'FAQ', 'LOCATION', 'GENERAL'.
+- SearchTerm: Si el cliente pregunta por un producto, servicio o duda concreta, extrae las palabras clave de búsqueda aquí.
+- Service: Nombre del servicio (Solo si Intent es RESERVATION).
 - Location: La sede mencionada.
 - Date: Fecha en formato YYYY-MM-DD.
 - Time: Hora en formato HH:mm.
-- CustomerName: Nombre y apellido del cliente (Solo si lo menciona explícitamente).
+- CustomerName: Nombre y apellido del cliente.
 
 RESPONDE ÚNICAMENTE CON EL JSON.";
 
@@ -77,7 +78,7 @@ RESPONDE ÚNICAMENTE CON EL JSON.";
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error crítico en AI Interpreter después del Fallback. Asumiendo intención CHAT.");
+            _logger.LogError(ex, "Error crítico en AI Interpreter. Asumiendo intención GENERAL.");
             return new AiInterpretation();
         }
     }

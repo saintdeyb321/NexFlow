@@ -1,6 +1,9 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Business;
+// 🔥 NUEVOS NAMESPACES
+using NexFlow.Application.Features.Shared.DTOs;
+using NexFlow.Application.Features.Catalog.DTOs;
+using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -13,14 +16,14 @@ public class FirestoreCatalogRepository : ICatalogRepository
     // =========================================================
     // CATEGORÍAS
     // =========================================================
-    public async Task<IEnumerable<CatalogCategoryDto>> GetCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken)
+    public async Task<IEnumerable<BusinessCategoryDto>> GetCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories");
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
         return snapshot.Documents.Select(MapToCategoryDto).OrderBy(c => c.DisplayOrder);
     }
 
-    public async Task<IEnumerable<CatalogCategoryDto>> GetActiveCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken)
+    public async Task<IEnumerable<BusinessCategoryDto>> GetActiveCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories")
             .WhereEqualTo("IsActive", true);
@@ -28,7 +31,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToCategoryDto).OrderBy(c => c.DisplayOrder);
     }
 
-    public async Task<CatalogCategoryDto?> GetCategoryByIdAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken)
+    public async Task<BusinessCategoryDto?> GetCategoryByIdAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(categoryId)) return null;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories").Document(categoryId);
@@ -36,7 +39,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Exists ? MapToCategoryDto(snapshot) : null;
     }
 
-    public async Task SaveCategoryAsync(Guid workspaceId, CatalogCategoryDto category, CancellationToken cancellationToken)
+    public async Task SaveCategoryAsync(Guid workspaceId, BusinessCategoryDto category, CancellationToken cancellationToken)
     {
         var docId = string.IsNullOrEmpty(category.Id) ? Guid.NewGuid().ToString() : category.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories").Document(docId);
@@ -133,10 +136,10 @@ public class FirestoreCatalogRepository : ICatalogRepository
     // =========================================================
     // MAPPERS Y CLASES INTERNAS FIRESTORE
     // =========================================================
-    private static CatalogCategoryDto MapToCategoryDto(DocumentSnapshot doc)
+    private static BusinessCategoryDto MapToCategoryDto(DocumentSnapshot doc)
     {
         var data = doc.ConvertTo<FirestoreCatalogCategory>();
-        return new CatalogCategoryDto
+        return new BusinessCategoryDto
         {
             Id = doc.Id,
             Name = data.Name,
@@ -147,7 +150,6 @@ public class FirestoreCatalogRepository : ICatalogRepository
         };
     }
 
-    // 🔥 SPRINT 1: Constructor dinámico según el Type almacenado
     private static BusinessOfferingDto MapToItemDto(DocumentSnapshot doc)
     {
         var data = doc.ConvertTo<FirestoreCatalogItem>();

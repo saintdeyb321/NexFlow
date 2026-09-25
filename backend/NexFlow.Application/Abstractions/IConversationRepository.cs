@@ -12,12 +12,12 @@ public interface IConversationRepository
     Task CreateConversationAsync(Guid workspaceId, ConversationRecord conversation, CancellationToken cancellationToken);
     Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
 
-    // 🔥 Sprint 4.1: Se añade HandoffReason
+    // 🔥 SPRINT 08: Método para cerrar conversaciones antiguas
+    Task CloseConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
+
     Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken);
 
     Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken);
-
-    // 🔥 Sprint 4.1: Actualizar a Sent o Failed
     Task UpdateMessageStatusAsync(Guid workspaceId, string conversationId, string messageId, MessageStatus status, string? externalMessageId, CancellationToken cancellationToken);
 
     Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken);

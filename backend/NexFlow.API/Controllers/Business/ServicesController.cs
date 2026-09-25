@@ -1,8 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Business;
-using System.Linq;
+// 🔥 NUEVO NAMESPACE
+using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -70,7 +70,6 @@ public class ServicesController : ControllerBase
             if (category.Scope == "PRODUCT") return BadRequest(new { message = "No puedes asignar un Servicio a una categoría exclusiva de Productos." });
         }
 
-        // Se guarda explícitamente como ServiceDto (asegurando Type = "SERVICE")
         await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken);
 
         return Ok(service);

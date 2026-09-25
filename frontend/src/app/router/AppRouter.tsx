@@ -12,11 +12,18 @@ import { DashboardPage } from '../../features/dashboard/pages/DashboardPage';
 import { InboxPage } from '../../features/conversations/pages/InboxPage';
 import { RequestsPage } from '../../features/requests/pages/RequestsPage';
 import { CatalogPage } from '../../features/catalog/pages/CatalogPage';
+import { OrdersPage } from '../../features/orders/pages/OrdersPage'; // 🔥 Nueva importación
 
 // 1. GUARDIÁN DE MÓDULOS
-const ModuleGuard = ({ requiredModule, children }: { requiredModule: string, children: React.ReactNode }) => {
+const ModuleGuard = ({ requiredModule, children }: { requiredModule: string | string[], children: React.ReactNode }) => {
   const { me } = useAuthStore();
-  const hasAccess = me?.entitlements?.includes(requiredModule);
+  const entitlements = me?.entitlements || [];
+  
+  // Si requiere un array (ej: ORDERS o CATALOG), validamos si tiene al menos uno
+  const hasAccess = Array.isArray(requiredModule) 
+    ? requiredModule.some(mod => entitlements.includes(mod))
+    : entitlements.includes(requiredModule);
+
   if (!hasAccess) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
@@ -32,7 +39,7 @@ const router = createBrowserRouter([
     children: [
       {
         path: '/',
-        element: <WorkspaceLayout />, // 🔥 Todo el Onboarding fue eliminado de raíz
+        element: <WorkspaceLayout />,
         children: [
           { index: true, element: <DashboardPage /> },
           { path: 'superadmin', element: <SuperAdminPage /> },
@@ -42,6 +49,7 @@ const router = createBrowserRouter([
           { path: 'inbox', element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard> },
           { path: 'requests', element: <ModuleGuard requiredModule="REQUESTS"><RequestsPage/></ModuleGuard> },
           { path: 'catalog', element: <ModuleGuard requiredModule="CATALOG"><CatalogPage/></ModuleGuard> },
+          { path: 'orders', element: <ModuleGuard requiredModule={['ORDERS', 'CATALOG']}><OrdersPage/></ModuleGuard> }, // 🔥 Nueva ruta
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

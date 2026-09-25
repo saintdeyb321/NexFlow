@@ -1,5 +1,8 @@
-﻿using NexFlow.Application.Abstractions;
-using System.Text.Json;
+﻿using System.Text.Json;
+using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Shared.DTOs;
+using NexFlow.Application.Features.Catalog.DTOs;
+using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.Application.Features.Business.Offerings;
 
@@ -18,7 +21,7 @@ public sealed class OfferingService : IOfferingService
 
         var products = items
             .Where(i => i.Type == "PRODUCT")
-            .Select(i => MapToSpecific<ProductDto>(i));
+            .Select(MapToSpecific<ProductDto>);
 
         return FilterItems(products, locationId, query);
     }
@@ -29,7 +32,7 @@ public sealed class OfferingService : IOfferingService
 
         var services = items
             .Where(i => i.Type == "SERVICE")
-            .Select(i => MapToSpecific<ServiceDto>(i));
+            .Select(MapToSpecific<ServiceDto>);
 
         return FilterItems(services, locationId, query);
     }
@@ -59,7 +62,6 @@ public sealed class OfferingService : IOfferingService
         return item.LocationIds != null && item.LocationIds.Contains(locationId);
     }
 
-    // --- Helpers de Infraestructura Compartida ---
     private IEnumerable<T> FilterItems<T>(IEnumerable<T> items, string? locationId, string? query) where T : BusinessOfferingDto
     {
         if (!string.IsNullOrWhiteSpace(locationId))
@@ -80,7 +82,6 @@ public sealed class OfferingService : IOfferingService
         return items;
     }
 
-    // Mapeo seguro de la clase base a la clase concreta
     private static T MapToSpecific<T>(BusinessOfferingDto baseItem) where T : BusinessOfferingDto
     {
         var json = JsonSerializer.Serialize(baseItem);

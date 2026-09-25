@@ -6,6 +6,8 @@ using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Domain.Entities.Catalog;
 using NexFlow.Domain.Entities.System;
+// 🔥 NUEVO NAMESPACE
+using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.Application.Features.Business;
 
@@ -135,7 +137,6 @@ public class CatalogGenerationService : ICatalogGenerationService
                 DateTime.UtcNow,
                 rawPayload);
 
-            // 🔥 SPRINT 16: Guardado Transaccional en Outbox
             var outboxMessage = new OutboxMessage
             {
                 WorkspaceId = workspaceId,

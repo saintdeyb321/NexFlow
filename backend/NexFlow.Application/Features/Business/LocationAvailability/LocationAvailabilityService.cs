@@ -1,5 +1,6 @@
 ﻿using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Business;
+// 🔥 NUEVO NAMESPACE
+using NexFlow.Application.Features.Shared.DTOs;
 
 namespace NexFlow.Application.Features.Business.LocationAvailability;
 
@@ -25,10 +26,9 @@ public class LocationAvailabilityService : ILocationAvailabilityService
         return IsOfferingAvailableAtLocation(offering, locationId);
     }
 
-    // 🔥 SPRINT 1: Reemplazo por clase base
     public bool IsOfferingAvailableAtLocation(BusinessOfferingDto? offering, string locationId)
     {
-        if (offering == null) return false; // Protección contra nulos
+        if (offering == null) return false;
         if (string.Equals(offering.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)) return true;
         if (string.IsNullOrWhiteSpace(locationId)) return false;
         return offering.LocationIds != null && offering.LocationIds.Contains(locationId);

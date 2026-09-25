@@ -1,5 +1,6 @@
-export type ConversationMode = 'Automatic' | 'Human' | 'Paused';
+export type ConversationMode = 'Automatic' | 'Human';
 export type SenderType = 'Consumer' | 'AI' | 'BusinessUser' | 'System';
+export type HandoffReason = 'None' | 'AiEscalation' | 'ManualIntervention';
 
 export interface Conversation {
   id: string;
@@ -7,6 +8,7 @@ export interface Conversation {
   channel: string;
   mode: ConversationMode;
   status: string;
+  handoffReason: HandoffReason;
   startedAt: string;
   lastMessageAt: string;
 }

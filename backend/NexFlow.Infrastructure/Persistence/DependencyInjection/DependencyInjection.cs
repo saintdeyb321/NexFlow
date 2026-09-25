@@ -82,6 +82,12 @@ public static class DependencyInjection
         services.AddScoped<IFileStorage, CloudinaryFileStorage>();
         services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>();
 
+        //notificacion
+        services.AddScoped<INotificationRepository, FirestoreNotificationRepository>();
+
+        services.AddScoped<IOrderRepository, FirestoreOrderRepository>();
+
+
         // 7. Conexión a Redis Resiliente
         var redisConnString = configuration.GetConnectionString("Redis") ?? "localhost:6379";
         services.AddSingleton<IConnectionMultiplexer>(sp =>

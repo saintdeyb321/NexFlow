@@ -1,8 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿namespace NexFlow.Application.Features.Shared.DTOs;
 
-namespace NexFlow.Application.Features.Business;
-
-// 🔥 SPRINT 1: Infraestructura técnica compartida (Base)
 public abstract class BusinessOfferingDto
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
@@ -17,19 +14,4 @@ public abstract class BusinessOfferingDto
     public List<string> LocationIds { get; set; } = new();
     public string? ImageUrl { get; set; }
     public Dictionary<string, object> Metadata { get; set; } = new();
-}
-
-// 🔥 SPRINT 1: Contrato comercial EXCLUSIVO para Módulo Catálogo
-public class ProductDto : BusinessOfferingDto
-{
-    public ProductDto() { Type = "PRODUCT"; }
-}
-
-// 🔥 SPRINT 1: Contrato comercial EXCLUSIVO para Módulo Servicios
-public class ServiceDto : BusinessOfferingDto
-{
-    public int? DurationInMinutes { get; set; }
-    public bool RequiresReservation { get; set; }
-
-    public ServiceDto() { Type = "SERVICE"; }
 }

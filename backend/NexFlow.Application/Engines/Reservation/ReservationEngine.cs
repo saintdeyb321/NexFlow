@@ -3,10 +3,12 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
-using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.LocationAvailability;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Domain.Entities.System;
+// 🔥 NUEVOS NAMESPACES
+using NexFlow.Application.Features.Shared.DTOs;
+using NexFlow.Application.Features.Services.DTOs;
 using System.Transactions;
 
 namespace NexFlow.Application.Engines.Reservation;
@@ -146,7 +148,6 @@ public class ReservationEngine : IReservationEngine
 
             var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
 
-            // 🔥 SPRINT 16: Guardado Transaccional en Outbox
             var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CREATED", Guid.NewGuid().ToString(), $"res_{reservation.Id}", DateTime.UtcNow, dto);
             var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CREATED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
             await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
@@ -200,7 +201,6 @@ public class ReservationEngine : IReservationEngine
 
         var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
 
-        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
         var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_RESCHEDULED", Guid.NewGuid().ToString(), $"res_upd_{reservation.Id}", DateTime.UtcNow, dto);
         var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_RESCHEDULED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
         await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
@@ -216,7 +216,6 @@ public class ReservationEngine : IReservationEngine
         reservation.Cancel();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
         var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
         var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
         await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
@@ -232,7 +231,6 @@ public class ReservationEngine : IReservationEngine
         reservation.Cancel();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
         var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
         var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
         await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
@@ -248,7 +246,6 @@ public class ReservationEngine : IReservationEngine
         reservation.Complete();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // 🔥 SPRINT 16: Guardado Transaccional en Outbox
         var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_COMPLETED", Guid.NewGuid().ToString(), $"res_comp_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "COMPLETED" });
         var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_COMPLETED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
         await _outboxRepository.AddAsync(outboxMessage, cancellationToken);

@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using NexFlow.Application.Abstractions;
+using System;
 
 namespace NexFlow.API.Services;
 
@@ -17,17 +18,23 @@ public class WorkspaceContext : IWorkspaceContext
         get
         {
             var httpContext = _httpContextAccessor.HttpContext;
-            if (httpContext == null) return Guid.Empty;
 
-            // 🔥 SPRINT 9: Ya no leemos Headers ni Rutas. Leemos el sello de aprobación del Middleware.
+            // 1. Procesos en segundo plano o sin HTTP
+            if (httpContext == null)
+                return Guid.Empty;
+
+            // 2. Si el middleware verificó exitosamente el Workspace, lo devolvemos
             if (httpContext.Items.TryGetValue("VerifiedWorkspaceId", out var verifiedId) && verifiedId is Guid workspaceId)
             {
                 return workspaceId;
             }
 
+            // 3. SOFT FAIL: Para endpoints globales (como /api/auth o /api/me) que no requieren Workspace,
+            // devolvemos Guid.Empty. Los endpoints que SÍ requieren Workspace están protegidos 
+            // por [Authorize(Policy = "WorkspaceMember")] y devolverán 403 automáticamente si esto ocurre.
             return Guid.Empty;
         }
     }
 
-    public bool HasWorkspace => CurrentWorkspaceId != Guid.Empty;
+    public bool HasWorkspace => _httpContextAccessor.HttpContext?.Items.ContainsKey("VerifiedWorkspaceId") == true;
 }

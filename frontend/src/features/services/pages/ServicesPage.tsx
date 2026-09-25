@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Tag, Trash2, Scissors } from 'lucide-react';
-import { getServices, saveService, deleteService } from '../services/services.service';
+import { Plus, Pencil, Tag, Trash2, Scissors, FolderPlus } from 'lucide-react';
+import { getServices, saveService, deleteService, saveCategory } from '../services/services.service';
 import { ServiceModal } from '../components/ServiceModal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { ServiceDto } from '../types/services.types';
-import { ArtifactGenerator } from '../../catalog/components/ArtifactGenerator';
+import type { BusinessCategoryDto } from '../../shared/types/business-offering.types';
+import { ArtifactGenerator } from '../../artifacts/components/ArtifactGenerator';
 
 export const ServicesPage = () => {
   const queryClient = useQueryClient();
@@ -37,6 +38,16 @@ export const ServicesPage = () => {
     onError: (error: any) => alert(`Error al eliminar: ${error.message || 'Error desconocido'}`)
   });
 
+  // 🔥 Nueva mutación para categorías de servicios
+  const createCategoryMutation = useMutation({
+    mutationFn: saveCategory,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalogCategories', workspaceId] });
+      alert("Categoría de servicios creada.");
+    },
+    onError: (error: any) => alert(`Error al crear categoría: ${error.message}`)
+  });
+
   const handleOpenNew = () => {
     setServiceToEdit(null);
     setIsModalOpen(true);
@@ -45,6 +56,20 @@ export const ServicesPage = () => {
   const handleOpenEdit = (service: ServiceDto) => {
     setServiceToEdit(service);
     setIsModalOpen(true);
+  };
+
+  // 🔥 Función para crear categorías exclusivas de SERVICES
+  const handleQuickAddCategory = () => {
+    const catName = window.prompt("Nombre de la nueva categoría (Ej: Faciales, Cortes, Mantenimiento):");
+    if (catName && catName.trim()) {
+      createCategoryMutation.mutate({ 
+        name: catName, 
+        isActive: true, 
+        displayOrder: 0, 
+        description: null, 
+        scope: 'SERVICE' // 🔥 Obligamos a que pertenezca a Servicios
+      } as BusinessCategoryDto);
+    }
   };
 
   if (isServicesLoading) {
@@ -64,13 +89,25 @@ export const ServicesPage = () => {
           </div>
         </div>
         
-        <button 
-          onClick={handleOpenNew}
-          className="flex items-center px-5 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Nuevo Servicio
-        </button>
+        {/* 🔥 Botones alineados y agregados */}
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleQuickAddCategory} 
+            disabled={createCategoryMutation.isPending}
+            className="flex items-center px-4 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <FolderPlus className="w-4 h-4 mr-2" />
+            Categoría
+          </button>
+          
+          <button 
+            onClick={handleOpenNew}
+            className="flex items-center px-5 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Nuevo Servicio
+          </button>
+        </div>
       </div>
 
       <ArtifactGenerator scope="SERVICE" title="Folleto de Servicios (PDF)" />

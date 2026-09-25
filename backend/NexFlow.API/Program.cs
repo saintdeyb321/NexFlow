@@ -28,8 +28,14 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IWorkspaceContext, WorkspaceContext>();
 builder.Services.AddMemoryCache();
+
+// Colas y Workers para Inbound (Webhooks de Chat)
 builder.Services.AddSingleton<IWebhookTaskQueue, WebhookTaskQueue>();
 builder.Services.AddHostedService<WebhookProcessingBackgroundService>();
+
+// 🔥 SPRINT 16: Colas y Workers Genéricos (Outbox Pattern para anular los Task.Run)
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddHostedService<GenericBackgroundWorker>();
 
 // 3. Configurar Firebase Authentication (JWT)
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"];
@@ -114,7 +120,6 @@ builder.Services.AddHealthChecks()
         "Redis",
         failureStatus: HealthStatus.Degraded,
         tags: new[] { "ready", "cache" })
-    // 🔥 CORRECCIÓN P1: HealthCheck para PostgreSQL incluido
     .AddDbContextCheck<NexFlowDbContext>(
         "PostgreSQL",
         failureStatus: HealthStatus.Unhealthy,
@@ -173,12 +178,11 @@ if (!app.Environment.IsDevelopment())
 
 app.UseCors("AllowFrontend");
 
-// 🔥 CORRECCIÓN P0: Orden correcto del pipeline de seguridad
 app.UseAuthentication();
 app.UseMiddleware<UserIdentityMiddleware>();
 app.UseMiddleware<NexFlow.API.Middleware.TenantIsolationMiddleware>();
 app.UseAuthorization();
-app.UseRateLimiter(); // Ahora el limitador sí puede leer context.User.Identity.IsAuthenticated
+app.UseRateLimiter();
 
 // Función formateadora de reporte JSON
 static Task WriteHealthResponse(HttpContext context, HealthReport report)
@@ -199,26 +203,22 @@ static Task WriteHealthResponse(HttpContext context, HealthReport report)
     return context.Response.WriteAsJsonAsync(response);
 }
 
-// Liveness: El proceso está vivo
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
     Predicate = _ => false,
     ResponseWriter = WriteHealthResponse
 });
 
-// Readiness: Los servicios y bases de datos están listos
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready"),
     ResponseWriter = WriteHealthResponse
 });
 
-// Endpoint general por compatibilidad
 app.MapHealthChecks("/health", new HealthCheckOptions
 {
     ResponseWriter = WriteHealthResponse
 });
 
 app.MapControllers();
-
 app.Run();

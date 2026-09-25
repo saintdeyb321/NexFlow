@@ -23,10 +23,14 @@ public class FirestoreRequestRepository : IRequestRepository
         var data = new Dictionary<string, object>
         {
             { "Id", request.Id },
+            { "ConversationId", request.ConversationId },
             { "ConsumerPhone", request.ConsumerPhone },
+            { "Type", request.Type.ToString().ToUpperInvariant() },
             { "Title", request.Title },
             { "Description", request.Description },
-            { "Status", request.Status.ToString() }, // Se guarda como string para mayor claridad en BD
+            { "Status", request.Status.ToString().ToUpperInvariant() },
+            { "AssignedTo", request.AssignedTo ?? "" },
+            { "Metadata", request.Metadata ?? new Dictionary<string, object>() },
             { "CreatedAt", request.CreatedAt.ToUniversalTime() },
             { "UpdatedAt", request.UpdatedAt.ToUniversalTime() }
         };
@@ -41,33 +45,9 @@ public class FirestoreRequestRepository : IRequestRepository
             .Limit(100)
             .GetSnapshotAsync(cancellationToken);
 
-        var list = new List<RequestRecord>();
-
-        foreach (var doc in snapshot.Documents)
-        {
-            if (doc.Exists)
-            {
-                var statusString = doc.GetValue<string>("Status");
-                var statusEnum = Enum.TryParse<RequestStatus>(statusString, true, out var parsed)
-                                 ? parsed
-                                 : RequestStatus.Pending;
-
-                list.Add(new RequestRecord
-                {
-                    Id = doc.GetValue<string>("Id"),
-                    ConsumerPhone = doc.GetValue<string>("ConsumerPhone"),
-                    Title = doc.GetValue<string>("Title"),
-                    Description = doc.GetValue<string>("Description"),
-                    Status = statusEnum,
-                    CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
-                    UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
-                });
-            }
-        }
-        return list;
+        return snapshot.Documents.Where(d => d.Exists).Select(MapToRequestRecord).ToList();
     }
 
-    // 🔥 SPRINT 4: Obtener la última solicitud del cliente
     public async Task<RequestRecord?> GetLatestRequestByPhoneAsync(Guid workspaceId, string phone, CancellationToken cancellationToken)
     {
         var snapshot = await GetCollection(workspaceId)
@@ -77,27 +57,7 @@ public class FirestoreRequestRepository : IRequestRepository
             .GetSnapshotAsync(cancellationToken);
 
         var doc = snapshot.Documents.FirstOrDefault();
-
-        if (doc != null && doc.Exists)
-        {
-            var statusString = doc.GetValue<string>("Status");
-            var statusEnum = Enum.TryParse<RequestStatus>(statusString, true, out var parsed)
-                             ? parsed
-                             : RequestStatus.Pending;
-
-            return new RequestRecord
-            {
-                Id = doc.GetValue<string>("Id"),
-                ConsumerPhone = doc.GetValue<string>("ConsumerPhone"),
-                Title = doc.GetValue<string>("Title"),
-                Description = doc.GetValue<string>("Description"),
-                Status = statusEnum,
-                CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
-                UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
-            };
-        }
-
-        return null;
+        return (doc != null && doc.Exists) ? MapToRequestRecord(doc) : null;
     }
 
     public async Task UpdateRequestStatusAsync(Guid workspaceId, string requestId, string status, CancellationToken cancellationToken)
@@ -108,5 +68,34 @@ public class FirestoreRequestRepository : IRequestRepository
             { "Status", status.ToUpperInvariant() },
             { "UpdatedAt", DateTime.UtcNow }
         }, cancellationToken: cancellationToken);
+    }
+
+    // 🔥 Método Helper para lectura segura compatible con datos viejos
+    private static RequestRecord MapToRequestRecord(DocumentSnapshot doc)
+    {
+        doc.TryGetValue("Status", out string statusString);
+        var statusEnum = Enum.TryParse<RequestStatus>(statusString, true, out var parsedStatus) ? parsedStatus : RequestStatus.Pending;
+
+        doc.TryGetValue("Type", out string typeString);
+        var typeEnum = Enum.TryParse<RequestType>(typeString, true, out var parsedType) ? parsedType : RequestType.Other;
+
+        doc.TryGetValue("ConversationId", out string conversationId);
+        doc.TryGetValue("AssignedTo", out string assignedTo);
+        doc.TryGetValue("Metadata", out Dictionary<string, object> metadata);
+
+        return new RequestRecord
+        {
+            Id = doc.GetValue<string>("Id"),
+            ConversationId = conversationId ?? string.Empty,
+            ConsumerPhone = doc.GetValue<string>("ConsumerPhone"),
+            Type = typeEnum,
+            Title = doc.GetValue<string>("Title"),
+            Description = doc.GetValue<string>("Description"),
+            Status = statusEnum,
+            AssignedTo = assignedTo,
+            Metadata = metadata ?? new Dictionary<string, object>(),
+            CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
+            UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
+        };
     }
 }

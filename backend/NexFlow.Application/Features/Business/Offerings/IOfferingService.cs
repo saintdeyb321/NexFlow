@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Features.Business;
+﻿using NexFlow.Application.Features.Catalog.DTOs;
+using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.Application.Features.Business.Offerings;
 

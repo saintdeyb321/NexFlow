@@ -1,12 +1,10 @@
-﻿using NexFlow.Application.Features.Business;
+﻿// 🔥 NUEVO NAMESPACE
+using NexFlow.Application.Features.Shared.DTOs;
 
 namespace NexFlow.Application.Features.Business.LocationAvailability;
 
 public interface ILocationAvailabilityService
 {
-    // Valida asíncronamente desde BD (Location ∈ Workspace, Offering ∈ Workspace, Offering en Location)
     Task<bool> IsOfferingAvailableAtLocationAsync(Guid workspaceId, string offeringId, string locationId, CancellationToken cancellationToken);
-
-    // Validación síncrona en memoria para cuando ya tienes el DTO cargado
-    bool IsOfferingAvailableAtLocation(BusinessOfferingDto offering, string locationId);
+    bool IsOfferingAvailableAtLocation(BusinessOfferingDto? offering, string locationId);
 }

@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, Trash2, FolderPlus } from 'lucide-react';
 import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } from '../services/catalog.service';
-import type { ProductDto, CatalogCategoryDto } from '../types/catalog.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { ImageUploader } from '../../../components/ui/ImageUploader';
-import { ArtifactGenerator } from '../components/ArtifactGenerator';
+import { ArtifactGenerator } from '../../artifacts/components/ArtifactGenerator';
+// 🔥 CORRECCIÓN 1: Importamos tanto ProductCategoryDto como ProductDto
+import type { ProductCategoryDto, ProductDto } from '../types/catalog.types';
 
 export const CatalogPage = () => {
   const queryClient = useQueryClient();
@@ -26,6 +27,7 @@ export const CatalogPage = () => {
     enabled: !!workspaceId 
   });
 
+  // 🔥 CORRECCIÓN 2: El estado debe ser Partial<ProductDto>, no ProductCategoryDto
   const [newProduct, setNewProduct] = useState<Partial<ProductDto>>({ 
     name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', 
     isActive: true, type: 'PRODUCT', locationScope: 'ALL', locationIds: [] 
@@ -71,7 +73,7 @@ export const CatalogPage = () => {
         displayOrder: 0, 
         description: null, 
         scope: 'PRODUCT' 
-      } as CatalogCategoryDto);
+      } as ProductCategoryDto);
     }
   };
 

@@ -9,4 +9,5 @@ public class ProcessedMessage
     public DateTime? ProcessedAt { get; set; }
     public int Attempts { get; set; } = 1;
     public string? LastError { get; set; }
+    public DateTime ProcessingStartedAt { get; set; } = DateTime.UtcNow;
 }

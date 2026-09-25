@@ -12,15 +12,18 @@ namespace NexFlow.API.Controllers.Business;
 public class RequestsController : ControllerBase
 {
     private readonly IRequestRepository _requestRepository;
+    private readonly IRequestService _requestService;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
 
     public RequestsController(
         IRequestRepository requestRepository,
+        IRequestService requestService,
         IWorkspaceContext workspaceContext,
         IEntitlementService entitlementService)
     {
         _requestRepository = requestRepository;
+        _requestService = requestService;
         _workspaceContext = workspaceContext;
         _entitlementService = entitlementService;
     }
@@ -35,6 +38,31 @@ public class RequestsController : ControllerBase
 
         var requests = await _requestRepository.GetRequestsAsync(WorkspaceId, cancellationToken);
         return Ok(requests);
+    }
+
+    // 🔥 SPRINT 06: Nuevo endpoint para creación manual desde el Dashboard
+    [HttpPost]
+    public async Task<IActionResult> CreateRequest([FromBody] CreateRequestDto payload, CancellationToken cancellationToken)
+    {
+        var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken);
+        if (!activeModules.Contains("REQUESTS")) return StatusCode(403, "Módulo REQUESTS no contratado.");
+
+        if (!Enum.TryParse<RequestType>(payload.Type, true, out var parsedType))
+        {
+            return BadRequest(new { code = "Request.InvalidType", message = $"El tipo '{payload.Type}' no es válido." });
+        }
+
+        var requestId = await _requestService.CreateRequestAsync(
+            WorkspaceId,
+            payload.ConsumerPhone,
+            payload.ConversationId ?? "MANUAL_ENTRY", // Si se crea a mano, indicamos el origen
+            parsedType,
+            payload.Title,
+            payload.Description,
+            payload.Metadata,
+            cancellationToken);
+
+        return Ok(new { Id = requestId, Message = "Solicitud creada exitosamente." });
     }
 
     [HttpPut("{requestId}/status")]
@@ -53,4 +81,14 @@ public class RequestsController : ControllerBase
     }
 }
 
+// DTOs
 public record UpdateStatusDto(string Status);
+
+public record CreateRequestDto(
+    string ConsumerPhone,
+    string? ConversationId,
+    string Type,
+    string Title,
+    string Description,
+    Dictionary<string, object>? Metadata
+);

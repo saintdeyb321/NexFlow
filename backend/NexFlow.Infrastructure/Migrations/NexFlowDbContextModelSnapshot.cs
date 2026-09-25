@@ -217,6 +217,9 @@ namespace NexFlow.Infrastructure.Migrations
                     b.Property<DateTime?>("ProcessedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime>("ProcessingStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("ReceivedAt")
                         .HasColumnType("timestamp with time zone");
 

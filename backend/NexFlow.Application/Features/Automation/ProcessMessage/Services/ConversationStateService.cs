@@ -19,6 +19,9 @@ public sealed class ConversationStateService : IConversationStateService
     private readonly IConversationCache _conversationCache;
     private readonly ILogger<ConversationStateService> _logger;
 
+    // 🔥 SPRINT 08: Tiempo máximo de inactividad antes de considerar una nueva sesión (24 horas)
+    private readonly TimeSpan _sessionTimeout = TimeSpan.FromHours(24);
+
     public ConversationStateService(
         IConversationRepository conversationRepo,
         IConsumerIdentityRepository consumerRepo,
@@ -34,6 +37,15 @@ public sealed class ConversationStateService : IConversationStateService
     public async Task<(bool ShouldAiRespond, ConversationRecord Record, string? FastReply)> ProcessStateAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
+
+        // 🔥 SPRINT 08: Control de Sesión. Si la conversación existe pero es muy vieja, la cerramos.
+        if (conversation != null && (DateTime.UtcNow - conversation.LastMessageAt) > _sessionTimeout)
+        {
+            _logger.LogInformation("La conversación {ConvId} ha expirado por inactividad. Cerrando sesión.", conversation.Id);
+            await _conversationRepo.CloseConversationAsync(workspaceId, conversation.Id, cancellationToken);
+            await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
+            conversation = null; // Forzamos la creación de una nueva sesión abajo
+        }
 
         // 1. Mensajes Salientes (Enviados por Humanos desde NexFlow)
         if (request.FromMe)
@@ -56,7 +68,13 @@ public sealed class ConversationStateService : IConversationStateService
             if (conversation.Mode != ConversationMode.Human)
             {
                 await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
-                await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
+
+                var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new ConversationContextDto();
+                context.Mode = "Human";
+                context.HandoffReason = HandoffReason.ManualIntervention.ToString();
+                context.HandoffAt = DateTime.UtcNow;
+                await _conversationCache.SetContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
+
                 conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
             }
 
@@ -67,6 +85,7 @@ public sealed class ConversationStateService : IConversationStateService
         // 2. Registro del Consumidor e Inbound
         await _consumerRepo.UpsertConsumerAsync(workspaceId, new ConsumerIdentityRecord { Phone = normalizedPhone, DisplayName = request.CustomerName, FirstSeenAt = DateTime.UtcNow, LastInteractionAt = DateTime.UtcNow }, cancellationToken);
 
+        // Si era nula (o fue cerrada por vieja), aquí se crea la nueva sesión fresca
         conversation ??= await _conversationRepo.GetOrCreateActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
         await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Direction = "inbound", Sender = SenderType.Consumer, Content = request.MessageText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
 
@@ -79,7 +98,6 @@ public sealed class ConversationStateService : IConversationStateService
         string? fastResponse = null;
         if (wordCount <= 3 && Regex.IsMatch(txt, @"^(hola|buenas|ola|buenos dias|buenas tardes|hey)$"))
         {
-            // 🔥 UX FIX: Borramos la memoria fantasma de reservas anteriores al saludar
             await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
             fastResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
         }

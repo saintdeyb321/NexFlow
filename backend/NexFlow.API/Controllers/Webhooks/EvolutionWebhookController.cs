@@ -54,8 +54,7 @@ public class EvolutionWebhookController : ControllerBase
         if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-") || payload.Data.Key.RemoteJid == "status@broadcast")
             return Ok();
 
-        // 🔥 SPRINT 11: PREVENCIÓN DE BOT-LOOPS Y DUPLICADOS 
-        // Si el mensaje fue enviado por el propio negocio (Bot o Humano desde la App), lo descartamos de la cola de procesamiento IA.
+        // Si el mensaje fue enviado por el propio negocio, lo descartamos
         if (payload.Data.Key.FromMe)
         {
             _logger.LogDebug("Mensaje saliente (FromMe) ignorado. ID: {MessageId}", payload.Data.Key.Id);
@@ -64,7 +63,6 @@ public class EvolutionWebhookController : ControllerBase
 
         var messageText = payload.Data.Message.GetRealText();
 
-        // 2. Filtro de mensajes vacíos o no soportados para no saturar la cola en memoria
         if (string.IsNullOrWhiteSpace(messageText))
         {
             _logger.LogDebug("Mensaje sin texto o contenido no soportado ignorado. ID: {MessageId}", payload.Data.Key.Id);
@@ -80,8 +78,16 @@ public class EvolutionWebhookController : ControllerBase
             FromMe: payload.Data.Key.FromMe
         );
 
-        // 3. Encolamiento ultra-rápido. El BackgroundWorker usará el IncomingMessageGuard que hicimos en el Sprint 1.
-        await _taskQueue.QueueBackgroundWorkItemAsync(command);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)); // Evitamos trabar la respuesta HTTP
+            await _taskQueue.QueueBackgroundWorkItemAsync(command);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "La cola en memoria está saturada o falló al recibir el mensaje {MessageId}", command.MessageId);
+            return StatusCode(503, new { Error = "Servidor saturado temporalmente." });
+        }
 
         return Ok();
     }

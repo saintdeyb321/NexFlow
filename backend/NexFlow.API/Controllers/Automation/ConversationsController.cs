@@ -1,7 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Application.Abstractions.Cache;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Nuevo using
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Conversations;
 
@@ -53,20 +54,42 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpPost("{conversationId}/takeover")]
-    public async Task<IActionResult> TakeOverConversation(string conversationId, CancellationToken cancellationToken)
+    public async Task<IActionResult> TakeOverConversation(string conversationId, [FromServices] IConversationCache cache, CancellationToken cancellationToken)
     {
-        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para asumir el control humano.");
+        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para asumir el control.");
 
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
+
+        var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
+        if (conversation != null)
+        {
+            var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
+            context.Mode = "Human";
+            context.HandoffReason = HandoffReason.ManualIntervention.ToString();
+            context.HandoffAt = DateTime.UtcNow;
+            await cache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, context, cancellationToken);
+        }
+
         return Ok(new { message = "Control humano asumido. La IA ha sido silenciada temporalmente.", mode = ConversationMode.Human.ToString() });
     }
 
     [HttpPost("{conversationId}/release")]
-    public async Task<IActionResult> ReleaseConversation(string conversationId, CancellationToken cancellationToken)
+    public async Task<IActionResult> ReleaseConversation(string conversationId, [FromServices] IConversationCache cache, CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para liberar el chat.");
 
         await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Automatic, HandoffReason.None, cancellationToken);
+
+        var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
+        if (conversation != null)
+        {
+            var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
+            context.Mode = "Automatic";
+            context.HandoffReason = null;
+            context.HandoffAt = null;
+            await cache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, context, cancellationToken);
+        }
+
         return Ok(new { message = "Chat liberado. La Inteligencia Artificial vuelve a tomar el control.", mode = ConversationMode.Automatic.ToString() });
     }
 
@@ -74,7 +97,8 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> SendManualMessage(
         string conversationId,
         [FromBody] SendManualMessageRequest request,
-        [FromServices] IMessageGateway messageGateway,
+        [FromServices] IOutboundMessageService outboundMessageService, // 🔥 SPRINT 14: Usamos el nuevo servicio
+        [FromServices] IConversationCache cache,
         CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("SEND_MESSAGE", cancellationToken)) return StatusCode(403, "No tiene permisos para enviar mensajes.");
@@ -82,56 +106,36 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        // 1. Guardamos como PENDING primero
-        var pendingId = Guid.NewGuid().ToString();
-        var initialRecord = new MessageRecord
-        {
-            Id = pendingId,
-            Direction = "outbound",
-            Sender = SenderType.BusinessUser,
-            Content = request.Content,
-            ExternalMessageId = pendingId,
-            Status = MessageStatus.Pending,
-            Timestamp = DateTime.UtcNow
-        };
-        await _conversationRepository.AddMessageAsync(WorkspaceId, conversation.Id, initialRecord, cancellationToken);
+        // 🔥 SPRINT 14: Delegamos la complejidad transaccional a nuestro servicio robusto
+        var finalRecord = await outboundMessageService.SendMessageAsync(
+            WorkspaceId,
+            conversation.Id,
+            conversation.ConsumerPhone,
+            request.Content,
+            SenderType.BusinessUser,
+            cancellationToken);
 
-        MessageRecord finalRecord;
-
-        // 2. Intentamos enviar y actualizamos según el resultado
-        try
+        if (finalRecord.Status == MessageStatus.Failed)
         {
-            var externalId = await messageGateway.SendTextAsync(WorkspaceId, conversation.ConsumerPhone, request.Content, pendingId, cancellationToken);
-            await _conversationRepository.UpdateMessageStatusAsync(WorkspaceId, conversation.Id, pendingId, MessageStatus.Sent, externalId, cancellationToken);
-
-            // 🔥 CORRECCIÓN: Creamos una nueva instancia limpia para la respuesta del frontend respetando los 'init'
-            finalRecord = new MessageRecord
-            {
-                Id = initialRecord.Id,
-                Direction = initialRecord.Direction,
-                Sender = initialRecord.Sender,
-                Content = initialRecord.Content,
-                ExternalMessageId = externalId,
-                Status = MessageStatus.Sent,
-                Timestamp = initialRecord.Timestamp
-            };
-        }
-        catch (Exception)
-        {
-            await _conversationRepository.UpdateMessageStatusAsync(WorkspaceId, conversation.Id, pendingId, MessageStatus.Failed, null, cancellationToken);
             return StatusCode(500, new { message = "No se pudo entregar el mensaje a WhatsApp." });
         }
 
         if (conversation.Mode != ConversationMode.Human)
         {
             await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
+
+            var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
+            context.Mode = "Human";
+            context.HandoffReason = HandoffReason.ManualIntervention.ToString();
+            context.HandoffAt = DateTime.UtcNow;
+            await cache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, context, cancellationToken);
         }
 
         return Ok(finalRecord);
     }
 
     [HttpDelete("{conversationId}")]
-    public async Task<IActionResult> DeleteConversation(string conversationId, [FromServices] NexFlow.Application.Abstractions.Cache.IConversationCache conversationCache, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteConversation(string conversationId, [FromServices] IConversationCache conversationCache, CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para eliminar conversaciones.");
 
