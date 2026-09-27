@@ -40,30 +40,35 @@ public class ReservationRepository : IReservationRepository
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string locationId, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
+    public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string? locationId, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
     {
         // 🔥 SPRINT 6: El repositorio ya no adivina el TimeZone. Compara directamente en UTC.
-        return await _context.Reservations
+        var query = _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
-                     && r.LocationId == locationId
-                     && r.Status != ReservationStatus.Cancelled
                      && r.StartTime >= startUtc
-                     && r.StartTime < endUtc)
+                     && r.StartTime < endUtc);
+
+        if (!string.IsNullOrEmpty(locationId))
+            query = query.Where(r => r.LocationId == locationId);
+
+        return await query
             .OrderBy(r => r.StartTime)
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string locationId, DateTime startTime, DateTime endTime, Guid? excludeReservationId = null, CancellationToken cancellationToken = default)
+    public async Task<bool> IsTimeSlotAvailableAsync(Guid workspaceId, string? locationId, DateTime startTime, DateTime endTime, Guid? excludeReservationId = null, CancellationToken cancellationToken = default)
     {
         var utcStartTime = startTime.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(startTime, DateTimeKind.Utc) : startTime.ToUniversalTime();
         var utcEndTime = endTime.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(endTime, DateTimeKind.Utc) : endTime.ToUniversalTime();
 
         var query = _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
-                     && r.LocationId == locationId
                      && r.Status != ReservationStatus.Cancelled
                      && r.StartTime < utcEndTime
                      && r.EndTime > utcStartTime);
+
+        if (!string.IsNullOrEmpty(locationId))
+            query = query.Where(r => r.LocationId == locationId);
 
         if (excludeReservationId.HasValue)
         {

@@ -38,15 +38,20 @@ public class OutboundMessageService : IOutboundMessageService
         // 1. Guardamos como PENDING primero
         await _conversationRepo.AddMessageAsync(workspaceId, conversationId, initialRecord, ct);
 
+        // 🔥 SPRINT 1: Limitamos el manejo de fallos al envío a Evolution API.
+        string externalId;
         try
         {
             // 2. Intentamos enviar a Evolution / WhatsApp
-            var externalId = await _messageGateway.SendTextAsync(workspaceId, phone, content, pendingId, ct);
-
-            // 3. Actualizamos a SENT
-            await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, externalId, ct);
-
-            return initialRecord with { ExternalMessageId = externalId, Status = MessageStatus.Sent };
+            externalId = await _messageGateway.SendTextAsync(workspaceId, phone, content, pendingId, ct);
+            // 🔥 SPRINT 1: Sin identificador no hay confirmación válida del envío.
+            if (string.IsNullOrWhiteSpace(externalId))
+                throw new InvalidOperationException("Evolution API no confirmó el envío del mensaje.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 🔥 SPRINT 1: Propagamos la cancelación; no confirmamos un envío incierto.
+            throw;
         }
         catch (Exception)
         {
@@ -55,5 +60,9 @@ public class OutboundMessageService : IOutboundMessageService
 
             return initialRecord with { Status = MessageStatus.Failed };
         }
+
+        // 🔥 SPRINT 1: Un fallo de persistencia se propaga sin reclasificar el envío.
+        await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, externalId, ct);
+        return initialRecord with { ExternalMessageId = externalId, Status = MessageStatus.Sent };
     }
 }

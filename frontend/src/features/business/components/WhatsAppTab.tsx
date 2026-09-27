@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { QrCode, RefreshCw, PowerOff, ShieldCheck, MessageCircle } from 'lucide-react';
+import { QrCode, RefreshCw, PowerOff, ShieldCheck, MessageCircle, Clock } from 'lucide-react';
 import { getWhatsAppStatus, connectWhatsApp, disconnectWhatsApp } from '../services/business.service';
 import type { ConnectionStatus } from '../types/business.types';
 
@@ -8,10 +8,14 @@ interface WhatsAppTabProps {
 }
 
 export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
-  const [status, setStatus] = useState<ConnectionStatus>('DISCONNECTED');
+  const [status, setStatus] = useState<ConnectionStatus | 'QR_EXPIRED'>('DISCONNECTED');
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(30); 
+  
+  // 🔥 Nuevo estado para el modal de confirmación
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
 
   const fetchStatus = async () => {
     try {
@@ -26,7 +30,6 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
 
   useEffect(() => {
     fetchStatus();
-    // Polling cada 5 segundos solo si está esperando escanear el QR
     const interval = setInterval(() => {
       if (status === 'QR_AVAILABLE' || status === 'CONNECTING') {
         fetchStatus();
@@ -35,15 +38,40 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
     return () => clearInterval(interval);
   }, [status]);
 
+  useEffect(() => {
+    let timer: any;
+    if (status === 'QR_AVAILABLE' && qrCode) {
+      setTimeLeft(30);
+      timer = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            setStatus('QR_EXPIRED'); 
+            setQrCode(null);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [status, qrCode]);
+
   const handleConnect = async () => {
     setIsProcessing(true);
     setQrCode(null);
+    setStatus('CONNECTING');
     try {
       const response = await connectWhatsApp();
-      if (response.qrBase64) {
+      if ('qrBase64' in response && response.qrBase64) {
         setQrCode(response.qrBase64);
         setStatus('QR_AVAILABLE');
-        showMessage('Código QR generado. Escanéalo con tu WhatsApp.', 'success');
+        showMessage('Código QR generado. Tienes 30 segundos para escanearlo.', 'success');
+      } else if ('status' in response && response.status === 'CONNECTED') {
+        setStatus('CONNECTED');
+        showMessage('El dispositivo ya estaba conectado.', 'success');
+      } else {
+        throw new Error('Respuesta de conexión inválida.');
       }
     } catch (error) {
       showMessage('No se pudo generar el código QR. Intenta nuevamente.', 'error');
@@ -53,10 +81,10 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
     }
   };
 
-  const handleDisconnect = async () => {
-    if (!window.confirm("¿Estás seguro de que deseas desconectar este dispositivo? El bot dejará de funcionar.")) return;
-    
+  // 🔥 Se eliminó el window.confirm() bloqueante
+  const executeDisconnect = async () => {
     setIsProcessing(true);
+    setShowDisconnectConfirm(false);
     try {
       await disconnectWhatsApp();
       setStatus('DISCONNECTED');
@@ -89,13 +117,16 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
 
       <div className="border border-gray-100 rounded-lg p-6 bg-gray-50">
         
-        {/* ESTADO: DESCONECTADO */}
-        {status === 'DISCONNECTED' || status === 'ERROR' ? (
+        {status === 'DISCONNECTED' || status === 'ERROR' || status === 'QR_EXPIRED' ? (
           <div className="flex flex-col items-center justify-center text-center">
             <QrCode className="w-16 h-16 text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Dispositivo no vinculado</h3>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              {status === 'QR_EXPIRED' ? 'El código QR ha expirado' : 'Dispositivo no vinculado'}
+            </h3>
             <p className="text-gray-500 text-sm mb-6 max-w-md">
-              Haz clic en conectar para generar un código QR. Deberás escanearlo desde la sección "Dispositivos Vinculados" en tu aplicación de WhatsApp.
+              {status === 'QR_EXPIRED' 
+                ? 'Por seguridad, el código QR solo es válido por 30 segundos. Genera uno nuevo para intentar otra vez.'
+                : 'Haz clic en conectar para generar un código QR. Deberás escanearlo desde la sección "Dispositivos Vinculados" en tu aplicación de WhatsApp.'}
             </p>
             <button 
               onClick={handleConnect} 
@@ -108,35 +139,31 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
           </div>
         ) : null}
 
-        {/* ESTADO: ESPERANDO ESCANEO (QR) */}
         {status === 'QR_AVAILABLE' && qrCode ? (
           <div className="flex flex-col items-center justify-center text-center">
             <h3 className="text-lg font-medium text-gray-900 mb-2">Escanea el código QR</h3>
-            <p className="text-gray-500 text-sm mb-4">Abre WhatsApp en tu teléfono {'>'} Dispositivos Vinculados {'>'} Vincular un dispositivo.</p>
+            <p className="text-gray-500 text-sm mb-4">Abre WhatsApp {'>'} Dispositivos Vinculados {'>'} Vincular un dispositivo.</p>
             
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
-              {/* Evolution API devuelve la cadena en Base64 cruda, si ya trae el data:image la usamos, sino se lo agregamos */}
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4 relative">
               <img 
                 src={qrCode.startsWith('data:image') ? qrCode : `data:image/png;base64,${qrCode}`} 
                 alt="WhatsApp QR Code" 
                 className="w-64 h-64"
               />
+              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs font-bold px-2 py-1 rounded-md flex items-center">
+                <Clock className="w-3 h-3 mr-1" /> {timeLeft}s
+              </div>
             </div>
             
             <div className="flex items-center text-blue-600 text-sm font-medium animate-pulse">
               <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
               Esperando conexión...
             </div>
-            
-            <button onClick={handleDisconnect} className="mt-6 text-sm text-red-500 hover:text-red-700 font-medium">
-              Cancelar
-            </button>
           </div>
         ) : null}
 
-        {/* ESTADO: CONECTADO */}
         {status === 'CONNECTED' ? (
-          <div className="flex flex-col items-center justify-center text-center py-4">
+          <div className="flex flex-col items-center justify-center text-center py-4 relative">
             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <ShieldCheck className="w-10 h-10 text-green-600" />
             </div>
@@ -147,13 +174,25 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
             </p>
 
             <button 
-              onClick={handleDisconnect} 
+              onClick={() => setShowDisconnectConfirm(true)} 
               disabled={isProcessing}
               className="mt-2 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-medium py-2 px-6 rounded-lg transition-colors flex items-center disabled:opacity-50"
             >
               {isProcessing ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <PowerOff className="w-5 h-5 mr-2" />}
               {isProcessing ? 'Desconectando...' : 'Desconectar Dispositivo'}
             </button>
+
+            {/* 🔥 Modal flotante de desconexión sin bloquear la UI */}
+            {showDisconnectConfirm && (
+              <div className="absolute top-full mt-4 bg-white border border-gray-200 shadow-xl p-5 rounded-xl z-10 w-80 text-left">
+                <h4 className="text-red-600 font-bold mb-2">¿Desconectar dispositivo?</h4>
+                <p className="text-sm text-gray-600 mb-4">El bot dejará de funcionar y ya no responderá automáticamente a tus clientes.</p>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setShowDisconnectConfirm(false)} className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium">Cancelar</button>
+                  <button onClick={executeDisconnect} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Sí, Desconectar</button>
+                </div>
+              </div>
+            )}
           </div>
         ) : null}
 

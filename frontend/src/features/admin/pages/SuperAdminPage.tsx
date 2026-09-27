@@ -4,12 +4,18 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 import { useSuperAdmin } from '../hooks/useSuperAdmin';
 import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ProvisionWorkspaceModal } from '../components/ProvisionWorkspaceModal';
+import { RenewLicenseModal } from '../components/RenewLicenseModal'; // 🔥 Import
+import { AssignModuleModal } from '../components/AssignModuleModal'; // 🔥 Import
+import type { WorkspaceSummaryDto } from '../types/admin.types';
 
 export const SuperAdminPage = () => {
   const { me } = useAuthStore();
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
   
-  const [showModal, setShowModal] = useState(false);
+  const [showProvisionModal, setShowProvisionModal] = useState(false);
+  const [workspaceToRenew, setWorkspaceToRenew] = useState<WorkspaceSummaryDto | null>(null); // 🔥 Estado Renovación
+  const [workspaceToModule, setWorkspaceToModule] = useState<WorkspaceSummaryDto | null>(null); // 🔥 Estado Módulo
+
   const { workspaces, isLoading, isProvisioning, loadWorkspaces, handleProvision, handleToggleStatus, handleDelete } = useSuperAdmin();
 
   useEffect(() => {
@@ -40,7 +46,7 @@ export const SuperAdminPage = () => {
           <p className="text-gray-500 text-sm mt-1">Gestión centralizada de inquilinos y licencias operativas.</p>
         </div>
         <button 
-          onClick={() => setShowModal(true)} 
+          onClick={() => setShowProvisionModal(true)} 
           className="flex items-center px-5 py-2.5 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4 mr-2" /> Aprovisionar Cliente
@@ -59,24 +65,33 @@ export const SuperAdminPage = () => {
           ) : (
             workspaces.map(ws => (
               <WorkspaceCard
-                  key={ws.id} // 🔥 Corregido: ws.id en lugar de workspace.id
-                  workspace={ws} // 🔥 Corregido: ws en lugar de workspace
+                  key={ws.id} 
+                  workspace={ws} 
                   onToggleStatus={handleToggleStatus}
                   onDelete={handleDelete}
-                  onRenew={(w) => console.log('Renovar pendiente', w)}
-                  onAssignModule={(w) => console.log('Módulo pendiente', w)}
+                  onRenew={(w) => setWorkspaceToRenew(w)} // 🔥 Abre modal
+                  onAssignModule={(w) => setWorkspaceToModule(w)} // 🔥 Abre modal
               />
             ))
           )}
         </div>
       </div>
 
-      {/* Modal Desacoplado */}
       <ProvisionWorkspaceModal 
-        isOpen={showModal}
-        onClose={() => setShowModal(false)} 
+        isOpen={showProvisionModal}
+        onClose={() => setShowProvisionModal(false)} 
         onProvision={handleProvision} 
         isProvisioning={isProvisioning} 
+      />
+
+      <RenewLicenseModal 
+        workspace={workspaceToRenew}
+        onClose={() => setWorkspaceToRenew(null)}
+      />
+
+      <AssignModuleModal 
+        workspace={workspaceToModule}
+        onClose={() => setWorkspaceToModule(null)}
       />
       
     </div>

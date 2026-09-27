@@ -35,11 +35,16 @@ public class GeminiAiProvider : IAiProvider
 
     public async Task<string> GenerateTextAsync(string systemPrompt, string userMessage, bool useJsonMode = false, CancellationToken cancellationToken = default)
     {
-        var response = await GenerateChatResponseAsync(systemPrompt, new List<AiMessage> { new("user", userMessage) }, null, cancellationToken);
+        var response = await GenerateChatResponseInternalAsync(systemPrompt, new List<AiMessage> { new("user", userMessage) }, null, useJsonMode, cancellationToken);
         return response.Text ?? string.Empty;
     }
 
-    public async Task<AiResponse> GenerateChatResponseAsync(string systemPrompt, List<AiMessage> history, List<AiTool>? tools = null, CancellationToken cancellationToken = default)
+    public Task<AiResponse> GenerateChatResponseAsync(string systemPrompt, List<AiMessage> history, List<AiTool>? tools = null, CancellationToken cancellationToken = default)
+    {
+        return GenerateChatResponseInternalAsync(systemPrompt, history, tools, false, cancellationToken);
+    }
+
+    private async Task<AiResponse> GenerateChatResponseInternalAsync(string systemPrompt, List<AiMessage> history, List<AiTool>? tools, bool useJsonMode, CancellationToken cancellationToken)
     {
         var safeSystemPrompt = string.IsNullOrWhiteSpace(systemPrompt) ? "Eres un asistente virtual corporativo." : systemPrompt;
 
@@ -83,7 +88,15 @@ public class GeminiAiProvider : IAiProvider
             { "contents", payloadContents }
         };
 
-        // Si en el futuro añadimos useJsonMode real nativo, iría en generationConfig aquí.
+        // 🔥 SPRINT 8: Aplicación estricta de JSON Mode si es requerido
+        if (useJsonMode)
+        {
+            payload["generationConfig"] = new
+            {
+                responseMimeType = "application/json",
+                temperature = 0.0
+            };
+        }
 
         string jsonPayload = JsonSerializer.Serialize(payload);
 

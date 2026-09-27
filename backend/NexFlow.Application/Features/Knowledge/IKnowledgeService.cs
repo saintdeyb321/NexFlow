@@ -1,11 +1,11 @@
-﻿namespace NexFlow.Application.Features.Knowledge;
+﻿using NexFlow.Application.Features.Knowledge;
+
+namespace NexFlow.Application.Abstractions;
 
 public interface IKnowledgeService
 {
     Task<BusinessKnowledgeSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Consulta el conocimiento estructurado sin usar IA, aplicando filtros de sede y términos de búsqueda.
-    /// </summary>
-    KnowledgeResult Query(BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query);
+    // 🔥 SPRINT 04: Query ahora es asíncrono para poder ir a BD y no consumir memoria.
+    Task<KnowledgeResult> QueryAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken);
 }

@@ -13,7 +13,6 @@ public class AiInterpretation
     public string? Date { get; set; }
     public string? Time { get; set; }
     public string? CustomerName { get; set; }
-    // 🔥 SPRINT 03: Para buscar productos, servicios o FAQs específicos sin cargar todo
     public string? SearchTerm { get; set; }
 }
 
@@ -49,17 +48,18 @@ public class AiInterpreter : IAiInterpreter
         var localBusinessTime = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
         var activeModulesList = string.Join(", ", activeModules);
 
+        // 🔥 Se agrega ORDER a las intenciones y a la regla estricta de módulos
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
 Tu ÚNICO trabajo es extraer intenciones y entidades en JSON.
 MÓDULOS PAGADOS POR ESTE NEGOCIO: {activeModulesList}
-(CRÍTICO: Si el negocio NO tiene 'RESERVATIONS', no puedes devolver 'RESERVATION'. Si no tiene 'CATALOG', no devuelvas 'PRODUCT_QUERY').
+(CRÍTICO: Si el negocio NO tiene 'RESERVATIONS', no puedes devolver 'RESERVATION'. Si no tiene 'ORDERS', no devuelvas 'ORDER').
 
 FECHA ACTUAL: {localBusinessTime:yyyy-MM-dd}
 HORA ACTUAL: {localBusinessTime:HH:mm}
 OBJETIVO ACTUAL: {(string.IsNullOrWhiteSpace(currentGoal) ? "NINGUNO" : currentGoal)}
 
-- Intent: 'PRODUCT_QUERY', 'SERVICE_QUERY', 'RESERVATION', 'REQUEST', 'FAQ', 'LOCATION', 'GENERAL'.
-- SearchTerm: Si el cliente pregunta por un producto, servicio o duda concreta, extrae las palabras clave de búsqueda aquí.
+- Intent: 'PRODUCT_QUERY', 'SERVICE_QUERY', 'RESERVATION', 'REQUEST', 'ORDER', 'FAQ', 'LOCATION', 'GENERAL', 'SUPPORT'.
+- SearchTerm: Si el cliente pregunta por un producto/servicio, o si HACE UN PEDIDO (ORDER), extrae los nombres y cantidades aquí (Ej: '2 martillos, 1 clavo').
 - Service: Nombre del servicio (Solo si Intent es RESERVATION).
 - Location: La sede mencionada.
 - Date: Fecha en formato YYYY-MM-DD.

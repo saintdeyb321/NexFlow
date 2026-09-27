@@ -29,10 +29,30 @@ public class FirestoreTenantCleanupService : ITenantCleanupService
             // 1. Recolectar todas las referencias de forma recursiva
             await CollectDocumentsToDeleteAsync(workspaceRef, docsToDelete, cancellationToken);
 
-            // 2. Agregar el documento raíz del tenant al final
-            docsToDelete.Add(workspaceRef);
+            // 🔥 SPRINT 20: EXTERMINIO EXPLÍCITO DE DOCUMENTOS FANTASMA (Implicit Documents)
+            // Agregamos manualmente las rutas críticas que ListCollectionsAsync podría omitir si no tienen campos raíz
+            string[] explicitCollections = { "items", "categories", "orders", "reservations", "requests", "conversations", "artifacts", "hours" };
 
-            // 🔥 SPRINT 4.2: Procesar en lotes de 500 (Límite estricto de Firestore)
+            foreach (var col in explicitCollections)
+            {
+                var snapshot = await workspaceRef.Collection(col).GetSnapshotAsync(cancellationToken);
+                foreach (var doc in snapshot.Documents)
+                {
+                    if (!docsToDelete.Contains(doc.Reference))
+                    {
+                        docsToDelete.Add(doc.Reference);
+                    }
+                }
+            }
+
+            // Exterminio directo del documento schedule fantasma
+            var scheduleRef = workspaceRef.Collection("hours").Document("schedule");
+            if (!docsToDelete.Contains(scheduleRef)) docsToDelete.Add(scheduleRef);
+
+            // 2. Agregar el documento raíz del tenant al final
+            if (!docsToDelete.Contains(workspaceRef)) docsToDelete.Add(workspaceRef);
+
+            // 3. Procesar en lotes de 500 (Límite estricto de Firestore)
             const int batchSize = 500;
             for (int i = 0; i < docsToDelete.Count; i += batchSize)
             {

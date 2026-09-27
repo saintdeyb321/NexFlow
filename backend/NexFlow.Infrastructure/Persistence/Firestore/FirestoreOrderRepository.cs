@@ -75,6 +75,16 @@ public class FirestoreOrderRepository : IOrderRepository
         }, cancellationToken: cancellationToken);
     }
 
+    public async Task UpdateOrderAmountAsync(Guid workspaceId, string orderId, long totalAmountMinorUnits, CancellationToken cancellationToken)
+    {
+        var docRef = GetCollection(workspaceId).Document(orderId);
+        await docRef.UpdateAsync(new Dictionary<string, object>
+        {
+            { "TotalAmountMinorUnits", totalAmountMinorUnits },
+            { "UpdatedAt", DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc) }
+        }, cancellationToken: cancellationToken);
+    }
+
     private static OrderRecord MapToOrderRecord(DocumentSnapshot doc)
     {
         var record = new OrderRecord

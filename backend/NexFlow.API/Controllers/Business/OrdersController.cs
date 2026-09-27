@@ -35,8 +35,7 @@ public class OrdersController : ControllerBase
     private async Task<bool> HasAccessAsync(CancellationToken ct)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
-        // 🔥 Permitimos acceso si tienen ORDERS o CATALOG (ya que Orders es la evolución de Catalog)
-        return activeModules.Contains("ORDERS") || activeModules.Contains("CATALOG");
+        return activeModules.Contains("ORDERS");
     }
 
     [HttpGet]
@@ -99,9 +98,28 @@ public class OrdersController : ControllerBase
 
         return Ok(new { message = "Estado actualizado exitosamente." });
     }
+
+
+    [HttpPut("{id}/amount")]
+    public async Task<IActionResult> UpdateAmount(string id, [FromBody] UpdateOrderAmountRequest request, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessAsync(cancellationToken)) return StatusCode(403, "Módulo de Pedidos no contratado.");
+
+        var order = await _orderRepository.GetOrderByIdAsync(WorkspaceId, id, cancellationToken);
+        if (order == null) return NotFound(new { message = "Pedido no encontrado." });
+
+        await _orderRepository.UpdateOrderAmountAsync(WorkspaceId, id, request.TotalAmountMinorUnits, cancellationToken);
+
+        return Ok(new { message = "Monto actualizado exitosamente." });
+    }
 }
 
 public class UpdateOrderStatusRequest
 {
     public OrderStatus Status { get; set; }
+}
+
+public class UpdateOrderAmountRequest
+{
+    public long TotalAmountMinorUnits { get; set; }
 }

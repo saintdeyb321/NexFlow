@@ -16,3 +16,8 @@ export const updateOrderStatus = async (id: string, status: OrderStatus): Promis
   const payload: UpdateOrderStatusRequest = { status };
   await axiosClient.put(`/orders/${id}/status`, payload);
 };
+
+export const updateOrderAmount = async (id: string, totalAmountMinorUnits: number): Promise<void> => {
+  const payload = { totalAmountMinorUnits };
+  await axiosClient.put(`/orders/${id}/amount`, payload);
+};

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon } from 'lucide-react';
+import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Loader2 } from 'lucide-react';
 import type { Conversation, Message } from '../types/conversation.types';
 
 interface ConversationThreadProps {
@@ -35,12 +35,14 @@ export const ConversationThread = ({
         </div>
         <div>
           {chat.mode === 'Automatic' ? (
-            <button onClick={onTakeOver} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm">
-              <User className="w-4 h-4 mr-2" /> {isChangingMode ? 'Procesando...' : 'Asumir Control Manual'}
+            <button onClick={onTakeOver} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
+              {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <User className="w-4 h-4 mr-2" />} 
+              {isChangingMode ? 'Procesando...' : 'Asumir Control Manual'}
             </button>
           ) : (
-            <button onClick={onRelease} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm">
-              <Bot className="w-4 h-4 mr-2" /> {isChangingMode ? 'Procesando...' : 'Reactivar Asistente IA'}
+            <button onClick={onRelease} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
+              {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bot className="w-4 h-4 mr-2" />} 
+              {isChangingMode ? 'Procesando...' : 'Reactivar Asistente IA'}
             </button>
           )}
         </div>
@@ -108,15 +110,15 @@ export const ConversationThread = ({
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder={chat.mode === 'Automatic' ? 'Bloqueado. Asume el control manual para enviar un mensaje...' : 'Escribe un mensaje al cliente...'}
-            disabled={chat.mode === 'Automatic' || isSending}
+            disabled={chat.mode === 'Automatic' || isSending || isChangingMode}
             className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
           />
           <button 
             onClick={handleSend}
-            disabled={chat.mode === 'Automatic' || isSending || !newMessage.trim()}
+            disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim()}
             className="ml-3 p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            <Send className="w-5 h-5" />
+            {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         </div>
       </div>

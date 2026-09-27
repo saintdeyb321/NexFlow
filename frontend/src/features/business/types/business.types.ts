@@ -37,6 +37,7 @@ export interface WhatsAppStatusResponse {
   status: ConnectionStatus;
 }
 
-export interface WhatsAppConnectResponse {
-  qrBase64: string;
-}
+export type WhatsAppConnectResponse =
+  | { qrBase64: string }
+  | { status: 'CONNECTED' };
+

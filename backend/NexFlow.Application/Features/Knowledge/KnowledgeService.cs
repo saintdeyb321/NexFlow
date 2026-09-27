@@ -1,9 +1,7 @@
-﻿using System.Text;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Features.Shared.DTOs;
-using NexFlow.Application.Features.Catalog.DTOs;
-using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Application.Features.Business.Offerings;
+using System.Text;
 
 namespace NexFlow.Application.Features.Knowledge;
 
@@ -13,7 +11,7 @@ public sealed class KnowledgeService : IKnowledgeService
     private readonly ILocationRepository _locationRepo;
     private readonly IBusinessHoursRepository _hoursRepo;
     private readonly IFaqRepository _faqRepo;
-    private readonly ICatalogRepository _catalogRepo;
+    private readonly IOfferingService _offeringService; // 🔥 Inyectamos el servicio de ofertas directamente
     private readonly ILogger<KnowledgeService> _logger;
 
     public KnowledgeService(
@@ -21,14 +19,14 @@ public sealed class KnowledgeService : IKnowledgeService
         ILocationRepository locationRepo,
         IBusinessHoursRepository hoursRepo,
         IFaqRepository faqRepo,
-        ICatalogRepository catalogRepo,
+        IOfferingService offeringService,
         ILogger<KnowledgeService> logger)
     {
         _profileRepo = profileRepo;
         _locationRepo = locationRepo;
         _hoursRepo = hoursRepo;
         _faqRepo = faqRepo;
-        _catalogRepo = catalogRepo;
+        _offeringService = offeringService;
         _logger = logger;
     }
 
@@ -38,11 +36,8 @@ public sealed class KnowledgeService : IKnowledgeService
         var locationsTask = _locationRepo.GetLocationsAsync(workspaceId, cancellationToken);
         var hoursTask = _hoursRepo.GetBusinessHoursAsync(workspaceId, null, cancellationToken);
         var faqsTask = _faqRepo.GetFaqsAsync(workspaceId, cancellationToken);
-        var catalogTask = _catalogRepo.GetActiveItemsAsync(workspaceId, cancellationToken);
 
-        await Task.WhenAll(profileTask, locationsTask, hoursTask, faqsTask, catalogTask);
-
-        var allItems = catalogTask.Result ?? new List<BusinessOfferingDto>();
+        await Task.WhenAll(profileTask, locationsTask, hoursTask, faqsTask);
 
         return new BusinessKnowledgeSnapshot
         {
@@ -50,25 +45,58 @@ public sealed class KnowledgeService : IKnowledgeService
             Profile = profileTask.Result,
             Locations = locationsTask.Result?.ToList() ?? new(),
             Hours = hoursTask.Result?.ToList() ?? new(),
-            Faqs = faqsTask.Result?.ToList() ?? new(),
-            // 🔥 SPRINT 04: Casteo y separación limpia desde la BD
-            Products = allItems.Where(i => i.Type == "PRODUCT").Select(i => (ProductDto)i).ToList(),
-            Services = allItems.Where(i => i.Type == "SERVICE").Select(i => (ServiceDto)i).ToList()
+            Faqs = faqsTask.Result?.ToList() ?? new()
+            // 🔥 SPRINT 03/04: Products y Services YA NO SE CARGAN EN MEMORIA.
         };
     }
 
-    // Nota: Dependiendo de tu definición de KnowledgeQuery, ajusta los Topics
-    public KnowledgeResult Query(BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query)
+    public async Task<KnowledgeResult> QueryAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
     {
-        // Se asume que actualizaste el Enum KnowledgeTopic para incluir Products y Services
         var topicString = query.Topic.ToString().ToUpper();
 
-        if (topicString == "LOCATIONS") return QueryLocations(snapshot, query.LocationId);
-        if (topicString == "PRODUCTS" || topicString == "OFFERINGS") return QueryProducts(snapshot, query.LocationId, query.SearchTerm);
-        if (topicString == "SERVICES") return QueryServices(snapshot, query.LocationId, query.SearchTerm);
-        if (topicString == "BUSINESSHOURS") return QueryHours(snapshot);
-        if (topicString == "FAQS") return QueryFaqs(snapshot, query.SearchTerm);
-        if (topicString == "PROFILE") return QueryProfile(snapshot);
+        if (topicString == "LOCATIONS")
+        {
+            var data = new BusinessKnowledgeSnapshot
+            {
+                WorkspaceId = workspaceId,
+                Locations = (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList()
+            };
+            return QueryLocations(data, query.LocationId);
+        }
+        if (topicString == "BUSINESSHOURS")
+        {
+            var data = new BusinessKnowledgeSnapshot
+            {
+                WorkspaceId = workspaceId,
+                Hours = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, query.LocationId, cancellationToken)).ToList()
+            };
+            return QueryHours(data);
+        }
+        if (topicString == "FAQS")
+        {
+            var data = new BusinessKnowledgeSnapshot
+            {
+                WorkspaceId = workspaceId,
+                Faqs = (await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList()
+            };
+            return QueryFaqs(data, query.SearchTerm);
+        }
+        if (topicString == "PROFILE")
+        {
+            var data = new BusinessKnowledgeSnapshot
+            {
+                WorkspaceId = workspaceId,
+                Profile = await _profileRepo.GetProfileAsync(workspaceId, cancellationToken)
+            };
+            return QueryProfile(data);
+        }
+
+        // 🔥 Búsquedas bajo demanda directamente a BD. Protege la RAM.
+        if (topicString == "PRODUCTS" || topicString == "OFFERINGS")
+            return await QueryProductsAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
+
+        if (topicString == "SERVICES")
+            return await QueryServicesAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
 
         return new KnowledgeResult { Found = false, Source = query.Topic };
     }
@@ -86,20 +114,11 @@ public sealed class KnowledgeService : IKnowledgeService
         return new KnowledgeResult { Found = true, Facts = sb.ToString() };
     }
 
-    private static KnowledgeResult QueryProducts(BusinessKnowledgeSnapshot snapshot, string? locationId, string? searchTerm)
+    private async Task<KnowledgeResult> QueryProductsAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
     {
-        var items = snapshot.Products.AsEnumerable();
+        var products = await _offeringService.GetProductsAsync(workspaceId, locationId, searchTerm, ct);
+        var resultList = products.Take(10).ToList();
 
-        if (!string.IsNullOrWhiteSpace(locationId))
-            items = items.Where(i => i.LocationScope == "ALL" || (i.LocationIds != null && i.LocationIds.Contains(locationId)));
-
-        if (!string.IsNullOrWhiteSpace(searchTerm))
-        {
-            var term = searchTerm.ToLowerInvariant();
-            items = items.Where(i => i.Name.ToLowerInvariant().Contains(term) || (i.Description != null && i.Description.ToLowerInvariant().Contains(term)));
-        }
-
-        var resultList = items.Take(10).ToList();
         if (!resultList.Any()) return new KnowledgeResult { Found = false };
 
         var sb = new StringBuilder();
@@ -111,20 +130,11 @@ public sealed class KnowledgeService : IKnowledgeService
         return new KnowledgeResult { Found = true, Facts = sb.ToString() };
     }
 
-    private static KnowledgeResult QueryServices(BusinessKnowledgeSnapshot snapshot, string? locationId, string? searchTerm)
+    private async Task<KnowledgeResult> QueryServicesAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
     {
-        var items = snapshot.Services.AsEnumerable();
+        var services = await _offeringService.GetServicesAsync(workspaceId, locationId, searchTerm, ct);
+        var resultList = services.Take(10).ToList();
 
-        if (!string.IsNullOrWhiteSpace(locationId))
-            items = items.Where(i => i.LocationScope == "ALL" || (i.LocationIds != null && i.LocationIds.Contains(locationId)));
-
-        if (!string.IsNullOrWhiteSpace(searchTerm))
-        {
-            var term = searchTerm.ToLowerInvariant();
-            items = items.Where(i => i.Name.ToLowerInvariant().Contains(term) || (i.Description != null && i.Description.ToLowerInvariant().Contains(term)));
-        }
-
-        var resultList = items.Take(10).ToList();
         if (!resultList.Any()) return new KnowledgeResult { Found = false };
 
         var sb = new StringBuilder();

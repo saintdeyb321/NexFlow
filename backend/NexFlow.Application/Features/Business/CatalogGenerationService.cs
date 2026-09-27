@@ -5,14 +5,14 @@ using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Domain.Entities.Catalog;
-using NexFlow.Domain.Entities.System;
-// 🔥 NUEVO NAMESPACE
 using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Domain.Entities.System;
 
 namespace NexFlow.Application.Features.Business;
 
 public interface ICatalogGenerationService
 {
+    Task<string> GetCurrentSourceHashAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
     Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
     Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken);
 }
@@ -45,8 +45,22 @@ public class CatalogGenerationService : ICatalogGenerationService
         _logger = logger;
     }
 
+    public async Task<string> GetCurrentSourceHashAsync(Guid workspaceId, string scope, CancellationToken cancellationToken)
+    {
+        var targetScope = scope.Trim().ToUpperInvariant();
+        if (targetScope != "PRODUCT" && targetScope != "SERVICE")
+            throw new ArgumentException("El scope debe ser PRODUCT o SERVICE.", nameof(scope));
+
+        var categories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
+        var items = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
+        return _hashService.ComputeHash(
+            categories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList(),
+            items.Where(i => i.Type == targetScope).ToList());
+    }
+
     public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
+        // 🔥 SPRINT 01: El motor solo verifica los scopes separados de forma aislada
         var scopesToVerify = new[] { "PRODUCT", "SERVICE" };
 
         var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
@@ -77,11 +91,18 @@ public class CatalogGenerationService : ICatalogGenerationService
     {
         var targetScope = scope.ToUpperInvariant();
 
+        // 🔥 SPRINT 01: HARD FAIL. Se prohíbe terminantemente la generación COMBINED.
+        if (targetScope != "PRODUCT" && targetScope != "SERVICE")
+        {
+            throw new ArgumentException("El scope del artefacto debe ser estrictamente PRODUCT o SERVICE. El modo COMBINED ha sido eliminado.", nameof(scope));
+        }
+
         var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
         var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
 
-        var filteredCategories = targetScope == "COMBINED" ? allCategories : allCategories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
-        var filteredItems = targetScope == "COMBINED" ? allItems : allItems.Where(i => i.Type == targetScope).ToList();
+        // Filtrado estricto por dominio
+        var filteredCategories = allCategories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
+        var filteredItems = allItems.Where(i => i.Type == targetScope).ToList();
 
         var currentHash = _hashService.ComputeHash(filteredCategories, filteredItems);
 
@@ -148,7 +169,8 @@ public class CatalogGenerationService : ICatalogGenerationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error preparando el payload para n8n");
+            _logger.LogError(ex, "Error preparando el payload documental para n8n");
+            throw;
         }
 
         return artifact;

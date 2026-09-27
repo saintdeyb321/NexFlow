@@ -1,28 +1,28 @@
 ﻿using NexFlow.Application.Abstractions.Repositories;
+using NexFlow.Application.Features.Notifications;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Requests;
 
 public interface IRequestService
 {
-    // Método antiguo (Mantenido por retrocompatibilidad temporal)
     Task<string> CreateSupportTicketAsync(Guid workspaceId, string phone, string description, CancellationToken ct);
-
-    // 🔥 SPRINT 06: Nuevo método genérico
     Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, Dictionary<string, object>? metadata, CancellationToken ct);
 }
 
 public class RequestService : IRequestService
 {
     private readonly IRequestRepository _requestRepo;
+    private readonly INotificationService _notificationService;
 
-    public RequestService(IRequestRepository requestRepo)
+    public RequestService(IRequestRepository requestRepo, INotificationService notificationService)
     {
         _requestRepo = requestRepo;
+        _notificationService = notificationService;
     }
 
     public Task<string> CreateSupportTicketAsync(Guid workspaceId, string phone, string description, CancellationToken ct)
     {
-        // Redirige al nuevo sistema marcándolo como Support
         return CreateRequestAsync(workspaceId, phone, "N/A", RequestType.Support, "Solicitud de Atención", description, null, ct);
     }
 
@@ -43,6 +43,21 @@ public class RequestService : IRequestService
         };
 
         await _requestRepo.CreateRequestAsync(workspaceId, newRequest, ct);
+
+        // 🔥 SPRINT 10: Disparamos la notificación en tiempo real según el tipo de solicitud
+        var notificationType = type == RequestType.CommercialInquiry
+            ? NotificationType.NewCommercialRequest
+            : NotificationType.SystemAlert;
+
+        await _notificationService.NotifyAsync(
+            workspaceId,
+            "REQUESTS",
+            notificationType,
+            title,
+            $"El cliente {phone} ha generado una nueva solicitud. Descripción: {description}",
+            "/requests",
+            ct);
+
         return newRequest.Id;
     }
 }

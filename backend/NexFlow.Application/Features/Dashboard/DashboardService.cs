@@ -1,6 +1,7 @@
 ﻿using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Requests;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Dashboard;
 
@@ -39,11 +40,14 @@ public class DashboardService : IDashboardService
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken);
         var modules = activeModules.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // 🔥 SPRINT 11: Ejecución asíncrona paralela SOLO de los módulos contratados
         var globalTask = BuildGlobalMetricsAsync(workspaceId, cancellationToken);
         var catalogTask = modules.Contains("CATALOG") ? BuildCatalogMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<CatalogMetricsDto?>(null);
         var servicesTask = modules.Contains("SERVICES") ? BuildServicesMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<ServicesMetricsDto?>(null);
         var requestsTask = modules.Contains("REQUESTS") ? BuildRequestsMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<RequestsMetricsDto?>(null);
         var reservationsTask = modules.Contains("RESERVATIONS") ? BuildReservationsMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<ReservationsMetricsDto?>(null);
+
+        // Opcional: Si implementaste Orders, podrías agregarlo aquí. Si no, lo omitimos.
 
         await Task.WhenAll(globalTask, catalogTask, servicesTask, requestsTask, reservationsTask);
 
@@ -58,29 +62,47 @@ public class DashboardService : IDashboardService
 
     private async Task<GlobalMetricsDto> BuildGlobalMetricsAsync(Guid workspaceId, CancellationToken ct)
     {
-        var recentConversations = await _conversationRepo.GetRecentConversationsAsync(workspaceId, 100, ct);
-        var today = _clock.UtcNow.Date;
+        var recentConversations = await _conversationRepo.GetRecentConversationsAsync(workspaceId, 200, ct);
 
-        var convsToday = recentConversations.Count(c => c.StartedAt >= today);
-        var handoffsToday = recentConversations.Count(c => c.StartedAt >= today && c.HandoffReason != Domain.Enums.HandoffReason.None);
+        // 🔥 SPRINT 10: Cálculo de "Hoy" basado en la zona horaria local, no en UTC universal.
+        var peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, peruZone);
+        var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, peruZone);
+        var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), peruZone);
+
+        var convsToday = recentConversations.Where(c => c.StartedAt >= todayLocalStartUtc && c.StartedAt < tomorrowLocalStartUtc).ToList();
+
+        int totalConversations = convsToday.Count;
+        int totalHandoffs = convsToday.Count(c => c.HandoffReason != HandoffReason.None);
+
+        int aiMessages = 0;
+        int humanMessages = 0;
+
+        foreach (var conv in convsToday)
+        {
+            var msgs = await _conversationRepo.GetMessagesAsync(workspaceId, conv.Id, 100, ct);
+            aiMessages += msgs.Count(m => m.Sender == SenderType.AI);
+            humanMessages += msgs.Count(m => m.Sender == SenderType.BusinessUser);
+        }
 
         return new GlobalMetricsDto(
-            ConversationsToday: convsToday,
-            AiMessagesHandled: convsToday * 4,
-            HumanMessagesHandled: handoffsToday * 3,
-            TotalHandoffsToday: handoffsToday
+            ConversationsToday: totalConversations,
+            AiMessagesHandled: aiMessages,
+            HumanMessagesHandled: humanMessages,
+            TotalHandoffsToday: totalHandoffs
         );
     }
 
-    // 🔥 Firmas corregidas a Nullable (Task<Dto?>) para evitar conflictos con el ternario
     private async Task<CatalogMetricsDto?> BuildCatalogMetricsAsync(Guid workspaceId, CancellationToken ct)
     {
         var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
         var products = items.Where(i => i.Type == "PRODUCT").ToList();
 
-        var topQueried = products.Take(3).Select(p => new ItemQueryMetricDto(p.Id, p.Name, new Random().Next(5, 50)));
+        // 🔥 SPRINT 12: Extraemos el uso real si lo tuvieras, de lo contrario usamos un placeholder estático (NO RANDOM) 
+        // para no romper la UI hasta que implementemos la tabla de CatalogAnalytics.
+        var topQueried = products.Take(3).Select(p => new ItemQueryMetricDto(p.Id, p.Name, 0));
 
-        return new CatalogMetricsDto(products.Count, new Random().Next(20, 150), topQueried);
+        return new CatalogMetricsDto(products.Count, 0, topQueried);
     }
 
     private async Task<ServicesMetricsDto?> BuildServicesMetricsAsync(Guid workspaceId, CancellationToken ct)
@@ -88,9 +110,10 @@ public class DashboardService : IDashboardService
         var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
         var services = items.Where(i => i.Type == "SERVICE").ToList();
 
-        var topQueried = services.Take(3).Select(s => new ItemQueryMetricDto(s.Id, s.Name, new Random().Next(5, 50)));
+        // 🔥 SPRINT 12: Mismo approach estático temporal.
+        var topQueried = services.Take(3).Select(s => new ItemQueryMetricDto(s.Id, s.Name, 0));
 
-        return new ServicesMetricsDto(services.Count, new Random().Next(10, 100), topQueried);
+        return new ServicesMetricsDto(services.Count, 0, topQueried);
     }
 
     private async Task<RequestsMetricsDto?> BuildRequestsMetricsAsync(Guid workspaceId, CancellationToken ct)
@@ -106,20 +129,26 @@ public class DashboardService : IDashboardService
 
     private async Task<ReservationsMetricsDto?> BuildReservationsMetricsAsync(Guid workspaceId, CancellationToken ct)
     {
-        var fromDate = _clock.UtcNow.AddDays(-15);
-        var toDate = _clock.UtcNow.AddDays(15);
+        var now = _clock.UtcNow;
+        var fromDate = now.AddDays(-15);
+        var toDate = now.AddDays(15);
 
-        // 🔥 null! silencia la alerta del compilador para strings no nulables
-        var reservations = await _reservationRepo.GetReservationsForDateAsync(workspaceId, null!, fromDate, toDate, ct);
+        var reservations = (await _reservationRepo.GetReservationsForDateAsync(workspaceId, string.Empty, fromDate, toDate, ct)).ToList();
 
-        var todayStart = _clock.UtcNow.Date;
-        var todayEnd = todayStart.AddDays(1);
+        var countsByStatus = reservations.GroupBy(r => r.Status)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        // 🔥 SPRINT 10: Ajuste de límites diarios locales para reservas
+        var peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, peruZone);
+        var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, peruZone);
+        var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), peruZone);
 
         return new ReservationsMetricsDto(
-            ReservationsToday: reservations.Count(r => r.StartTime >= todayStart && r.StartTime < todayEnd),
-            Pending: reservations.Count(r => r.Status == Domain.Enums.ReservationStatus.Confirmed && r.StartTime > _clock.UtcNow),
-            Confirmed: reservations.Count(r => r.Status == Domain.Enums.ReservationStatus.Completed),
-            Cancelled: reservations.Count(r => r.Status == Domain.Enums.ReservationStatus.Cancelled)
+            ReservationsToday: reservations.Count(r => r.StartTime >= todayLocalStartUtc && r.StartTime < tomorrowLocalStartUtc),
+            Pending: reservations.Count(r => r.Status == ReservationStatus.Confirmed && r.StartTime > now),
+            Confirmed: countsByStatus.GetValueOrDefault(ReservationStatus.Completed),
+            Cancelled: countsByStatus.GetValueOrDefault(ReservationStatus.Cancelled)
         );
     }
 }

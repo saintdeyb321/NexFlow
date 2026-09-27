@@ -1,6 +1,7 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Automation.Conversations;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Domain.Enums;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
@@ -74,8 +75,17 @@ public class FirestoreConversationRepository : IConversationRepository
 
     public async Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken)
     {
-        var updates = new Dictionary<string, object> { { "mode", mode.ToString() }, { "handoffReason", reason.ToString() } };
-        await GetCollection(workspaceId).Document(conversationId).UpdateAsync(updates, cancellationToken: cancellationToken);
+        var stateLock = ConversationStateService.GetStateLock(workspaceId, conversationId);
+        await stateLock.WaitAsync(cancellationToken);
+        try
+        {
+            var updates = new Dictionary<string, object> { { "mode", mode.ToString() }, { "handoffReason", reason.ToString() } };
+            await GetCollection(workspaceId).Document(conversationId).UpdateAsync(updates, cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            stateLock.Release();
+        }
     }
 
     public async Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken)

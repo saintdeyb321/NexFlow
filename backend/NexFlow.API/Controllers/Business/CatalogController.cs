@@ -38,10 +38,20 @@ public class CatalogController : ControllerBase
         return activeModules.Contains(moduleCode.ToUpperInvariant());
     }
 
-    private async Task<bool> HasAccessToCategories(CancellationToken ct)
+    private async Task<bool> HasAccessToCategoryScope(string? scope, bool write, CancellationToken ct)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, ct);
-        return activeModules.Contains("CATALOG") || activeModules.Contains("SERVICES");
+        var modules = activeModules.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return scope switch
+        {
+            "PRODUCT" => modules.Contains("CATALOG"),
+            "SERVICE" => modules.Contains("SERVICES"),
+            // 🔥 SPRINT 3: Modificar categorías compartidas afecta a ambos módulos.
+            "SHARED" => write
+                ? modules.Contains("CATALOG") && modules.Contains("SERVICES")
+                : modules.Contains("CATALOG") || modules.Contains("SERVICES"),
+            _ => false
+        };
     }
 
     // ==========================================
@@ -50,25 +60,51 @@ public class CatalogController : ControllerBase
     [HttpGet("categories")]
     public async Task<IActionResult> GetCategories([FromQuery] string? scope, CancellationToken cancellationToken)
     {
-        if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "No tienes módulos contratados que utilicen categorías.");
+        // 🔥 SPRINT 3: El scope solicitado y cada scope persistido deben estar autorizados.
+        var targetScope = string.IsNullOrWhiteSpace(scope) ? null : scope.Trim().ToUpperInvariant();
+        if (targetScope != null && targetScope != "PRODUCT" && targetScope != "SERVICE" && targetScope != "SHARED")
+            return BadRequest(new { message = "Scope inválido." });
+
+        var modules = (await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var canReadProducts = modules.Contains("CATALOG");
+        var canReadServices = modules.Contains("SERVICES");
+        if ((!canReadProducts && !canReadServices)
+            || (targetScope == "PRODUCT" && !canReadProducts)
+            || (targetScope == "SERVICE" && !canReadServices))
+            return StatusCode(403, "Acceso denegado al scope solicitado.");
 
         var categories = await _catalogRepository.GetCategoriesAsync(WorkspaceId, cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(scope))
-        {
-            var targetScope = scope.ToUpperInvariant();
-            categories = categories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
-        }
-
-        return Ok(categories);
+        return Ok(categories.Where(c =>
+                (c.Scope == "PRODUCT" && canReadProducts)
+                || (c.Scope == "SERVICE" && canReadServices)
+                || c.Scope == "SHARED")
+            .Where(c => targetScope == null || c.Scope == targetScope || c.Scope == "SHARED")
+            .ToList());
     }
 
     [HttpPost("categories")]
     public async Task<IActionResult> CreateCategory([FromBody] ProductCategoryDto category, CancellationToken cancellationToken)
     {
-        if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
+        // 🔥 SPRINT 3: POST también es un upsert; validamos la entidad existente.
+        category.Scope = category.Scope?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (category.Scope != "PRODUCT" && category.Scope != "SERVICE" && category.Scope != "SHARED")
+            return BadRequest(new { message = "Scope inválido." });
+        if (!await HasAccessToCategoryScope(category.Scope, true, cancellationToken))
+            return StatusCode(403, "Acceso denegado al scope de la categoría.");
 
-        if (string.IsNullOrEmpty(category.Id)) category.Id = Guid.NewGuid().ToString();
+        if (string.IsNullOrWhiteSpace(category.Id)) category.Id = Guid.NewGuid().ToString();
+        else
+        {
+            var existing = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, category.Id, cancellationToken);
+            if (existing != null)
+            {
+                if (!await HasAccessToCategoryScope(existing.Scope, true, cancellationToken))
+                    return StatusCode(403, "Acceso denegado a la categoría existente.");
+                if (existing.Scope != category.Scope)
+                    return BadRequest(new { message = "No se permite cambiar el scope de una categoría existente." });
+            }
+        }
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
 
         QueueArtifactInvalidation(WorkspaceId); // 🔥 SPRINT 16: Llamada segura a la cola
@@ -79,7 +115,18 @@ public class CatalogController : ControllerBase
     [HttpPut("categories/{categoryId}")]
     public async Task<IActionResult> UpdateCategory(string categoryId, [FromBody] ProductCategoryDto category, CancellationToken cancellationToken)
     {
-        if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
+        // 🔥 SPRINT 3: La autorización considera el scope persistido, no solo el payload.
+        category.Scope = category.Scope?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (category.Scope != "PRODUCT" && category.Scope != "SERVICE" && category.Scope != "SHARED")
+            return BadRequest(new { message = "Scope inválido." });
+        if (!await HasAccessToCategoryScope(category.Scope, true, cancellationToken))
+            return StatusCode(403, "Acceso denegado al scope de la categoría.");
+        var existing = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, categoryId, cancellationToken);
+        if (existing == null) return NotFound();
+        if (!await HasAccessToCategoryScope(existing.Scope, true, cancellationToken))
+            return StatusCode(403, "Acceso denegado a la categoría existente.");
+        if (existing.Scope != category.Scope)
+            return BadRequest(new { message = "No se permite cambiar el scope de una categoría existente." });
 
         category.Id = categoryId;
         await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
@@ -92,7 +139,13 @@ public class CatalogController : ControllerBase
     [HttpDelete("categories/{categoryId}")]
     public async Task<IActionResult> DeleteCategory(string categoryId, CancellationToken cancellationToken)
     {
-        if (!await HasAccessToCategories(cancellationToken)) return StatusCode(403, "Acceso denegado.");
+        // 🔥 SPRINT 3: Se autoriza la eliminación según el scope guardado.
+        if (!await HasAccessToCategoryScope("SHARED", false, cancellationToken))
+            return StatusCode(403, "Acceso denegado.");
+        var category = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, categoryId, cancellationToken);
+        if (category == null) return NotFound();
+        if (!await HasAccessToCategoryScope(category.Scope, true, cancellationToken))
+            return StatusCode(403, "Acceso denegado al scope de la categoría.");
 
         var items = await _catalogRepository.GetItemsByCategoryAsync(WorkspaceId, categoryId, cancellationToken);
         if (items.Any()) return BadRequest(new { message = "No puedes eliminar una categoría que contiene productos o servicios." });
@@ -113,7 +166,7 @@ public class CatalogController : ControllerBase
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
         var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
-        var products = allItems.Where(i => i.Type.ToUpperInvariant() == "PRODUCT");
+        var products = allItems.Where(i => i.Type == "PRODUCT");
 
         if (!string.IsNullOrWhiteSpace(locationId))
         {
@@ -131,7 +184,16 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        if (string.IsNullOrEmpty(product.Id)) product.Id = Guid.NewGuid().ToString();
+        // 🔥 SPRINT 3: Ni el payload ni un ID conocido pueden cruzar el límite de tipo.
+        if (product.Type != "PRODUCT")
+            return BadRequest(new { message = "Este endpoint solo admite entidades PRODUCT." });
+        if (string.IsNullOrWhiteSpace(product.Id)) product.Id = Guid.NewGuid().ToString();
+        else
+        {
+            var existing = await _catalogRepository.GetItemByIdAsync(WorkspaceId, product.Id, cancellationToken);
+            if (existing != null && existing.Type != "PRODUCT")
+                return StatusCode(403, "No se permite sobrescribir una entidad de otro tipo.");
+        }
 
         if (string.IsNullOrEmpty(product.CategoryId))
         {
@@ -141,7 +203,8 @@ public class CatalogController : ControllerBase
         {
             var category = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, product.CategoryId, cancellationToken);
             if (category == null) return BadRequest(new { message = "La categoría asignada no existe." });
-            if (category.Scope == "SERVICE") return BadRequest(new { message = "No puedes asignar un Producto a una categoría exclusiva de Servicios." });
+            if (category.Scope != "PRODUCT" && category.Scope != "SHARED")
+                return BadRequest(new { message = "El producto requiere una categoría PRODUCT o SHARED." });
         }
 
         await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken);
@@ -157,7 +220,9 @@ public class CatalogController : ControllerBase
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
         var item = await _catalogRepository.GetItemByIdAsync(WorkspaceId, productId, cancellationToken);
-        if (item != null && item.Type.ToUpperInvariant() == "PRODUCT")
+        if (item != null && item.Type != "PRODUCT")
+            return StatusCode(403, "Este endpoint solo permite eliminar productos.");
+        if (item != null)
         {
             await _catalogRepository.DeleteItemAsync(WorkspaceId, productId, cancellationToken);
             QueueArtifactInvalidation(WorkspaceId);
@@ -175,7 +240,10 @@ public class CatalogController : ControllerBase
         [FromServices] ICatalogArtifactRepository artifactRepository,
         CancellationToken cancellationToken)
     {
-        var targetScope = string.IsNullOrWhiteSpace(scope) ? "PRODUCT" : scope.ToUpperInvariant();
+        var targetScope = string.IsNullOrWhiteSpace(scope) ? "PRODUCT" : scope.Trim().ToUpperInvariant();
+        // 🔥 SPRINT 3: Un scope desconocido nunca hereda los permisos de CATALOG.
+        if (targetScope != "PRODUCT" && targetScope != "SERVICE")
+            return BadRequest(new { message = "Scope inválido. Usa PRODUCT o SERVICE." });
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
         if (!await HasAccessTo(requiredModule, cancellationToken))
@@ -200,7 +268,10 @@ public class CatalogController : ControllerBase
         [FromServices] ICatalogGenerationService generationService,
         CancellationToken cancellationToken)
     {
-        var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "PRODUCT" : request.Scope.ToUpperInvariant();
+        var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "PRODUCT" : request.Scope.Trim().ToUpperInvariant();
+        // 🔥 SPRINT 3: Aplicamos la misma matriz a la generación de artefactos.
+        if (targetScope != "PRODUCT" && targetScope != "SERVICE")
+            return BadRequest(new { message = "Scope inválido. Usa PRODUCT o SERVICE." });
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
         if (!await HasAccessTo(requiredModule, cancellationToken))

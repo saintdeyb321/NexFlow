@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, RefreshCw, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
-import { getArtifactStatus, generateArtifact } from '../services/artifact.service';
+import { FileText, RefreshCw, Download, Loader2 } from 'lucide-react';
+import { axiosClient } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
 interface ArtifactGeneratorProps {
@@ -11,78 +10,82 @@ interface ArtifactGeneratorProps {
 
 export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
   const queryClient = useQueryClient();
-  const workspaceId = useAuthStore((state: any) => state.me?.workspace?.id);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
   const { data: artifact, isLoading } = useQuery({
-    queryKey: ['artifact', workspaceId, scope], 
-    queryFn: () => getArtifactStatus(scope),
+    queryKey: ['artifact', workspaceId, scope],
+    queryFn: async () => {
+      // Opción A Pragmática: Reutilizamos el endpoint existente pero forzamos el scope estricto
+      const response = await axiosClient.get(`/catalog/artifact?scope=${scope}`);
+      return response.data;
+    },
     enabled: !!workspaceId,
-    refetchInterval: (query) => (query.state.data?.status === 'GENERATING' ? 5000 : false)
+    refetchInterval: (query) => (query.state.data?.status === 'Generating' ? 5000 : false),
   });
 
   const generateMutation = useMutation({
-    mutationFn: () => generateArtifact(scope),
+    mutationFn: async () => {
+      const response = await axiosClient.post('/catalog/artifact/generate', { scope });
+      return response.data;
+    },
     onSuccess: () => {
-      setErrorMessage(null);
       queryClient.invalidateQueries({ queryKey: ['artifact', workspaceId, scope] });
     },
-    onError: (error: any) => setErrorMessage(error.message || 'Error al solicitar la generación.')
+    onError: () => {
+      alert(`Error al solicitar la generación del documento de ${scope.toLowerCase()}s.`);
+    }
   });
 
-  if (isLoading) return <div className="animate-pulse h-24 bg-gray-100 rounded-xl mb-6"></div>;
+  if (isLoading) return <div className="animate-pulse h-16 bg-gray-100 rounded-xl mb-6"></div>;
 
-  const status = artifact?.status || 'NOT_GENERATED';
-  const isGenerating = status === 'GENERATING' || generateMutation.isPending;
+  const isStale = artifact?.status === 'Stale';
+  const isGenerating = artifact?.status === 'Generating';
+  const isCurrent = artifact?.status === 'Current';
+  const hasError = artifact?.status === 'Error';
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-      <div className="flex items-start">
-        <div className="p-3 rounded-lg mr-4 bg-blue-100 text-blue-600">
+    <div className="mb-8 p-5 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="flex items-start gap-3">
+        <div className={`p-3 rounded-lg ${isCurrent ? 'bg-green-100 text-green-700' : isStale ? 'bg-yellow-100 text-yellow-700' : isGenerating ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
           <FileText className="w-6 h-6" />
         </div>
         <div>
           <h3 className="font-bold text-gray-900">{title}</h3>
-          <div className="flex items-center mt-1 text-sm">
-            {status === 'CURRENT' && <span className="text-green-600 flex items-center font-medium"><CheckCircle2 className="w-4 h-4 mr-1"/> Actualizado</span>}
-            {status === 'STALE' && <span className="text-orange-500 flex items-center font-medium"><AlertCircle className="w-4 h-4 mr-1"/> Hay cambios sin publicar</span>}
-            {status === 'NOT_GENERATED' && <span className="text-gray-500 flex items-center">Nunca generado</span>}
-            {status === 'FAILED' && <span className="text-red-600 flex items-center font-medium"><AlertCircle className="w-4 h-4 mr-1"/> Falló última generación</span>}
-            {isGenerating && <span className="text-blue-600 flex items-center font-medium animate-pulse"><RefreshCw className="w-4 h-4 mr-1 animate-spin"/> Generando...</span>}
-            
-            {artifact?.lastGeneratedAt && (
-              <span className="text-gray-400 ml-3 flex items-center text-xs">
-                <Clock className="w-3 h-3 mr-1"/> 
-                Última vez: {new Date(artifact.lastGeneratedAt).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-          {errorMessage && <p className="text-red-500 text-xs mt-1">{errorMessage}</p>}
+          <p className="text-sm text-gray-500 mt-0.5">
+            {isCurrent && 'El documento PDF está actualizado y listo para enviarse a los clientes.'}
+            {isStale && 'Se detectaron cambios recientes. Necesitas actualizar el documento.'}
+            {isGenerating && 'Generando documento mediante IA. Esto puede tomar unos minutos...'}
+            {hasError && 'Hubo un error en la última generación. Intenta nuevamente.'}
+            {!artifact && 'No se ha generado ningún documento aún.'}
+          </p>
         </div>
       </div>
 
-      <div className="flex gap-3 w-full md:w-auto">
-        {artifact?.pdfUrl && status !== 'GENERATING' && (
+      <div className="flex items-center gap-3 w-full md:w-auto">
+        {artifact?.pdfUrl && (
           <a 
             href={artifact.pdfUrl} 
             target="_blank" 
             rel="noreferrer"
-            className="flex-1 md:flex-none text-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm transition-colors"
+            className="flex-1 md:flex-none flex items-center justify-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors"
           >
-            Ver Publicación
+            <Download className="w-4 h-4 mr-2" /> Ver PDF
           </a>
         )}
-        <button 
+
+        <button
           onClick={() => generateMutation.mutate()}
-          disabled={isGenerating || status === 'CURRENT'}
-          className="flex-1 md:flex-none flex items-center justify-center px-4 py-2 text-white font-medium rounded-lg text-sm transition-colors disabled:opacity-50 bg-blue-600 hover:bg-blue-700"
+          disabled={isGenerating || (isCurrent && !isStale)}
+          className={`flex-1 md:flex-none flex items-center justify-center px-4 py-2 font-medium rounded-lg transition-colors ${
+            isGenerating || (isCurrent && !isStale)
+              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+          }`}
         >
           {isGenerating ? (
-            <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Procesando</>
-          ) : status === 'CURRENT' ? (
-            <><CheckCircle2 className="w-4 h-4 mr-2" /> Al día</>
+            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Procesando...</>
           ) : (
-            <><FileText className="w-4 h-4 mr-2" /> {status === 'STALE' ? 'Regenerar PDF' : 'Generar PDF'}</>
+            <><RefreshCw className="w-4 h-4 mr-2" /> {artifact ? 'Actualizar PDF' : 'Generar PDF'}</>
           )}
         </button>
       </div>

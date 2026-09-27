@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities;
+using NexFlow.Domain.Entities.System;
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 
@@ -20,6 +21,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Reservation> Reservations { get; set; } = null!;
     public DbSet<SystemAdministrator> SystemAdministrators { get; set; } = null!;
+    public DbSet<Notification> Notifications { get; set; } = null!;
 
     // 🔥 SPRINT 7: Tabla persistente de idempotencia
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();

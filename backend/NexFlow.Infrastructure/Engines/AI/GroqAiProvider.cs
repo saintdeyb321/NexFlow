@@ -59,7 +59,9 @@ public class GroqAiProvider : IAiProvider
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("Groq API Error {StatusCode}: {ErrorDetails}. Fallback será manejado por el Router.", response.StatusCode, error);
-                throw new HttpRequestException($"Groq Fallo: {response.StatusCode}");
+
+                // 🔥 SPRINT 8: Propagación correcta del StatusCode para activar el fallback
+                throw new HttpRequestException($"Groq Fallo: {(int)response.StatusCode} {response.StatusCode}", inner: null, statusCode: response.StatusCode);
             }
 
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);

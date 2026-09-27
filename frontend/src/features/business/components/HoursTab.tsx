@@ -13,13 +13,13 @@ const DAYS_OF_WEEK = [
 export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
   const queryClient = useQueryClient();
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id); // 🔥 SPRINT 9
   const [hours, setHours] = useState<BusinessHoursDto[]>([]);
 
-  // 🔥 Sprint 5.1/5.2: Carga usando TanStack vinculada al Selector Global
   const { data: fetchedHours, isLoading } = useQuery({
-    queryKey: ['businessHours', selectedLocationId],
+    queryKey: ['businessHours', workspaceId, selectedLocationId],
     queryFn: () => getBusinessHours(selectedLocationId),
-    enabled: selectedLocationId !== 'all',
+    enabled: selectedLocationId !== 'all' && !!workspaceId,
   });
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
   const saveMutation = useMutation({
     mutationFn: (newHours: BusinessHoursDto[]) => saveBusinessHours(selectedLocationId, newHours),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['businessHours', selectedLocationId] });
+      queryClient.invalidateQueries({ queryKey: ['businessHours', workspaceId, selectedLocationId] });
       showMessage('Horarios actualizados correctamente', 'success');
     },
     onError: (error: any) => {

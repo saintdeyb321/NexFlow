@@ -61,6 +61,8 @@ public static class DependencyInjection
         services.AddScoped<IRequestFlow, RequestFlow>();
         services.AddScoped<ISupportFlow, SupportFlow>();
         services.AddScoped<IChatFlow, ChatFlow>();
+        services.AddScoped<IOrderFlow, OrderFlow>();
+        services.AddScoped<IContextRecoveryService, ContextRecoveryService>();
 
         services.AddScoped<ILocationResolverService, LocationResolverService>();
         services.AddScoped<IRequestService, RequestService>();

@@ -53,7 +53,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
     setIsSaving(true);
     try {
-      const exactDateTime = new Date(`${formData.date}T${formData.time}:00`).toISOString();
+      const exactDateTime = `${formData.date}T${formData.time}:00`;
 
       await createReservation({
         locationId: formData.locationId,

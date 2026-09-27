@@ -11,7 +11,6 @@ interface AuthState {
   isBootstrapping: boolean;
   me: MeResponse | null;
   
-  // 🔥 Sprint 5.2: Estado global para el selector de sedes
   selectedLocationId: string | 'all';
   setSelectedLocationId: (id: string | 'all') => void;
   
@@ -80,7 +79,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       console.error("Error signing out:", e);
     } finally {
       setActiveWorkspaceId(null); 
-      // Si tienes tokens locales, bórralos aquí: localStorage.removeItem('token');
+      
+      // 🔥 SPRINT 9 CORRECCIÓN: Limpieza segura sin invocar módulos inexistentes
+      if (typeof window !== 'undefined') {
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+
       set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
     }
   }

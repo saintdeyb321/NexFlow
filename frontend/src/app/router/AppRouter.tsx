@@ -49,7 +49,7 @@ const router = createBrowserRouter([
           { path: 'inbox', element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard> },
           { path: 'requests', element: <ModuleGuard requiredModule="REQUESTS"><RequestsPage/></ModuleGuard> },
           { path: 'catalog', element: <ModuleGuard requiredModule="CATALOG"><CatalogPage/></ModuleGuard> },
-          { path: 'orders', element: <ModuleGuard requiredModule={['ORDERS', 'CATALOG']}><OrdersPage/></ModuleGuard> }, // 🔥 Nueva ruta
+          { path: 'orders', element: <ModuleGuard requiredModule="ORDERS"><OrdersPage/></ModuleGuard> }, 
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

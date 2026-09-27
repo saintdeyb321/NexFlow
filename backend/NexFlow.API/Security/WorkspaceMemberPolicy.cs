@@ -34,14 +34,6 @@ public class WorkspaceMemberHandler : AuthorizationHandler<WorkspaceMemberRequir
         var userId = _currentUser.UserId;
         if (userId == Guid.Empty) return;
 
-        // 🔥 Auditoría (Sprint 3.3): El SuperAdmin tiene pase libre a cualquier Workspace
-        bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(userId, System.Threading.CancellationToken.None);
-        if (isSuperAdmin)
-        {
-            context.Succeed(requirement);
-            return;
-        }
-
         var httpContext = _httpContextAccessor.HttpContext;
         if (httpContext == null) return;
 
@@ -50,8 +42,16 @@ public class WorkspaceMemberHandler : AuthorizationHandler<WorkspaceMemberRequir
 
         var workspaceIdString = routeWorkspaceId ?? headerWorkspaceId;
 
-        if (string.IsNullOrEmpty(workspaceIdString) || !Guid.TryParse(workspaceIdString, out var workspaceId))
+        // 🔥 SPRINT 9: Exigir y validar WorkspaceId ANTES de otorgar permisos de SuperAdmin
+        if (string.IsNullOrEmpty(workspaceIdString) || !Guid.TryParse(workspaceIdString, out var workspaceId) || workspaceId == Guid.Empty)
             return;
+
+        bool isSuperAdmin = await _sysAdminRepository.IsUserSuperAdminAsync(userId, System.Threading.CancellationToken.None);
+        if (isSuperAdmin)
+        {
+            context.Succeed(requirement);
+            return;
+        }
 
         var membership = await _membershipRepository.GetUserMembershipAsync(userId, workspaceId, System.Threading.CancellationToken.None);
 

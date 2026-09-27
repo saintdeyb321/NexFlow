@@ -31,3 +31,7 @@ export interface OrderRecord {
 export interface UpdateOrderStatusRequest {
   status: OrderStatus;
 }
+
+export interface UpdateOrderAmountRequest {
+  totalAmountMinorUnits: number;
+}

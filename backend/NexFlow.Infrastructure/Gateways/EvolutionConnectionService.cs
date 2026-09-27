@@ -30,19 +30,29 @@ public class EvolutionConnectionService : IEvolutionConnectionService
         _baseUrl = configuration["Evolution:BaseUrl"]?.TrimEnd('/') ?? throw new ArgumentNullException("Evolution BaseUrl no configurada");
         _apiKey = configuration["Evolution:ApiKey"] ?? string.Empty;
 
-        // 🔥 SPRINT 18: Obtenemos configuración de Webhook
         _webhookUrl = configuration["Evolution:WebhookUrl"] ?? string.Empty;
         _webhookKey = configuration["Evolution:WebhookKey"] ?? string.Empty;
 
+        // 🔥 SPRINT 20: CORRECCIÓN DE HEADERS. 
+        // Solo inyectamos "apikey" una vez. .NET concatena si lo agregas dos veces, arruinando la clave.
         if (!string.IsNullOrEmpty(_apiKey))
         {
+            _httpClient.DefaultRequestHeaders.Remove("apikey");
             _httpClient.DefaultRequestHeaders.Add("apikey", _apiKey);
         }
     }
 
+    // 🔥 BLINDAJE: Evolution explota si hay guiones, espacios o mayúsculas en el nombre.
+    private string SanitizeInstanceName(string? rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName)) return string.Empty;
+        return rawName.Replace("-", "").Replace(" ", "").ToLowerInvariant();
+    }
+
     public async Task<string> GetConnectionStatusAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        var rawName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        var instanceName = SanitizeInstanceName(rawName);
         if (string.IsNullOrEmpty(instanceName)) return "DISCONNECTED";
 
         var url = $"{_baseUrl}/instance/connectionState/{instanceName}";
@@ -69,69 +79,110 @@ public class EvolutionConnectionService : IEvolutionConnectionService
 
     public async Task<string?> ConnectAndGetQrAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
-        if (string.IsNullOrEmpty(instanceName)) return null;
+        var rawName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        var instanceName = SanitizeInstanceName(rawName);
 
-        // 🔥 SPRINT 18 (Regla fundamental): Bloquear una segunda conexión únicamente cuando CONNECTED
+        if (string.IsNullOrEmpty(instanceName))
+        {
+            _logger.LogWarning("ConnectAndGetQrAsync: No se pudo resolver un nombre de instancia válido.");
+            return null;
+        }
+
         var currentStatus = await GetConnectionStatusAsync(workspaceId, cancellationToken);
         if (currentStatus == "CONNECTED")
         {
-            _logger.LogWarning("Intento de reconexión bloqueado. La instancia {Instance} ya está CONNECTED.", instanceName);
-            return null; // O lanzar excepción de dominio según prefieras
+            return "ALREADY_CONNECTED";
         }
-
-        var url = $"{_baseUrl}/instance/create";
-
-        // 🔥 SPRINT 18: Inyección segura del Webhook al momento de crear
-        var payload = new
-        {
-            instanceName = instanceName,
-            token = Guid.NewGuid().ToString("N"),
-            qrcode = true,
-            webhook = string.IsNullOrEmpty(_webhookUrl) ? null : new
-            {
-                url = _webhookUrl,
-                byEvents = false,
-                base64 = false,
-                events = new[] { "MESSAGES_UPSERT" },
-                headers = new Dictionary<string, string> { { "X-NexFlow-Webhook-Key", _webhookKey } }
-            }
-        };
 
         try
         {
-            var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+            // 1. Intentamos conectar si la instancia ya existe (Devuelve el QR si está desconectada)
+            var connectUrl = $"{_baseUrl}/instance/connect/{instanceName}";
+            var connectResponse = await _httpClient.GetAsync(connectUrl, cancellationToken);
 
-            if (json.TryGetProperty("qrcode", out var qrNode) && qrNode.TryGetProperty("base64", out var base64Node))
+            if (connectResponse.IsSuccessStatusCode)
             {
-                return base64Node.GetString();
-            }
-
-            if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
-            {
-                var connectUrl = $"{_baseUrl}/instance/connect/{instanceName}";
-                var connectResponse = await _httpClient.GetAsync(connectUrl, cancellationToken);
                 var connectJson = await connectResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-                if (connectJson.TryGetProperty("base64", out var fallbackBase64))
+                var base64 = ExtractBase64(connectJson);
+                if (!string.IsNullOrEmpty(base64))
                 {
-                    return fallbackBase64.GetString();
+                    // Si logró conectarse a una existente, aseguramos el webhook por si acaso
+                    await SetWebhookSafeAsync(instanceName, cancellationToken);
+                    return base64;
                 }
             }
-            return null;
+
+            // 2. Si no existe, CREAMOS la instancia con un payload súper limpio
+            var createUrl = $"{_baseUrl}/instance/create";
+            var createPayload = new
+            {
+                instanceName = instanceName,
+                qrcode = true,
+                token = Guid.NewGuid().ToString("N")
+            };
+
+            var createResponse = await _httpClient.PostAsJsonAsync(createUrl, createPayload, cancellationToken);
+
+            if (!createResponse.IsSuccessStatusCode)
+            {
+                var err = await createResponse.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("Evolution devolvió error al crear la instancia {Instance}. StatusCode: {Code}, Detalle: {Error}", instanceName, createResponse.StatusCode, err);
+                return null;
+            }
+
+            // 3. SETEAMOS EL WEBHOOK en un paso separado
+            await SetWebhookSafeAsync(instanceName, cancellationToken);
+
+            // 4. Retornamos el QR
+            var createJson = await createResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+            return ExtractBase64(createJson);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fallo al crear la instancia de Evolution para {InstanceName}", instanceName);
+            _logger.LogError(ex, "Fallo crítico de red hacia Evolution API para la instancia {InstanceName}", instanceName);
             return null;
+        }
+    }
+
+    private async Task SetWebhookSafeAsync(string instanceName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(_webhookUrl)) return;
+
+        try
+        {
+            var webhookUrlEndpoint = $"{_baseUrl}/webhook/set/{instanceName}";
+            var webhookPayload = new
+            {
+                webhook = new
+                {
+                    url = _webhookUrl,
+                    byEvents = false,
+                    base64 = false,
+                    events = new[] { "MESSAGES_UPSERT" },
+                    headers = new Dictionary<string, string> { { "X-NexFlow-Webhook-Key", _webhookKey } }
+                }
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(webhookUrlEndpoint, webhookPayload, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("No se pudo configurar el webhook para {Instance}. Status: {Status}. Detalle: {Error}", instanceName, response.StatusCode, err);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Excepción al intentar configurar el webhook para {Instance}", instanceName);
         }
     }
 
     public async Task<bool> DisconnectAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        var rawName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
+        var instanceName = SanitizeInstanceName(rawName);
         if (string.IsNullOrEmpty(instanceName)) return true;
 
+        // Logout cierra la sesión de WhatsApp pero no borra la instancia
         var url = $"{_baseUrl}/instance/logout/{instanceName}";
         try
         {
@@ -142,5 +193,22 @@ public class EvolutionConnectionService : IEvolutionConnectionService
         {
             return false;
         }
+    }
+
+    // Extractor Universal para soportar formatos Base64 de v1 y v2 de Evolution
+    private string? ExtractBase64(JsonElement json)
+    {
+        if (json.TryGetProperty("base64", out var b1)) return b1.GetString();
+
+        if (json.TryGetProperty("qrcode", out var q2))
+        {
+            if (q2.ValueKind == JsonValueKind.String) return q2.GetString();
+            if (q2.ValueKind == JsonValueKind.Object && q2.TryGetProperty("base64", out var b2)) return b2.GetString();
+        }
+
+        if (json.TryGetProperty("hash", out var hashNode) && hashNode.TryGetProperty("qrcode", out var q3))
+            return q3.GetString();
+
+        return null;
     }
 }

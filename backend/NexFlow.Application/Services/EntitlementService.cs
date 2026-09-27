@@ -70,27 +70,33 @@ public class EntitlementService : IEntitlementService
 
         return await _cache.GetOrCreateAsync(cacheKey, async entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
-
             var snapshot = new EntitlementSnapshot();
 
             var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
             if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
-                return snapshot;
-
-            // Agregamos solo los módulos puramente base al snapshot
-            foreach (var baseMod in _baseModules)
             {
-                snapshot.ActiveModuleCodes.Add(baseMod);
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+                return snapshot;
             }
 
             var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+
+            // 🔥 SPRINT 9 CORRECCIÓN: Usamos un tiempo seguro sin adivinar propiedades
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
+
+            // Licencia nula o vencida restringe el acceso EXCLUSIVAMENTE a módulos base
             if (license == null || !license.IsValidAt(_clock.UtcNow))
             {
-                // Si la licencia expira, o no tiene, solo conserva acceso a los módulos base
                 snapshot.IsValid = true;
                 snapshot.MaxLocations = 1;
+                snapshot.ActiveModuleCodes.Add("CONVERSATIONS");
+                snapshot.ActiveModuleCodes.Add("FAQ");
                 return snapshot;
+            }
+
+            foreach (var baseMod in _baseModules)
+            {
+                snapshot.ActiveModuleCodes.Add(baseMod);
             }
 
             snapshot.IsValid = true;
@@ -139,7 +145,7 @@ public class EntitlementService : IEntitlementService
         if (await IsSuperAdminAsync(cancellationToken))
         {
             // El SuperAdmin retiene acceso global para soporte técnico
-            return new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "SERVICES", "CATALOG", "FAQ", "REQUESTS", "RESERVATIONS" };
+            return new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "SERVICES", "CATALOG", "FAQ", "REQUESTS", "RESERVATIONS", "ORDERS" };
         }
 
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);

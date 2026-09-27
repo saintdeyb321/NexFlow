@@ -52,7 +52,8 @@ public class ReservationsController : ControllerBase
 
         var localDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
         var startUtc = TimeZoneInfo.ConvertTimeToUtc(localDate, workspaceZone);
-        var endUtc = startUtc.AddDays(1);
+        // 🔥 SPRINT 2: El final del día se convierte desde la fecha local, incluso con cambios de horario.
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localDate.AddDays(1), workspaceZone);
 
         var reservations = await _reservationRepository.GetReservationsForDateAsync(WorkspaceId, locationId, startUtc, endUtc, cancellationToken);
         return Ok(reservations);
@@ -69,10 +70,13 @@ public class ReservationsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> CreateReservation([FromBody] CreateReservationRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateReservation(
+        [FromBody] CreateReservationRequest request,
+        CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
 
+        // 🔥 SPRINT 2: Sin zona = hora del workspace; con Z = UTC. Solo el motor convierte.
         var result = await _reservationEngine.CreateReservationAsync(
             WorkspaceId, request.LocationId, request.ServiceId, request.CustomerIdentifier, request.CustomerName, request.DateTime, cancellationToken);
 
@@ -85,6 +89,7 @@ public class ReservationsController : ControllerBase
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
 
+        // 🔥 SPRINT 2: La edición usa el mismo contrato temporal que la creación.
         var result = await _reservationEngine.EditReservationAsync(WorkspaceId, id, request.NewDateTime, cancellationToken);
 
         if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });

@@ -1,4 +1,5 @@
-﻿using NexFlow.Application.Features.Knowledge;
+﻿using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Knowledge;
 
 namespace NexFlow.Application.Features.Business.Locations;
 

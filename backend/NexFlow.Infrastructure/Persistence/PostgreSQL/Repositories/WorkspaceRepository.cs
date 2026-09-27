@@ -29,37 +29,27 @@ public class WorkspaceRepository : IWorkspaceRepository
     }
 
     // 🔥 EL EXTERMINADOR DE DEPENDENCIAS
+    // 🔥 EL EXTERMINADOR DE DEPENDENCIAS
     public async Task DeleteNuclearAsync(Workspace workspace, CancellationToken cancellationToken)
     {
-        // 1. Buscar las membresías asociadas a este workspace ignorando filtros globales
-        var memberships = await _context.Memberships
-            .IgnoreQueryFilters()
-            .Where(m => m.WorkspaceId == workspace.Id)
-            .ToListAsync(cancellationToken);
-
+        // 1 y 2 quedan igual...
+        var memberships = await _context.Memberships.IgnoreQueryFilters().Where(m => m.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
         var userIds = memberships.Select(m => m.UserId).Distinct().ToList();
 
-        // 2. Buscar licencias asociadas y sus módulos de licencia
-        var licenses = await _context.Licenses
-            .IgnoreQueryFilters()
-            .Include(l => l.LicenseModules)
-            .Where(l => l.WorkspaceId == workspace.Id)
-            .ToListAsync(cancellationToken);
+        var licenses = await _context.Licenses.IgnoreQueryFilters().Include(l => l.LicenseModules).Where(l => l.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
 
-        // 3. Buscar registros condicionales (si existen en el contexto)
-        var audits = await _context.AuditLogs
-            .IgnoreQueryFilters()
-            .Where(a => a.WorkspaceId == workspace.Id)
-            .ToListAsync(cancellationToken);
+        // 3. Buscar registros condicionales (AQUÍ AGREGAMOS NOTIFICACIONES Y MENSAJES)
+        var audits = await _context.AuditLogs.IgnoreQueryFilters().Where(a => a.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
+        var reservations = await _context.Reservations.IgnoreQueryFilters().Where(r => r.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
 
-        var reservations = await _context.Reservations
-            .IgnoreQueryFilters()
-            .Where(r => r.WorkspaceId == workspace.Id)
-            .ToListAsync(cancellationToken);
+        var notifications = await _context.Notifications.IgnoreQueryFilters().Where(n => n.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
+        var processedMsgs = await _context.ProcessedMessages.IgnoreQueryFilters().Where(p => p.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
 
-        // 4. Eliminación limpia de hijos
+        // 4. Eliminación limpia de hijos (AQUÍ LIMPIAMOS LAS NUEVAS TABLAS)
         if (reservations.Any()) _context.Reservations.RemoveRange(reservations);
         if (audits.Any()) _context.AuditLogs.RemoveRange(audits);
+        if (notifications.Any()) _context.Notifications.RemoveRange(notifications);
+        if (processedMsgs.Any()) _context.ProcessedMessages.RemoveRange(processedMsgs);
 
         foreach (var license in licenses)
         {
@@ -69,14 +59,12 @@ public class WorkspaceRepository : IWorkspaceRepository
             }
         }
         if (licenses.Any()) _context.Licenses.RemoveRange(licenses);
-
         if (memberships.Any()) _context.Memberships.RemoveRange(memberships);
 
         // 5. Eliminar el Workspace principal
         _context.Workspaces.Remove(workspace);
 
-        // 6. Lógica inteligente de usuario: 
-        // ¿Este usuario ya no tiene ningún otro workspace activo en el sistema? Si es así, se purga también.
+        // 6. Lógica inteligente de usuario queda exactamente igual...
         foreach (var userId in userIds)
         {
             var hasOtherWorkspaces = await _context.Memberships
@@ -85,14 +73,8 @@ public class WorkspaceRepository : IWorkspaceRepository
 
             if (!hasOtherWorkspaces)
             {
-                var userToDelete = await _context.Users
-                    .IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
-
-                if (userToDelete != null)
-                {
-                    _context.Users.Remove(userToDelete);
-                }
+                var userToDelete = await _context.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+                if (userToDelete != null) _context.Users.Remove(userToDelete);
             }
         }
     }

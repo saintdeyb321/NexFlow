@@ -2,7 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
-using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Nuevo using
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Conversations;
 
@@ -16,6 +16,7 @@ public class ConversationsController : ControllerBase
     private readonly IConversationRepository _conversationRepository;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+
     public record SendManualMessageRequest(string Content);
 
     public ConversationsController(
@@ -63,6 +64,7 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation != null)
         {
+            // 🔥 SPRINT 07: Actualizamos el modo sin borrar el contexto histórico de la sesión
             var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
             context.Mode = "Human";
             context.HandoffReason = HandoffReason.ManualIntervention.ToString();
@@ -83,6 +85,7 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation != null)
         {
+            // 🔥 SPRINT 07: La IA retoma el control manteniendo el contexto intacto
             var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
             context.Mode = "Automatic";
             context.HandoffReason = null;
@@ -97,7 +100,7 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> SendManualMessage(
         string conversationId,
         [FromBody] SendManualMessageRequest request,
-        [FromServices] IOutboundMessageService outboundMessageService, // 🔥 SPRINT 14: Usamos el nuevo servicio
+        [FromServices] IOutboundMessageService outboundMessageService,
         [FromServices] IConversationCache cache,
         CancellationToken cancellationToken)
     {
@@ -106,7 +109,6 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        // 🔥 SPRINT 14: Delegamos la complejidad transaccional a nuestro servicio robusto
         var finalRecord = await outboundMessageService.SendMessageAsync(
             WorkspaceId,
             conversation.Id,
@@ -120,6 +122,7 @@ public class ConversationsController : ControllerBase
             return StatusCode(500, new { message = "No se pudo entregar el mensaje a WhatsApp." });
         }
 
+        // 🔥 SPRINT 07: Takeover implícito sin amnesia
         if (conversation.Mode != ConversationMode.Human)
         {
             await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
@@ -143,7 +146,10 @@ public class ConversationsController : ControllerBase
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
         await _conversationRepository.DeleteConversationAsync(WorkspaceId, conversationId, cancellationToken);
+
+        // Aquí sí es válido borrar el caché, porque la conversación completa está siendo destruida
         await conversationCache.DeleteContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken);
+
         return NoContent();
     }
 }

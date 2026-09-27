@@ -40,8 +40,9 @@ public class WebhookProcessingBackgroundService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<WebhookProcessingBackgroundService> _logger;
 
-    // 🔥 Auditoría (Sprint 1.3): Diccionario de bloqueos (Locks) por conversación para evitar carrera de datos.
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _conversationLocks = new();
+    // Franjas estables: no se elimina un bloqueo mientras otro consumidor puede usarlo.
+    private static readonly SemaphoreSlim[] ConversationLocks = Enumerable.Range(0, 1024)
+        .Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 
     public WebhookProcessingBackgroundService(
         IWebhookTaskQueue taskQueue,
@@ -55,18 +56,22 @@ public class WebhookProcessingBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => DispatchAsync(stoppingToken)));
+    }
+
+    private async Task DispatchAsync(CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var command = await _taskQueue.DequeueAsync(stoppingToken);
 
-                // 🔥 Auditoría (Sprint 1.3): Disparamos la tarea de fondo sin bloquear el hilo principal (Cola concurrente).
-                _ = ProcessMessageConcurrentAsync(command, stoppingToken);
+                await ProcessMessageConcurrentAsync(command, stoppingToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                // Ignorar si el host se está apagando
+                break;
             }
             catch (Exception ex)
             {
@@ -80,8 +85,8 @@ public class WebhookProcessingBackgroundService : BackgroundService
         // Llave única para particionar la concurrencia: Instancia + Teléfono.
         string lockKey = $"{command.InstanceName}_{command.CustomerPhone}";
 
-        // Obtenemos o creamos un cerrojo exclusivo para este chat.
-        var semaphore = _conversationLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
+        // Seleccionamos un cerrojo estable para este chat.
+        var semaphore = ConversationLocks[(int)((uint)StringComparer.Ordinal.GetHashCode(lockKey) % (uint)ConversationLocks.Length)];
 
         // Esperamos turno si ya hay otro mensaje de ESTE MISMO chat procesándose.
         // Los chats diferentes no esperarán y se procesarán en paralelo.
@@ -101,11 +106,6 @@ public class WebhookProcessingBackgroundService : BackgroundService
         {
             semaphore.Release();
 
-            // Limpieza básica de memoria para no acumular Semaphores de chats inactivos.
-            if (semaphore.CurrentCount == 1)
-            {
-                _conversationLocks.TryRemove(lockKey, out _);
-            }
         }
     }
 }

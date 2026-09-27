@@ -4,12 +4,13 @@ import { ClipboardList, Clock, PlayCircle, CheckCircle, XCircle, FileText, Plus,
 import { getRequests, updateRequestStatus } from '../services/request.service';
 import type { RequestStatus, RequestType } from '../types/request.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import { CreateRequestModal } from '../components/CreateRequestModal';
 
 export const RequestsPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const [filterStatus, setFilterStatus] = useState<RequestStatus | 'ALL'>('ALL');
-
+  const [isModalOpen, setIsModalOpen] = useState(false); // 🔥 Nuevo estado
   const { data: requests = [], isLoading, isError } = useQuery({
     queryKey: ['requests', workspaceId],
     queryFn: getRequests,
@@ -80,7 +81,10 @@ export const RequestsPage = () => {
             <option value="InReview">En Revisión</option>
             <option value="Completed">Completadas</option>
           </select>
-          <button className="flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
             <Plus className="w-4 h-4 mr-2" /> Nueva Solicitud
           </button>
         </div>
@@ -153,6 +157,10 @@ export const RequestsPage = () => {
           </div>
         )}
       </div>
+        <CreateRequestModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+      />
     </div>
   );
 };

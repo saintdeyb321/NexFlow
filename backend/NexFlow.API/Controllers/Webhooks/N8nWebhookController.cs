@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Entities.Catalog;
 using System.Security.Cryptography;
 using System.Text;
@@ -24,7 +25,7 @@ public class N8nWebhookController : ControllerBase
     }
 
     [HttpPost("catalog-ready")]
-    public async Task<IActionResult> OnCatalogReady([FromBody] CatalogReadyPayload payload, [FromHeader(Name = "X-NexFlow-Signature")] string providedSignature, CancellationToken cancellationToken)
+    public async Task<IActionResult> OnCatalogReady([FromBody] CatalogReadyPayload payload, [FromHeader(Name = "X-NexFlow-Signature")] string providedSignature, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
     {
         // 1. FASE 5 - SPRINT 16: Validación Criptográfica HMAC
         if (string.IsNullOrWhiteSpace(providedSignature))
@@ -45,7 +46,9 @@ public class N8nWebhookController : ControllerBase
             return BadRequest(new { message = "Payload inválido o incompleto." });
         }
 
-        var scope = string.IsNullOrWhiteSpace(payload.Scope) ? "PRODUCT" : payload.Scope.ToUpperInvariant();
+        var scope = string.IsNullOrWhiteSpace(payload.Scope) ? "PRODUCT" : payload.Scope.Trim().ToUpperInvariant();
+        if (scope != "PRODUCT" && scope != "SERVICE")
+            return BadRequest(new { message = "Scope inválido." });
         var artifact = await _artifactRepository.GetCurrentArtifactAsync(payload.WorkspaceId, scope, cancellationToken);
 
         // 3. FASE 5 - SPRINT 16: Idempotencia y Blindaje contra Race Conditions
@@ -64,6 +67,14 @@ public class N8nWebhookController : ControllerBase
                 artifact.MarkAsFailed();
                 await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
                 return BadRequest(new { message = "Inconsistencia de Hash detectada." });
+            }
+
+            var currentHash = await generationService.GetCurrentSourceHashAsync(payload.WorkspaceId, scope, cancellationToken);
+            if (!string.Equals(currentHash, payload.SourceHash, StringComparison.Ordinal))
+            {
+                artifact.MarkAsFailed();
+                await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
+                return Ok(new { message = "PDF invalidado: los datos del catálogo cambiaron durante la generación." });
             }
 
             // 4. Marcamos el artefacto como vigente
@@ -90,6 +101,5 @@ public class CatalogReadyPayload
     public string GenerationId { get; set; } = string.Empty;
     public string Scope { get; set; } = string.Empty;
     public string SourceHash { get; set; } = string.Empty;
-    public string ImageUrl { get; set; } = string.Empty;
     public string PdfUrl { get; set; } = string.Empty;
 }

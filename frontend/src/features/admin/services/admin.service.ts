@@ -29,7 +29,7 @@ export const reactivateWorkspace = async (workspaceId: string): Promise<void> =>
 };
 
 export const deleteWorkspace = async (workspaceId: string): Promise<void> => {
-  await axiosClient.delete(`/superadmin/clients/${workspaceId}`);
+  await axiosClient.post('/superadmin/clients/delete', { workspaceId });
 };
 
 export const renewWorkspaceLicense = async (workspaceId: string, durationInMonths: number): Promise<void> => {

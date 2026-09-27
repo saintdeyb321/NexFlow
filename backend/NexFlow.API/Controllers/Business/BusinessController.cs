@@ -252,8 +252,12 @@ public class BusinessController : ControllerBase
     {
         var qrBase64 = await evolutionService.ConnectAndGetQrAsync(WorkspaceId, cancellationToken);
 
+        // 🔥 SPRINT 20: Si ya estaba conectado, informamos éxito en lugar de intentar renderizar un QR vacío
+        if (qrBase64 == "ALREADY_CONNECTED")
+            return Ok(new { status = "CONNECTED" });
+
         if (string.IsNullOrEmpty(qrBase64))
-            return StatusCode(500, new { message = "No se pudo generar el código QR." });
+            return StatusCode(500, new { message = "No se pudo generar el código QR. Verifica la conexión con Evolution API." });
 
         return Ok(new { qrBase64 });
     }

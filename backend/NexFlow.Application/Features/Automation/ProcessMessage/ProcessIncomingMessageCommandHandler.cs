@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Automation.Conversations;
@@ -12,12 +11,13 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
 public class ProcessIncomingMessageCommandHandler
 {
+    private readonly IContextRecoveryService _contextRecovery;
+    private readonly ILocationRepository _locationRepo;
     private readonly IIncomingMessageGuard _guard;
     private readonly IConversationStateService _stateService;
     private readonly IAiResponseOrchestrator _aiOrchestrator;
     private readonly IKnowledgeService _knowledgeService;
-    private readonly IMessageGateway _messageGateway;
-    private readonly IConversationRepository _conversationRepo;
+    private readonly IOutboundMessageService _outboundMessageService; // 🔥 SPRINT 14: Centralización absoluta
     private readonly IProcessedMessageRepository _processedMessageRepo;
     private readonly ILogger<ProcessIncomingMessageCommandHandler> _logger;
 
@@ -26,19 +26,21 @@ public class ProcessIncomingMessageCommandHandler
         IConversationStateService stateService,
         IAiResponseOrchestrator aiOrchestrator,
         IKnowledgeService knowledgeService,
-        IMessageGateway messageGateway,
-        IConversationRepository conversationRepo,
+        IOutboundMessageService outboundMessageService,
         IProcessedMessageRepository processedMessageRepo,
-        ILogger<ProcessIncomingMessageCommandHandler> logger)
+        ILogger<ProcessIncomingMessageCommandHandler> logger,
+        IContextRecoveryService contextRecovery,
+        ILocationRepository locationRepo)
     {
         _guard = guard;
         _stateService = stateService;
         _aiOrchestrator = aiOrchestrator;
         _knowledgeService = knowledgeService;
-        _messageGateway = messageGateway;
-        _conversationRepo = conversationRepo;
+        _outboundMessageService = outboundMessageService;
         _processedMessageRepo = processedMessageRepo;
         _logger = logger;
+        _contextRecovery = contextRecovery;
+        _locationRepo = locationRepo;
     }
 
     public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
@@ -49,9 +51,13 @@ public class ProcessIncomingMessageCommandHandler
         try
         {
             var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
+
             if (stateResult.FastReply != null)
             {
-                await PersistAndSendAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, stateResult.Record.Id, stateResult.FastReply, cancellationToken);
+                // 🔥 SPRINT 14: Usamos el servicio centralizado para respuestas rápidas
+                // 🔥 SPRINT 1: Solo confirmamos el procesamiento si la respuesta fue enviada.
+                var outbound = await _outboundMessageService.SendMessageAsync(guardResult.WorkspaceId, stateResult.Record.Id, guardResult.NormalizedPhone, stateResult.FastReply, SenderType.AI, cancellationToken);
+                EnsureMessageSent(outbound);
                 await _processedMessageRepo.MarkAsProcessedAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken);
                 return Result.Success();
             }
@@ -60,19 +66,18 @@ public class ProcessIncomingMessageCommandHandler
             {
                 if (!await TryHandleZeroTokenKnowledgeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request.MessageText, stateResult.Record, cancellationToken))
                 {
-                    await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
+                    // 🔥 SPRINT 1: El orquestador debe confirmar la entrega a la API.
+                    var outbound = await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
+                    EnsureMessageSent(outbound);
                 }
             }
 
-            // 🔥 SPRINT 1: Marcamos el mensaje como procesado exitosamente al final del flujo
             await _processedMessageRepo.MarkAsProcessedAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken);
             return Result.Success();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error crítico procesando el mensaje {MessageId}. Marcando como FAILED para permitir reintento.", request.MessageId);
-
-            // 🔥 SPRINT 1: El mensaje queda documentado como fallido y habilitado para reintentos
             await _processedMessageRepo.MarkAsFailedAsync(guardResult.WorkspaceId, request.MessageId, ex.Message, CancellationToken.None);
             throw;
         }
@@ -100,13 +105,33 @@ public class ProcessIncomingMessageCommandHandler
 
         if (topic.HasValue)
         {
-            var snapshot = await _knowledgeService.GetSnapshotAsync(workspaceId, ct);
-            var result = _knowledgeService.Query(snapshot, new KnowledgeQuery { Topic = topic.Value });
+            var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, phone, ct);
+            var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+            var mentionedLocations = locations.Where(l =>
+                !string.IsNullOrWhiteSpace(l.Name)
+                && message.Contains(l.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (mentionedLocations.Count > 1) return false;
+
+            var locationId = mentionedLocations.Count == 1
+                ? mentionedLocations[0].Id
+                : context.SelectedLocationId;
+            if (!string.IsNullOrWhiteSpace(locationId) && !locations.Any(l => l.Id == locationId))
+                return false;
+
+            var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
+
+            // 🔥 SPRINT 04: Pasamos el workspaceId y el cancellation token a la nueva firma de BD
+            var result = await _knowledgeService.QueryAsync(workspaceId, snapshot,
+                new KnowledgeQuery { Topic = topic.Value, LocationId = locationId }, ct);
 
             if (result.Found)
             {
                 string reply = $"Aquí tienes la información solicitada:\n\n{result.Facts}\n¿En qué más te puedo ayudar?";
-                await PersistAndSendAsync(workspaceId, phone, conversation.Id, reply, ct);
+
+                // 🔥 SPRINT 14: Reemplazamos PersistAndSendAsync interno por el Outbound unificado
+                // 🔥 SPRINT 1: Un fallo de envío no cuenta como conocimiento atendido.
+                var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone, reply, SenderType.AI, ct);
+                EnsureMessageSent(outbound);
                 return true;
             }
         }
@@ -114,18 +139,10 @@ public class ProcessIncomingMessageCommandHandler
         return false;
     }
 
-    private async Task PersistAndSendAsync(Guid workspaceId, string phone, string conversationId, string text, CancellationToken ct)
+    // 🔥 SPRINT 1: Activamos MarkAsFailedAsync y el reintento ante una salida no confirmada.
+    private static void EnsureMessageSent(MessageRecord message)
     {
-        var pendingId = Guid.NewGuid().ToString();
-        await _conversationRepo.AddMessageAsync(workspaceId, conversationId, new MessageRecord { Id = pendingId, ExternalMessageId = pendingId, Direction = "outbound", Sender = SenderType.AI, Content = text, Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow }, ct);
-        try
-        {
-            var extId = await _messageGateway.SendTextAsync(workspaceId, phone, text, pendingId, ct);
-            await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, extId, ct);
-        }
-        catch
-        {
-            await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Failed, null, ct);
-        }
+        if (message.Status != MessageStatus.Sent)
+            throw new InvalidOperationException("El envío de la respuesta no fue confirmado.");
     }
 }

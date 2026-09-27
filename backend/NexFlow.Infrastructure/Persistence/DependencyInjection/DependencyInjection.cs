@@ -83,9 +83,9 @@ public static class DependencyInjection
         services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>();
 
         //notificacion
-        services.AddScoped<INotificationRepository, FirestoreNotificationRepository>();
-
         services.AddScoped<IOrderRepository, FirestoreOrderRepository>();
+
+        services.AddScoped<INotificationRepository, NotificationRepository>();
 
 
         // 7. Conexión a Redis Resiliente

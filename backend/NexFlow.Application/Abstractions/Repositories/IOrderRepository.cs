@@ -9,4 +9,5 @@ public interface IOrderRepository
     Task<OrderRecord?> GetOrderByIdAsync(Guid workspaceId, string orderId, CancellationToken cancellationToken);
     Task<IEnumerable<OrderRecord>> GetOrdersAsync(Guid workspaceId, OrderStatus? status, CancellationToken cancellationToken);
     Task UpdateOrderStatusAsync(Guid workspaceId, string orderId, OrderStatus newStatus, CancellationToken cancellationToken);
+    Task UpdateOrderAmountAsync(Guid workspaceId, string orderId, long totalAmountMinorUnits, CancellationToken cancellationToken); 
 }

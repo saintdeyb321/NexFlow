@@ -1,5 +1,8 @@
-import { X, ShoppingCart, MessageSquare, User, Calendar } from 'lucide-react';
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { X, ShoppingCart, MessageSquare, User, Calendar, Pencil, Check } from 'lucide-react';
 import type { OrderRecord } from '../types/orders.types';
+import { updateOrderAmount } from '../services/orders.service';
 
 interface OrderDetailModalProps {
   order: OrderRecord;
@@ -7,8 +10,25 @@ interface OrderDetailModalProps {
 }
 
 export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
+  const queryClient = useQueryClient();
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [newPrice, setNewPrice] = useState((order.totalAmountMinorUnits / 100).toFixed(2));
+
   const formatCurrency = (minorUnits: number, currency: string) => 
     `${currency} ${(minorUnits / 100).toFixed(2)}`;
+
+  const amountMutation = useMutation({
+    mutationFn: (minorUnits: number) => updateOrderAmount(order.id, minorUnits),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setIsEditingPrice(false);
+    }
+  });
+
+  const handleSavePrice = () => {
+    const minorUnits = Math.round(parseFloat(newPrice || '0') * 100);
+    amountMutation.mutate(minorUnits);
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
@@ -76,16 +96,55 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
             <div className="w-1/2">
               {order.notes && (
                 <>
-                  <p className="text-xs text-gray-500 uppercase font-medium">Notas del Cliente:</p>
+                  <p className="text-xs text-gray-500 uppercase font-medium">Notas del Sistema:</p>
                   <p className="text-sm text-gray-700 italic bg-yellow-50 p-2 rounded border border-yellow-100 mt-1">"{order.notes}"</p>
                 </>
               )}
             </div>
             <div className="text-right">
               <p className="text-sm text-gray-500 mb-1">Total del Pedido</p>
-              <p className="text-2xl font-bold text-blue-600">
-                {formatCurrency(order.totalAmountMinorUnits, order.currency)}
-              </p>
+              
+              {isEditingPrice ? (
+                <div className="flex items-center justify-end gap-2 mt-1">
+                  <span className="text-gray-500 font-bold">{order.currency}</span>
+                  <input
+                    type="number"
+                    step="0.10"
+                    value={newPrice}
+                    onChange={(e) => setNewPrice(e.target.value)}
+                    className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSavePrice}
+                    disabled={amountMutation.isPending}
+                    className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setIsEditingPrice(false)}
+                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-end gap-2 group">
+                  <p className="text-2xl font-bold text-blue-600">
+                    {order.status === 'PendingReview' && order.totalAmountMinorUnits === 0 
+                      ? 'Por definir' 
+                      : formatCurrency(order.totalAmountMinorUnits, order.currency)}
+                  </p>
+                  <button
+                    onClick={() => setIsEditingPrice(true)}
+                    className="p-1.5 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Definir/Editar Precio"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
