@@ -9,17 +9,20 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 export const FaqsPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  const selectedLocationId = useAuthStore(state => state.selectedLocationId); // 🔥 Contexto Global
+  const selectedLocationId = useAuthStore(state => state.selectedLocationId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [faqToEdit, setFaqToEdit] = useState<FaqDto | null>(null);
+  
+  // 🔥 SPRINT 11: Manejo de estado visual (Elimina alerts y confirms)
+  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
 
-  // 🔥 SPRINT 09: Lectura aislada por Workspace y Sede
   const { data: faqs = [], isLoading: isFaqsLoading } = useQuery({
     queryKey: ['faqs', workspaceId, queryLocation],
-    queryFn: () => faqService.getFaqs(queryLocation), // Deberás actualizar faq.service.ts
+    queryFn: () => faqService.getFaqs(queryLocation),
     enabled: !!workspaceId,
     staleTime: 1000 * 60 * 10,
   });
@@ -29,16 +32,19 @@ export const FaqsPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['faqs', workspaceId] });
       setIsModalOpen(false);
+      setNotification({ msg: 'Pregunta guardada correctamente.', type: 'success' });
     },
-    onError: (error: any) => alert(`No se pudo guardar: ${error.response?.data?.error || error.message}`)
+    onError: (error: any) => setNotification({ msg: error.message || 'No se pudo guardar la pregunta.', type: 'error' })
   });
 
   const deleteMutation = useMutation({
     mutationFn: faqService.deleteFaq,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['faqs', workspaceId] });
+      setDeleteConfirmId(null);
+      setNotification({ msg: 'Pregunta eliminada exitosamente.', type: 'success' });
     },
-    onError: (error: any) => alert(`Error al eliminar: ${error.response?.data?.error || error.message}`)
+    onError: (error: any) => setNotification({ msg: error.message || 'Error al eliminar la pregunta.', type: 'error' })
   });
 
   const handleOpenNew = () => {
@@ -49,12 +55,6 @@ export const FaqsPage = () => {
   const handleOpenEdit = (faq: FaqDto) => {
     setFaqToEdit(faq);
     setIsModalOpen(true);
-  };
-
-  const handleDelete = (faqId: string) => {
-    if (window.confirm("¿Seguro que deseas eliminar esta pregunta de la IA?")) {
-      deleteMutation.mutate(faqId);
-    }
   };
 
   const getCategoryColor = (category: string) => {
@@ -70,6 +70,14 @@ export const FaqsPage = () => {
 
   return (
     <div className="max-w-5xl mx-auto animate-in fade-in">
+      
+      {notification && (
+        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          <span>{notification.msg}</span>
+          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
@@ -124,13 +132,24 @@ export const FaqsPage = () => {
                   </p>
                 </div>
 
-                <div className="flex items-center space-x-2 md:self-start">
+                <div className="flex items-center space-x-2 md:self-start relative">
                   <button onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button onClick={() => handleDelete(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
+                  <button onClick={() => setDeleteConfirmId(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
                     <Trash2 className="w-4 h-4" />
                   </button>
+
+                  {/* 🔥 Modal en línea para borrar (Reemplaza confirm) */}
+                  {deleteConfirmId === faq.id && (
+                    <div className="absolute right-0 top-12 bg-white border border-red-200 shadow-xl p-3 rounded-lg z-10 w-48">
+                      <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar pregunta?</p>
+                      <div className="flex justify-between gap-2">
+                        <button onClick={() => setDeleteConfirmId(null)} className="flex-1 text-xs bg-gray-100 py-1 rounded">No</button>
+                        <button onClick={() => deleteMutation.mutate(faq.id!)} disabled={deleteMutation.isPending} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí, borrar</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))

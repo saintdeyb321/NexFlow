@@ -54,13 +54,6 @@ public class EvolutionWebhookController : ControllerBase
         if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-") || payload.Data.Key.RemoteJid == "status@broadcast")
             return Ok();
 
-        // Si el mensaje fue enviado por el propio negocio, lo descartamos
-        if (payload.Data.Key.FromMe)
-        {
-            _logger.LogDebug("Mensaje saliente (FromMe) ignorado. ID: {MessageId}", payload.Data.Key.Id);
-            return Ok();
-        }
-
         var messageText = payload.Data.Message.GetRealText();
 
         if (string.IsNullOrWhiteSpace(messageText))

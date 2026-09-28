@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.Automation.Conversations;
+using NexFlow.Application.Features.Notifications;
 using NexFlow.Domain.Enums;
 using System.Text.RegularExpressions;
 
@@ -26,20 +27,22 @@ public sealed class ConversationStateService : IConversationStateService
     private readonly IConversationRepository _conversationRepo;
     private readonly IConsumerIdentityRepository _consumerRepo;
     private readonly IConversationCache _conversationCache;
+    private readonly INotificationService _notificationService;
     private readonly ILogger<ConversationStateService> _logger;
 
-    // 🔥 SPRINT 08: Tiempo máximo de inactividad antes de considerar una nueva sesión (24 horas)
     private readonly TimeSpan _sessionTimeout = TimeSpan.FromHours(24);
 
     public ConversationStateService(
         IConversationRepository conversationRepo,
         IConsumerIdentityRepository consumerRepo,
         IConversationCache conversationCache,
+        INotificationService notificationService,
         ILogger<ConversationStateService> logger)
     {
         _conversationRepo = conversationRepo;
         _consumerRepo = consumerRepo;
         _conversationCache = conversationCache;
+        _notificationService = notificationService;
         _logger = logger;
     }
 
@@ -111,8 +114,20 @@ public sealed class ConversationStateService : IConversationStateService
                 return (false, conversation, null);
             conversation = latestConversation;
 
-            // 🔥 Si la IA está apagada, no responde, pero el mensaje ya quedó registrado en la DB.
-            if (conversation.Mode != ConversationMode.Automatic) return (false, conversation, null);
+            if (conversation.Mode != ConversationMode.Automatic)
+            {
+                // 🔥 SPRINT 11 CORRECCIÓN: Usamos request.CustomerName que viene fresco desde WhatsApp
+                await _notificationService.NotifyAsync(
+                    workspaceId,
+                    "CONVERSATIONS",
+                    NotificationType.NewMessage,
+                    "Nuevo mensaje en chat manual",
+                    $"El cliente {request.CustomerName ?? normalizedPhone} ha respondido.",
+                    $"/inbox?conversation={conversation.Id}",
+                    cancellationToken);
+
+                return (false, conversation, null);
+            }
 
             // 3. Reglas Deterministas (Level 0 Fast Rules) - Para ahorrar consumo de IA
             var txt = request.MessageText.Trim().ToLowerInvariant();

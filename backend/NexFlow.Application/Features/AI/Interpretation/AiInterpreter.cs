@@ -48,7 +48,6 @@ public class AiInterpreter : IAiInterpreter
         var localBusinessTime = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
         var activeModulesList = string.Join(", ", activeModules);
 
-        // 🔥 Se agrega ORDER a las intenciones y a la regla estricta de módulos
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
 Tu ÚNICO trabajo es extraer intenciones y entidades en JSON.
 MÓDULOS PAGADOS POR ESTE NEGOCIO: {activeModulesList}
@@ -59,7 +58,7 @@ HORA ACTUAL: {localBusinessTime:HH:mm}
 OBJETIVO ACTUAL: {(string.IsNullOrWhiteSpace(currentGoal) ? "NINGUNO" : currentGoal)}
 
 - Intent: 'PRODUCT_QUERY', 'SERVICE_QUERY', 'RESERVATION', 'REQUEST', 'ORDER', 'FAQ', 'LOCATION', 'GENERAL', 'SUPPORT'.
-- SearchTerm: Si el cliente pregunta por un producto/servicio, o si HACE UN PEDIDO (ORDER), extrae los nombres y cantidades aquí (Ej: '2 martillos, 1 clavo').
+- SearchTerm: Si el cliente hace un PEDIDO (ORDER), extrae los productos y SUS CANTIDADES (Ej: '2x martillos', '1x clavo'). Si el cliente indica que ya terminó de pedir, o dice 'enviar pedido', pon EXACTAMENTE: 'FINALIZAR_PEDIDO'.
 - Service: Nombre del servicio (Solo si Intent es RESERVATION).
 - Location: La sede mencionada.
 - Date: Fecha en formato YYYY-MM-DD.

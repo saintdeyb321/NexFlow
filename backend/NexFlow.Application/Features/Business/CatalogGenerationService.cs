@@ -165,11 +165,27 @@ public class CatalogGenerationService : ICatalogGenerationService
                 PayloadJson = JsonSerializer.Serialize(wrappedPayload)
             };
 
+            // 🔥 SPRINT 11 (Auditoría): Si esto falla (la base de datos se cae, etc), el bloque catch lo atajará.
             await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error preparando el payload documental para n8n");
+            _logger.LogError(ex, "Error preparando el payload documental para n8n o guardando en Outbox");
+
+            // 🔥 SPRINT 11: Forzamos el estado a Failed saltándonos el private set usando Reflexión
+            var prop = artifact.GetType().GetProperty("Status");
+            if (prop != null && prop.CanWrite)
+            {
+                prop.SetValue(artifact, CatalogArtifactStatus.Failed);
+            }
+            else
+            {
+                // Si el set es init-only o estrictamente privado, modificamos el campo de respaldo
+                var field = artifact.GetType().GetField("<Status>k__BackingField", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                field?.SetValue(artifact, CatalogArtifactStatus.Failed);
+            }
+
+            await _artifactRepository.SaveArtifactAsync(artifact, CancellationToken.None);
             throw;
         }
 

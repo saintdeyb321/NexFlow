@@ -72,7 +72,7 @@ public static class DependencyInjection
         services.AddHttpClient<IAiProvider, GroqAiProvider>();
         services.AddScoped<IAiRouter, AiRouter>();
 
-        services.AddScoped<IOutboxRepository, FirestoreOutboxRepository>();
+        services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();
 
         // 6. Gateways Externos

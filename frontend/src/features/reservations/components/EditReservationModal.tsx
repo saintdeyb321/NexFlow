@@ -7,7 +7,7 @@ interface EditReservationModalProps {
   onClose: () => void;
   onSuccess: () => void;
   reservation: ReservationDto | null;
-  timeZone: string; // 🔥 SPRINT 7: Inyectamos la zona horaria real
+  timeZone: string; 
 }
 
 export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, timeZone }: EditReservationModalProps) => {
@@ -17,10 +17,8 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
 
   useEffect(() => {
     if (reservation) {
-      const timeStr = (reservation as any).startTime || reservation.dateTime;
-      
-      // 🔥 SPRINT 7: Usamos la zona horaria del perfil de negocio en lugar de un string estático[cite: 1]
-      const localTime = new Date(new Date(timeStr).toLocaleString('en-US', { timeZone }));
+      // 🔥 SPRINT 11: Se eliminaron los "as any"
+      const localTime = new Date(new Date(reservation.dateTime).toLocaleString('en-US', { timeZone }));
       
       setEditDate(localTime.toISOString().split('T')[0]);
       setEditTime(`${localTime.getHours().toString().padStart(2, '0')}:${localTime.getMinutes().toString().padStart(2, '0')}`);

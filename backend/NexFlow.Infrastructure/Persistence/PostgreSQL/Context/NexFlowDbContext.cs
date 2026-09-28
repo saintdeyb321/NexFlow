@@ -22,8 +22,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
     public DbSet<Reservation> Reservations { get; set; } = null!;
     public DbSet<SystemAdministrator> SystemAdministrators { get; set; } = null!;
     public DbSet<Notification> Notifications { get; set; } = null!;
-
-    // 🔥 SPRINT 7: Tabla persistente de idempotencia
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     public Guid TenantId => _workspaceContext?.CurrentWorkspaceId ?? Guid.Empty;
@@ -42,12 +41,17 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
         modelBuilder.Entity<Membership>().HasQueryFilter(e => TenantId == Guid.Empty || e.WorkspaceId == TenantId);
         modelBuilder.Entity<License>().HasQueryFilter(e => TenantId == Guid.Empty || e.WorkspaceId == TenantId);
 
-        // 🔥 SPRINT 7: Índice para transacciones rápidas
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PayloadJson).HasColumnType("jsonb"); 
+            entity.HasIndex(e => e.Status);
+        });
+
         modelBuilder.Entity<Reservation>()
             .HasIndex(r => new { r.WorkspaceId, r.LocationId, r.Status, r.StartTime, r.EndTime })
             .HasDatabaseName("IX_Reservations_TimeRangeOverlap");
 
-        // 🔥 SPRINT 7: Llave primaria para Idempotencia
         modelBuilder.Entity<ProcessedMessage>()
             .HasKey(p => new { p.WorkspaceId, p.MessageId });
 

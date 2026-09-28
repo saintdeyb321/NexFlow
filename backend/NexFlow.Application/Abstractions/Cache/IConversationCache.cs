@@ -18,6 +18,8 @@ public class ConversationContextDto
     public string? TargetTime { get; set; }
     public string? RealCustomerName { get; set; }
 
+    public List<string> OrderDraftItems { get; set; } = new();
+
     public List<string> MissingFields { get; set; } = new();
     public string? LastQuestion { get; set; }
     public string? LastIntent { get; set; }

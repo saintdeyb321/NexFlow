@@ -1,6 +1,5 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
-// 🔥 NUEVOS NAMESPACES
 using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
@@ -97,12 +96,20 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToItemDto);
     }
 
+    // 🔥 SPRINT 11 (Auditoría): Implementación de la búsqueda nativa por Tipo (PRODUCT o SERVICE) para ahorrar RAM
+    public async Task<IEnumerable<BusinessOfferingDto>> GetItemsByTypeAsync(Guid workspaceId, string type, CancellationToken cancellationToken)
+    {
+        var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems")
+            .WhereEqualTo("Type", type.ToUpperInvariant());
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+        return snapshot.Documents.Select(MapToItemDto);
+    }
+
     public async Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken)
     {
         var docId = string.IsNullOrEmpty(item.Id) ? Guid.NewGuid().ToString() : item.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(docId);
 
-        // Cast seguro para extraer propiedades de servicios sin romper los productos
         var serviceData = item as ServiceDto;
 
         var data = new FirestoreCatalogItem

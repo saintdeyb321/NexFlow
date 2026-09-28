@@ -20,6 +20,10 @@ public interface ICatalogRepository
     Task<IEnumerable<BusinessOfferingDto>> GetActiveItemsAsync(Guid workspaceId, CancellationToken cancellationToken);
     Task<BusinessOfferingDto?> GetItemByIdAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken);
     Task<IEnumerable<BusinessOfferingDto>> GetItemsByCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
+
+    // 🔥 SPRINT 11 (Auditoría): Nuevo método para evitar $N+1 de RAM en el Catalog
+    Task<IEnumerable<BusinessOfferingDto>> GetItemsByTypeAsync(Guid workspaceId, string type, CancellationToken cancellationToken);
+
     Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken);
     Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken);
 }

@@ -38,13 +38,17 @@ public class FirestoreRequestRepository : IRequestRepository
         await docRef.SetAsync(data, cancellationToken: cancellationToken);
     }
 
-    public async Task<IEnumerable<RequestRecord>> GetRequestsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    // 🔥 SPRINT 11 (Auditoría): Firma modificada para soportar Paginación y Filtrado Real
+    public async Task<IEnumerable<RequestRecord>> GetRequestsAsync(Guid workspaceId, int limit, string? status, CancellationToken cancellationToken)
     {
-        var snapshot = await GetCollection(workspaceId)
-            .OrderByDescending("CreatedAt")
-            .Limit(100)
-            .GetSnapshotAsync(cancellationToken);
+        var query = GetCollection(workspaceId).OrderByDescending("CreatedAt").Limit(limit);
 
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.WhereEqualTo("Status", status.ToUpperInvariant());
+        }
+
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
         return snapshot.Documents.Where(d => d.Exists).Select(MapToRequestRecord).ToList();
     }
 
@@ -70,7 +74,17 @@ public class FirestoreRequestRepository : IRequestRepository
         }, cancellationToken: cancellationToken);
     }
 
-    // 🔥 Método Helper para lectura segura compatible con datos viejos
+    // 🔥 SPRINT 11 (Auditoría): Nuevo método para asignar encargados
+    public async Task AssignRequestAsync(Guid workspaceId, string requestId, string assignedTo, CancellationToken cancellationToken)
+    {
+        var docRef = GetCollection(workspaceId).Document(requestId);
+        await docRef.UpdateAsync(new Dictionary<string, object>
+        {
+            { "AssignedTo", assignedTo },
+            { "UpdatedAt", DateTime.UtcNow }
+        }, cancellationToken: cancellationToken);
+    }
+
     private static RequestRecord MapToRequestRecord(DocumentSnapshot doc)
     {
         doc.TryGetValue("Status", out string statusString);

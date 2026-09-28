@@ -19,24 +19,29 @@ public class ReservationEngine : IReservationEngine
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IWorkflowGateway _workflowGateway;
-    private readonly ILogger<ReservationEngine> _logger;
     private readonly ILocationAvailabilityService _locationAvailabilityService;
     private readonly IClock _clock;
     private readonly IOutboxRepository _outboxRepository;
 
+    // 🔥 SPRINT 11 (Auditoría): Se eliminaron IWorkflowGateway y ILogger porque ya no se usaban, 
+    // su función fue delegada al Outbox.
     public ReservationEngine(
-        IReservationRepository reservationRepository, ICatalogRepository catalogRepository,
-        IBusinessHoursRepository hoursRepository, IBusinessProfileRepository profileRepository,
-        ILocationRepository locationRepository, IUnitOfWork unitOfWork,
-        IWorkflowGateway workflowGateway, ILogger<ReservationEngine> logger,
+        IReservationRepository reservationRepository,
+        ICatalogRepository catalogRepository,
+        IBusinessHoursRepository hoursRepository,
+        IBusinessProfileRepository profileRepository,
+        ILocationRepository locationRepository,
+        IUnitOfWork unitOfWork,
         ILocationAvailabilityService locationAvailabilityService,
-        IClock clock, IOutboxRepository outboxRepository)
+        IClock clock,
+        IOutboxRepository outboxRepository)
     {
-        _reservationRepository = reservationRepository; _catalogRepository = catalogRepository;
-        _hoursRepository = hoursRepository; _profileRepository = profileRepository;
-        _locationRepository = locationRepository; _unitOfWork = unitOfWork;
-        _workflowGateway = workflowGateway; _logger = logger;
+        _reservationRepository = reservationRepository;
+        _catalogRepository = catalogRepository;
+        _hoursRepository = hoursRepository;
+        _profileRepository = profileRepository;
+        _locationRepository = locationRepository;
+        _unitOfWork = unitOfWork;
         _locationAvailabilityService = locationAvailabilityService;
         _clock = clock;
         _outboxRepository = outboxRepository;

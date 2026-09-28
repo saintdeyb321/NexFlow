@@ -10,6 +10,7 @@ interface CreateRequestModalProps {
 
 export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps) => {
   const queryClient = useQueryClient();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     type: 'Tramite',
     title: '',
@@ -26,9 +27,11 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
       queryClient.invalidateQueries({ queryKey: ['requests'] });
       onClose();
       setFormData({ type: 'Tramite', title: '', description: '', consumerPhone: '' });
+      setErrorMessage(null);
     },
     onError: (error: any) => {
-      alert(`Error al crear la solicitud: ${error.response?.data?.message || 'Error desconocido'}`);
+      // 🔥 SPRINT 11: Ya no existe error.response ni alert()
+      setErrorMessage(error.message || 'Ocurrió un error al crear la solicitud.');
     }
   });
 
@@ -36,6 +39,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     createMutation.mutate({
       ...formData,
       conversationId: 'MANUAL_ENTRY'
@@ -51,6 +55,12 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {errorMessage && (
+          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+            {errorMessage}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>

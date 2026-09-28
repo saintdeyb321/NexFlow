@@ -6,7 +6,7 @@ namespace NexFlow.Application.Features.Requests;
 
 public interface IRequestService
 {
-    Task<string> CreateSupportTicketAsync(Guid workspaceId, string phone, string description, CancellationToken ct);
+    // 🔥 SPRINT 11 (Auditoría): Eliminado el método CreateSupportTicketAsync() legacy
     Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, Dictionary<string, object>? metadata, CancellationToken ct);
 }
 
@@ -19,11 +19,6 @@ public class RequestService : IRequestService
     {
         _requestRepo = requestRepo;
         _notificationService = notificationService;
-    }
-
-    public Task<string> CreateSupportTicketAsync(Guid workspaceId, string phone, string description, CancellationToken ct)
-    {
-        return CreateRequestAsync(workspaceId, phone, "N/A", RequestType.Support, "Solicitud de Atención", description, null, ct);
     }
 
     public async Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, Dictionary<string, object>? metadata, CancellationToken ct)
@@ -44,7 +39,6 @@ public class RequestService : IRequestService
 
         await _requestRepo.CreateRequestAsync(workspaceId, newRequest, ct);
 
-        // 🔥 SPRINT 10: Disparamos la notificación en tiempo real según el tipo de solicitud
         var notificationType = type == RequestType.CommercialInquiry
             ? NotificationType.NewCommercialRequest
             : NotificationType.SystemAlert;

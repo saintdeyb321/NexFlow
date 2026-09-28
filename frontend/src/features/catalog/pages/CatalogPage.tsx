@@ -5,7 +5,6 @@ import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } 
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { ImageUploader } from '../../../components/ui/ImageUploader';
 import { ArtifactGenerator } from '../../artifacts/components/ArtifactGenerator';
-// 🔥 CORRECCIÓN 1: Importamos tanto ProductCategoryDto como ProductDto
 import type { ProductCategoryDto, ProductDto } from '../types/catalog.types';
 
 export const CatalogPage = () => {
@@ -14,6 +13,12 @@ export const CatalogPage = () => {
   const selectedLocationId = useAuthStore((state) => state.selectedLocationId);
 
   const [showModal, setShowModal] = useState(false);
+  
+  // 🔥 SPRINT 11: Manejo de estado visual (Elimina window.prompt, alert y confirm)
+  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [showCategoryPrompt, setShowCategoryPrompt] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   
   const { data: products = [], isLoading } = useQuery({ 
     queryKey: ['catalog', workspaceId, selectedLocationId], 
@@ -27,7 +32,6 @@ export const CatalogPage = () => {
     enabled: !!workspaceId 
   });
 
-  // 🔥 CORRECCIÓN 2: El estado debe ser Partial<ProductDto>, no ProductCategoryDto
   const [newProduct, setNewProduct] = useState<Partial<ProductDto>>({ 
     name: '', description: '', categoryId: '', priceMinorUnits: 0, currency: 'PEN', 
     isActive: true, type: 'PRODUCT', locationScope: 'ALL', locationIds: [] 
@@ -39,22 +43,35 @@ export const CatalogPage = () => {
       queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
       setShowModal(false);
       setNewProduct({ name: '', description: '', categoryId: categories[0]?.id || '', priceMinorUnits: 0, currency: 'PEN', isActive: true, type: 'PRODUCT', locationScope: 'ALL', locationIds: [] });
-    }
+      setNotification({ msg: 'Producto guardado exitosamente.', type: 'success' });
+    },
+    onError: (error: any) => setNotification({ msg: error.message || 'Error al guardar el producto.', type: 'error' })
   });
 
   const deleteMutation = useMutation({
     mutationFn: deleteProduct,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
+      setDeleteConfirmId(null);
+      setNotification({ msg: 'Producto eliminado exitosamente.', type: 'success' });
+    },
+    onError: (error: any) => setNotification({ msg: error.message || 'Error al eliminar el producto.', type: 'error' })
   });
 
   const createCategoryMutation = useMutation({
     mutationFn: saveCategory,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['catalogCategories', workspaceId] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalogCategories', workspaceId] });
+      setShowCategoryPrompt(false);
+      setNewCategoryName('');
+      setNotification({ msg: 'Categoría creada exitosamente.', type: 'success' });
+    },
+    onError: (error: any) => setNotification({ msg: error.message || 'Error al crear la categoría.', type: 'error' })
   });
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProduct.categoryId) return alert("Debes seleccionar una categoría.");
+    if (!newProduct.categoryId) return setNotification({ msg: "Debes seleccionar una categoría.", type: 'error' });
     
     const productToSave: ProductDto = {
         ...(newProduct as ProductDto),
@@ -65,10 +82,9 @@ export const CatalogPage = () => {
   };
 
   const handleQuickAddCategory = () => {
-    const catName = window.prompt("Nombre de la nueva categoría (Ej: Bebidas, Postres, Herramientas):");
-    if (catName && catName.trim()) {
+    if (newCategoryName.trim()) {
       createCategoryMutation.mutate({ 
-        name: catName, 
+        name: newCategoryName, 
         isActive: true, 
         displayOrder: 0, 
         description: null, 
@@ -81,6 +97,35 @@ export const CatalogPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in">
+      
+      {notification && (
+        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          <span>{notification.msg}</span>
+          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
+        </div>
+      )}
+
+      {/* 🔥 SPRINT 11: Prompt de categoría custom (Evita window.prompt) */}
+      {showCategoryPrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl shadow-lg w-96">
+            <h3 className="text-lg font-bold mb-4">Nueva Categoría de Producto</h3>
+            <input 
+              type="text" 
+              autoFocus
+              placeholder="Ej: Bebidas, Postres, Herramientas..." 
+              value={newCategoryName} 
+              onChange={e => setNewCategoryName(e.target.value)}
+              className="w-full border rounded-lg p-2 mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowCategoryPrompt(false)} className="px-4 py-2 bg-gray-100 rounded-lg text-gray-700">Cancelar</button>
+              <button onClick={handleQuickAddCategory} disabled={createCategoryMutation.isPending || !newCategoryName.trim()} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">Crear</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
@@ -89,7 +134,7 @@ export const CatalogPage = () => {
           <p className="text-sm text-gray-500 mt-1">Administra tu inventario y genera folletos comerciales PDF.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleQuickAddCategory} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
+          <button onClick={() => setShowCategoryPrompt(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
             <FolderPlus className="w-4 h-4 mr-2" /> Categoría
           </button>
           <button onClick={() => { setNewProduct({ ...newProduct, categoryId: categories[0]?.id || '' }); setShowModal(true); }} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
@@ -111,7 +156,7 @@ export const CatalogPage = () => {
           products.map((prod) => {
             const catName = categories.find(c => c.id === prod.categoryId)?.name || 'Sin Categoría';
             return (
-              <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:border-blue-300 transition-colors group">
+              <div key={prod.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:border-blue-300 transition-colors group relative">
                 <div className="flex justify-between items-start mb-2">
                   <div>
                     <h3 className="font-bold text-gray-900 text-lg leading-tight">{prod.name}</h3>
@@ -126,13 +171,28 @@ export const CatalogPage = () => {
                   <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>
                     {prod.isActive ? 'Disponible' : 'Agotado / Inactivo'}
                   </span>
-                  <button 
-                    onClick={() => window.confirm("¿Estás seguro de eliminar este producto?") && deleteMutation.mutate(prod.id!)} 
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    title="Eliminar"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  
+                  {/* 🔥 Modal de eliminación integrado */}
+                  <div className="relative">
+                    <button 
+                      onClick={() => setDeleteConfirmId(prod.id!)} 
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      title="Eliminar"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+
+                    {deleteConfirmId === prod.id && (
+                      <div className="absolute right-0 bottom-full mb-2 bg-white border border-red-200 shadow-xl p-3 rounded-lg z-10 w-48">
+                        <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar producto?</p>
+                        <div className="flex justify-between gap-2">
+                          <button onClick={() => setDeleteConfirmId(null)} className="flex-1 text-xs bg-gray-100 py-1 rounded">No</button>
+                          <button onClick={() => deleteMutation.mutate(prod.id!)} disabled={deleteMutation.isPending} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí, borrar</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               </div>
             );

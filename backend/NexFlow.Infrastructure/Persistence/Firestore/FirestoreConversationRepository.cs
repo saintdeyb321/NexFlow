@@ -119,22 +119,20 @@ public class FirestoreConversationRepository : IConversationRepository
 
     public async Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken)
     {
-        try
+        // 🔥 SPRINT 11 (Auditoría): Eliminado el try/catch que silenciaba errores críticos de la DB.
+        var query = GetCollection(workspaceId).Document(conversationId).Collection("messages").OrderByDescending("timestamp").Limit(limit);
+        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+
+        return snapshot.Documents.Select(d => new MessageRecord
         {
-            var query = GetCollection(workspaceId).Document(conversationId).Collection("messages").OrderByDescending("timestamp").Limit(limit);
-            var snapshot = await query.GetSnapshotAsync(cancellationToken);
-            return snapshot.Documents.Select(d => new MessageRecord
-            {
-                Id = d.Id,
-                Direction = d.GetValue<string>("direction"),
-                Sender = Enum.Parse<SenderType>(d.GetValue<string>("sender")),
-                Content = d.GetValue<string>("content"),
-                Status = d.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent,
-                ExternalMessageId = d.TryGetValue("externalMessageId", out string extId) ? extId : null,
-                Timestamp = d.GetValue<Timestamp>("timestamp").ToDateTime()
-            }).Reverse();
-        }
-        catch { return Enumerable.Empty<MessageRecord>(); }
+            Id = d.Id,
+            Direction = d.GetValue<string>("direction"),
+            Sender = Enum.Parse<SenderType>(d.GetValue<string>("sender")),
+            Content = d.GetValue<string>("content"),
+            Status = d.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent,
+            ExternalMessageId = d.TryGetValue("externalMessageId", out string extId) ? extId : null,
+            Timestamp = d.GetValue<Timestamp>("timestamp").ToDateTime()
+        }).Reverse();
     }
 
     private static ConversationRecord MapToConversation(DocumentSnapshot doc)
@@ -163,36 +161,31 @@ public class FirestoreConversationRepository : IConversationRepository
 
     public async Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string externalMessageId, CancellationToken cancellationToken)
     {
-        // 1. Obtenemos todas las conversaciones activas o recientes (optimización: podríamos indexar externalMessageId a nivel raíz si fuera necesario, pero por ahora buscaremos en las colecciones anidadas)
-        var convQuery = GetCollection(workspaceId).Limit(50);
-        var convSnapshot = await convQuery.GetSnapshotAsync(cancellationToken);
+        // 🔥 SPRINT 11 (Auditoría): Optimización O(1). Usamos CollectionGroup (Group Queries) 
+        // en lugar de iterar manualmente por 50 colecciones padre.
+        var msgQuery = _db.CollectionGroup("messages").WhereEqualTo("externalMessageId", externalMessageId).Limit(1);
+        var msgSnapshot = await msgQuery.GetSnapshotAsync(cancellationToken);
+        var msgDoc = msgSnapshot.Documents.FirstOrDefault();
 
-        foreach (var convDoc in convSnapshot.Documents)
+        if (msgDoc != null)
         {
-            var msgQuery = convDoc.Reference.Collection("messages").WhereEqualTo("externalMessageId", externalMessageId).Limit(1);
-            var msgSnapshot = await msgQuery.GetSnapshotAsync(cancellationToken);
-            var msgDoc = msgSnapshot.Documents.FirstOrDefault();
-
-            if (msgDoc != null)
+            return new MessageRecord
             {
-                return new MessageRecord
-                {
-                    Id = msgDoc.Id,
-                    Direction = msgDoc.GetValue<string>("direction"),
-                    Sender = Enum.Parse<SenderType>(msgDoc.GetValue<string>("sender")),
-                    Content = msgDoc.GetValue<string>("content"),
-                    Status = msgDoc.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent,
-                    ExternalMessageId = msgDoc.TryGetValue("externalMessageId", out string extId) ? extId : null,
-                    Timestamp = msgDoc.GetValue<Timestamp>("timestamp").ToDateTime()
-                };
-            }
+                Id = msgDoc.Id,
+                Direction = msgDoc.GetValue<string>("direction"),
+                Sender = Enum.Parse<SenderType>(msgDoc.GetValue<string>("sender")),
+                Content = msgDoc.GetValue<string>("content"),
+                Status = msgDoc.TryGetValue("status", out string statusStr) && Enum.TryParse<MessageStatus>(statusStr, out var status) ? status : MessageStatus.Sent,
+                ExternalMessageId = msgDoc.TryGetValue("externalMessageId", out string extId) ? extId : null,
+                Timestamp = msgDoc.GetValue<Timestamp>("timestamp").ToDateTime()
+            };
         }
+
         return null;
     }
 
     public async Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 1.3: Limpieza síncrona en Lotes (Bulk Write) para evitar datos huérfanos.
         var convRef = GetCollection(workspaceId).Document(conversationId);
         var messagesSnapshot = await convRef.Collection("messages").GetSnapshotAsync(cancellationToken);
 

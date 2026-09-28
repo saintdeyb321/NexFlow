@@ -6,31 +6,46 @@ import { getDashboardSummary } from '../services/dashboard.service';
 export const DashboardPage = () => {
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
+  
+  const adminName = (me as any)?.firstName || (me as any)?.name || (me as any)?.email?.split('@')[0] || 'Administrador';
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['dashboard', workspaceId],
     queryFn: getDashboardSummary,
     enabled: !!workspaceId,
-    refetchInterval: 60000, // Refresca cada minuto automáticamente
+    refetchInterval: 60000,
   });
 
   if (isLoading) {
-    return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando métricas de atención...</div>;
+    return (
+      <div className="max-w-7xl mx-auto animate-pulse">
+        <div className="h-8 bg-gray-200 rounded w-1/4 mb-8"></div>
+        <div className="h-6 bg-gray-200 rounded w-1/6 mb-4"></div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          {[1,2,3,4].map(i => <div key={i} className="h-24 bg-gray-100 rounded-xl"></div>)}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[1,2].map(i => <div key={i} className="h-48 bg-gray-100 rounded-xl"></div>)}
+        </div>
+      </div>
+    );
   }
 
   if (isError || !data) {
-    return <div className="p-8 text-center text-red-500">Error al cargar el panel de control. Intenta nuevamente.</div>;
+    return (
+      <div className="p-8 text-center bg-red-50 border border-red-100 rounded-xl">
+        <p className="text-red-600 font-medium">Error al cargar el panel de control. Intenta recargar la página.</p>
+      </div>
+    );
   }
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in space-y-8">
-      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Hola, {me?.user.firstName} 👋</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Hola, {adminName} 👋</h1>
         <p className="mt-1 text-sm text-gray-500">Aquí tienes el resumen de tu centro de atención automatizada.</p>
       </div>
 
-      {/* Módulo Global (Siempre presente) */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
           <Activity className="w-5 h-5 mr-2 text-blue-600" /> Tráfico de Hoy
@@ -43,9 +58,7 @@ export const DashboardPage = () => {
         </div>
       </section>
 
-      {/* Mini-Dashboards Condicionales por Licencia */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
         {data.reservations && (
           <ModuleCard title="Citas y Reservas" icon={<CalendarCheck className="w-5 h-5 text-indigo-600" />} colorClass="border-indigo-100">
             <div className="grid grid-cols-2 gap-4">
@@ -75,14 +88,18 @@ export const DashboardPage = () => {
             </div>
             <div className="text-sm text-gray-500 border-t pt-3 mt-3">
               <p className="font-medium mb-2">Más consultados:</p>
-              <ul className="space-y-1">
-                {data.catalog.topQueriedProducts.map(p => (
-                  <li key={p.id} className="flex justify-between">
-                    <span className="truncate pr-2">{p.name}</span>
-                    <span className="font-medium text-gray-900">{p.queries}</span>
-                  </li>
-                ))}
-              </ul>
+              {data.catalog.topQueriedProducts.length === 0 ? (
+                <p className="text-gray-400 italic text-xs">Aún no hay datos suficientes.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {data.catalog.topQueriedProducts.map(p => (
+                    <li key={p.id} className="flex justify-between">
+                      <span className="truncate pr-2">{p.name}</span>
+                      <span className="font-medium text-gray-900">{p.queries}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </ModuleCard>
         )}
@@ -95,24 +112,25 @@ export const DashboardPage = () => {
             </div>
             <div className="text-sm text-gray-500 border-t pt-3 mt-3">
               <p className="font-medium mb-2">Más consultados:</p>
-              <ul className="space-y-1">
-                {data.services.topQueriedServices.map(s => (
-                  <li key={s.id} className="flex justify-between">
-                    <span className="truncate pr-2">{s.name}</span>
-                    <span className="font-medium text-gray-900">{s.queries}</span>
-                  </li>
-                ))}
-              </ul>
+              {data.services.topQueriedServices.length === 0 ? (
+                <p className="text-gray-400 italic text-xs">Aún no hay datos suficientes.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {data.services.topQueriedServices.map(s => (
+                    <li key={s.id} className="flex justify-between">
+                      <span className="truncate pr-2">{s.name}</span>
+                      <span className="font-medium text-gray-900">{s.queries}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </ModuleCard>
         )}
-
       </div>
     </div>
   );
 };
-
-// --- Subcomponentes de UI Privados para limpiar el código ---
 
 const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title: string, value: number, color: 'blue' | 'emerald' | 'purple' | 'orange' }) => {
   const colorStyles = {
@@ -123,7 +141,7 @@ const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title:
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center hover:shadow-md transition-shadow">
       <div className={`w-12 h-12 rounded-full flex items-center justify-center mr-4 ${colorStyles[color]}`}>
         {icon}
       </div>
@@ -136,8 +154,8 @@ const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title:
 };
 
 const ModuleCard = ({ title, icon, colorClass, children }: { title: string, icon: React.ReactNode, colorClass: string, children: React.ReactNode }) => (
-  <div className={`bg-white rounded-xl shadow-sm border-t-4 ${colorClass} border-x border-b border-gray-100 p-6`}>
-    <div className="flex items-center mb-4">
+  <div className={`bg-white rounded-xl shadow-sm border-t-4 ${colorClass} border-x border-b border-gray-100 p-6 hover:shadow-md transition-shadow`}>
+    <div className="flex items-center mb-4 pb-3 border-b border-gray-50">
       {icon}
       <h3 className="ml-2 text-lg font-semibold text-gray-800">{title}</h3>
     </div>
@@ -147,7 +165,7 @@ const ModuleCard = ({ title, icon, colorClass, children }: { title: string, icon
 
 const MiniStat = ({ label, value }: { label: string, value: number }) => (
   <div>
-    <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
-    <p className="text-xl font-bold text-gray-900">{value}</p>
+    <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{label}</p>
+    <p className="text-2xl font-bold text-gray-900">{value}</p>
   </div>
 );

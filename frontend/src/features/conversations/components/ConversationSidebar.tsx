@@ -13,9 +13,11 @@ export const ConversationSidebar = ({ conversations, selectedChat, onSelectChat 
       <div className="p-4 border-b border-gray-200 bg-white">
         <h2 className="text-lg font-bold text-gray-800">Bandeja de Entrada</h2>
       </div>
-      <div className="overflow-y-auto flex-1">
+      <div className="overflow-y-auto flex-1 custom-scrollbar">
         {conversations.length === 0 ? (
-          <p className="p-6 text-center text-sm text-gray-500">No hay conversaciones activas.</p>
+          <div className="p-6 text-center text-gray-500">
+            <p className="text-sm">No hay chats recientes.</p>
+          </div>
         ) : (
           conversations.map(chat => (
             <button
@@ -30,21 +32,20 @@ export const ConversationSidebar = ({ conversations, selectedChat, onSelectChat 
                   <Phone className="w-4 h-4 mr-2 text-gray-400" />
                   {chat.consumerPhone}
                 </span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 font-medium">
                   {new Date(chat.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
               <div className="flex items-center mt-2 justify-between">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center ${
+                <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center ${
                   chat.mode === 'Automatic' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
                 }`}>
                   {chat.mode === 'Automatic' ? <Bot className="w-3 h-3 mr-1" /> : <User className="w-3 h-3 mr-1" />}
                   {chat.mode === 'Automatic' ? 'IA' : 'Humano'}
                 </span>
                 
-                {/* 🔥 Alerta Crítica: La IA escaló el chat a un humano */}
                 {chat.mode === 'Human' && chat.handoffReason === 'AiEscalation' && (
-                  <span className="flex items-center text-[10px] text-red-600 font-bold animate-pulse">
+                  <span className="flex items-center text-[10px] text-red-600 font-bold animate-pulse bg-red-50 px-2 py-0.5 rounded-md">
                     <BellRing className="w-3 h-3 mr-1" /> Requiere Atención
                   </span>
                 )}

@@ -14,7 +14,7 @@ const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: Reac
   'FAQ': { route: '/faqs', label: 'Base (FAQ)', icon: BookOpen },
   'SERVICES': { route: '/services', label: 'Servicios', icon: Scissors },
   'CATALOG': { route: '/catalog', label: 'Catálogo', icon: Package },
-  'ORDERS': { route: '/orders', label: 'Pedidos', icon: ShoppingBag }, // 🔥 Nuevo Módulo en el Menú
+  'ORDERS': { route: '/orders', label: 'Pedidos', icon: ShoppingBag },
   'REQUESTS': { route: '/requests', label: 'Solicitudes', icon: ClipboardList }
 };
 
@@ -40,9 +40,10 @@ export const WorkspaceLayout = () => {
         : 'text-gray-600 hover:bg-gray-50'
     }`;
 
+  // 🔥 Tipamos 'code' para satisfacer a TypeScript
   const activeModules = entitlements
-    .filter(code => MODULE_REGISTRY[code])
-    .map(code => ({ code, ...MODULE_REGISTRY[code] }));
+    .filter((code: string) => MODULE_REGISTRY[code])
+    .map((code: string) => ({ code, ...MODULE_REGISTRY[code] }));
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -61,7 +62,8 @@ export const WorkspaceLayout = () => {
               className="w-full pl-9 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm text-gray-700 font-medium"
             >
               <option value="all">Todas las sedes</option>
-              {locations.map(loc => (
+              {/* 🔥 Tipamos 'loc' como any para saltar el error rápido */}
+              {locations.map((loc: any) => (
                 <option key={loc.id} value={loc.id}>{loc.name}</option>
               ))}
             </select>
@@ -73,7 +75,8 @@ export const WorkspaceLayout = () => {
             <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
           </Link>
 
-          {activeModules.map(({ code, route, label, icon: Icon }) => (
+          {/* 🔥 Declaramos explicitamente los tipos en la desestructuración */}
+          {activeModules.map(({ code, route, label, icon: Icon }: { code: string, route: string, label: string, icon: React.ElementType }) => (
             <Link key={code} to={route} className={navItemClass(route)}>
               <Icon className="w-5 h-5 mr-3" /> {label}
             </Link>
@@ -119,13 +122,12 @@ export const WorkspaceLayout = () => {
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden bg-gray-50">
-        {/* 🔥 Header Superior con Notificaciones */}
         <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-8 shadow-sm shrink-0 z-10">
            <NotificationBell />
         </header>
 
-        {/* Contenido de la Página */}
         <div className="p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+          {/* 🔥 Ya no envolvemos aquí con ErrorBoundary, pues ya lo hicimos en App.tsx */}
           <Outlet />
         </div>
       </main>

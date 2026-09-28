@@ -1,10 +1,12 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities.System;
+using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using System.Text.Json;
 
 namespace NexFlow.Infrastructure.Workers;
@@ -44,63 +46,66 @@ public class OutboxProcessorWorker : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
+        var dbContext = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
         var workflowGateway = scope.ServiceProvider.GetRequiredService<IWorkflowGateway>();
-        var config = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
 
         var pendingMessages = await outboxRepo.GetPendingMessagesAsync(20, cancellationToken);
 
-        foreach (var message in pendingMessages)
+        foreach (var msg in pendingMessages)
         {
-            await using var lockConnection = new Npgsql.NpgsqlConnection(config.GetConnectionString("Postgres"));
-            await lockConnection.OpenAsync(cancellationToken);
-
-            var hashBytes = System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(message.Id));
-            var lockKey = BitConverter.ToInt64(hashBytes, 0);
-
-            await using var claimCommand = new Npgsql.NpgsqlCommand("SELECT pg_try_advisory_lock(@key);", lockConnection);
-            claimCommand.Parameters.AddWithValue("key", lockKey);
-
-            var claimed = (bool?)await claimCommand.ExecuteScalarAsync(cancellationToken) == true;
-
-            if (!claimed)
-            {
-                continue;
-            }
+            // 🔥 SPRINT 11: Bloqueo Transaccional EF Core puro (Cero colisiones de Workers)
+            using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken);
 
             try
             {
-                _logger.LogInformation("Procesando evento Outbox {EventId} tipo {EventType}", message.Id, message.EventType);
+                // Intentamos reclamar el mensaje. FOR UPDATE SKIP LOCKED asegura que si otro worker ya lo tomó, este query devuelve null.
+                var lockedMessage = await dbContext.OutboxMessages
+                    .FromSqlInterpolated($"SELECT * FROM \"OutboxMessages\" WHERE \"Id\" = {msg.Id} AND \"Status\" = {(int)OutboxStatus.Pending} FOR UPDATE SKIP LOCKED")
+                    .FirstOrDefaultAsync(cancellationToken);
 
-                var payloadObject = JsonSerializer.Deserialize<N8nEventPayload<object>>(message.PayloadJson);
+                if (lockedMessage == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    continue; // El mensaje ya fue procesado o tomado por otro hilo
+                }
+
+                _logger.LogInformation("Procesando evento Outbox {EventId} tipo {EventType}", lockedMessage.Id, lockedMessage.EventType);
+
+                var payloadObject = JsonSerializer.Deserialize<N8nEventPayload<object>>(lockedMessage.PayloadJson);
 
                 if (payloadObject != null)
                 {
                     await workflowGateway.TriggerWorkflowAsync("nexflow-events", payloadObject, cancellationToken);
                 }
 
-                message.Status = OutboxStatus.Processed;
-                message.ProcessedAt = DateTime.UtcNow;
-                message.Error = null;
+                lockedMessage.Status = OutboxStatus.Processed;
+                lockedMessage.ProcessedAt = DateTime.UtcNow;
+                lockedMessage.Error = null;
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error procesando mensaje Outbox {EventId}", message.Id);
-                message.RetryCount++;
-                message.Error = ex.Message;
+                _logger.LogError(ex, "Error procesando mensaje Outbox {EventId}", msg.Id);
+                await transaction.RollbackAsync(cancellationToken);
 
-                if (message.RetryCount >= 5)
+                // Reintento en una transacción independiente y rápida
+                using var retryTx = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                var retryMsg = await dbContext.OutboxMessages.FindAsync(new object[] { msg.Id }, cancellationToken);
+                if (retryMsg != null)
                 {
-                    message.Status = OutboxStatus.Failed;
-                }
-            }
-            finally
-            {
-                // Aseguramos la persistencia del estado en BD antes de liberar el lock
-                await outboxRepo.UpdateAsync(message, cancellationToken);
+                    retryMsg.RetryCount++;
+                    retryMsg.Error = ex.Message;
 
-                await using var releaseCommand = new Npgsql.NpgsqlCommand("SELECT pg_advisory_unlock(@key);", lockConnection);
-                releaseCommand.Parameters.AddWithValue("key", lockKey);
-                await releaseCommand.ExecuteScalarAsync(cancellationToken);
+                    if (retryMsg.RetryCount >= 5)
+                    {
+                        retryMsg.Status = OutboxStatus.Failed;
+                    }
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+                await retryTx.CommitAsync(cancellationToken);
             }
         }
     }

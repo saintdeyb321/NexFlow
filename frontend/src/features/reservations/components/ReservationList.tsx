@@ -1,10 +1,10 @@
 import { Search, Pencil, XCircle } from 'lucide-react';
 import type { ReservationDto } from '../types/reservation.types';
-import type { ServiceDto } from '../../services/types/services.types'; // 🔥 SPRINT 1: Reemplazo a ServiceDto
+import type { ServiceDto } from '../../services/types/services.types'; 
 
 interface ReservationListProps {
   reservations: ReservationDto[];
-  services: ServiceDto[]; // 🔥 Actualizado a ServiceDto
+  services: ServiceDto[]; 
   timeZone: string; 
   onEdit: (res: ReservationDto) => void;
   onCancel: (id: string) => void;
@@ -42,9 +42,10 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
     );
   }
 
+  // 🔥 SPRINT 11: Se eliminaron los "as any"
   const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
-    const dateA = new Date((a as any).startTime || a.dateTime || new Date()).getTime();
-    const dateB = new Date((b as any).startTime || b.dateTime || new Date()).getTime();
+    const dateA = new Date(a.dateTime).getTime();
+    const dateB = new Date(b.dateTime).getTime();
     return dateA - dateB;
   });
 
@@ -62,9 +63,8 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
         </thead>
         <tbody className="divide-y divide-gray-100">
           {sortedReservations.map((res) => {
-            const timeStr = (res as any).startTime || res.dateTime;
-            
-            const localTime = timeStr ? new Date(new Date(timeStr).toLocaleString('en-US', { timeZone })) : new Date();
+            // 🔥 SPRINT 11: Se eliminaron los "as any"
+            const localTime = res.dateTime ? new Date(new Date(res.dateTime).toLocaleString('en-US', { timeZone })) : new Date();
             
             const normalizedStatus = normalizeStatus(res.status);
             const isCancelled = normalizedStatus === 'CANCELLED';

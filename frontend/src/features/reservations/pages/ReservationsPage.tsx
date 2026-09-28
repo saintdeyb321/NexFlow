@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calendar as CalendarIcon, List, CalendarDays, AlertCircle, MapPin } from 'lucide-react';
+import { Calendar as CalendarIcon, AlertCircle, MapPin } from 'lucide-react';
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
 import { getLocations } from '../../business/services/business.service';
 import { getServices } from '../../services/services/services.service';
@@ -9,7 +9,7 @@ import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { ReservationDto } from '../types/reservation.types';
-import type { ServiceDto } from '../../services/types/services.types'; // 🔥 SPRINT 1: Separación estricta
+import type { ServiceDto } from '../../services/types/services.types';
 import type { LocationDto } from '../../business/types/business.types';
 
 export const ReservationsPage = () => {
@@ -17,7 +17,6 @@ export const ReservationsPage = () => {
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   
-  // 🔥 SPRINT 7: Extraemos la zona horaria real del backend, con un fallback seguro
   const timeZone = useAuthStore(state => (state.me as any)?.businessProfile?.timeZone) || 'America/Lima';
 
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -26,14 +25,16 @@ export const ReservationsPage = () => {
     return today.toISOString().split('T')[0];
   });
   
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
 
+  // 🔥 SPRINT 11: Estado para confirmaciones y notificaciones sin alert()
+  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ action: 'cancel' | 'complete', id: string } | null>(null);
+
   const isValidLocationSelected = Boolean(selectedLocationId && selectedLocationId !== 'all');
 
-  // 🔥 SPRINT 1: Tipado estricto con ServiceDto
   const { data: services = [] } = useQuery<ServiceDto[]>({
     queryKey: ['services', workspaceId, selectedLocationId],
     queryFn: () => getServices(selectedLocationId),
@@ -55,26 +56,70 @@ export const ReservationsPage = () => {
 
   const cancelMutation = useMutation({
     mutationFn: cancelReservation,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['reservations'] }),
-    onError: (error: any) => alert(`Error al cancelar: ${error.message}`)
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
+      setNotification({ msg: 'Reserva cancelada exitosamente.', type: 'success' });
+      setConfirmDialog(null);
+    },
+    onError: (error: any) => {
+      setNotification({ msg: error.message || 'Error al cancelar la reserva.', type: 'error' });
+      setConfirmDialog(null);
+    }
   });
 
   const completeMutation = useMutation({
     mutationFn: completeReservation,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['reservations'] }),
-    onError: (error: any) => alert(`Error al completar: ${error.message}`)
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
+      setNotification({ msg: 'Reserva marcada como completada.', type: 'success' });
+      setConfirmDialog(null);
+    },
+    onError: (error: any) => {
+      setNotification({ msg: error.message || 'Error al completar la reserva.', type: 'error' });
+      setConfirmDialog(null);
+    }
   });
 
-  const handleCancel = (id: string) => {
-    if (confirm('¿Estás seguro de cancelar esta reserva?')) cancelMutation.mutate(id);
-  };
-
-  const handleComplete = (id: string) => {
-    if (confirm('¿Marcar esta cita como Completada?')) completeMutation.mutate(id);
+  const executeAction = () => {
+    if (confirmDialog?.action === 'cancel') cancelMutation.mutate(confirmDialog.id);
+    if (confirmDialog?.action === 'complete') completeMutation.mutate(confirmDialog.id);
   };
 
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in">
+      
+      {/* 🔥 Banner de notificaciones */}
+      {notification && (
+        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          <span>{notification.msg}</span>
+          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
+        </div>
+      )}
+
+      {/* 🔥 Modal de Confirmación Customizado */}
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl shadow-lg w-96 text-center animate-in zoom-in-95">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">
+              {confirmDialog.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-6">
+              {confirmDialog.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'}
+            </p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 bg-gray-100 rounded-lg text-gray-700 font-medium hover:bg-gray-200 transition-colors">No, volver</button>
+              <button 
+                onClick={executeAction} 
+                disabled={cancelMutation.isPending || completeMutation.isPending}
+                className={`px-4 py-2 text-white font-medium rounded-lg disabled:opacity-50 transition-colors ${confirmDialog.action === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+              >
+                Sí, {confirmDialog.action === 'cancel' ? 'cancelar' : 'completar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
@@ -94,16 +139,11 @@ export const ReservationsPage = () => {
             />
           </div>
 
-          <div className="flex bg-gray-100 p-1 rounded-lg">
-            <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md ${viewMode === 'list' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><List className="w-4 h-4" /></button>
-            <button onClick={() => setViewMode('calendar')} className={`p-1.5 rounded-md ${viewMode === 'calendar' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><CalendarDays className="w-4 h-4" /></button>
-          </div>
-
           <div className="relative group">
             <button 
               onClick={() => setIsCreateModalOpen(true)}
               disabled={!isValidLocationSelected}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 flex items-center transition-colors"
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 flex items-center transition-colors shadow-sm"
             >
               Nueva Reserva
             </button>
@@ -129,28 +169,25 @@ export const ReservationsPage = () => {
             <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
             <p className="text-sm">Cargando agenda...</p>
           </div>
-        ) : viewMode === 'list' ? (
+        ) : (
           <ReservationList 
             reservations={reservations} 
             services={services} 
             timeZone={timeZone} 
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
-            onCancel={handleCancel} 
-            onComplete={handleComplete}
+            onCancel={(id) => setConfirmDialog({ action: 'cancel', id })} 
+            onComplete={(id) => setConfirmDialog({ action: 'complete', id })}
           />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-96 text-gray-400 bg-gray-50">
-            <CalendarDays className="w-16 h-16 text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-600">Vista de Calendario Inteligente</h3>
-            <p className="text-sm mt-2 max-w-md text-center">Espacio reservado para FullCalendar.</p>
-          </div>
         )}
       </div>
 
       <CreateReservationModal 
         isOpen={isCreateModalOpen} 
         onClose={() => setIsCreateModalOpen(false)} 
-        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })} 
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['reservations'] });
+          setNotification({ msg: 'Reserva creada exitosamente.', type: 'success' });
+        }} 
         locations={locations} 
         services={services}
         timeZone={timeZone} 
@@ -159,7 +196,10 @@ export const ReservationsPage = () => {
       <EditReservationModal 
         isOpen={isEditModalOpen}
         onClose={() => { setIsEditModalOpen(false); setEditingRes(null); }}
-        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['reservations'] })}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['reservations'] });
+          setNotification({ msg: 'Reserva reprogramada exitosamente.', type: 'success' });
+        }}
         reservation={editingRes}
         timeZone={timeZone}
       />

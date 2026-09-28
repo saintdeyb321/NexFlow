@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom'; // 🔥 SPRINT 11: Navegación real
 import { X, ShoppingCart, MessageSquare, User, Calendar, Pencil, Check } from 'lucide-react';
 import type { OrderRecord } from '../types/orders.types';
 import { updateOrderAmount } from '../services/orders.service';
@@ -11,6 +12,7 @@ interface OrderDetailModalProps {
 
 export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate(); // 🔥 Hook de enrutamiento
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [newPrice, setNewPrice] = useState((order.totalAmountMinorUnits / 100).toFixed(2));
 
@@ -37,7 +39,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
         <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gray-50">
           <h2 className="text-xl font-bold text-gray-900 flex items-center">
             <ShoppingCart className="w-5 h-5 mr-2 text-blue-600" />
-            Detalle del Pedido
+            Detalle de la Solicitud
           </h2>
           <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
             <X className="w-5 h-5" />
@@ -82,9 +84,12 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="py-3 px-3 font-medium text-gray-900">{item.productName}</td>
                     <td className="py-3 px-3 text-center text-gray-600">{item.quantity}</td>
-                    <td className="py-3 px-3 text-right text-gray-600">{formatCurrency(item.unitPriceMinorUnits, order.currency)}</td>
+                    {/* 🔥 SPRINT 11: Ocultar PEN 0.00 en cada línea */}
+                    <td className="py-3 px-3 text-right text-gray-600">
+                      {item.unitPriceMinorUnits === 0 ? <span className="text-gray-400 italic text-xs">Por definir</span> : formatCurrency(item.unitPriceMinorUnits, order.currency)}
+                    </td>
                     <td className="py-3 px-3 text-right font-medium text-gray-900">
-                      {formatCurrency(item.quantity * item.unitPriceMinorUnits, order.currency)}
+                      {item.unitPriceMinorUnits === 0 ? <span className="text-gray-400 italic text-xs">Por definir</span> : formatCurrency(item.quantity * item.unitPriceMinorUnits, order.currency)}
                     </td>
                   </tr>
                 ))}
@@ -102,7 +107,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
               )}
             </div>
             <div className="text-right">
-              <p className="text-sm text-gray-500 mb-1">Total del Pedido</p>
+              <p className="text-sm text-gray-500 mb-1">Total de Cotización</p>
               
               {isEditingPrice ? (
                 <div className="flex items-center justify-end gap-2 mt-1">
@@ -139,7 +144,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                   <button
                     onClick={() => setIsEditingPrice(true)}
                     className="p-1.5 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Definir/Editar Precio"
+                    title="Definir/Editar Precio Total"
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
@@ -151,7 +156,11 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
 
         <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
           {order.conversationId && order.conversationId !== 'MANUAL_ENTRY' ? (
-            <button className="flex items-center text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors">
+            // 🔥 SPRINT 11: Ahora el botón usa navigate para enviarte al chat
+            <button 
+              onClick={() => { onClose(); navigate(`/inbox?conversation=${order.conversationId}`); }} 
+              className="flex items-center text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors"
+            >
               <MessageSquare className="w-4 h-4 mr-2" /> Ir a la conversación
             </button>
           ) : <div></div>}

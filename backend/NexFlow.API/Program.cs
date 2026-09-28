@@ -76,11 +76,14 @@ builder.Services.AddRateLimiter(options =>
     {
         if (context.Request.Path.StartsWithSegments("/api/webhooks/evolution"))
         {
-            return RateLimitPartition.GetFixedWindowLimiter("evolution_webhook_limiter",
+
+            var instanceName = context.Request.Query["instance"].FirstOrDefault() ?? context.Connection.RemoteIpAddress?.ToString() ?? "global_evolution";
+
+            return RateLimitPartition.GetFixedWindowLimiter($"evolution_{instanceName}",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     AutoReplenishment = true,
-                    PermitLimit = 2000,
+                    PermitLimit = 1500, 
                     Window = TimeSpan.FromMinutes(1)
                 });
         }

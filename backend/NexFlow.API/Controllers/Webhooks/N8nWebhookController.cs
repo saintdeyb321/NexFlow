@@ -20,48 +20,53 @@ public class N8nWebhookController : ControllerBase
     public N8nWebhookController(ICatalogArtifactRepository artifactRepository, IConfiguration config)
     {
         _artifactRepository = artifactRepository;
-        // 🔥 SPRINT 3: Secreto estricto. Obliga a que la variable de entorno exista en producción.[cite: 1]
         _webhookSecret = config["N8n:WebhookSecret"] ?? throw new InvalidOperationException("Falta configurar N8n:WebhookSecret en appsettings o variables de entorno.");
     }
 
     [HttpPost("catalog-ready")]
-    public async Task<IActionResult> OnCatalogReady([FromBody] CatalogReadyPayload payload, [FromHeader(Name = "X-NexFlow-Signature")] string providedSignature, [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    public async Task<IActionResult> OnCatalogReady(
+        [FromHeader(Name = "X-NexFlow-Signature")] string providedSignature,
+        [FromHeader(Name = "X-NexFlow-Timestamp")] string timestampString,
+        [FromServices] ICatalogGenerationService generationService,
+        CancellationToken cancellationToken)
     {
-        // 1. FASE 5 - SPRINT 16: Validación Criptográfica HMAC
-        if (string.IsNullOrWhiteSpace(providedSignature))
-            return Unauthorized(new { message = "Firma de webhook ausente." });
+        // 🔥 SPRINT 11 (Auditoría): Protección estricta contra Replay Attacks y Hash de Raw Body
+        if (string.IsNullOrWhiteSpace(providedSignature) || string.IsNullOrWhiteSpace(timestampString))
+            return Unauthorized(new { message = "Firma o timestamp ausente." });
 
-        var payloadJson = JsonSerializer.Serialize(payload);
-        var expectedSignature = ComputeHmacSha256(payloadJson, _webhookSecret);
+        if (!long.TryParse(timestampString, out long timestamp))
+            return Unauthorized(new { message = "Timestamp inválido." });
 
-        // 🔥 SPRINT 3: Eliminado el fallback inseguro (providedSignature != _webhookSecret). SOLO se acepta HMAC válido.[cite: 1]
+        var requestTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
+        if (Math.Abs((DateTime.UtcNow - requestTime).TotalMinutes) > 5)
+            return Unauthorized(new { message = "Request expirado. Posible ataque de repetición (Replay Attack) bloqueado." });
+
+        // Leemos el stream original tal cual vino por la red, sin reserializar (evita fallos de formato JSON)
+        using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+        var rawBody = await reader.ReadToEndAsync(cancellationToken);
+
+        var payloadToHash = $"{timestampString}.{rawBody}";
+        var expectedSignature = ComputeHmacSha256(payloadToHash, _webhookSecret);
+
         if (providedSignature != expectedSignature)
-        {
             return Unauthorized(new { message = "Firma HMAC inválida. Intento de inyección bloqueado." });
-        }
 
-        // 2. Validación de completitud estructural
+        var payload = JsonSerializer.Deserialize<CatalogReadyPayload>(rawBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
         if (payload == null || string.IsNullOrWhiteSpace(payload.PdfUrl) || payload.WorkspaceId == Guid.Empty || string.IsNullOrWhiteSpace(payload.GenerationId))
-        {
             return BadRequest(new { message = "Payload inválido o incompleto." });
-        }
 
         var scope = string.IsNullOrWhiteSpace(payload.Scope) ? "PRODUCT" : payload.Scope.Trim().ToUpperInvariant();
         if (scope != "PRODUCT" && scope != "SERVICE")
             return BadRequest(new { message = "Scope inválido." });
+
         var artifact = await _artifactRepository.GetCurrentArtifactAsync(payload.WorkspaceId, scope, cancellationToken);
 
-        // 3. FASE 5 - SPRINT 16: Idempotencia y Blindaje contra Race Conditions
-        // Exigimos que el estado sea Generating y que el ID de generación COINCIDA EXACTAMENTE
         if (artifact != null && artifact.Status == CatalogArtifactStatus.Generating)
         {
             if (artifact.GenerationId != payload.GenerationId)
-            {
-                // Un proceso de n8n viejo intentó responder, lo ignoramos de forma segura
                 return Ok(new { message = "Generación obsoleta ignorada. Hay una más reciente en proceso." });
-            }
 
-            // Validamos que el SourceHash también coincida para asegurar integridad de la data
             if (artifact.SourceHash != payload.SourceHash)
             {
                 artifact.MarkAsFailed();
@@ -77,7 +82,6 @@ public class N8nWebhookController : ControllerBase
                 return Ok(new { message = "PDF invalidado: los datos del catálogo cambiaron durante la generación." });
             }
 
-            // 4. Marcamos el artefacto como vigente
             artifact.CompleteGeneration(payload.PdfUrl);
             await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
 

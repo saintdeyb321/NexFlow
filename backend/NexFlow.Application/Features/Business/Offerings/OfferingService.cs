@@ -17,22 +17,21 @@ public sealed class OfferingService : IOfferingService
 
     public async Task<IEnumerable<ProductDto>> GetProductsAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct)
     {
-        var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
+        // 🔥 SPRINT 11 (Auditoría): Descargamos SOLO los de tipo PRODUCT directamente desde Firestore.
+        // Esto evita traer 5,000 servicios a memoria solo para descartarlos.
+        var items = await _catalogRepo.GetItemsByTypeAsync(workspaceId, "PRODUCT", ct);
 
-        var products = items
-            .Where(i => i.Type == "PRODUCT")
-            .Select(MapToSpecific<ProductDto>);
-
+        var products = items.Select(MapToSpecific<ProductDto>);
         return FilterItems(products, locationId, query);
     }
 
     public async Task<IEnumerable<ServiceDto>> GetServicesAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct)
     {
-        var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
+        // 🔥 SPRINT 11 (Auditoría): Descargamos SOLO los de tipo SERVICE directamente desde Firestore.
+        var items = await _catalogRepo.GetItemsByTypeAsync(workspaceId, "SERVICE", ct);
 
         var services = items
-            // 🔥 SPRINT 2: Solo entidades SERVICE activas del workspace consultado.
-            .Where(i => i.Type == "SERVICE" && i.IsActive)
+            .Where(i => i.IsActive)
             .Select(MapToSpecific<ServiceDto>);
 
         return FilterItems(services, locationId, query);
@@ -48,7 +47,6 @@ public sealed class OfferingService : IOfferingService
     public async Task<ServiceDto?> GetServiceByIdAsync(Guid workspaceId, string serviceId, CancellationToken ct)
     {
         var item = await _catalogRepo.GetItemByIdAsync(workspaceId, serviceId, ct);
-        // 🔥 SPRINT 2: No reutilizamos selecciones inactivas ni entidades de otro tipo.
         if (item == null || item.Type != "SERVICE" || !item.IsActive) return null;
         return MapToSpecific<ServiceDto>(item);
     }
@@ -95,7 +93,6 @@ public sealed class OfferingService : IOfferingService
     }
 }
 
-// 🔥 SPRINT 2: Extendemos el contrato existente sin modificar archivos adicionales.
 public static class OfferingServiceReservationExtensions
 {
     public static async Task<(ServiceDto? Service, string? Clarification)> ResolveReservationServiceAsync(
@@ -107,7 +104,6 @@ public static class OfferingServiceReservationExtensions
         if (string.IsNullOrWhiteSpace(serviceName))
             return (null, "¿Qué servicio deseas reservar en esa sede?");
 
-        // 🔥 SPRINT 2: La consulta al repositorio está acotada al workspace y a la sede.
         var services = await offerings.GetServicesAsync(workspaceId, locationId, null, ct);
         var matches = services
             .Where(s => s.Type == "SERVICE" && s.IsActive && s.RequiresReservation)

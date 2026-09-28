@@ -8,10 +8,11 @@ export interface CreateReservationRequest {
 
 export interface ReservationDto {
   id: string;
+  workspaceId: string; // Agregado para coincidir con C#
   locationId: string;
   serviceId: string;
   customerName: string;
   customerIdentifier: string;
-  dateTime: string;
-  status: string; // Ej: 'Pending', 'Confirmed', 'Cancelled'
+  dateTime: string; // Ya no usa startTime
+  status: string;
 }

@@ -2,19 +2,21 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createReservation } from '../services/reservation.service';
 import type { LocationDto } from '../../business/types/business.types';
-import type { ServiceDto } from '../../services/types/services.types'; // 🔥 SPRINT 1: Reemplazo a ServiceDto
+import type { ServiceDto } from '../../services/types/services.types';
 
 interface CreateReservationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   locations: LocationDto[];
-  services: ServiceDto[]; // 🔥 Actualizado a ServiceDto
+  services: ServiceDto[]; 
   timeZone: string;
 }
 
 export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
   const [isSaving, setIsSaving] = useState(false);
+  // 🔥 SPRINT 11: Estado local para manejar errores sin alert()
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     locationId: '',
@@ -27,6 +29,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
   useEffect(() => {
     if (isOpen) {
+      setErrorMessage(null); // Limpiamos el error al abrir
       const nowInWorkspace = new Date(new Date().toLocaleString('en-US', { timeZone }));
       const todayString = nowInWorkspace.toISOString().split('T')[0];
 
@@ -45,9 +48,10 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     
     if (!formData.locationId || !formData.serviceId || !formData.customerIdentifier || !formData.customerName) {
-      alert("Por favor, selecciona una sede, un servicio y completa los datos del cliente.");
+      setErrorMessage("Por favor, selecciona una sede, un servicio y completa los datos del cliente.");
       return;
     }
 
@@ -66,7 +70,8 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
       onSuccess(); 
       onClose();   
     } catch (error: any) {
-      alert(`Error al crear la reserva: ${error.response?.data?.message || error.response?.data?.error || 'Conflicto de horario'}`);
+      // 🔥 SPRINT 11: Consumiendo ApiError directamente, sin error.response
+      setErrorMessage(error.message || 'Error al crear la reserva o conflicto de horario.');
     } finally {
       setIsSaving(false);
     }
@@ -81,6 +86,13 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* 🔥 SPRINT 11: Banner de error integrado en la UI */}
+        {errorMessage && (
+          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+            {errorMessage}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>

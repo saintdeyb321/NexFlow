@@ -241,9 +241,9 @@ public class CatalogController : ControllerBase
         CancellationToken cancellationToken)
     {
         var targetScope = string.IsNullOrWhiteSpace(scope) ? "PRODUCT" : scope.Trim().ToUpperInvariant();
-        // 🔥 SPRINT 3: Un scope desconocido nunca hereda los permisos de CATALOG.
         if (targetScope != "PRODUCT" && targetScope != "SERVICE")
             return BadRequest(new { message = "Scope inválido. Usa PRODUCT o SERVICE." });
+
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
 
         if (!await HasAccessTo(requiredModule, cancellationToken))
@@ -253,10 +253,9 @@ public class CatalogController : ControllerBase
 
         if (artifact == null)
             return Ok(new { status = "NOT_GENERATED", pdfUrl = (string?)null });
-
         return Ok(new
         {
-            status = artifact.Status.ToString(),
+            status = artifact.Status.ToString().ToUpperInvariant(),
             pdfUrl = artifact.PdfUrl,
             lastGeneratedAt = artifact.LastGeneratedAt
         });

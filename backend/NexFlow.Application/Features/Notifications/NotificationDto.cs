@@ -6,7 +6,8 @@ public enum NotificationType
     ReservationCancelled,
     HumanTakeoverRequested, // La IA pide ayuda
     NewCommercialRequest,
-    SystemAlert
+    SystemAlert,
+    NewMessage
 }
 
 public class NotificationDto

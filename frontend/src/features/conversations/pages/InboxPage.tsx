@@ -19,16 +19,37 @@ export const InboxPage = () => {
     handleDelete
   } = useConversations();
 
+  // 🔥 SPRINT 11 (P2): Error Boundary Local Elegante
   if (isError) {
     return (
-      <div className="flex h-64 items-center justify-center text-red-500 bg-red-50 rounded-xl border border-red-100">
-        No se pudo conectar con NexFlow. Revisa tu conexión o intenta recargar.
+      <div className="flex h-[calc(100vh-8rem)] items-center justify-center bg-white border border-gray-200 rounded-xl shadow-sm">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 mb-1">Pérdida de Conexión</h3>
+          <p className="text-sm text-gray-500 mb-4">No se pudo conectar con el servidor de NexFlow. Revisa tu conexión a internet e intenta recargar la página.</p>
+          <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">Recargar Bandeja</button>
+        </div>
       </div>
     );
   }
 
+  // 🔥 SPRINT 11 (P2): Skeleton Loader Profesional
   if (isLoading) {
-    return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando bandeja de entrada...</div>;
+    return (
+      <div className="flex h-[calc(100vh-8rem)] bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm animate-pulse">
+        <div className="w-1/3 border-r border-gray-200 flex flex-col bg-gray-50">
+          <div className="p-4 border-b border-gray-200 bg-white"><div className="h-6 bg-gray-200 rounded w-1/2"></div></div>
+          <div className="p-4"><div className="h-16 bg-gray-200 rounded-lg mb-2"></div><div className="h-16 bg-gray-200 rounded-lg mb-2"></div><div className="h-16 bg-gray-200 rounded-lg"></div></div>
+        </div>
+        <div className="w-2/3 flex flex-col p-6 justify-end">
+          <div className="h-12 bg-gray-100 rounded-lg w-1/2 mb-4 self-start"></div>
+          <div className="h-12 bg-gray-200 rounded-lg w-1/2 mb-4 self-end"></div>
+          <div className="h-12 bg-gray-100 rounded-lg w-full mt-4"></div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -41,7 +62,6 @@ export const InboxPage = () => {
       
       {selectedChat ? (
         <div className="w-2/3 flex flex-col relative">
-          
           <div className="absolute top-4 right-4 z-10">
             <button 
               onClick={handleDelete}
@@ -66,9 +86,19 @@ export const InboxPage = () => {
       ) : (
         <div className="w-2/3 flex flex-col items-center justify-center text-gray-500 bg-gray-50/50">
           {conversations.length === 0 ? (
-            <p>No hay conversaciones activas en este momento.</p>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">📭</div>
+              <p className="font-medium text-gray-700">Bandeja Vacía</p>
+              <p className="text-sm mt-1">No hay conversaciones activas en este momento.</p>
+            </div>
           ) : (
-            <p>Selecciona una conversación para ver el historial.</p>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              </div>
+              <p className="font-medium text-gray-700">Selecciona una conversación</p>
+              <p className="text-sm mt-1">Elige un chat del panel lateral para ver el historial.</p>
+            </div>
           )}
         </div>
       )}

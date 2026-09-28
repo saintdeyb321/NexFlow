@@ -1,5 +1,6 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 
+// 🔥 SPRINT 11: Contrato estricto unificado
 export interface ArtifactStatusDto {
   status: 'NOT_GENERATED' | 'GENERATING' | 'CURRENT' | 'STALE' | 'FAILED';
   pdfUrl?: string | null;

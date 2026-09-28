@@ -17,6 +17,7 @@ public class DashboardService : IDashboardService
     private readonly ICatalogRepository _catalogRepo;
     private readonly IRequestRepository _requestRepo;
     private readonly IReservationRepository _reservationRepo;
+    private readonly IBusinessProfileRepository _profileRepo; 
     private readonly IClock _clock;
 
     public DashboardService(
@@ -25,6 +26,7 @@ public class DashboardService : IDashboardService
         ICatalogRepository catalogRepo,
         IRequestRepository requestRepo,
         IReservationRepository reservationRepo,
+        IBusinessProfileRepository profileRepo,
         IClock clock)
     {
         _entitlementService = entitlementService;
@@ -32,6 +34,7 @@ public class DashboardService : IDashboardService
         _catalogRepo = catalogRepo;
         _requestRepo = requestRepo;
         _reservationRepo = reservationRepo;
+        _profileRepo = profileRepo;
         _clock = clock;
     }
 
@@ -40,14 +43,11 @@ public class DashboardService : IDashboardService
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken);
         var modules = activeModules.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // 🔥 SPRINT 11: Ejecución asíncrona paralela SOLO de los módulos contratados
         var globalTask = BuildGlobalMetricsAsync(workspaceId, cancellationToken);
         var catalogTask = modules.Contains("CATALOG") ? BuildCatalogMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<CatalogMetricsDto?>(null);
         var servicesTask = modules.Contains("SERVICES") ? BuildServicesMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<ServicesMetricsDto?>(null);
         var requestsTask = modules.Contains("REQUESTS") ? BuildRequestsMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<RequestsMetricsDto?>(null);
         var reservationsTask = modules.Contains("RESERVATIONS") ? BuildReservationsMetricsAsync(workspaceId, cancellationToken) : Task.FromResult<ReservationsMetricsDto?>(null);
-
-        // Opcional: Si implementaste Orders, podrías agregarlo aquí. Si no, lo omitimos.
 
         await Task.WhenAll(globalTask, catalogTask, servicesTask, requestsTask, reservationsTask);
 
@@ -60,15 +60,23 @@ public class DashboardService : IDashboardService
         );
     }
 
+    private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
+    {
+        var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
+        var tzId = string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone;
+        try { return TimeZoneInfo.FindSystemTimeZoneById(tzId); }
+        catch { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+    }
+
     private async Task<GlobalMetricsDto> BuildGlobalMetricsAsync(Guid workspaceId, CancellationToken ct)
     {
         var recentConversations = await _conversationRepo.GetRecentConversationsAsync(workspaceId, 200, ct);
 
-        // 🔥 SPRINT 10: Cálculo de "Hoy" basado en la zona horaria local, no en UTC universal.
-        var peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
-        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, peruZone);
-        var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, peruZone);
-        var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), peruZone);
+        // 🔥 SPRINT 11: Zonas horarias dinámicas
+        var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, ct);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
+        var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, workspaceZone);
+        var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), workspaceZone);
 
         var convsToday = recentConversations.Where(c => c.StartedAt >= todayLocalStartUtc && c.StartedAt < tomorrowLocalStartUtc).ToList();
 
@@ -98,10 +106,8 @@ public class DashboardService : IDashboardService
         var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
         var products = items.Where(i => i.Type == "PRODUCT").ToList();
 
-        // 🔥 SPRINT 12: Extraemos el uso real si lo tuvieras, de lo contrario usamos un placeholder estático (NO RANDOM) 
-        // para no romper la UI hasta que implementemos la tabla de CatalogAnalytics.
-        var topQueried = products.Take(3).Select(p => new ItemQueryMetricDto(p.Id, p.Name, 0));
-
+        // 🔥 SPRINT 11: Ocultamos el Top Consultados hasta tener Analytics real
+        var topQueried = Enumerable.Empty<ItemQueryMetricDto>();
         return new CatalogMetricsDto(products.Count, 0, topQueried);
     }
 
@@ -110,9 +116,7 @@ public class DashboardService : IDashboardService
         var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
         var services = items.Where(i => i.Type == "SERVICE").ToList();
 
-        // 🔥 SPRINT 12: Mismo approach estático temporal.
-        var topQueried = services.Take(3).Select(s => new ItemQueryMetricDto(s.Id, s.Name, 0));
-
+        var topQueried = Enumerable.Empty<ItemQueryMetricDto>();
         return new ServicesMetricsDto(services.Count, 0, topQueried);
     }
 
@@ -138,16 +142,16 @@ public class DashboardService : IDashboardService
         var countsByStatus = reservations.GroupBy(r => r.Status)
             .ToDictionary(group => group.Key, group => group.Count());
 
-        // 🔥 SPRINT 10: Ajuste de límites diarios locales para reservas
-        var peruZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
-        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, peruZone);
-        var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, peruZone);
-        var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), peruZone);
+        var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, ct);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
+        var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, workspaceZone);
+        var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), workspaceZone);
 
+        // 🔥 SPRINT 11: Semántica correcta de conteo
         return new ReservationsMetricsDto(
             ReservationsToday: reservations.Count(r => r.StartTime >= todayLocalStartUtc && r.StartTime < tomorrowLocalStartUtc),
-            Pending: reservations.Count(r => r.Status == ReservationStatus.Confirmed && r.StartTime > now),
-            Confirmed: countsByStatus.GetValueOrDefault(ReservationStatus.Completed),
+            Pending: countsByStatus.GetValueOrDefault(ReservationStatus.Pending),
+            Confirmed: countsByStatus.GetValueOrDefault(ReservationStatus.Confirmed),
             Cancelled: countsByStatus.GetValueOrDefault(ReservationStatus.Cancelled)
         );
     }

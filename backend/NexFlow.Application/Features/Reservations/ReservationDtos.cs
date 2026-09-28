@@ -7,8 +7,8 @@ public record ReservationDto(
     Guid WorkspaceId,
     string LocationId,
     string ServiceId,
+    string CustomerName,
     string CustomerIdentifier,
-    string CustomerName, // <--- Moverlo aquí para que coincida con el Engine
-    DateTime StartTime,
+    DateTime DateTime, // Cambiado de StartTime a DateTime para coincidir con frontend
     string Status
 );

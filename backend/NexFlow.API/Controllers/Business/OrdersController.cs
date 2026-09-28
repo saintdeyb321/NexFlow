@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Orders.DTOs;
-using NexFlow.Application.Features.Notifications; // 🔥 Para las notificaciones
+using NexFlow.Application.Features.Notifications;
 using NexFlow.Domain.Enums;
 
 namespace NexFlow.API.Controllers.Business;
@@ -68,19 +68,23 @@ public class OrdersController : ControllerBase
         order.UpdatedAt = DateTime.UtcNow;
         order.Status = OrderStatus.PendingReview;
 
-        // Calculamos el total de forma segura desde el backend
-        order.TotalAmountMinorUnits = order.Items.Sum(i => i.Quantity * i.UnitPriceMinorUnits);
+        // 🔥 SPRINT 11: Forzamos a que todo pedido nuevo entre como cotización (0.00)
+        foreach (var item in order.Items)
+        {
+            item.UnitPriceMinorUnits = 0;
+        }
+        order.TotalAmountMinorUnits = 0;
 
         await _orderRepository.CreateOrderAsync(WorkspaceId, order, cancellationToken);
 
-        // 🔥 Notificamos al Dashboard instantáneamente
+        // 🔥 SPRINT 11: Se envía al módulo "ORDERS", no a "CATALOG"
         await _notificationService.NotifyAsync(
             WorkspaceId,
-            "CATALOG",
+            "ORDERS",
             NotificationType.NewCommercialRequest,
-            "Nuevo Pedido Registrado",
-            $"Se ha recibido un pedido de {order.ConsumerName} por {order.Currency} {(order.TotalAmountMinorUnits / 100.0):0.00}.",
-            "/orders", // Redirige a la futura vista de pedidos en el frontend
+            "Nueva Solicitud/Cotización Registrada",
+            $"Se ha recibido una solicitud de {order.ConsumerName} con {order.Items.Count} ítems por revisar.",
+            "/orders",
             cancellationToken);
 
         return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, order);
@@ -99,11 +103,14 @@ public class OrdersController : ControllerBase
         return Ok(new { message = "Estado actualizado exitosamente." });
     }
 
-
     [HttpPut("{id}/amount")]
     public async Task<IActionResult> UpdateAmount(string id, [FromBody] UpdateOrderAmountRequest request, CancellationToken cancellationToken)
     {
         if (!await HasAccessAsync(cancellationToken)) return StatusCode(403, "Módulo de Pedidos no contratado.");
+
+        // 🔥 SPRINT 11: Bloqueamos montos negativos
+        if (request.TotalAmountMinorUnits < 0)
+            return BadRequest(new { message = "El monto de la cotización no puede ser negativo." });
 
         var order = await _orderRepository.GetOrderByIdAsync(WorkspaceId, id, cancellationToken);
         if (order == null) return NotFound(new { message = "Pedido no encontrado." });

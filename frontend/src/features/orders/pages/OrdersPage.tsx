@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShoppingBag, Clock, CheckCircle, Package, XCircle, Eye, ShoppingCart } from 'lucide-react'; // 🔥 ShoppingCart agregado
+import { ShoppingBag, Clock, CheckCircle, Package, XCircle, Eye, ShoppingCart } from 'lucide-react';
 import { getOrders, updateOrderStatus } from '../services/orders.service';
 import { OrderDetailModal } from '../components/OrderDetailModal';
 import type { OrderStatus, OrderRecord } from '../types/orders.types';
@@ -27,12 +27,13 @@ export const OrdersPage = () => {
     },
   });
 
+  // 🔥 SPRINT 11: Eliminados términos de ERP
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
       case 'PendingReview': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Por Confirmar</span>;
-      case 'Approved': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Confirmado</span>;
-      case 'Processing': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-full w-fit"><Package className="w-3 h-3 mr-1" /> Separando Stock</span>;
-      case 'Completed': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Entregado / Pagado</span>;
+      case 'Approved': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Aprobado</span>;
+      case 'Processing': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-full w-fit"><Package className="w-3 h-3 mr-1" /> En Revisión</span>;
+      case 'Completed': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Resuelto</span>;
       case 'Rejected': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Rechazado</span>;
       case 'Cancelled': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Cancelado</span>;
       default: return <span className="bg-gray-100 text-gray-800 text-xs px-2.5 py-1 rounded-full w-fit">{status}</span>;
@@ -43,17 +44,17 @@ export const OrdersPage = () => {
     updateMutation.mutate({ id, status: newStatus });
   };
 
-  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar los pedidos.</div>;
+  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar las solicitudes.</div>;
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in">
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <ShoppingBag className="w-6 h-6 mr-3 text-blue-600" /> Pedidos por Entregar
+            <ShoppingBag className="w-6 h-6 mr-3 text-blue-600" /> Solicitudes y Cotizaciones
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Revisa las listas de compra que la IA capturó y coordina el recojo o envío con tus clientes.
+            Revisa las listas de compra o consultas que la IA capturó y envía los precios a tus clientes.
           </p>
         </div>
         
@@ -62,22 +63,22 @@ export const OrdersPage = () => {
           onChange={(e) => setFilterStatus(e.target.value as OrderStatus | 'ALL')}
           className="border border-gray-200 rounded-lg px-4 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
         >
-          <option value="ALL">Todos los Pedidos</option>
+          <option value="ALL">Todas las Solicitudes</option>
           <option value="PendingReview">Por Confirmar</option>
-          <option value="Approved">Confirmados</option>
-          <option value="Processing">Separando Stock</option>
-          <option value="Completed">Entregados / Pagados</option>
+          <option value="Approved">Aprobados</option>
+          <option value="Processing">En Revisión</option>
+          <option value="Completed">Resueltos</option>
         </select>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-[400px]">
         {isLoading ? (
-          <div className="flex items-center justify-center h-64 text-gray-400 animate-pulse">Cargando pedidos...</div>
+          <div className="flex items-center justify-center h-64 text-gray-400 animate-pulse">Cargando solicitudes...</div>
         ) : orders.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <ShoppingCart className="w-16 h-16 mb-4 text-gray-200" />
-            <p className="text-lg font-medium text-gray-600">No hay pedidos pendientes</p>
-            <p className="text-sm">Las listas de compra solicitadas por tus clientes aparecerán aquí.</p>
+            <p className="text-lg font-medium text-gray-600">No hay solicitudes pendientes</p>
+            <p className="text-sm">Las listas capturadas por el asistente aparecerán aquí.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -112,7 +113,10 @@ export const OrdersPage = () => {
                       </p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-900">
-                      {order.currency} {(order.totalAmountMinorUnits / 100).toFixed(2)}
+                      {/* 🔥 SPRINT 11: Ocultamos el PEN 0.00 */}
+                      {order.status === 'PendingReview' && order.totalAmountMinorUnits === 0 
+                        ? <span className="text-gray-400 italic font-normal text-sm">Por definir</span>
+                        : `${order.currency} ${(order.totalAmountMinorUnits / 100).toFixed(2)}`}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getStatusBadge(order.status)}
@@ -133,10 +137,10 @@ export const OrdersPage = () => {
                         className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white hover:bg-gray-50 outline-none font-medium text-gray-700 cursor-pointer"
                       >
                         <option value="PendingReview">Por Confirmar</option>
-                        <option value="Approved">Confirmar Pedido</option>
-                        <option value="Processing">Separando Stock</option>
-                        <option value="Completed">Entregado / Pagado</option>
-                        <option value="Rejected">Rechazar Pedido</option>
+                        <option value="Processing">En Revisión</option>
+                        <option value="Approved">Aprobar</option>
+                        <option value="Completed">Marcar Resuelto</option>
+                        <option value="Rejected">Rechazar</option>
                         <option value="Cancelled">Cancelar</option>
                       </select>
                     </td>

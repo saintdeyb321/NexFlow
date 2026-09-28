@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Loader2, Image as ImageIcon } from 'lucide-react';
 import type { Conversation, Message } from '../types/conversation.types';
 
 interface ConversationThreadProps {
@@ -16,6 +16,12 @@ export const ConversationThread = ({
   chat, messages, isChangingMode, isSending, onTakeOver, onRelease, onSendMessage
 }: ConversationThreadProps) => {
   const [newMessage, setNewMessage] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null); // 🔥 SPRINT 11: Auto-Scroll
+
+  // Auto-scroll al recibir un nuevo mensaje
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSend = () => {
     if (!newMessage.trim()) return;
@@ -24,8 +30,7 @@ export const ConversationThread = ({
   };
 
   return (
-    <div className="w-2/3 flex flex-col bg-gray-50/50 relative">
-      {/* Header del Chat */}
+    <div className="w-full flex flex-col h-full bg-gray-50/50 relative">
       <div className="p-4 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
         <div>
           <h3 className="font-bold text-gray-900 text-lg">{chat.consumerPhone}</h3>
@@ -37,18 +42,17 @@ export const ConversationThread = ({
           {chat.mode === 'Automatic' ? (
             <button onClick={onTakeOver} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
               {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <User className="w-4 h-4 mr-2" />} 
-              {isChangingMode ? 'Procesando...' : 'Asumir Control Manual'}
+              {isChangingMode ? 'Procesando...' : 'Asumir Control'}
             </button>
           ) : (
             <button onClick={onRelease} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
               {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bot className="w-4 h-4 mr-2" />} 
-              {isChangingMode ? 'Procesando...' : 'Reactivar Asistente IA'}
+              {isChangingMode ? 'Procesando...' : 'Reactivar IA'}
             </button>
           )}
         </div>
       </div>
 
-      {/* 🔥 Banner Visual Inteligente del Estado */}
       {chat.mode === 'Automatic' ? (
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2.5 flex items-center justify-center text-blue-700 text-sm font-medium">
           <Bot className="w-4 h-4 mr-2 animate-pulse" />
@@ -63,7 +67,7 @@ export const ConversationThread = ({
           {chat.handoffReason === 'AiEscalation' ? (
             <>
               <AlertOctagon className="w-4 h-4 mr-2" />
-              Alerta de la IA: El bot no pudo resolver la solicitud y necesita tu asistencia inmediata.
+              Alerta de la IA: El bot necesita tu asistencia para resolver esta solicitud.
             </>
           ) : (
             <>
@@ -74,7 +78,6 @@ export const ConversationThread = ({
         </div>
       )}
 
-      {/* Historial de Mensajes */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.length === 0 ? (
           <div className="text-center text-gray-500 text-sm mt-10">Sin mensajes en el historial.</div>
@@ -88,7 +91,14 @@ export const ConversationThread = ({
                     ? 'bg-blue-100 text-blue-900 border border-blue-200 rounded-tr-sm shadow-sm'
                     : 'bg-green-500 text-white rounded-tr-sm shadow-sm'
               }`}>
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                {/* 🔥 SPRINT 11 (P2): Protección contra Textos Vacíos (Audios/Imágenes de WhatsApp) */}
+                <p className="text-sm whitespace-pre-wrap break-words">
+                  {msg.content ? msg.content : (
+                    <span className="italic flex items-center opacity-80">
+                      <ImageIcon className="w-4 h-4 mr-1" /> [Contenido Multimedia]
+                    </span>
+                  )}
+                </p>
                 <div className={`text-[10px] mt-1 flex items-center justify-end ${
                   msg.direction === 'inbound' ? 'text-gray-400' : (msg.sender === 'AI' ? 'text-blue-500' : 'text-green-100')
                 }`}>
@@ -99,9 +109,9 @@ export const ConversationThread = ({
             </div>
           ))
         )}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Manual */}
       <div className="p-4 bg-white border-t border-gray-200">
         <div className="flex items-center">
           <input
