@@ -1,6 +1,8 @@
-export type ConversationMode = 'Automatic' | 'Human';
+// 🔥 SPRINT 02: Tipos exactos del backend
+export type ConversationMode = 'Automatic' | 'Human' | 'Paused';
 export type SenderType = 'Consumer' | 'AI' | 'BusinessUser' | 'System';
-export type HandoffReason = 'None' | 'AiEscalation' | 'ManualIntervention';
+export type HandoffReason = 'None' | 'AiEscalation' | 'ManualIntervention' | 'SystemError';
+export type MessageStatus = 'Pending' | 'Sent' | 'Failed';
 
 export interface Conversation {
   id: string;
@@ -19,5 +21,6 @@ export interface Message {
   sender: SenderType;
   content: string;
   externalMessageId?: string;
+  status: MessageStatus; // 🔥 Añadido status para ver si falló
   timestamp: string;
 }

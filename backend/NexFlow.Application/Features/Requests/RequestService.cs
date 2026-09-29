@@ -6,8 +6,8 @@ namespace NexFlow.Application.Features.Requests;
 
 public interface IRequestService
 {
-    // 🔥 SPRINT 11 (Auditoría): Eliminado el método CreateSupportTicketAsync() legacy
-    Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, Dictionary<string, object>? metadata, CancellationToken ct);
+    // 🔥 SPRINT 08: Añadimos sourceMessageId a la firma
+    Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, string? sourceMessageId, Dictionary<string, object>? metadata, CancellationToken ct);
 }
 
 public class RequestService : IRequestService
@@ -21,8 +21,18 @@ public class RequestService : IRequestService
         _notificationService = notificationService;
     }
 
-    public async Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, Dictionary<string, object>? metadata, CancellationToken ct)
+    public async Task<string> CreateRequestAsync(Guid workspaceId, string phone, string conversationId, RequestType type, string title, string description, string? sourceMessageId, Dictionary<string, object>? metadata, CancellationToken ct)
     {
+        // 🔥 SPRINT 08: Idempotencia estricta. Evitamos crear duplicados si el mensaje ya generó un Request.
+        if (!string.IsNullOrWhiteSpace(sourceMessageId))
+        {
+            var latestRequest = await _requestRepo.GetLatestRequestByPhoneAsync(workspaceId, phone, ct);
+            if (latestRequest != null && latestRequest.SourceMessageId == sourceMessageId)
+            {
+                return latestRequest.Id; // Ya existía, devolvemos el ID en silencio
+            }
+        }
+
         var newRequest = new RequestRecord
         {
             Id = Guid.NewGuid().ToString(),
@@ -32,6 +42,7 @@ public class RequestService : IRequestService
             Title = title,
             Description = description,
             Status = RequestStatus.Pending,
+            SourceMessageId = sourceMessageId,
             Metadata = metadata ?? new Dictionary<string, object>(),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow

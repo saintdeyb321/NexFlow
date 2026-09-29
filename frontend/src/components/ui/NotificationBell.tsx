@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bell, Calendar, MessageCircle, ClipboardList, AlertTriangle } from 'lucide-react';
+import { Bell, Calendar, MessageCircle, ClipboardList, AlertTriangle, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getNotifications, markNotificationAsRead, type NotificationDto } from '../../features/notifications/services/notification.service';
 import { useAuthStore } from '../../core/store/useAuthStore';
@@ -12,7 +12,7 @@ export const NotificationBell = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: notifications = [] } = useQuery({
+  const { data: notifications = [], isLoading, isError } = useQuery({
     queryKey: ['notifications', workspaceId],
     queryFn: getNotifications,
     enabled: !!workspaceId,
@@ -22,7 +22,6 @@ export const NotificationBell = () => {
   const readMutation = useMutation({
     mutationFn: markNotificationAsRead,
     onSuccess: (_, notificationId) => {
-      // Actualización optimista instantánea
       queryClient.setQueryData<NotificationDto[]>(['notifications', workspaceId], (old) => {
         if (!old) return [];
         return old.map(n => n.id === notificationId ? { ...n, isRead: true } : n);
@@ -57,13 +56,9 @@ export const NotificationBell = () => {
     }
     setIsOpen(false);
     
-    // Navegar de forma segura dentro de la app
-    if (n.actionUrl) {
-      if (n.actionUrl.startsWith('http')) {
-        window.location.href = n.actionUrl;
-      } else {
-        navigate(n.actionUrl);
-      }
+    // 🔥 SPRINT 08: Prevención de redirecciones maliciosas y SPA router.
+    if (n.actionUrl && n.actionUrl.startsWith('/')) {
+       navigate(n.actionUrl);
     }
   };
 
@@ -93,7 +88,17 @@ export const NotificationBell = () => {
           </div>
           
           <div className="max-h-[28rem] overflow-y-auto">
-            {notifications.length === 0 ? (
+            {isLoading ? (
+              <div className="p-8 text-center text-blue-600 flex flex-col items-center">
+                 <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                 <span className="text-sm font-medium">Cargando notificaciones...</span>
+              </div>
+            ) : isError ? (
+              <div className="p-8 text-center text-red-500 text-sm font-medium">
+                <AlertTriangle className="w-8 h-8 mx-auto text-red-300 mb-2" />
+                No pudimos cargar las notificaciones.
+              </div>
+            ) : notifications.length === 0 ? (
               <div className="p-8 text-center text-gray-500 text-sm">
                 <Bell className="w-8 h-8 mx-auto text-gray-300 mb-2" />
                 No tienes notificaciones

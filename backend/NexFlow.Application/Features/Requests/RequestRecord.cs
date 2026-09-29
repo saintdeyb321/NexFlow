@@ -10,7 +10,6 @@ public enum RequestStatus
     Cancelled
 }
 
-// 🔥 SPRINT 06: Tipos específicos de solicitudes requeridos por la auditoría
 public enum RequestType
 {
     Tramite,
@@ -23,7 +22,7 @@ public enum RequestType
 public class RequestRecord
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
-    public string ConversationId { get; set; } = string.Empty; // Vinculación con la conversación original
+    public string ConversationId { get; set; } = string.Empty;
     public string ConsumerPhone { get; set; } = string.Empty;
 
     public RequestType Type { get; set; } = RequestType.Other;
@@ -31,7 +30,10 @@ public class RequestRecord
     public string Description { get; set; } = string.Empty;
 
     public RequestStatus Status { get; set; } = RequestStatus.Pending;
-    public string? AssignedTo { get; set; } // Asignación a un humano
+    public string? AssignedTo { get; set; }
+
+    // 🔥 SPRINT 08: Clave de idempotencia para evitar solicitudes duplicadas por reintentos de red
+    public string? SourceMessageId { get; set; }
 
     public Dictionary<string, object> Metadata { get; set; } = new();
 

@@ -11,7 +11,7 @@ public sealed class KnowledgeService : IKnowledgeService
     private readonly ILocationRepository _locationRepo;
     private readonly IBusinessHoursRepository _hoursRepo;
     private readonly IFaqRepository _faqRepo;
-    private readonly IOfferingService _offeringService; // 🔥 Inyectamos el servicio de ofertas directamente
+    private readonly IOfferingService _offeringService;
     private readonly ILogger<KnowledgeService> _logger;
 
     public KnowledgeService(
@@ -46,59 +46,66 @@ public sealed class KnowledgeService : IKnowledgeService
             Locations = locationsTask.Result?.ToList() ?? new(),
             Hours = hoursTask.Result?.ToList() ?? new(),
             Faqs = faqsTask.Result?.ToList() ?? new()
-            // 🔥 SPRINT 03/04: Products y Services YA NO SE CARGAN EN MEMORIA.
         };
     }
 
     public async Task<KnowledgeResult> QueryAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
     {
-        var topicString = query.Topic.ToString().ToUpper();
-
-        if (topicString == "LOCATIONS")
+        try
         {
-            var data = new BusinessKnowledgeSnapshot
-            {
-                WorkspaceId = workspaceId,
-                Locations = (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList()
-            };
-            return QueryLocations(data, query.LocationId);
-        }
-        if (topicString == "BUSINESSHOURS")
-        {
-            var data = new BusinessKnowledgeSnapshot
-            {
-                WorkspaceId = workspaceId,
-                Hours = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, query.LocationId, cancellationToken)).ToList()
-            };
-            return QueryHours(data);
-        }
-        if (topicString == "FAQS")
-        {
-            var data = new BusinessKnowledgeSnapshot
-            {
-                WorkspaceId = workspaceId,
-                Faqs = (await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList()
-            };
-            return QueryFaqs(data, query.SearchTerm);
-        }
-        if (topicString == "PROFILE")
-        {
-            var data = new BusinessKnowledgeSnapshot
-            {
-                WorkspaceId = workspaceId,
-                Profile = await _profileRepo.GetProfileAsync(workspaceId, cancellationToken)
-            };
-            return QueryProfile(data);
-        }
+            var topicString = query.Topic.ToString().ToUpper();
 
-        // 🔥 Búsquedas bajo demanda directamente a BD. Protege la RAM.
-        if (topicString == "PRODUCTS" || topicString == "OFFERINGS")
-            return await QueryProductsAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
+            if (topicString == "LOCATIONS")
+            {
+                var data = new BusinessKnowledgeSnapshot
+                {
+                    WorkspaceId = workspaceId,
+                    Locations = (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList()
+                };
+                return QueryLocations(data, query.LocationId);
+            }
+            if (topicString == "BUSINESSHOURS")
+            {
+                var data = new BusinessKnowledgeSnapshot
+                {
+                    WorkspaceId = workspaceId,
+                    Hours = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, query.LocationId, cancellationToken)).ToList()
+                };
+                return QueryHours(data);
+            }
+            if (topicString == "FAQS")
+            {
+                var data = new BusinessKnowledgeSnapshot
+                {
+                    WorkspaceId = workspaceId,
+                    Faqs = (await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList()
+                };
+                return QueryFaqs(data, query.SearchTerm);
+            }
+            if (topicString == "PROFILE")
+            {
+                var data = new BusinessKnowledgeSnapshot
+                {
+                    WorkspaceId = workspaceId,
+                    Profile = await _profileRepo.GetProfileAsync(workspaceId, cancellationToken)
+                };
+                return QueryProfile(data);
+            }
 
-        if (topicString == "SERVICES")
-            return await QueryServicesAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
+            if (topicString == "PRODUCTS" || topicString == "OFFERINGS")
+                return await QueryProductsAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
 
-        return new KnowledgeResult { Found = false, Source = query.Topic };
+            if (topicString == "SERVICES")
+                return await QueryServicesAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
+
+            return new KnowledgeResult { Found = false, Source = query.Topic };
+        }
+        catch (Exception ex)
+        {
+            // 🔥 SPRINT 05: Si hay un error de conexión a la BD, no devolvemos una lista vacía que podría confundir a la IA.
+            _logger.LogError(ex, "Falla al consultar el Knowledge Engine para el workspace {WorkspaceId}.", workspaceId);
+            return new KnowledgeResult { Found = false };
+        }
     }
 
     private static KnowledgeResult QueryLocations(BusinessKnowledgeSnapshot snapshot, string? locationId)

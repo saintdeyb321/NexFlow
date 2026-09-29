@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom'; // 🔥 Necesario para el botón
+import { useNavigate } from 'react-router-dom';
 import { ClipboardList, Clock, PlayCircle, CheckCircle, XCircle, FileText, Plus, MessageSquare, UserCircle } from 'lucide-react';
 import { getRequests, updateRequestStatus, assignRequest } from '../services/request.service';
 import type { RequestStatus, RequestType } from '../types/request.types';
@@ -9,18 +9,19 @@ import { CreateRequestModal } from '../components/CreateRequestModal';
 
 export const RequestsPage = () => {
   const queryClient = useQueryClient();
-  const navigate = useNavigate(); // 🔥 Hook de router
+  const navigate = useNavigate(); 
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  // 🔥 SPRINT 11: Extraemos el nombre dinámicamente o usamos la primera parte del correo
-  const adminName = useAuthStore((state) => 
-    (state.me as any)?.firstName || 
-    (state.me as any)?.name || 
-    (state.me as any)?.email?.split('@')[0]
-  ) || 'Agente';
+  
+  // 🔥 SPRINT 07: Nombre real usando el DTO correcto, no "any".
+  const me = useAuthStore((state) => state.me);
+  const adminName = me?.user?.firstName || me?.user?.email?.split('@')[0] || 'Agente';
   
   const [filterStatus, setFilterStatus] = useState<RequestStatus | 'ALL'>('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false); 
-  const [limit, setLimit] = useState(50); // 🔥 Paginación básica
+  const [limit, setLimit] = useState(50); 
+  
+  // 🔥 SPRINT 07: Estado para notificaciones de error
+  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
   const { data: requests = [], isLoading, isError } = useQuery({
     queryKey: ['requests', workspaceId, limit, filterStatus],
@@ -31,12 +32,24 @@ export const RequestsPage = () => {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: RequestStatus }) => updateRequestStatus(id, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['requests'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['requests'] });
+      setNotification({ msg: 'Estado actualizado correctamente.', type: 'success' });
+    },
+    onError: (error: any) => {
+      setNotification({ msg: error.message || 'Error al cambiar el estado de la solicitud.', type: 'error' });
+    }
   });
 
   const assignMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => assignRequest(id, name),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['requests'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['requests'] });
+      setNotification({ msg: 'Solicitud asignada a ti correctamente.', type: 'success' });
+    },
+    onError: (error: any) => {
+      setNotification({ msg: error.message || 'Error al asignarte la solicitud.', type: 'error' });
+    }
   });
 
   const getStatusBadge = (status: RequestStatus) => {
@@ -66,6 +79,13 @@ export const RequestsPage = () => {
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in">
+      {notification && (
+        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          <span>{notification.msg}</span>
+          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
+        </div>
+      )}
+
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
@@ -127,7 +147,6 @@ export const RequestsPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="font-medium text-gray-900 block">{req.consumerPhone}</span>
                       {req.conversationId && req.conversationId !== 'MANUAL_ENTRY' && (
-                        // 🔥 SPRINT 11: Ahora el enlace al chat FUNCIONA
                         <button 
                           onClick={() => navigate(`/inbox?conversation=${req.conversationId}`)}
                           className="flex items-center text-xs text-blue-600 mt-1 hover:underline font-medium"
@@ -152,7 +171,7 @@ export const RequestsPage = () => {
                         <button 
                           onClick={() => assignMutation.mutate({ id: req.id, name: adminName })}
                           disabled={assignMutation.isPending}
-                          className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                          className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
                         >
                           Asignarme
                         </button>

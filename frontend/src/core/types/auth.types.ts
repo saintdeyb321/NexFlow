@@ -1,3 +1,5 @@
+import type { BusinessProfile } from "../../features/business/types/business.types";
+
 export interface User {
   id: string;
   email: string;
@@ -23,4 +25,5 @@ export interface MeResponse {
   workspace: Workspace | null;
   license: License | null;
   entitlements: string[]; 
+  businessProfile: BusinessProfile | null;
 }

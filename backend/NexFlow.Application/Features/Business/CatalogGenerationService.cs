@@ -1,12 +1,12 @@
-﻿using System.Text.Json;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
-using NexFlow.Application.Common;
-using NexFlow.Domain.Entities.Catalog;
 using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Domain.Entities.Catalog;
 using NexFlow.Domain.Entities.System;
+using NexFlow.Domain.Exceptions; // Agregado para usar excepciones limpias
+using System.Text.Json;
 
 namespace NexFlow.Application.Features.Business;
 
@@ -25,6 +25,7 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly ICatalogHashService _hashService;
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly IOutboxRepository _outboxRepository;
+    private readonly IUnitOfWork _unitOfWork; // 🔥 SPRINT 11: Requerido para guardar el Outbox
     private readonly ILogger<CatalogGenerationService> _logger;
 
     public CatalogGenerationService(
@@ -34,6 +35,7 @@ public class CatalogGenerationService : ICatalogGenerationService
         ICatalogHashService hashService,
         IBusinessProfileRepository profileRepository,
         IOutboxRepository outboxRepository,
+        IUnitOfWork unitOfWork,
         ILogger<CatalogGenerationService> logger)
     {
         _catalogRepository = catalogRepository;
@@ -42,6 +44,7 @@ public class CatalogGenerationService : ICatalogGenerationService
         _hashService = hashService;
         _profileRepository = profileRepository;
         _outboxRepository = outboxRepository;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
@@ -60,9 +63,7 @@ public class CatalogGenerationService : ICatalogGenerationService
 
     public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 01: El motor solo verifica los scopes separados de forma aislada
         var scopesToVerify = new[] { "PRODUCT", "SERVICE" };
-
         var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
         var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
 
@@ -91,16 +92,14 @@ public class CatalogGenerationService : ICatalogGenerationService
     {
         var targetScope = scope.ToUpperInvariant();
 
-        // 🔥 SPRINT 01: HARD FAIL. Se prohíbe terminantemente la generación COMBINED.
         if (targetScope != "PRODUCT" && targetScope != "SERVICE")
         {
-            throw new ArgumentException("El scope del artefacto debe ser estrictamente PRODUCT o SERVICE. El modo COMBINED ha sido eliminado.", nameof(scope));
+            throw new ArgumentException("El scope del artefacto debe ser estrictamente PRODUCT o SERVICE.", nameof(scope));
         }
 
         var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
         var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
 
-        // Filtrado estricto por dominio
         var filteredCategories = allCategories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
         var filteredItems = allItems.Where(i => i.Type == targetScope).ToList();
 
@@ -165,28 +164,15 @@ public class CatalogGenerationService : ICatalogGenerationService
                 PayloadJson = JsonSerializer.Serialize(wrappedPayload)
             };
 
-            // 🔥 SPRINT 11 (Auditoría): Si esto falla (la base de datos se cae, etc), el bloque catch lo atajará.
             await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+
+            // 🔥 SPRINT 11 (Auditoría): Guardamos el evento en la BD. Si no, nunca será procesado por el Worker.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error preparando el payload documental para n8n o guardando en Outbox");
-
-            // 🔥 SPRINT 11: Forzamos el estado a Failed saltándonos el private set usando Reflexión
-            var prop = artifact.GetType().GetProperty("Status");
-            if (prop != null && prop.CanWrite)
-            {
-                prop.SetValue(artifact, CatalogArtifactStatus.Failed);
-            }
-            else
-            {
-                // Si el set es init-only o estrictamente privado, modificamos el campo de respaldo
-                var field = artifact.GetType().GetField("<Status>k__BackingField", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                field?.SetValue(artifact, CatalogArtifactStatus.Failed);
-            }
-
-            await _artifactRepository.SaveArtifactAsync(artifact, CancellationToken.None);
-            throw;
+            throw; // Propagamos. No tocamos el estado interno con reflexión para no ensuciar el Dominio.
         }
 
         return artifact;

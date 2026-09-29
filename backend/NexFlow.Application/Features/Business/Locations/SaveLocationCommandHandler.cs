@@ -21,6 +21,7 @@ public class SaveLocationCommandHandler
         var existingLocations = (await _locationRepository.GetLocationsAsync(request.WorkspaceId, cancellationToken)).ToList();
 
         bool isNewLocation = string.IsNullOrEmpty(request.Location.Id) || !existingLocations.Any(l => l.Id == request.Location.Id);
+
         if (isNewLocation)
         {
             int maxLocations = await _entitlementService.GetMaxLocationsAsync(request.WorkspaceId, cancellationToken);
@@ -32,20 +33,24 @@ public class SaveLocationCommandHandler
 
         var locationToSave = request.Location;
 
+        // 🔥 SPRINT 10: Regla Férrea: Si no hay ninguna otra sede principal, ESTA debe ser la principal.
+        var otherLocations = existingLocations.Where(l => l.Id != locationToSave.Id).ToList();
+        var hasOtherMain = otherLocations.Any(l => l.IsMain);
+
+        if (!locationToSave.IsMain && !hasOtherMain)
+        {
+            // Forzamos a que sea la principal, porque un negocio no puede quedarse sin sede central.
+            locationToSave = locationToSave with { IsMain = true };
+        }
+
+        // Si el usuario marcó ESTA como principal, le quitamos el título a la que lo tuviera antes.
         if (locationToSave.IsMain)
         {
-            foreach (var loc in existingLocations)
+            foreach (var loc in otherLocations.Where(l => l.IsMain))
             {
-                if (loc.IsMain && loc.Id != locationToSave.Id)
-                {
-                    var updatedLoc = loc with { IsMain = false };
-                    await _locationRepository.SaveLocationAsync(request.WorkspaceId, updatedLoc, cancellationToken);
-                }
+                var updatedLoc = loc with { IsMain = false };
+                await _locationRepository.SaveLocationAsync(request.WorkspaceId, updatedLoc, cancellationToken);
             }
-        }
-        else if (!existingLocations.Any(l => l.IsMain) && isNewLocation)
-        {
-            locationToSave = locationToSave with { IsMain = true };
         }
 
         await _locationRepository.SaveLocationAsync(request.WorkspaceId, locationToSave, cancellationToken);

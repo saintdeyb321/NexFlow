@@ -10,14 +10,12 @@ public class EntitlementService : IEntitlementService
     private readonly ILicenseRepository _licenseRepository;
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly IModuleRepository _moduleRepository;
+    private readonly IMembershipRepository _membershipRepository; // 🔥 SPRINT 12: Inyectado para Aislamiento B2B
     private readonly IClock _clock;
     private readonly IMemoryCache _cache;
     private readonly ICurrentUser _currentUser;
     private readonly ISystemAdministratorRepository _sysAdminRepository;
 
-    // 🔥 SPRINT 1 (Corección Comercial): Separación estricta de módulos.
-    // Solo dejamos las funcionalidades básicas/gratuitas. 
-    // CATALOG, SERVICES, RESERVATIONS y REQUESTS ahora requieren licenciamiento explícito en BD.
     private readonly string[] _baseModules = {
         "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "FAQ"
     };
@@ -26,6 +24,7 @@ public class EntitlementService : IEntitlementService
         ILicenseRepository licenseRepository,
         IWorkspaceRepository workspaceRepository,
         IModuleRepository moduleRepository,
+        IMembershipRepository membershipRepository,
         IClock clock,
         IMemoryCache cache,
         ICurrentUser currentUser,
@@ -34,6 +33,7 @@ public class EntitlementService : IEntitlementService
         _licenseRepository = licenseRepository;
         _workspaceRepository = workspaceRepository;
         _moduleRepository = moduleRepository;
+        _membershipRepository = membershipRepository;
         _clock = clock;
         _cache = cache;
         _currentUser = currentUser;
@@ -43,6 +43,10 @@ public class EntitlementService : IEntitlementService
     public void InvalidateWorkspaceCache(Guid workspaceId)
     {
         _cache.Remove($"entitlement_{workspaceId}");
+        if (_currentUser != null && _currentUser.UserId != Guid.Empty)
+        {
+            _cache.Remove($"role_{workspaceId}_{_currentUser.UserId}");
+        }
     }
 
     private async Task<bool> IsSuperAdminAsync(CancellationToken cancellationToken)
@@ -60,6 +64,21 @@ public class EntitlementService : IEntitlementService
         {
             return false;
         }
+    }
+
+    // 🔥 SPRINT 12: Verificación de Aislamiento de Tenant. 
+    // Garantiza que un usuario no pueda consultar datos de un Tenant al que no pertenece.
+    private async Task<string?> GetUserRoleAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        if (_currentUser == null || _currentUser.UserId == Guid.Empty) return null;
+
+        var cacheKey = $"role_{workspaceId}_{_currentUser.UserId}";
+        return await _cache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
+            var membership = await _membershipRepository.GetMembershipAsync(workspaceId, _currentUser.UserId, cancellationToken);
+            return membership != null ? membership.Role.ToString().ToUpperInvariant() : null;
+        });
     }
 
     private async Task<EntitlementSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken)
@@ -80,11 +99,8 @@ public class EntitlementService : IEntitlementService
             }
 
             var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-
-            // 🔥 SPRINT 9 CORRECCIÓN: Usamos un tiempo seguro sin adivinar propiedades
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
 
-            // Licencia nula o vencida restringe el acceso EXCLUSIVAMENTE a módulos base
             if (license == null || !license.IsValidAt(_clock.UtcNow))
             {
                 snapshot.IsValid = true;
@@ -94,10 +110,7 @@ public class EntitlementService : IEntitlementService
                 return snapshot;
             }
 
-            foreach (var baseMod in _baseModules)
-            {
-                snapshot.ActiveModuleCodes.Add(baseMod);
-            }
+            foreach (var baseMod in _baseModules) snapshot.ActiveModuleCodes.Add(baseMod);
 
             snapshot.IsValid = true;
             snapshot.MaxLocations = license.MaxLocations > 0 ? license.MaxLocations : 1;
@@ -118,6 +131,70 @@ public class EntitlementService : IEntitlementService
             return snapshot;
         }) ?? new EntitlementSnapshot();
     }
+
+    // =========================================================================
+    // MATRIZ DE AUTORIZACIÓN (Capabilities RBAC) - SPRINT 12
+    // =========================================================================
+    public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
+    {
+        if (await IsSuperAdminAsync(cancellationToken)) return true;
+
+        // 1. Aislamiento estricto: Si viene de una llamada HTTP, debe tener un Rol válido en el Tenant.
+        if (_currentUser == null || _currentUser.UserId == Guid.Empty) return false;
+
+        var userRole = await GetUserRoleAsync(workspaceId, cancellationToken);
+        if (string.IsNullOrEmpty(userRole)) return false; // Intento de acceso a Tenant ajeno bloqueado.
+
+        // 2. Validar que la licencia del Negocio permita el módulo
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        if (!snapshot.IsValid) return false;
+
+        var code = moduleCode.ToUpperInvariant();
+        var cap = capabilityCode.ToUpperInvariant();
+
+        bool hasLicenseCap = _baseModules.Contains(code) ||
+            (snapshot.ModuleCapabilities.TryGetValue(code, out var caps) && caps.Contains(cap));
+
+        if (!hasLicenseCap && !_baseModules.Contains(code)) return false;
+
+        // 3. Evaluar Matriz de Permisos (Rol vs Capacidad)
+        return EvaluateRoleMatrix(userRole, code, cap);
+    }
+
+    private bool EvaluateRoleMatrix(string role, string module, string capability)
+    {
+        if (role == "OWNER" || role == "ADMIN") return true;
+
+        // Viewers son estrictamente de lectura
+        if (role == "VIEWER") return capability == "READ";
+
+        // Agents/Users operan, pero no borran ni configuran negocio
+        if (role == "AGENT" || role == "USER")
+        {
+            if (capability == "READ") return true;
+
+            return module switch
+            {
+                "CATALOG" => false,
+                "SERVICES" => false,
+                "RESERVATIONS" => capability is "CHECK_AVAILABILITY" or "CREATE" or "UPDATE" or "CANCEL" or "COMPLETE",
+                "ORDERS" => capability is "CREATE" or "UPDATE" or "UPDATE_STATUS",
+                "REQUESTS" => capability is "CREATE" or "ASSIGN" or "UPDATE_STATUS",
+                "CONVERSATIONS" => capability is "SEND_MESSAGE" or "TAKEOVER" or "RELEASE",
+                "BUSINESS_PROFILE" => false,
+                "LOCATIONS" => false,
+                "BUSINESS_HOURS" => false,
+                "FAQ" => false,
+                _ => false
+            };
+        }
+
+        return false;
+    }
+
+    // =========================================================================
+    // MÉTODOS DE CONSULTA (Adaptados para Webhooks/Background Workers)
+    // =========================================================================
 
     public async Task<bool> IsLicenseValidAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
@@ -143,35 +220,19 @@ public class EntitlementService : IEntitlementService
     public async Task<IEnumerable<string>> GetAvailableModuleCodesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         if (await IsSuperAdminAsync(cancellationToken))
-        {
-            // El SuperAdmin retiene acceso global para soporte técnico
             return new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "SERVICES", "CATALOG", "FAQ", "REQUESTS", "RESERVATIONS", "ORDERS" };
+
+        // Si es una petición HTTP con usuario logueado, verificamos que pertenezca al Tenant.
+        // Si es el Webhook de IA (System call), el UserId es Empty, así que se permite leer los módulos.
+        if (_currentUser != null && _currentUser.UserId != Guid.Empty && !await IsSuperAdminAsync(cancellationToken))
+        {
+            var role = await GetUserRoleAsync(workspaceId, cancellationToken);
+            if (string.IsNullOrEmpty(role)) return Enumerable.Empty<string>();
         }
 
         var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
         if (!snapshot.IsValid) return Enumerable.Empty<string>();
         return snapshot.ActiveModuleCodes;
-    }
-
-    public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
-    {
-        if (await IsSuperAdminAsync(cancellationToken)) return true;
-
-        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
-        if (!snapshot.IsValid) return false;
-
-        var code = moduleCode.ToUpperInvariant();
-
-        // Si el módulo está en los base (solo básicos), damos acceso directo.
-        if (_baseModules.Contains(code)) return true;
-
-        // Si es comercial, comprobamos la licencia en el diccionario cargado desde PostgreSQL.
-        if (snapshot.ModuleCapabilities.TryGetValue(code, out var caps))
-        {
-            return caps.Contains(capabilityCode.ToUpperInvariant());
-        }
-
-        return false;
     }
 
     public async Task<int> GetMaxLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)

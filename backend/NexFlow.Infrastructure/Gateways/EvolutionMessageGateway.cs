@@ -45,6 +45,7 @@ public class EvolutionMessageGateway : IMessageGateway
         var url = $"{_baseUrl}/message/sendText/{instanceName}";
         var safeMessage = string.IsNullOrWhiteSpace(message) ? "Lo siento, tuve un pequeño problema. ¿Puedes repetir?" : message;
 
+        // 🔥 SPRINT 02: messageId ahora es la clave determinista (Ej: msg_123:response:1)
         var payload = new { number = customerIdentifier, text = safeMessage, options = new { delay = 1200, presence = "composing", messageId = messageId } };
         return await ExecutePostAsync(url, payload, cancellationToken);
     }
@@ -71,7 +72,6 @@ public class EvolutionMessageGateway : IMessageGateway
 
     private async Task<string> ExecutePostAsync(string url, object payload, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 2: Removemos el try/catch general. Si HTTP falla, la excepción sube al Orquestador para marcar FAILED.
         var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {

@@ -10,6 +10,8 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 public interface IConversationStateService
 {
+    // 🔥 SPRINT 03: Eliminamos la necesidad de pasar request a ProcessStateAsync para evitar errores de firma.
+    // Pasamos solo los datos que realmente necesita el método.
     Task<(bool ShouldAiRespond, ConversationRecord Record, string? FastReply)> ProcessStateAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, CancellationToken cancellationToken);
 }
 
@@ -50,8 +52,6 @@ public sealed class ConversationStateService : IConversationStateService
     {
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
 
-        // 🔥 SPRINT 08: Control de Sesión. Si la conversación es muy vieja, la cerramos.
-        // Solo la IA (Automatic) olvida la sesión antigua. Si está en 'Human', el agente asume la responsabilidad.
         if (conversation != null && conversation.Mode == ConversationMode.Automatic && (DateTime.UtcNow - conversation.LastMessageAt) > _sessionTimeout)
         {
             _logger.LogInformation("La conversación {ConvId} ha expirado por inactividad. Cerrando sesión.", conversation.Id);
@@ -60,32 +60,32 @@ public sealed class ConversationStateService : IConversationStateService
             conversation = null;
         }
 
-        // 1. Mensajes Salientes (Enviados por Humanos desde la Bandeja de Entrada NexFlow)
+        // 🔥 SPRINT 03: Manejo Estricto de Mensajes Salientes (FromMe)
         if (request.FromMe)
         {
             if (conversation == null) return (false, null!, null);
 
+            // 1. ¿Fue la IA quien lo envió? (Revisamos caché Rápido)
             bool isAiMessage = await _conversationCache.IsMessageAiGeneratedAsync(workspaceId, request.MessageId, cancellationToken);
 
+            // 2. Si no está en caché, comprobamos la base de datos (por si hubo un reinicio)
             if (!isAiMessage)
             {
-                var dbMessage = await _conversationRepo.GetMessageByExternalIdAsync(workspaceId, request.MessageId, cancellationToken);
+                var dbMessage = await _conversationRepo.GetMessageByExternalIdAsync(workspaceId, conversation.Id, request.MessageId, cancellationToken);
                 if (dbMessage != null && dbMessage.Sender == SenderType.AI)
                 {
                     isAiMessage = true;
                 }
             }
 
-            // Si fue la IA quien envió el mensaje (a través del Outbox), ignoramos.
+            // Si fue la IA, lo ignoramos como input (ya lo procesamos al enviarlo)
             if (isAiMessage) return (false, conversation, null);
 
-            // 🔥 SPRINT 07: HUMAN TAKEOVER IMPLÍCITO (Sin borrar contexto)
-            // Si el humano escribe desde NexFlow, la IA se pone en pausa, PERO el contexto sobrevive[cite: 1].
+            // Si NO fue la IA, significa que un Humano respondió (Desde la app web o desde su WhatsApp físico)
             if (conversation.Mode != ConversationMode.Human)
             {
                 await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
 
-                // Recuperamos el contexto de Redis, actualizamos el estado, y lo VOLVEMOS a guardar.
                 var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new ConversationContextDto();
                 context.Mode = "Human";
                 context.HandoffReason = HandoffReason.ManualIntervention.ToString();
@@ -95,11 +95,12 @@ public sealed class ConversationStateService : IConversationStateService
                 conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
             }
 
+            // Registramos el mensaje como enviado por el humano
             await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Direction = "outbound", Sender = SenderType.BusinessUser, Content = request.MessageText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
             return (false, conversation, null);
         }
 
-        // 2. Registro del Consumidor e Inbound (Mensaje entrante de WhatsApp)
+        // Si es un mensaje del Cliente:
         await _consumerRepo.UpsertConsumerAsync(workspaceId, new ConsumerIdentityRecord { Phone = normalizedPhone, DisplayName = request.CustomerName, FirstSeenAt = DateTime.UtcNow, LastInteractionAt = DateTime.UtcNow }, cancellationToken);
 
         conversation ??= await _conversationRepo.GetOrCreateActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
@@ -116,7 +117,6 @@ public sealed class ConversationStateService : IConversationStateService
 
             if (conversation.Mode != ConversationMode.Automatic)
             {
-                // 🔥 SPRINT 11 CORRECCIÓN: Usamos request.CustomerName que viene fresco desde WhatsApp
                 await _notificationService.NotifyAsync(
                     workspaceId,
                     "CONVERSATIONS",
@@ -129,14 +129,12 @@ public sealed class ConversationStateService : IConversationStateService
                 return (false, conversation, null);
             }
 
-            // 3. Reglas Deterministas (Level 0 Fast Rules) - Para ahorrar consumo de IA
             var txt = request.MessageText.Trim().ToLowerInvariant();
             var wordCount = txt.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
             string? fastResponse = null;
             if (wordCount <= 3 && Regex.IsMatch(txt, @"^(hola|buenas|ola|buenos dias|buenas tardes|hey)$"))
             {
-                // Solo borramos el contexto si nos saludan con un mensaje nuevo de inicio.
                 await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
                 fastResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
             }
@@ -151,7 +149,6 @@ public sealed class ConversationStateService : IConversationStateService
                 return (false, conversation, fastResponse);
             }
 
-            // Si llegó hasta aquí, la IA (Orquestador) debe pensar y responder.
             return (true, conversation, null);
         }
         finally

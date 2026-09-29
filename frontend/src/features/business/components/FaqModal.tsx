@@ -16,10 +16,9 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
     question: '',
     answer: '',
     category: 'General',
-    isActive: true // 🔥 Agregado por defecto
+    isActive: true 
   });
 
-  // Cargar datos si estamos en modo edición
   useEffect(() => {
     if (initialData) {
       setFormData(initialData);
@@ -35,11 +34,11 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
     setIsSaving(true);
     try {
       const faqToSave: FaqDto = {
-        id: formData.id || crypto.randomUUID(), // El backend respetará el ID si es edición
+        ...(formData.id ? { id: formData.id } : {}), // 🔥 SPRINT 06: Dejamos que el backend genere el ID si es creación
         question: formData.question,
         answer: formData.answer,
         category: formData.category || 'General',
-        isActive: formData.isActive ?? true // 🔥 SPRINT 20: Requisito estricto del DTO satisfecho
+        isActive: formData.isActive ?? true 
       };
       
       await onSave(faqToSave);
@@ -58,7 +57,6 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
       title={initialData ? 'Editar Pregunta' : 'Nueva Pregunta'}
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
           <select 

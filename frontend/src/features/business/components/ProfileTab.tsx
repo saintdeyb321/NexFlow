@@ -9,7 +9,7 @@ export const ProfileTab = ({ showMessage }: { showMessage: (msg: string, type: '
   const [isEditing, setIsEditing] = useState(false); // 🔥 NUEVO: Candado de seguridad
   
   const [profile, setProfile] = useState<BusinessProfile>({
-    commercialName: '', taxId: '', contactEmail: '', whatsAppNumber: '', description: ''
+    commercialName: '', taxId: '', contactEmail: '', whatsAppNumber: '', description: '', timeZone: ''
   });
 
   const [originalProfile, setOriginalProfile] = useState<BusinessProfile | null>(null);

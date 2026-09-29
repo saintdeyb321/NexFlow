@@ -56,16 +56,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isAuthenticated: true, me: data, isLoading: false, isBootstrapping: false });
 
     } catch (error: unknown) {
-      console.error("Error validando sesión contra el backend:", error);
-      await signOut(auth);
-      
-      setActiveWorkspaceId(null); 
-      set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
-      
-      if (error instanceof ApiError) {
-        if (error.status === 401 || error.status === 403) {
-           console.warn("⛔ Sesión rechazada: Tu cuenta no está registrada o no tienes permisos.");
-        }
+      // 🔥 SPRINT 01: Diferenciar errores de red vs errores de autorización reales
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        await signOut(auth);
+        setActiveWorkspaceId(null); 
+        set({ isAuthenticated: false, me: null, isLoading: false, isBootstrapping: false, selectedLocationId: 'all' });
+      } else {
+        // Mantenemos la sesión si el backend está caído (5xx o Error de Red)
+        set({ isLoading: false, isBootstrapping: false });
       }
     } finally {
       isCheckingSession = false;
@@ -80,7 +78,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     } finally {
       setActiveWorkspaceId(null); 
       
-      // 🔥 SPRINT 9 CORRECCIÓN: Limpieza segura sin invocar módulos inexistentes
       if (typeof window !== 'undefined') {
         localStorage.clear();
         sessionStorage.clear();

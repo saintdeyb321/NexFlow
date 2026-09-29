@@ -7,7 +7,8 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 public interface IOutboundMessageService
 {
-    Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content, SenderType sender, CancellationToken ct);
+    // 🔥 SPRINT 02: Añadimos sourceInboundMessageId a la firma
+    Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content, SenderType sender, string sourceInboundMessageId, CancellationToken ct);
 }
 
 public class OutboundMessageService : IOutboundMessageService
@@ -21,7 +22,7 @@ public class OutboundMessageService : IOutboundMessageService
         _messageGateway = messageGateway;
     }
 
-    public async Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content, SenderType sender, CancellationToken ct)
+    public async Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content, SenderType sender, string sourceInboundMessageId, CancellationToken ct)
     {
         var pendingId = Guid.NewGuid().ToString();
         var initialRecord = new MessageRecord
@@ -35,33 +36,31 @@ public class OutboundMessageService : IOutboundMessageService
             Timestamp = DateTime.UtcNow
         };
 
-        // 1. Guardamos como PENDING primero
         await _conversationRepo.AddMessageAsync(workspaceId, conversationId, initialRecord, ct);
 
-        // 🔥 SPRINT 1: Limitamos el manejo de fallos al envío a Evolution API.
         string externalId;
         try
         {
-            // 2. Intentamos enviar a Evolution / WhatsApp
-            externalId = await _messageGateway.SendTextAsync(workspaceId, phone, content, pendingId, ct);
-            // 🔥 SPRINT 1: Sin identificador no hay confirmación válida del envío.
+            // 🔥 SPRINT 02: Generamos una clave determinista única basada en el mensaje que originó esta respuesta
+            var idempotencyKey = string.IsNullOrWhiteSpace(sourceInboundMessageId)
+                ? pendingId
+                : $"{sourceInboundMessageId}:response:1";
+
+            externalId = await _messageGateway.SendTextAsync(workspaceId, phone, content, idempotencyKey, ct);
+
             if (string.IsNullOrWhiteSpace(externalId))
                 throw new InvalidOperationException("Evolution API no confirmó el envío del mensaje.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // 🔥 SPRINT 1: Propagamos la cancelación; no confirmamos un envío incierto.
             throw;
         }
         catch (Exception)
         {
-            // 3. Fallo: Actualizamos a FAILED
             await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Failed, null, ct);
-
             return initialRecord with { Status = MessageStatus.Failed };
         }
 
-        // 🔥 SPRINT 1: Un fallo de persistencia se propaga sin reclasificar el envío.
         await _conversationRepo.UpdateMessageStatusAsync(workspaceId, conversationId, pendingId, MessageStatus.Sent, externalId, ct);
         return initialRecord with { ExternalMessageId = externalId, Status = MessageStatus.Sent };
     }

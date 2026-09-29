@@ -17,8 +17,8 @@ public class ConversationContextDto
     public string? TargetDate { get; set; }
     public string? TargetTime { get; set; }
     public string? RealCustomerName { get; set; }
+    public List<OrderDraftItem> OrderDraftItems { get; set; } = new();
 
-    public List<string> OrderDraftItems { get; set; } = new();
 
     public List<string> MissingFields { get; set; } = new();
     public string? LastQuestion { get; set; }
@@ -26,6 +26,12 @@ public class ConversationContextDto
     public double? Confidence { get; set; }
 
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
+}
+
+public class OrderDraftItem
+{
+    public string ProductName { get; set; } = string.Empty;
+    public int Quantity { get; set; } = 1;
 }
 
 public interface IConversationCache

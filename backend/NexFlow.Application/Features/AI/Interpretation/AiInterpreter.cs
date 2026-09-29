@@ -2,12 +2,14 @@
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.AI.Router;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.AI.Interpretation;
 
 public class AiInterpretation
 {
-    public string Intent { get; set; } = "GENERAL";
+    // 🔥 SPRINT 05: Fuertemente tipado
+    public ConversationIntent Intent { get; set; } = ConversationIntent.General;
     public string? Service { get; set; }
     public string? Location { get; set; }
     public string? Date { get; set; }
@@ -51,34 +53,42 @@ public class AiInterpreter : IAiInterpreter
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
 Tu ÚNICO trabajo es extraer intenciones y entidades en JSON.
 MÓDULOS PAGADOS POR ESTE NEGOCIO: {activeModulesList}
-(CRÍTICO: Si el negocio NO tiene 'RESERVATIONS', no puedes devolver 'RESERVATION'. Si no tiene 'ORDERS', no devuelvas 'ORDER').
+(CRÍTICO: Si el negocio NO tiene 'RESERVATIONS', no puedes devolver 'Reservation'. Si no tiene 'ORDERS', no devuelvas 'Order').
 
 FECHA ACTUAL: {localBusinessTime:yyyy-MM-dd}
 HORA ACTUAL: {localBusinessTime:HH:mm}
 OBJETIVO ACTUAL: {(string.IsNullOrWhiteSpace(currentGoal) ? "NINGUNO" : currentGoal)}
 
-- Intent: 'PRODUCT_QUERY', 'SERVICE_QUERY', 'RESERVATION', 'REQUEST', 'ORDER', 'FAQ', 'LOCATION', 'GENERAL', 'SUPPORT'.
-- SearchTerm: Si el cliente hace un PEDIDO (ORDER), extrae los productos y SUS CANTIDADES (Ej: '2x martillos', '1x clavo'). Si el cliente indica que ya terminó de pedir, o dice 'enviar pedido', pon EXACTAMENTE: 'FINALIZAR_PEDIDO'.
-- Service: Nombre del servicio (Solo si Intent es RESERVATION).
+- Intent: 'ProductQuery', 'ServiceQuery', 'Reservation', 'Request', 'Order', 'Faq', 'Location', 'General', 'Support', 'BusinessHours'.
+- SearchTerm: Si el cliente hace un PEDIDO (Order), extrae los productos y SUS CANTIDADES (Ej: '2x martillos', '1x clavo'). Si el cliente indica que ya terminó de pedir, o dice 'enviar pedido', pon EXACTAMENTE: 'FINALIZAR_PEDIDO'.
+- Service: Nombre del servicio (Solo si Intent es Reservation).
 - Location: La sede mencionada.
 - Date: Fecha en formato YYYY-MM-DD.
 - Time: Hora en formato HH:mm.
 - CustomerName: Nombre y apellido del cliente.
 
-RESPONDE ÚNICAMENTE CON EL JSON.";
+RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exactamente con las opciones dadas.";
 
         try
         {
             var responseText = await _router.ExecuteTaskAsync(AiTaskType.IntentExtraction, prompt, userMessage, true, ct);
             var cleanJson = responseText.Replace("```json", "").Replace("```", "").Trim();
 
-            return JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                   ?? new AiInterpretation();
+            var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                   ?? new AiInterpretation { Intent = ConversationIntent.General };
+
+            return interpretation;
+        }
+        catch (HttpRequestException ex) when (ex.Message.Contains("429"))
+        {
+            _logger.LogWarning(ex, "Rate Limit alcanzado en el proveedor de IA.");
+            return new AiInterpretation { Intent = ConversationIntent.RateLimited };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error crítico en AI Interpreter. Asumiendo intención GENERAL.");
-            return new AiInterpretation();
+            // 🔥 SPRINT 05: Ya no ocultamos el error detrás de "GENERAL"
+            _logger.LogError(ex, "Error crítico en IA. Proveedor inalcanzable o timeout.");
+            return new AiInterpretation { Intent = ConversationIntent.ProviderUnavailable };
         }
     }
 }

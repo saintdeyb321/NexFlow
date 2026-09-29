@@ -9,24 +9,30 @@ interface ConversationThreadProps {
   isSending: boolean;
   onTakeOver: () => void;
   onRelease: () => void;
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string) => Promise<any>; // 🔥 Acepta Promesa
 }
 
 export const ConversationThread = ({
   chat, messages, isChangingMode, isSending, onTakeOver, onRelease, onSendMessage
 }: ConversationThreadProps) => {
   const [newMessage, setNewMessage] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null); // 🔥 SPRINT 11: Auto-Scroll
+  const [sendError, setSendError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null); 
 
-  // Auto-scroll al recibir un nuevo mensaje
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
+  // 🔥 SPRINT 05: Solo limpiamos el input si el envío fue exitoso. Si falla, retenemos el texto.
+  const handleSend = async () => {
     if (!newMessage.trim()) return;
-    onSendMessage(newMessage.trim());
-    setNewMessage('');
+    setSendError(null);
+    try {
+      await onSendMessage(newMessage.trim());
+      setNewMessage(''); 
+    } catch (error: any) {
+      setSendError("No se pudo enviar el mensaje. Intenta nuevamente.");
+    }
   };
 
   return (
@@ -60,11 +66,16 @@ export const ConversationThread = ({
         </div>
       ) : (
         <div className={`border-b px-4 py-2.5 flex items-center justify-center text-sm font-medium ${
-          chat.handoffReason === 'AiEscalation' 
+          chat.handoffReason === 'AiEscalation' || chat.handoffReason === 'SystemError'
             ? 'bg-red-50 border-red-200 text-red-700' 
             : 'bg-orange-50 border-orange-200 text-orange-700'
         }`}>
-          {chat.handoffReason === 'AiEscalation' ? (
+          {chat.handoffReason === 'SystemError' ? (
+             <>
+               <AlertOctagon className="w-4 h-4 mr-2" />
+               Error del Sistema: La IA falló o se desconectó. Asume el control para continuar.
+             </>
+          ) : chat.handoffReason === 'AiEscalation' ? (
             <>
               <AlertOctagon className="w-4 h-4 mr-2" />
               Alerta de la IA: El bot necesita tu asistencia para resolver esta solicitud.
@@ -91,7 +102,6 @@ export const ConversationThread = ({
                     ? 'bg-blue-100 text-blue-900 border border-blue-200 rounded-tr-sm shadow-sm'
                     : 'bg-green-500 text-white rounded-tr-sm shadow-sm'
               }`}>
-                {/* 🔥 SPRINT 11 (P2): Protección contra Textos Vacíos (Audios/Imágenes de WhatsApp) */}
                 <p className="text-sm whitespace-pre-wrap break-words">
                   {msg.content ? msg.content : (
                     <span className="italic flex items-center opacity-80">
@@ -104,6 +114,8 @@ export const ConversationThread = ({
                 }`}>
                   {msg.sender === 'AI' && <Bot className="w-3 h-3 mr-1" />}
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {/* 🔥 SPRINT 05: Mostramos si falló la entrega */}
+                  {msg.status === 'Failed' && <span className="ml-2 text-red-500 font-bold">Error de envío</span>}
                 </div>
               </div>
             </div>
@@ -113,6 +125,7 @@ export const ConversationThread = ({
       </div>
 
       <div className="p-4 bg-white border-t border-gray-200">
+        {sendError && <div className="text-red-500 text-xs font-medium mb-2">{sendError}</div>}
         <div className="flex items-center">
           <input
             type="text"

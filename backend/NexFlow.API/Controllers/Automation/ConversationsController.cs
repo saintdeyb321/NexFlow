@@ -64,7 +64,6 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation != null)
         {
-            // 🔥 SPRINT 07: Actualizamos el modo sin borrar el contexto histórico de la sesión
             var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
             context.Mode = "Human";
             context.HandoffReason = HandoffReason.ManualIntervention.ToString();
@@ -85,7 +84,6 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation != null)
         {
-            // 🔥 SPRINT 07: La IA retoma el control manteniendo el contexto intacto
             var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
             context.Mode = "Automatic";
             context.HandoffReason = null;
@@ -115,6 +113,7 @@ public class ConversationsController : ControllerBase
             conversation.ConsumerPhone,
             request.Content,
             SenderType.BusinessUser,
+            "", // 🔥 SPRINT 02 FIX: Pasamos string vacío como clave de idempotencia, ya que es un mensaje proactivo humano
             cancellationToken);
 
         if (finalRecord.Status == MessageStatus.Failed)
@@ -122,7 +121,6 @@ public class ConversationsController : ControllerBase
             return StatusCode(500, new { message = "No se pudo entregar el mensaje a WhatsApp." });
         }
 
-        // 🔥 SPRINT 07: Takeover implícito sin amnesia
         if (conversation.Mode != ConversationMode.Human)
         {
             await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
@@ -146,8 +144,6 @@ public class ConversationsController : ControllerBase
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
         await _conversationRepository.DeleteConversationAsync(WorkspaceId, conversationId, cancellationToken);
-
-        // Aquí sí es válido borrar el caché, porque la conversación completa está siendo destruida
         await conversationCache.DeleteContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken);
 
         return NoContent();

@@ -18,7 +18,7 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
   useEffect(() => {
     if (reservation) {
       // 🔥 SPRINT 11: Se eliminaron los "as any"
-      const localTime = new Date(new Date(reservation.dateTime).toLocaleString('en-US', { timeZone }));
+      const localTime = new Date(new Date(reservation.startTime).toLocaleString('en-US', { timeZone }));
       
       setEditDate(localTime.toISOString().split('T')[0]);
       setEditTime(`${localTime.getHours().toString().padStart(2, '0')}:${localTime.getMinutes().toString().padStart(2, '0')}`);

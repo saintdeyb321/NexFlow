@@ -29,9 +29,6 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IWorkspaceContext, WorkspaceContext>();
 builder.Services.AddMemoryCache();
 
-// Colas y Workers para Inbound (Webhooks de Chat)
-builder.Services.AddSingleton<IWebhookTaskQueue, WebhookTaskQueue>();
-builder.Services.AddHostedService<WebhookProcessingBackgroundService>();
 
 // 🔥 SPRINT 16: Colas y Workers Genéricos (Outbox Pattern para anular los Task.Run)
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();

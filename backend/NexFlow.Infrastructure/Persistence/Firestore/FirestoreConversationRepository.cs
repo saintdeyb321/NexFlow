@@ -119,7 +119,6 @@ public class FirestoreConversationRepository : IConversationRepository
 
     public async Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 11 (Auditoría): Eliminado el try/catch que silenciaba errores críticos de la DB.
         var query = GetCollection(workspaceId).Document(conversationId).Collection("messages").OrderByDescending("timestamp").Limit(limit);
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
 
@@ -159,11 +158,15 @@ public class FirestoreConversationRepository : IConversationRepository
         return !snapshot.Exists ? null : MapToConversation(snapshot);
     }
 
-    public async Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string externalMessageId, CancellationToken cancellationToken)
+    // 🔥 SPRINT 03: Búsqueda precisa por conversationId en lugar de CollectionGroup global
+    public async Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string conversationId, string externalMessageId, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 11 (Auditoría): Optimización O(1). Usamos CollectionGroup (Group Queries) 
-        // en lugar de iterar manualmente por 50 colecciones padre.
-        var msgQuery = _db.CollectionGroup("messages").WhereEqualTo("externalMessageId", externalMessageId).Limit(1);
+        var msgQuery = GetCollection(workspaceId)
+            .Document(conversationId)
+            .Collection("messages")
+            .WhereEqualTo("externalMessageId", externalMessageId)
+            .Limit(1);
+
         var msgSnapshot = await msgQuery.GetSnapshotAsync(cancellationToken);
         var msgDoc = msgSnapshot.Documents.FirstOrDefault();
 
@@ -188,24 +191,18 @@ public class FirestoreConversationRepository : IConversationRepository
     {
         var convRef = GetCollection(workspaceId).Document(conversationId);
         var messagesSnapshot = await convRef.Collection("messages").GetSnapshotAsync(cancellationToken);
-
         var batch = _db.StartBatch();
-
         foreach (var messageDoc in messagesSnapshot.Documents)
         {
             batch.Delete(messageDoc.Reference);
         }
         batch.Delete(convRef);
-
         await batch.CommitAsync(cancellationToken);
     }
 
     public async Task CloseConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken)
     {
         var docRef = GetCollection(workspaceId).Document(conversationId);
-        await docRef.UpdateAsync(new Dictionary<string, object>
-        {
-            { "status", "closed" }
-        }, cancellationToken: cancellationToken);
+        await docRef.UpdateAsync(new Dictionary<string, object> { { "status", "closed" } }, cancellationToken: cancellationToken);
     }
 }

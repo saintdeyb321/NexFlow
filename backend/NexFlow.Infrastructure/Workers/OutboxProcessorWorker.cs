@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -37,72 +36,78 @@ public class OutboxProcessorWorker : BackgroundService
                 _logger.LogError(ex, "Error fatal en el ciclo del Outbox Processor.");
             }
 
-            // Pausa de 10 segundos antes de buscar nuevos mensajes
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); // Reducido a 5s para mayor agilidad
         }
     }
 
     private async Task ProcessOutboxMessagesAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
         var dbContext = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
         var workflowGateway = scope.ServiceProvider.GetRequiredService<IWorkflowGateway>();
 
-        var pendingMessages = await outboxRepo.GetPendingMessagesAsync(20, cancellationToken);
+        // 🔥 SPRINT 11: 1. RECLAMO DE EVENTOS (Transacción Ultra-Corta SQL)
+        var messagesToProcess = new List<OutboxMessage>();
 
-        foreach (var msg in pendingMessages)
+        using (var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken))
         {
-            // 🔥 SPRINT 11: Bloqueo Transaccional EF Core puro (Cero colisiones de Workers)
-            using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken);
+            // Seleccionamos los próximos 20 y los marcamos como PROCESSING instantáneamente usando FOR UPDATE SKIP LOCKED
+            var claimedMessages = await dbContext.OutboxMessages
+                .FromSqlInterpolated($"SELECT * FROM \"OutboxMessages\" WHERE \"Status\" = {(int)OutboxStatus.Pending} ORDER BY \"CreatedAt\" LIMIT 20 FOR UPDATE SKIP LOCKED")
+                .ToListAsync(cancellationToken);
 
+            if (!claimedMessages.Any())
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return;
+            }
+
+            foreach (var msg in claimedMessages)
+            {
+                msg.Status = OutboxStatus.Processing;
+                messagesToProcess.Add(msg);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        // 🔥 SPRINT 11: 2. EJECUCIÓN HTTP (Totalmente fuera de la transacción SQL)
+        foreach (var msg in messagesToProcess)
+        {
             try
             {
-                // Intentamos reclamar el mensaje. FOR UPDATE SKIP LOCKED asegura que si otro worker ya lo tomó, este query devuelve null.
-                var lockedMessage = await dbContext.OutboxMessages
-                    .FromSqlInterpolated($"SELECT * FROM \"OutboxMessages\" WHERE \"Id\" = {msg.Id} AND \"Status\" = {(int)OutboxStatus.Pending} FOR UPDATE SKIP LOCKED")
-                    .FirstOrDefaultAsync(cancellationToken);
-
-                if (lockedMessage == null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                    continue; // El mensaje ya fue procesado o tomado por otro hilo
-                }
-
-                _logger.LogInformation("Procesando evento Outbox {EventId} tipo {EventType}", lockedMessage.Id, lockedMessage.EventType);
-
-                var payloadObject = JsonSerializer.Deserialize<N8nEventPayload<object>>(lockedMessage.PayloadJson);
+                _logger.LogInformation("Enviando evento Outbox {EventId} a n8n", msg.Id);
+                var payloadObject = JsonSerializer.Deserialize<N8nEventPayload<object>>(msg.PayloadJson);
 
                 if (payloadObject != null)
                 {
+                    // La DB no sufre si n8n tarda 10 segundos
                     await workflowGateway.TriggerWorkflowAsync("nexflow-events", payloadObject, cancellationToken);
                 }
 
-                lockedMessage.Status = OutboxStatus.Processed;
-                lockedMessage.ProcessedAt = DateTime.UtcNow;
-                lockedMessage.Error = null;
-
-                await dbContext.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                // 3. ACTUALIZACIÓN POST-HTTP (Nueva Transacción Corta)
+                using var finalTx = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                var messageToUpdate = await dbContext.OutboxMessages.FindAsync(new object[] { msg.Id }, cancellationToken);
+                if (messageToUpdate != null)
+                {
+                    messageToUpdate.Status = OutboxStatus.Processed;
+                    messageToUpdate.ProcessedAt = DateTime.UtcNow;
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+                await finalTx.CommitAsync(cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error procesando mensaje Outbox {EventId}", msg.Id);
-                await transaction.RollbackAsync(cancellationToken);
+                _logger.LogError(ex, "Falla HTTP al enviar mensaje Outbox {EventId}", msg.Id);
 
-                // Reintento en una transacción independiente y rápida
                 using var retryTx = await dbContext.Database.BeginTransactionAsync(cancellationToken);
                 var retryMsg = await dbContext.OutboxMessages.FindAsync(new object[] { msg.Id }, cancellationToken);
                 if (retryMsg != null)
                 {
                     retryMsg.RetryCount++;
                     retryMsg.Error = ex.Message;
-
-                    if (retryMsg.RetryCount >= 5)
-                    {
-                        retryMsg.Status = OutboxStatus.Failed;
-                    }
-
+                    retryMsg.Status = retryMsg.RetryCount >= 5 ? OutboxStatus.Failed : OutboxStatus.Pending; // Lo regresa a Pending para reintento
                     await dbContext.SaveChangesAsync(cancellationToken);
                 }
                 await retryTx.CommitAsync(cancellationToken);

@@ -25,4 +25,11 @@ public class MembershipRepository : IMembershipRepository
             .Where(m => m.UserId == userId)
             .ToListAsync(cancellationToken);
     }
+
+    // 🔥 FIX: Implementamos el método faltante que exige la interfaz (Sprint 12)
+    public async Task<Membership?> GetMembershipAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken)
+    {
+        return await _context.Memberships
+            .FirstOrDefaultAsync(m => m.WorkspaceId == workspaceId && m.UserId == userId, cancellationToken);
+    }
 }

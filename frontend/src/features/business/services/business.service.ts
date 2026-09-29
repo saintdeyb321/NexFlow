@@ -10,21 +10,26 @@ export const updateBusinessProfile = async (profile: BusinessProfile): Promise<v
   await axiosClient.put('/business/profile', profile);
 };
 
-// --- LOCATIONS & ONBOARDING ---
+// --- LOCATIONS ---
 export const getLocations = async (): Promise<LocationDto[]> => {
   const { data } = await axiosClient.get<LocationDto[]>('/business/locations');
   return data;
 };
 
-export const saveLocation = async (location: LocationDto): Promise<LocationDto> => {
-  const { data } = await axiosClient.post<LocationDto>('/business/locations', location);
-  return data;
+// 🔥 SPRINT 06: Separamos estrictamente la Creación de la Edición (POST vs PUT)
+export const createLocation = async (location: LocationDto): Promise<void> => {
+  await axiosClient.post('/business/locations', location);
+};
+
+export const updateLocation = async (locationId: string, location: LocationDto): Promise<void> => {
+  await axiosClient.put(`/business/locations/${locationId}`, location);
 };
 
 export const deleteLocation = async (locationId: string): Promise<void> => {
   await axiosClient.delete(`/business/locations/${locationId}`);
 };
 
+// --- HOURS ---
 export const getBusinessHours = async (locationId: string): Promise<BusinessHoursDto[]> => {
   const { data } = await axiosClient.get(`/business/locations/${locationId}/hours`);
   return data;
@@ -32,10 +37,6 @@ export const getBusinessHours = async (locationId: string): Promise<BusinessHour
 
 export const saveBusinessHours = async (locationId: string, hours: BusinessHoursDto[]): Promise<void> => {
   await axiosClient.put(`/business/locations/${locationId}/hours`, hours);
-};
-
-export const completeBusinessOnboarding = async (): Promise<void> => {
-  await axiosClient.post('/business/complete-onboarding');
 };
 
 // --- WHATSAPP (Evolution API) ---

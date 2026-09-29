@@ -44,8 +44,8 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
 
   // 🔥 SPRINT 11: Se eliminaron los "as any"
   const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
-    const dateA = new Date(a.dateTime).getTime();
-    const dateB = new Date(b.dateTime).getTime();
+    const dateA = new Date(a.startTime).getTime();
+    const dateB = new Date(b.startTime).getTime();
     return dateA - dateB;
   });
 
@@ -64,7 +64,7 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
         <tbody className="divide-y divide-gray-100">
           {sortedReservations.map((res) => {
             // 🔥 SPRINT 11: Se eliminaron los "as any"
-            const localTime = res.dateTime ? new Date(new Date(res.dateTime).toLocaleString('en-US', { timeZone })) : new Date();
+            const localTime = res.startTime ? new Date(new Date(res.startTime).toLocaleString('en-US', { timeZone })) : new Date();
             
             const normalizedStatus = normalizeStatus(res.status);
             const isCancelled = normalizedStatus === 'CANCELLED';

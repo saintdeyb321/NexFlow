@@ -5,21 +5,17 @@ namespace NexFlow.Application.Abstractions;
 
 public interface IConversationRepository
 {
-    Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string externalMessageId, CancellationToken cancellationToken);
+    // 🔥 SPRINT 03: Firma ajustada para obligar a pasar el ConversationId
+    Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string conversationId, string externalMessageId, CancellationToken cancellationToken);
+
     Task<ConversationRecord?> GetActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken);
     Task<ConversationRecord> GetOrCreateActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken);
-
     Task CreateConversationAsync(Guid workspaceId, ConversationRecord conversation, CancellationToken cancellationToken);
     Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
-
-    // 🔥 SPRINT 08: Método para cerrar conversaciones antiguas
     Task CloseConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
-
     Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken);
-
     Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken);
     Task UpdateMessageStatusAsync(Guid workspaceId, string conversationId, string messageId, MessageStatus status, string? externalMessageId, CancellationToken cancellationToken);
-
     Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken);
     Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken);
     Task<ConversationRecord?> GetConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);

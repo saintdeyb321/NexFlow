@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Map, MapPin, Pencil, X } from 'lucide-react';
-import { getLocations, saveLocation, deleteLocation } from '../services/business.service';
+import { getLocations, createLocation, updateLocation, deleteLocation } from '../services/business.service';
 import type { LocationDto } from '../types/business.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
@@ -9,7 +9,6 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
-  // 🔥 Restauramos mapUrl en el estado inicial
   const emptyLocation: Partial<LocationDto> = { name: '', address: '', reference: '', mapUrl: '', isMain: false };
   const [newLocation, setNewLocation] = useState<Partial<LocationDto>>(emptyLocation);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -21,8 +20,9 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
     staleTime: 1000 * 60 * 15,
   });
 
+  // 🔥 SPRINT 06: Decisión dinámica POST/PUT
   const saveMutation = useMutation({
-    mutationFn: saveLocation,
+    mutationFn: (loc: LocationDto) => loc.id ? updateLocation(loc.id, loc) : createLocation(loc),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['locations', workspaceId] });
       showMessage(newLocation.id ? 'Sede actualizada exitosamente' : 'Sede registrada exitosamente', 'success');
@@ -43,14 +43,12 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
 
   const deleteMutation = useMutation({
     mutationFn: deleteLocation,
-    onSuccess: (_, deletedId) => {
-      queryClient.setQueryData(['locations', workspaceId], (oldLocs: LocationDto[] = []) => 
-        oldLocs.filter(l => l.id !== deletedId)
-      );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['locations', workspaceId] });
       showMessage('Sede eliminada correctamente', 'success');
     },
-    onError: () => {
-      showMessage('Error al eliminar la sede', 'error');
+    onError: (error: any) => {
+      showMessage(error.message || 'Error al eliminar la sede.', 'error');
     }
   });
 
@@ -67,7 +65,7 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
   };
 
   const handleDeleteLocation = (locationId: string) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar esta sede? Perderás los horarios asociados a ella.')) {
+    if (window.confirm('¿Estás seguro de que deseas eliminar esta sede? Si tiene reservas a futuro, la acción será rechazada.')) {
       deleteMutation.mutate(locationId);
     }
   };
@@ -155,7 +153,6 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
                     <p className="text-sm text-gray-600 flex items-start"><MapPin className="w-4 h-4 mr-2 text-gray-400 mt-0.5 shrink-0"/> {loc.address}</p>
                     {loc.reference && <p className="text-sm text-gray-500 flex items-start pl-6"><span className="font-medium mr-1">Ref:</span> {loc.reference}</p>}
                     
-                    {/* 🔥 RESTAURADO: Visualización del mapa */}
                     {loc.mapUrl && (
                        <a href={loc.mapUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex items-center pl-6 mt-1">
                          <Map className="w-4 h-4 mr-1"/> Ver en Google Maps

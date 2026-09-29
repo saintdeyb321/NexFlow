@@ -7,7 +7,8 @@ export const DashboardPage = () => {
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
   
-  const adminName = (me as any)?.firstName || (me as any)?.name || (me as any)?.email?.split('@')[0] || 'Administrador';
+  // 🔥 SPRINT 09: Extracción de nombre segura sin any (usando la interfaz correcta)
+  const adminName = me?.user?.firstName || me?.user?.email?.split('@')[0] || 'Administrador';
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['dashboard', workspaceId],
@@ -18,10 +19,9 @@ export const DashboardPage = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-7xl mx-auto animate-pulse">
-        <div className="h-8 bg-gray-200 rounded w-1/4 mb-8"></div>
-        <div className="h-6 bg-gray-200 rounded w-1/6 mb-4"></div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div className="max-w-7xl mx-auto animate-pulse px-4 md:px-0">
+        <div className="h-8 bg-gray-200 rounded w-1/4 mb-8 mt-2"></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[1,2,3,4].map(i => <div key={i} className="h-24 bg-gray-100 rounded-xl"></div>)}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -33,14 +33,15 @@ export const DashboardPage = () => {
 
   if (isError || !data) {
     return (
-      <div className="p-8 text-center bg-red-50 border border-red-100 rounded-xl">
-        <p className="text-red-600 font-medium">Error al cargar el panel de control. Intenta recargar la página.</p>
+      <div className="p-8 text-center bg-red-50 border border-red-100 rounded-xl mx-4 md:mx-0">
+        <p className="text-red-600 font-medium">Error al cargar el panel de control. Revisa tu conexión.</p>
+        <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">Reintentar</button>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto animate-in fade-in space-y-8">
+    <div className="max-w-7xl mx-auto animate-in fade-in space-y-8 pb-10">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Hola, {adminName} 👋</h1>
         <p className="mt-1 text-sm text-gray-500">Aquí tienes el resumen de tu centro de atención automatizada.</p>
@@ -86,21 +87,6 @@ export const DashboardPage = () => {
               <MiniStat label="Productos Totales" value={data.catalog.totalProducts} />
               <MiniStat label="Consultas IA (Semana)" value={data.catalog.totalQueriesThisWeek} />
             </div>
-            <div className="text-sm text-gray-500 border-t pt-3 mt-3">
-              <p className="font-medium mb-2">Más consultados:</p>
-              {data.catalog.topQueriedProducts.length === 0 ? (
-                <p className="text-gray-400 italic text-xs">Aún no hay datos suficientes.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {data.catalog.topQueriedProducts.map(p => (
-                    <li key={p.id} className="flex justify-between">
-                      <span className="truncate pr-2">{p.name}</span>
-                      <span className="font-medium text-gray-900">{p.queries}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           </ModuleCard>
         )}
 
@@ -109,21 +95,6 @@ export const DashboardPage = () => {
             <div className="flex justify-between items-end mb-4">
               <MiniStat label="Servicios Activos" value={data.services.totalServices} />
               <MiniStat label="Consultas IA (Semana)" value={data.services.totalQueriesThisWeek} />
-            </div>
-            <div className="text-sm text-gray-500 border-t pt-3 mt-3">
-              <p className="font-medium mb-2">Más consultados:</p>
-              {data.services.topQueriedServices.length === 0 ? (
-                <p className="text-gray-400 italic text-xs">Aún no hay datos suficientes.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {data.services.topQueriedServices.map(s => (
-                    <li key={s.id} className="flex justify-between">
-                      <span className="truncate pr-2">{s.name}</span>
-                      <span className="font-medium text-gray-900">{s.queries}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
           </ModuleCard>
         )}
@@ -142,7 +113,7 @@ const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title:
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center hover:shadow-md transition-shadow">
-      <div className={`w-12 h-12 rounded-full flex items-center justify-center mr-4 ${colorStyles[color]}`}>
+      <div className={`w-12 h-12 rounded-full flex items-center justify-center mr-4 shrink-0 ${colorStyles[color]}`}>
         {icon}
       </div>
       <div>

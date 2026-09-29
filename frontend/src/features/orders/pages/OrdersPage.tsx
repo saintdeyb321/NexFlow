@@ -12,6 +12,9 @@ export const OrdersPage = () => {
   
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  
+  // 🔥 SPRINT 07: Notificaciones de error/éxito al cambiar estado
+  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
   const { data: orders = [], isLoading, isError } = useQuery({
     queryKey: ['orders', workspaceId, filterStatus],
@@ -24,10 +27,13 @@ export const OrdersPage = () => {
     mutationFn: ({ id, status }: { id: string; status: OrderStatus }) => updateOrderStatus(id, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders', workspaceId] });
+      setNotification({ msg: 'Estado de la cotización actualizado.', type: 'success' });
     },
+    onError: (error: any) => {
+      setNotification({ msg: error.message || 'Error al cambiar el estado de la cotización.', type: 'error' });
+    }
   });
 
-  // 🔥 SPRINT 11: Eliminados términos de ERP
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
       case 'PendingReview': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Por Confirmar</span>;
@@ -44,10 +50,18 @@ export const OrdersPage = () => {
     updateMutation.mutate({ id, status: newStatus });
   };
 
-  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar las solicitudes.</div>;
+  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar las cotizaciones.</div>;
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in">
+      
+      {notification && (
+        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          <span>{notification.msg}</span>
+          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
+        </div>
+      )}
+
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
@@ -73,7 +87,7 @@ export const OrdersPage = () => {
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-[400px]">
         {isLoading ? (
-          <div className="flex items-center justify-center h-64 text-gray-400 animate-pulse">Cargando solicitudes...</div>
+          <div className="flex items-center justify-center h-64 text-gray-400 animate-pulse">Cargando cotizaciones...</div>
         ) : orders.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <ShoppingCart className="w-16 h-16 mb-4 text-gray-200" />
@@ -113,7 +127,6 @@ export const OrdersPage = () => {
                       </p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-900">
-                      {/* 🔥 SPRINT 11: Ocultamos el PEN 0.00 */}
                       {order.status === 'PendingReview' && order.totalAmountMinorUnits === 0 
                         ? <span className="text-gray-400 italic font-normal text-sm">Por definir</span>
                         : `${order.currency} ${(order.totalAmountMinorUnits / 100).toFixed(2)}`}

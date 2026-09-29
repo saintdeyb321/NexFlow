@@ -15,7 +15,7 @@ public class ServicesController : ControllerBase
     private readonly ICatalogRepository _catalogRepository;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
-    private readonly IBackgroundTaskQueue _taskQueue; // 🔥 SPRINT 16: Cola inyectada
+    private readonly IBackgroundTaskQueue _taskQueue;
 
     public ServicesController(
         ICatalogRepository catalogRepository,
@@ -61,9 +61,29 @@ public class ServicesController : ControllerBase
     {
         if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
 
-        // 🔥 SPRINT 3: Validamos tanto el tipo recibido como el persistido.
+        // 🔥 SPRINT 09: Validaciones de Integridad del Servicio
+        if (string.IsNullOrWhiteSpace(service.Name))
+            return BadRequest(new { message = "El nombre del servicio es obligatorio." });
+
+        if (service.PriceMinorUnits < 0)
+            return BadRequest(new { message = "El precio no puede ser negativo." });
+
+        if (string.IsNullOrWhiteSpace(service.Currency))
+            return BadRequest(new { message = "La moneda del precio es obligatoria (ej. PEN, USD)." });
+
+        if (service.RequiresReservation)
+        {
+            if (!service.DurationInMinutes.HasValue || service.DurationInMinutes <= 0)
+                return BadRequest(new { message = "Un servicio que requiere reserva debe tener una duración válida mayor a 0 minutos." });
+        }
+
+        service.LocationScope = service.LocationScope?.Trim().ToUpperInvariant() ?? "ALL";
+        if (service.LocationScope == "SPECIFIC" && (service.LocationIds == null || !service.LocationIds.Any()))
+            return BadRequest(new { message = "Si el alcance es SPECIFIC, debes proveer al menos una sede (LocationIds)." });
+
         if (service.Type != "SERVICE")
             return BadRequest(new { message = "Este endpoint solo admite entidades SERVICE." });
+
         if (string.IsNullOrWhiteSpace(service.Id)) service.Id = Guid.NewGuid().ToString();
         else
         {
@@ -86,7 +106,7 @@ public class ServicesController : ControllerBase
 
         await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken);
 
-        QueueArtifactInvalidation(WorkspaceId); // 🔥 SPRINT 16: Invalidar PDF
+        QueueArtifactInvalidation(WorkspaceId);
 
         return Ok(service);
     }
@@ -102,13 +122,12 @@ public class ServicesController : ControllerBase
         if (item != null)
         {
             await _catalogRepository.DeleteItemAsync(WorkspaceId, serviceId, cancellationToken);
-            QueueArtifactInvalidation(WorkspaceId); // 🔥 SPRINT 16: Invalidar PDF
+            QueueArtifactInvalidation(WorkspaceId);
         }
 
         return NoContent();
     }
 
-    // 🔥 SPRINT 16: Helper para encolar la invalidación de manera segura
     private void QueueArtifactInvalidation(Guid workspaceId)
     {
         _taskQueue.QueueBackgroundWorkItemAsync(async (serviceProvider, token) =>

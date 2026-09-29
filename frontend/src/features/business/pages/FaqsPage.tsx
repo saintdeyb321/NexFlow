@@ -9,20 +9,17 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 export const FaqsPage = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  const selectedLocationId = useAuthStore(state => state.selectedLocationId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [faqToEdit, setFaqToEdit] = useState<FaqDto | null>(null);
   
-  // 🔥 SPRINT 11: Manejo de estado visual (Elimina alerts y confirms)
   const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const queryLocation = selectedLocationId === 'all' ? 'global' : selectedLocationId;
-
+  // 🔥 SPRINT 06: La IA usa la base de conocimiento de manera global. No se filtra por sede.
   const { data: faqs = [], isLoading: isFaqsLoading } = useQuery({
-    queryKey: ['faqs', workspaceId, queryLocation],
-    queryFn: () => faqService.getFaqs(queryLocation),
+    queryKey: ['faqs', workspaceId],
+    queryFn: () => faqService.getFaqs('global'), // Reemplazamos la ubicación dinámica
     enabled: !!workspaceId,
     staleTime: 1000 * 60 * 10,
   });
@@ -85,13 +82,14 @@ export const FaqsPage = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Base de Conocimiento</h1>
-            <p className="text-sm text-gray-500 mt-0.5">La información que tu IA usará para responder.</p>
+            <p className="text-sm text-gray-500 mt-0.5">Entrena al asistente virtual con preguntas frecuentes de tu negocio.</p>
           </div>
         </div>
         
         <button 
           onClick={handleOpenNew}
-          className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm"
+          disabled={faqs.length >= 20}
+          className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm disabled:opacity-50 disabled:bg-gray-400"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nueva Pregunta
@@ -101,7 +99,7 @@ export const FaqsPage = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex justify-between items-center border-b border-gray-100 mb-4 pb-2">
           <h3 className="text-sm font-semibold text-gray-700">
-            Preguntas Activas para esta Sede ({faqs.length}/30)
+            Preguntas Activas Globales ({faqs.length}/20)
           </h3>
         </div>
         
@@ -109,8 +107,8 @@ export const FaqsPage = () => {
           {faqs.length === 0 ? (
             <div className="text-center py-10 text-gray-500 flex flex-col items-center">
               <MessageSquare className="w-12 h-12 text-gray-200 mb-3" />
-              <p>Tu IA aún no tiene conocimientos específicos para esta sede.</p>
-              <p className="text-sm mt-1">Haz clic en "Nueva Pregunta" para entrenarla.</p>
+              <p>Tu asistente aún no tiene información pre-programada.</p>
+              <p className="text-sm mt-1">Haz clic en "Nueva Pregunta" para entrenarlo.</p>
             </div>
           ) : (
             faqs.map((faq) => (
@@ -140,7 +138,6 @@ export const FaqsPage = () => {
                     <Trash2 className="w-4 h-4" />
                   </button>
 
-                  {/* 🔥 Modal en línea para borrar (Reemplaza confirm) */}
                   {deleteConfirmId === faq.id && (
                     <div className="absolute right-0 top-12 bg-white border border-red-200 shadow-xl p-3 rounded-lg z-10 w-48">
                       <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar pregunta?</p>

@@ -38,7 +38,6 @@ public static class DependencyInjection
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<ISystemAdministratorRepository, SystemAdministratorRepository>();
         services.AddScoped<IModuleRepository, ModuleRepository>();
-        services.AddScoped<IProcessedMessageRepository, ProcessedMessageRepository>();
 
         // 3. Caché
         services.AddStackExchangeRedisCache(options => { options.Configuration = configuration.GetConnectionString("Redis"); });
@@ -57,6 +56,7 @@ public static class DependencyInjection
             services.AddScoped<ICatalogRepository, FirestoreCatalogRepository>();
             services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
             services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
+            services.AddScoped<IConversationStateRepository, FirestoreConversationStateRepository>();
 
             // 🔥 SPRINT 4: Repositorio de Solicitudes
             services.AddScoped<IRequestRepository, FirestoreRequestRepository>();
@@ -74,6 +74,9 @@ public static class DependencyInjection
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();
+
+        services.AddScoped<IInboundMessageRepository, InboundMessageRepository>();
+        services.AddHostedService<InboundMessageWorker>();
 
         // 6. Gateways Externos
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();

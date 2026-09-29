@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom'; // 🔥 SPRINT 11: Navegación real
-import { X, ShoppingCart, MessageSquare, User, Calendar, Pencil, Check } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { X, ShoppingCart, MessageSquare, User, Calendar, Pencil, Check, AlertCircle } from 'lucide-react';
 import type { OrderRecord } from '../types/orders.types';
 import { updateOrderAmount } from '../services/orders.service';
 
@@ -12,9 +12,11 @@ interface OrderDetailModalProps {
 
 export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
   const queryClient = useQueryClient();
-  const navigate = useNavigate(); // 🔥 Hook de enrutamiento
+  const navigate = useNavigate(); 
+  
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [newPrice, setNewPrice] = useState((order.totalAmountMinorUnits / 100).toFixed(2));
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const formatCurrency = (minorUnits: number, currency: string) => 
     `${currency} ${(minorUnits / 100).toFixed(2)}`;
@@ -24,11 +26,24 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       setIsEditingPrice(false);
+      setErrorMsg(null);
+    },
+    onError: (error: any) => {
+      setErrorMsg(error.message || 'Error al actualizar el precio.');
     }
   });
 
   const handleSavePrice = () => {
-    const minorUnits = Math.round(parseFloat(newPrice || '0') * 100);
+    setErrorMsg(null);
+    const floatValue = parseFloat(newPrice || '0');
+    
+    // 🔥 SPRINT 07: Validación estricta para números negativos, vacíos o NaN.
+    if (isNaN(floatValue) || floatValue < 0 || !isFinite(floatValue)) {
+      setErrorMsg('Por favor, ingresa un monto válido igual o mayor a cero.');
+      return;
+    }
+
+    const minorUnits = Math.round(floatValue * 100);
     amountMutation.mutate(minorUnits);
   };
 
@@ -39,7 +54,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
         <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gray-50">
           <h2 className="text-xl font-bold text-gray-900 flex items-center">
             <ShoppingCart className="w-5 h-5 mr-2 text-blue-600" />
-            Detalle de la Solicitud
+            Detalle de la Cotización
           </h2>
           <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
             <X className="w-5 h-5" />
@@ -68,7 +83,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
             </div>
           </div>
 
-          <h3 className="font-bold text-gray-800 mb-3 border-b border-gray-100 pb-2">Artículos Solicitados</h3>
+          <h3 className="font-bold text-gray-800 mb-3 border-b border-gray-100 pb-2">Artículos Cotizados</h3>
           <div className="max-h-60 overflow-y-auto mb-4">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 sticky top-0">
@@ -84,7 +99,6 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="py-3 px-3 font-medium text-gray-900">{item.productName}</td>
                     <td className="py-3 px-3 text-center text-gray-600">{item.quantity}</td>
-                    {/* 🔥 SPRINT 11: Ocultar PEN 0.00 en cada línea */}
                     <td className="py-3 px-3 text-right text-gray-600">
                       {item.unitPriceMinorUnits === 0 ? <span className="text-gray-400 italic text-xs">Por definir</span> : formatCurrency(item.unitPriceMinorUnits, order.currency)}
                     </td>
@@ -97,7 +111,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
             </table>
           </div>
 
-          <div className="flex justify-between items-end border-t border-gray-200 pt-4 mt-2">
+          <div className="flex justify-between items-start border-t border-gray-200 pt-4 mt-2">
             <div className="w-1/2">
               {order.notes && (
                 <>
@@ -106,33 +120,42 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                 </>
               )}
             </div>
-            <div className="text-right">
+            
+            <div className="text-right flex flex-col items-end">
               <p className="text-sm text-gray-500 mb-1">Total de Cotización</p>
               
               {isEditingPrice ? (
-                <div className="flex items-center justify-end gap-2 mt-1">
-                  <span className="text-gray-500 font-bold">{order.currency}</span>
-                  <input
-                    type="number"
-                    step="0.10"
-                    value={newPrice}
-                    onChange={(e) => setNewPrice(e.target.value)}
-                    className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                    autoFocus
-                  />
-                  <button
-                    onClick={handleSavePrice}
-                    disabled={amountMutation.isPending}
-                    className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
-                  >
-                    <Check className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setIsEditingPrice(false)}
-                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                <div className="flex flex-col items-end">
+                  <div className="flex items-center justify-end gap-2 mt-1">
+                    <span className="text-gray-500 font-bold">{order.currency}</span>
+                    <input
+                      type="number"
+                      step="0.10"
+                      min="0"
+                      value={newPrice}
+                      onChange={(e) => setNewPrice(e.target.value)}
+                      className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSavePrice}
+                      disabled={amountMutation.isPending}
+                      className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => { setIsEditingPrice(false); setErrorMsg(null); }}
+                      className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {errorMsg && (
+                    <div className="text-xs text-red-500 mt-2 flex items-center">
+                      <AlertCircle className="w-3 h-3 mr-1" /> {errorMsg}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center justify-end gap-2 group">
@@ -143,7 +166,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                   </p>
                   <button
                     onClick={() => setIsEditingPrice(true)}
-                    className="p-1.5 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="p-1.5 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-50 rounded-lg"
                     title="Definir/Editar Precio Total"
                   >
                     <Pencil className="w-4 h-4" />
@@ -156,7 +179,6 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
 
         <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
           {order.conversationId && order.conversationId !== 'MANUAL_ENTRY' ? (
-            // 🔥 SPRINT 11: Ahora el botón usa navigate para enviarte al chat
             <button 
               onClick={() => { onClose(); navigate(`/inbox?conversation=${order.conversationId}`); }} 
               className="flex items-center text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors"

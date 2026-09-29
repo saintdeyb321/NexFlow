@@ -27,7 +27,6 @@ public class RedisConversationCache : IConversationCache
             var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
             context.LastUpdated = DateTime.UtcNow;
 
-            // 🔥 CORRECCIÓN: Guardado sin riesgo
             var json = JsonSerializer.Serialize(context);
             await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30));
         }
@@ -47,7 +46,6 @@ public class RedisConversationCache : IConversationCache
             if (!value.HasValue || string.IsNullOrWhiteSpace(value.ToString()))
                 return null;
 
-            // 🔥 NEXFLOW 2.0: Deserialización Type-Safe. Si falla o es nulo, devuelve null de forma segura, sin explotar.
             var context = JsonSerializer.Deserialize<ConversationContextDto>(value.ToString());
             return context;
         }
@@ -71,11 +69,14 @@ public class RedisConversationCache : IConversationCache
         }
     }
 
+    // 🔥 SPRINT 03: Usamos Redis para identificar instantáneamente los mensajes que nosotros mismos disparamos.
     public async Task MarkMessageAsAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
     {
         try
         {
-            var key = $"workspace:{workspaceId}:aimessage:{messageId}";
+            // Limpiamos la clave para evitar fallos por si llega con el prefijo "response:X"
+            var cleanMessageId = messageId.Contains(':') ? messageId.Split(':')[0] : messageId;
+            var key = $"workspace:{workspaceId}:aimessage:{cleanMessageId}";
             await _redisDb.StringSetAsync(key, "1", TimeSpan.FromMinutes(10));
         }
         catch (Exception ex)
@@ -88,7 +89,8 @@ public class RedisConversationCache : IConversationCache
     {
         try
         {
-            var key = $"workspace:{workspaceId}:aimessage:{messageId}";
+            var cleanMessageId = messageId.Contains(':') ? messageId.Split(':')[0] : messageId;
+            var key = $"workspace:{workspaceId}:aimessage:{cleanMessageId}";
             return await _redisDb.KeyExistsAsync(key);
         }
         catch (Exception ex)

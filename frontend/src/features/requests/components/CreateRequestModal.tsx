@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Save } from 'lucide-react';
-import { axiosClient } from '../../../core/api/axiosClient';
+import { createRequest } from '../services/request.service';
+import type { RequestType } from '../types/request.types';
 
 interface CreateRequestModalProps {
   isOpen: boolean;
@@ -11,18 +12,16 @@ interface CreateRequestModalProps {
 export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps) => {
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
   const [formData, setFormData] = useState({
-    type: 'Tramite',
+    type: 'Tramite' as RequestType,
     title: '',
     description: '',
     consumerPhone: ''
   });
 
   const createMutation = useMutation({
-    mutationFn: async (payload: any) => {
-      const { data } = await axiosClient.post('/requests', payload);
-      return data;
-    },
+    mutationFn: createRequest,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['requests'] });
       onClose();
@@ -30,7 +29,6 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
       setErrorMessage(null);
     },
     onError: (error: any) => {
-      // 🔥 SPRINT 11: Ya no existe error.response ni alert()
       setErrorMessage(error.message || 'Ocurrió un error al crear la solicitud.');
     }
   });
@@ -67,7 +65,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
             <label className="block text-sm font-medium mb-1">Tipo de Solicitud</label>
             <select 
               value={formData.type} 
-              onChange={e => setFormData({...formData, type: e.target.value})} 
+              onChange={e => setFormData({...formData, type: e.target.value as RequestType})} 
               className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
             >
               <option value="Tramite">Trámite Administrativo</option>
@@ -108,7 +106,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
               value={formData.description} 
               onChange={e => setFormData({...formData, description: e.target.value})} 
               placeholder="Describe el requerimiento del cliente..." 
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" 
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none" 
               required 
             />
           </div>

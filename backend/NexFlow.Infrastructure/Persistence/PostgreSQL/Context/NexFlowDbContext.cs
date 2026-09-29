@@ -23,7 +23,9 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
     public DbSet<SystemAdministrator> SystemAdministrators { get; set; } = null!;
     public DbSet<Notification> Notifications { get; set; } = null!;
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
-    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
+
+    // 🔥 SPRINT 01: Nueva Inbox Duradera reemplaza a ProcessedMessages
+    public DbSet<InboundMessage> InboundMessages => Set<InboundMessage>();
 
     public Guid TenantId => _workspaceContext?.CurrentWorkspaceId ?? Guid.Empty;
 
@@ -44,7 +46,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
         modelBuilder.Entity<OutboxMessage>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.PayloadJson).HasColumnType("jsonb"); 
+            entity.Property(e => e.PayloadJson).HasColumnType("jsonb");
             entity.HasIndex(e => e.Status);
         });
 
@@ -52,8 +54,14 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
             .HasIndex(r => new { r.WorkspaceId, r.LocationId, r.Status, r.StartTime, r.EndTime })
             .HasDatabaseName("IX_Reservations_TimeRangeOverlap");
 
-        modelBuilder.Entity<ProcessedMessage>()
-            .HasKey(p => new { p.WorkspaceId, p.MessageId });
+        // 🔥 SPRINT 01: Configuración de la Inbox
+        modelBuilder.Entity<InboundMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            // Evita que Evolution duplique el mismo mensaje en caso de reintentos suyos
+            entity.HasIndex(e => new { e.InstanceName, e.ExternalMessageId }).IsUnique();
+            entity.HasIndex(e => e.Status); // Agiliza el Worker
+        });
 
         base.OnModelCreating(modelBuilder);
     }

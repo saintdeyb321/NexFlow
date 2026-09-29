@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { UploadCloud, Loader2, X } from 'lucide-react';
+import { UploadCloud, Loader2, X, AlertCircle } from 'lucide-react';
 import { axiosClient } from '../../core/api/axiosClient';
 
 interface ImageUploaderProps {
@@ -9,21 +9,26 @@ interface ImageUploaderProps {
   label?: string;
 }
 
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Imagen" }: ImageUploaderProps) => {
   const [isUploading, setIsUploading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 1. Validación en cliente (UX rápida)
+    setErrorMsg(null);
+
+    // 🔥 SPRINT 08: Validación estricta sin alert()
     if (file.size > 5 * 1024 * 1024) {
-      alert("La imagen es demasiado grande. Máximo 5MB.");
+      setErrorMsg("La imagen supera los 5MB permitidos.");
       return;
     }
-    if (!file.type.startsWith('image/')) {
-      alert("Solo se permiten archivos de imagen (JPG, PNG, WebP).");
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setErrorMsg("Solo se permiten archivos JPG, PNG y WebP.");
       return;
     }
 
@@ -34,18 +39,12 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
     formData.append('file', file);
 
     try {
-      // 2. Petición BLINDADA a tu propio Backend (El JWT se inyecta automáticamente)
       const { data } = await axiosClient.post<{ secureUrl: string }>('/storage/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      
-      // 3. El backend nos devuelve la URL final de Cloudinary
       onChange(data.secureUrl);
-      
     } catch (error: any) {
-      alert(`Error al subir imagen: ${error.response?.data?.message || 'Fallo de red'}`);
+      setErrorMsg("Ocurrió un error de red al subir la imagen.");
     } finally {
       setIsUploading(false);
       if (onUploadingContext) onUploadingContext(false);
@@ -57,13 +56,19 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
     <div className="w-full">
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       
+      {errorMsg && (
+        <div className="mb-2 text-xs font-medium text-red-600 flex items-center bg-red-50 p-2 rounded-lg border border-red-100">
+          <AlertCircle className="w-3 h-3 mr-1" /> {errorMsg}
+        </div>
+      )}
+
       {value ? (
         <div className="relative w-full h-40 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden group">
           <img src={value} alt="Preview" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
             <button 
               type="button" 
-              onClick={() => onChange(null)} 
+              onClick={() => { onChange(null); setErrorMsg(null); }} 
               className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg transform transition-transform hover:scale-110"
               title="Eliminar imagen"
             >
@@ -97,7 +102,7 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
-        accept="image/jpeg, image/png, image/webp" 
+        accept={ALLOWED_TYPES.join(',')} 
         className="hidden" 
       />
     </div>

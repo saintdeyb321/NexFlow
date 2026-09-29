@@ -16,14 +16,12 @@ public interface IIncomingMessageGuard
 public class IncomingMessageGuard : IIncomingMessageGuard
 {
     private readonly IInstanceResolver _instanceResolver;
-    private readonly IProcessedMessageRepository _processedMessageRepo;
     private readonly IEntitlementService _entitlementService;
     private readonly ILogger<IncomingMessageGuard> _logger;
 
-    public IncomingMessageGuard(IInstanceResolver instanceResolver, IProcessedMessageRepository processedMessageRepo, IEntitlementService entitlementService, ILogger<IncomingMessageGuard> logger)
+    public IncomingMessageGuard(IInstanceResolver instanceResolver, IEntitlementService entitlementService, ILogger<IncomingMessageGuard> logger)
     {
         _instanceResolver = instanceResolver;
-        _processedMessageRepo = processedMessageRepo;
         _entitlementService = entitlementService;
         _logger = logger;
     }
@@ -37,7 +35,6 @@ public class IncomingMessageGuard : IIncomingMessageGuard
 
     public async Task<(bool IsValid, Guid WorkspaceId, string NormalizedPhone)> CheckMessageAsync(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
-        // 1. Validaciones puras en memoria (Sin tocar la BD de idempotencia todavía)
         var normalizedPhone = NormalizePhone(request.CustomerPhone);
         if (string.IsNullOrEmpty(normalizedPhone))
         {
@@ -58,12 +55,8 @@ public class IncomingMessageGuard : IIncomingMessageGuard
             return (false, Guid.Empty, string.Empty);
         }
 
-        // 2. ÚLTIMO PASO: Adquirir el candado solo si todas las validaciones previas pasaron
-        if (!await _processedMessageRepo.BeginProcessingAsync(resolvedId.Value, request.MessageId, cancellationToken))
-        {
-            _logger.LogWarning("Incoming message {MessageId} for workspace {WorkspaceId} rejected: already processed or processing.", request.MessageId, resolvedId.Value);
-            return (false, Guid.Empty, string.Empty);
-        }
+        // 🔥 SPRINT 02: Ya no bloqueamos ni guardamos en la vieja tabla ProcessedMessages 
+        // porque InboundMessageRepository ya gestiona el bloqueo a nivel de transacción PostgreSQL (FOR UPDATE SKIP LOCKED).
 
         return (true, resolvedId.Value, normalizedPhone);
     }

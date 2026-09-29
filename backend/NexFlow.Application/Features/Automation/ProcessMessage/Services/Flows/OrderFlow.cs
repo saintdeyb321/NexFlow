@@ -16,20 +16,19 @@ public class OrderFlow : IOrderFlow
 {
     private readonly IOrderRepository _orderRepository;
     private readonly INotificationService _notificationService;
-    private readonly IConversationCache _conversationCache;
+    private readonly IConversationStateRepository _stateRepo; // 🔥 SPRINT 06: Guardado durable directo
 
-    public OrderFlow(IOrderRepository orderRepository, INotificationService notificationService, IConversationCache conversationCache)
+    public OrderFlow(IOrderRepository orderRepository, INotificationService notificationService, IConversationStateRepository stateRepo)
     {
         _orderRepository = orderRepository;
         _notificationService = notificationService;
-        _conversationCache = conversationCache;
+        _stateRepo = stateRepo;
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, AiInterpretation interpretation, CancellationToken ct)
     {
-        var context = await _conversationCache.GetContextAsync(workspaceId, phone, ct) ?? new ConversationContextDto();
+        var context = await _stateRepo.GetStateAsync(workspaceId, phone, ct) ?? new ConversationContextDto();
 
-        // 🔥 SPRINT 11: Cierre explícito del pedido y traspaso al humano
         if (interpretation.SearchTerm == "FINALIZAR_PEDIDO" || interpretation.SearchTerm?.Contains("FINALIZAR") == true)
         {
             if (!context.OrderDraftItems.Any())
@@ -38,22 +37,12 @@ public class OrderFlow : IOrderFlow
             var orderItems = new List<OrderItemRecord>();
             foreach (var item in context.OrderDraftItems)
             {
-                int qty = 1;
-                string name = item;
-                // Parseo básico de cantidades (Ej: "2x martillo")
-                var parts = item.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2 && int.TryParse(parts[0].Replace("x", "").Replace("X", ""), out int parsedQty))
-                {
-                    qty = parsedQty;
-                    name = parts[1];
-                }
-
                 orderItems.Add(new OrderItemRecord
                 {
                     ProductId = "GENERIC_ITEM",
-                    ProductName = name.Trim(),
-                    Quantity = qty,
-                    UnitPriceMinorUnits = 0 // Sigue siendo cotización hasta que el humano lo revise
+                    ProductName = item.ProductName,
+                    Quantity = item.Quantity,
+                    UnitPriceMinorUnits = 0
                 });
             }
 
@@ -78,41 +67,57 @@ public class OrderFlow : IOrderFlow
                 workspaceId,
                 "ORDERS",
                 NotificationType.NewCommercialRequest,
-                "Intervención Requerida: Cotización de IA",
-                $"El cliente {order.ConsumerName} cerró su lista con {orderItems.Count} ítems. Asume el control del chat y envíale los precios.",
+                "Cotización Recibida",
+                $"El cliente {order.ConsumerName} cerró su lista con {orderItems.Count} ítems. Entra al chat para enviar precios.",
                 "/orders",
                 ct);
 
-            // Limpiamos el carrito y el objetivo para que la IA quede libre para otras consultas
             context.CurrentGoal = null;
             context.OrderDraftItems.Clear();
-            await _conversationCache.SetContextAsync(workspaceId, phone, context, ct);
+            await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
 
             return $"¡Excelente! He enviado tu lista de pedido. En este momento estoy transfiriendo el chat a un asesor humano para que confirme el stock y los precios exactos. Tu código de atención es {order.Id.Substring(0, 6)}.";
         }
 
-        // 🔥 SPRINT 11: Modo "Carrito de Compras" (Multi-Turno)
+        // 🔥 SPRINT 06: Múltiples turnos y extracción precisa
         var rawItems = interpretation.SearchTerm?.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
-        var newItems = new List<string>();
 
         foreach (var itemStr in rawItems)
         {
             if (!string.IsNullOrWhiteSpace(itemStr) && itemStr != "FINALIZAR_PEDIDO")
             {
-                newItems.Add(itemStr.Trim());
+                int qty = 1;
+                string name = itemStr.Trim();
+
+                var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2 && int.TryParse(parts[0].Replace("x", "").Replace("X", ""), out int parsedQty))
+                {
+                    qty = parsedQty;
+                    name = parts[1].Trim();
+                }
+
+                // Si ya existe el producto, sumamos cantidad, sino lo agregamos.
+                var existingItem = context.OrderDraftItems.FirstOrDefault(i => i.ProductName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (existingItem != null)
+                {
+                    existingItem.Quantity += qty;
+                }
+                else
+                {
+                    context.OrderDraftItems.Add(new OrderDraftItem { ProductName = name, Quantity = qty });
+                }
             }
         }
 
-        if (!newItems.Any() && !context.OrderDraftItems.Any())
+        if (!context.OrderDraftItems.Any())
         {
             return "No logré identificar los productos. ¿Podrías detallar tu pedido?";
         }
 
-        context.OrderDraftItems.AddRange(newItems);
-        context.CurrentGoal = "ORDER";
-        await _conversationCache.SetContextAsync(workspaceId, phone, context, ct);
+        context.CurrentGoal = "ORDER"; // 🔥 Mantiene el flujo activo.
+        await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
 
-        var listText = string.Join("\n- ", context.OrderDraftItems);
-        return $"Anotado. Hasta el momento tu lista tiene:\n- {listText}\n\n¿Deseas agregar algo más? (Si ya terminaste, escribe 'enviar pedido').";
+        var listText = string.Join("\n", context.OrderDraftItems.Select(i => $"- {i.Quantity}x {i.ProductName}"));
+        return $"Anotado. Hasta el momento tu lista tiene:\n{listText}\n\n¿Deseas agregar algo más? (Si ya terminaste, escribe 'enviar pedido').";
     }
 }

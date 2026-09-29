@@ -33,7 +33,7 @@ public class Reservation : Entity
             CustomerName = customerName,
             StartTime = startTime,
             EndTime = endTime,
-            Status = ReservationStatus.Confirmed // Iniciamos en Confirmed
+            Status = ReservationStatus.Confirmed // Iniciamos directo en Confirmed
         };
     }
 
@@ -47,18 +47,10 @@ public class Reservation : Entity
 
     public void Cancel()
     {
-        if (Status == ReservationStatus.Completed || Status == ReservationStatus.NoShow || Status == ReservationStatus.Cancelled)
+        if (Status == ReservationStatus.Completed || Status == ReservationStatus.Cancelled)
             throw new DomainException($"Transición inválida: No es posible cancelar una reserva en estado {Status}.");
 
         Status = ReservationStatus.Cancelled;
-    }
-
-    public void MarkAsNoShow()
-    {
-        if (Status != ReservationStatus.Confirmed)
-            throw new DomainException($"Transición inválida: Solo las reservas confirmadas pueden marcarse como No-Show.");
-
-        Status = ReservationStatus.NoShow;
     }
 
     public void Reschedule(DateTime newStartTime, DateTime newEndTime)

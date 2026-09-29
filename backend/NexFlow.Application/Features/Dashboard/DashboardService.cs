@@ -17,7 +17,7 @@ public class DashboardService : IDashboardService
     private readonly ICatalogRepository _catalogRepo;
     private readonly IRequestRepository _requestRepo;
     private readonly IReservationRepository _reservationRepo;
-    private readonly IBusinessProfileRepository _profileRepo; 
+    private readonly IBusinessProfileRepository _profileRepo;
     private readonly IClock _clock;
 
     public DashboardService(
@@ -70,9 +70,10 @@ public class DashboardService : IDashboardService
 
     private async Task<GlobalMetricsDto> BuildGlobalMetricsAsync(Guid workspaceId, CancellationToken ct)
     {
+        // 🔥 SPRINT 13: Eliminamos el destructivo N+1 de Mensajes en Firestore.
+        // Solo contamos las Conversaciones del día sin cargar su sub-colección de mensajes.
         var recentConversations = await _conversationRepo.GetRecentConversationsAsync(workspaceId, 200, ct);
 
-        // 🔥 SPRINT 11: Zonas horarias dinámicas
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, ct);
         var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
         var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, workspaceZone);
@@ -83,20 +84,12 @@ public class DashboardService : IDashboardService
         int totalConversations = convsToday.Count;
         int totalHandoffs = convsToday.Count(c => c.HandoffReason != HandoffReason.None);
 
-        int aiMessages = 0;
-        int humanMessages = 0;
-
-        foreach (var conv in convsToday)
-        {
-            var msgs = await _conversationRepo.GetMessagesAsync(workspaceId, conv.Id, 100, ct);
-            aiMessages += msgs.Count(m => m.Sender == SenderType.AI);
-            humanMessages += msgs.Count(m => m.Sender == SenderType.BusinessUser);
-        }
-
+        // Los contadores de mensajes individuales serán 0 hasta que implementes la nueva API
+        // de Eventos (IMetricsRepository) sugerida por la Auditoría. Esto protege la RAM.
         return new GlobalMetricsDto(
             ConversationsToday: totalConversations,
-            AiMessagesHandled: aiMessages,
-            HumanMessagesHandled: humanMessages,
+            AiMessagesHandled: 0,
+            HumanMessagesHandled: 0,
             TotalHandoffsToday: totalHandoffs
         );
     }
@@ -106,7 +99,6 @@ public class DashboardService : IDashboardService
         var items = await _catalogRepo.GetActiveItemsAsync(workspaceId, ct);
         var products = items.Where(i => i.Type == "PRODUCT").ToList();
 
-        // 🔥 SPRINT 11: Ocultamos el Top Consultados hasta tener Analytics real
         var topQueried = Enumerable.Empty<ItemQueryMetricDto>();
         return new CatalogMetricsDto(products.Count, 0, topQueried);
     }
@@ -122,7 +114,7 @@ public class DashboardService : IDashboardService
 
     private async Task<RequestsMetricsDto?> BuildRequestsMetricsAsync(Guid workspaceId, CancellationToken ct)
     {
-        var requests = await _requestRepo.GetRequestsAsync(workspaceId, ct);
+        var requests = await _requestRepo.GetRequestsAsync(workspaceId, 500, null, ct);
 
         return new RequestsMetricsDto(
             Pending: requests.Count(r => r.Status == RequestStatus.Pending),
@@ -147,10 +139,10 @@ public class DashboardService : IDashboardService
         var todayLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date, workspaceZone);
         var tomorrowLocalStartUtc = TimeZoneInfo.ConvertTimeToUtc(localNow.Date.AddDays(1), workspaceZone);
 
-        // 🔥 SPRINT 11: Semántica correcta de conteo
+        // 🔥 SPRINT 07 FIX: Pending fue removido del sistema. Retornamos 0.
         return new ReservationsMetricsDto(
             ReservationsToday: reservations.Count(r => r.StartTime >= todayLocalStartUtc && r.StartTime < tomorrowLocalStartUtc),
-            Pending: countsByStatus.GetValueOrDefault(ReservationStatus.Pending),
+            Pending: 0,
             Confirmed: countsByStatus.GetValueOrDefault(ReservationStatus.Confirmed),
             Cancelled: countsByStatus.GetValueOrDefault(ReservationStatus.Cancelled)
         );

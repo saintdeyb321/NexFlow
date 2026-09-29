@@ -28,28 +28,24 @@ public class WorkspaceRepository : IWorkspaceRepository
             .FirstOrDefaultAsync(w => w.Id == id, cancellationToken);
     }
 
-    // 🔥 EL EXTERMINADOR DE DEPENDENCIAS
-    // 🔥 EL EXTERMINADOR DE DEPENDENCIAS
     public async Task DeleteNuclearAsync(Workspace workspace, CancellationToken cancellationToken)
     {
-        // 1 y 2 quedan igual...
         var memberships = await _context.Memberships.IgnoreQueryFilters().Where(m => m.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
         var userIds = memberships.Select(m => m.UserId).Distinct().ToList();
 
         var licenses = await _context.Licenses.IgnoreQueryFilters().Include(l => l.LicenseModules).Where(l => l.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
 
-        // 3. Buscar registros condicionales (AQUÍ AGREGAMOS NOTIFICACIONES Y MENSAJES)
         var audits = await _context.AuditLogs.IgnoreQueryFilters().Where(a => a.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
         var reservations = await _context.Reservations.IgnoreQueryFilters().Where(r => r.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
-
         var notifications = await _context.Notifications.IgnoreQueryFilters().Where(n => n.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
-        var processedMsgs = await _context.ProcessedMessages.IgnoreQueryFilters().Where(p => p.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
 
-        // 4. Eliminación limpia de hijos (AQUÍ LIMPIAMOS LAS NUEVAS TABLAS)
+        // 🔥 Reemplazado ProcessedMessages por InboundMessages
+        var inboundMsgs = await _context.InboundMessages.IgnoreQueryFilters().Where(p => p.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
+
         if (reservations.Any()) _context.Reservations.RemoveRange(reservations);
         if (audits.Any()) _context.AuditLogs.RemoveRange(audits);
         if (notifications.Any()) _context.Notifications.RemoveRange(notifications);
-        if (processedMsgs.Any()) _context.ProcessedMessages.RemoveRange(processedMsgs);
+        if (inboundMsgs.Any()) _context.InboundMessages.RemoveRange(inboundMsgs);
 
         foreach (var license in licenses)
         {
@@ -61,10 +57,8 @@ public class WorkspaceRepository : IWorkspaceRepository
         if (licenses.Any()) _context.Licenses.RemoveRange(licenses);
         if (memberships.Any()) _context.Memberships.RemoveRange(memberships);
 
-        // 5. Eliminar el Workspace principal
         _context.Workspaces.Remove(workspace);
 
-        // 6. Lógica inteligente de usuario queda exactamente igual...
         foreach (var userId in userIds)
         {
             var hasOtherWorkspaces = await _context.Memberships
@@ -97,10 +91,10 @@ public class WorkspaceRepository : IWorkspaceRepository
             CreatedAt = x.Workspace.CreatedAt
         });
     }
-    // 🔥 Auditoría (Fase 5): Implementación de búsqueda por instancia sin ensuciar Application
+
     public async Task<Guid?> GetIdByEvolutionInstanceNameAsync(string instanceName, CancellationToken cancellationToken)
     {
-        var workspace = await _context.Set<NexFlow.Domain.Entities.Workspace>()
+        var workspace = await _context.Set<Workspace>()
             .AsNoTracking()
             .FirstOrDefaultAsync(w => w.EvolutionInstanceName == instanceName, cancellationToken);
 
@@ -109,11 +103,10 @@ public class WorkspaceRepository : IWorkspaceRepository
 
     public async Task<string?> GetEvolutionInstanceNameByIdAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        var workspace = await _context.Set<NexFlow.Domain.Entities.Workspace>()
+        var workspace = await _context.Set<Workspace>()
             .AsNoTracking()
             .FirstOrDefaultAsync(w => w.Id == workspaceId, cancellationToken);
 
         return workspace?.EvolutionInstanceName;
     }
-
 }

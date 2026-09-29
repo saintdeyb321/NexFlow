@@ -4,6 +4,7 @@ export interface BusinessProfile {
   contactEmail: string;
   whatsAppNumber: string;
   description: string;
+  timeZone: string; 
 }
 
 export interface FaqDto {
@@ -30,7 +31,7 @@ export interface BusinessHoursDto {
   isClosed: boolean; 
 }
 
-// WHATSAPP (Evolution API) - SPRINT 5
+// WHATSAPP (Evolution API)
 export type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_AVAILABLE' | 'CONNECTED' | 'ERROR';
 
 export interface WhatsAppStatusResponse {
@@ -40,4 +41,3 @@ export interface WhatsAppStatusResponse {
 export type WhatsAppConnectResponse =
   | { qrBase64: string }
   | { status: 'CONNECTED' };
-

@@ -152,9 +152,25 @@ public class BusinessController : ControllerBase
     }
 
     [HttpDelete("locations/{locationId}")]
-    public async Task<IActionResult> DeleteLocation(string locationId, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteLocation(
+        string locationId,
+        [FromServices] IReservationRepository reservationRepository,
+        CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
+
+        // 🔥 SPRINT 10: Validación Estricta. No se puede borrar si hay reservas futuras en esta sede.
+        var futureReservations = await reservationRepository.GetReservationsForDateAsync(
+            WorkspaceId,
+            locationId,
+            DateTime.UtcNow,
+            DateTime.UtcNow.AddYears(1),
+            cancellationToken);
+
+        if (futureReservations.Any(r => r.Status == ReservationStatus.Confirmed))
+        {
+            return BadRequest(new { message = "No puedes eliminar una sede que tiene reservas confirmadas a futuro. Por favor, reasigna o cancela esas reservas primero." });
+        }
 
         var items = await _catalogRepository.GetActiveItemsAsync(WorkspaceId, cancellationToken);
         var affectedItems = items.Where(i => i.LocationIds != null && i.LocationIds.Contains(locationId)).ToList();
@@ -165,6 +181,7 @@ public class BusinessController : ControllerBase
             await _catalogRepository.SaveItemAsync(WorkspaceId, item, cancellationToken);
         }
 
+        // 🔥 SPRINT 10: Limpiamos los horarios de la sede borrada para no dejar datos huérfanos.
         await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, Array.Empty<BusinessHoursDto>(), cancellationToken);
         await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
 
@@ -252,7 +269,6 @@ public class BusinessController : ControllerBase
     {
         var qrBase64 = await evolutionService.ConnectAndGetQrAsync(WorkspaceId, cancellationToken);
 
-        // 🔥 SPRINT 20: Si ya estaba conectado, informamos éxito en lugar de intentar renderizar un QR vacío
         if (qrBase64 == "ALREADY_CONNECTED")
             return Ok(new { status = "CONNECTED" });
 

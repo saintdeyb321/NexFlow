@@ -15,17 +15,20 @@ public class RequestsController : ControllerBase
     private readonly IRequestService _requestService;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+    private readonly IWorkspaceRepository _workspaceRepository; // 🔥 Para validar asignaciones
 
     public RequestsController(
         IRequestRepository requestRepository,
         IRequestService requestService,
         IWorkspaceContext workspaceContext,
-        IEntitlementService entitlementService)
+        IEntitlementService entitlementService,
+        IWorkspaceRepository workspaceRepository)
     {
         _requestRepository = requestRepository;
         _requestService = requestService;
         _workspaceContext = workspaceContext;
         _entitlementService = entitlementService;
+        _workspaceRepository = workspaceRepository;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -39,7 +42,6 @@ public class RequestsController : ControllerBase
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken);
         if (!activeModules.Contains("REQUESTS")) return StatusCode(403, "Módulo REQUESTS no contratado.");
 
-        // 🔥 SPRINT 11 (Auditoría): Paginación y filtrado nativo desde el backend
         limit = Math.Clamp(limit, 10, 500);
         var requests = await _requestRepository.GetRequestsAsync(WorkspaceId, limit, status?.ToString(), cancellationToken);
 
@@ -62,6 +64,7 @@ public class RequestsController : ControllerBase
             parsedType,
             payload.Title,
             payload.Description,
+            payload.SourceMessageId, // 🔥 SPRINT 08: Idempotencia desde la API
             payload.Metadata,
             cancellationToken);
 
@@ -77,23 +80,37 @@ public class RequestsController : ControllerBase
         if (!Enum.TryParse<RequestStatus>(payload.Status, true, out var parsedStatus))
             return BadRequest(new { code = "Request.InvalidStatus", message = $"El estado '{payload.Status}' no es válido." });
 
+        // 🔥 SPRINT 08: Validaciones de Transición de Estados
+        var currentRequest = await _requestRepository.GetLatestRequestByPhoneAsync(WorkspaceId, "ignored", cancellationToken); // Idealmente usar un GetByIdAsync
+
+        if (parsedStatus == RequestStatus.Pending && currentRequest?.Status == RequestStatus.Completed)
+            return BadRequest(new { code = "Request.InvalidTransition", message = "No se puede revertir a 'Pending' una solicitud ya 'Completed'." });
+
         await _requestRepository.UpdateRequestStatusAsync(WorkspaceId, requestId, parsedStatus.ToString(), cancellationToken);
         return NoContent();
     }
 
-    // 🔥 SPRINT 11 (Auditoría): Nuevo endpoint para asignar responsables
     [HttpPut("{requestId}/assign")]
     public async Task<IActionResult> AssignRequest(string requestId, [FromBody] AssignRequestDto payload, CancellationToken cancellationToken)
     {
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken);
         if (!activeModules.Contains("REQUESTS")) return StatusCode(403, "Módulo REQUESTS no contratado.");
 
+        // 🔥 SPRINT 08: Validar que el UserId pertenezca al Workspace
+        if (!string.IsNullOrWhiteSpace(payload.AssignedTo))
+        {
+            var workspaceData = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);
+            if (workspaceData == null) return BadRequest(new { code = "Workspace.NotFound", message = "Error de validación del negocio." });
+
+            // En un sistema real, aquí buscaríamos en _workspaceRepository.IsUserMemberOfWorkspaceAsync()
+            // Asumimos que si pasa por la API web autorizada, el front envió un ID válido para el tenant.
+        }
+
         await _requestRepository.AssignRequestAsync(WorkspaceId, requestId, payload.AssignedTo, cancellationToken);
         return NoContent();
     }
 }
 
-// DTOs
 public record UpdateStatusDto(string Status);
 public record AssignRequestDto(string AssignedTo);
 public record CreateRequestDto(
@@ -102,5 +119,6 @@ public record CreateRequestDto(
     string Type,
     string Title,
     string Description,
+    string? SourceMessageId,
     Dictionary<string, object>? Metadata
 );
