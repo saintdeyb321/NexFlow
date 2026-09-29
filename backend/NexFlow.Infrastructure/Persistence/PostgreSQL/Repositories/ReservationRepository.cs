@@ -31,6 +31,10 @@ public class ReservationRepository : IReservationRepository
 
     public void Add(Reservation reservation) => _context.Reservations.Add(reservation);
 
+    public Task<Reservation?> GetBySourceMessageIdAsync(Guid workspaceId, string sourceMessageId, CancellationToken cancellationToken) =>
+        _context.Reservations.AsNoTracking().SingleOrDefaultAsync(
+            r => r.WorkspaceId == workspaceId && r.SourceMessageId == sourceMessageId, cancellationToken);
+
     public Task<bool> HasFutureConfirmedAtLocationAsync(Guid workspaceId, string locationId, CancellationToken cancellationToken) =>
         _context.Reservations.AnyAsync(r => r.WorkspaceId == workspaceId && r.LocationId == locationId
             && r.Status == ReservationStatus.Confirmed && r.StartTime >= _clock.UtcNow, cancellationToken);

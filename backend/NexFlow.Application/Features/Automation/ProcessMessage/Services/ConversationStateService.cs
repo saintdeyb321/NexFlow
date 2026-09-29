@@ -77,11 +77,32 @@ public sealed class ConversationStateService : IConversationStateService
             }
             if (origin == null)
             {
-                if (await _conversationRepo.HasUnconfirmedOutboundAsync(workspaceId, normalizedPhone, cancellationToken))
-                    throw new InvalidOperationException("FromMe origin cannot be determined while an outbound attempt is unconfirmed.");
-                // Confirmation may have committed between the first origin lookup
-                // and the pending lookup. Re-read before classifying a human.
-                origin = await _conversationRepo.GetMessageOriginAsync(workspaceId, normalizedPhone, request.MessageId, cancellationToken);
+                var reconciliation = await _conversationRepo.ReconcileOutboundEchoAsync(workspaceId, conversation?.Id,
+                    normalizedPhone, request.MessageText, request.MessageId, request.ObservedAtUtc ?? DateTime.UtcNow, cancellationToken);
+                origin = reconciliation.Origin;
+                if (reconciliation.Ambiguous)
+                {
+                    _logger.LogError("FromMe {ExternalId} cannot be uniquely reconciled in workspace {WorkspaceId}; no origin or takeover was assigned.",
+                        request.MessageId, workspaceId);
+                    await _notificationService.NotifyAsync(workspaceId, "CONVERSATIONS", NotificationType.SystemAlert,
+                        "Origen de envío sin confirmar",
+                        $"El eco {request.MessageId} tiene posibles envíos de NexFlow sin confirmar. Revisión requerida; no se asumió control humano.",
+                        "/conversations", cancellationToken);
+                    return (false, conversation!, null);
+                }
+                if (origin == null && await _conversationRepo.HasUnconfirmedOutboundAsync(workspaceId, normalizedPhone, cancellationToken))
+                {
+                    // A transport may have started while reading the first query.
+                    reconciliation = await _conversationRepo.ReconcileOutboundEchoAsync(workspaceId, conversation?.Id,
+                        normalizedPhone, request.MessageText, request.MessageId, request.ObservedAtUtc ?? DateTime.UtcNow, cancellationToken);
+                    origin = reconciliation.Origin;
+                    if (reconciliation.Ambiguous)
+                    {
+                        _logger.LogError("FromMe {ExternalId} remains ambiguous in workspace {WorkspaceId}.", request.MessageId, workspaceId);
+                        return (false, conversation!, null);
+                    }
+                }
+                origin ??= await _conversationRepo.GetMessageOriginAsync(workspaceId, normalizedPhone, request.MessageId, cancellationToken);
             }
             if (origin == MessageOrigin.NexFlowAI) return (false, conversation!, null);
 

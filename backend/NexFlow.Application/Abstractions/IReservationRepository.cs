@@ -6,6 +6,7 @@ public interface IReservationRepository
 {
     Task<(int Today, int Confirmed, int Cancelled)> CountForPeriodAsync(Guid workspaceId, DateTime from, DateTime to, DateTime today, DateTime tomorrow, CancellationToken ct);
     void Add(Reservation reservation);
+    Task<Reservation?> GetBySourceMessageIdAsync(Guid workspaceId, string sourceMessageId, CancellationToken cancellationToken);
     Task<bool> HasFutureConfirmedAtLocationAsync(Guid workspaceId, string locationId, CancellationToken cancellationToken);
 
     Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken);

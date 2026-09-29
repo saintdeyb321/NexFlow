@@ -128,8 +128,14 @@ public class ReservationEngine : IReservationEngine
         return availableSlots;
     }
 
-    public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken)
+    public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken, string? sourceMessageId = null)
     {
+        if (sourceMessageId != null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
+            var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, cancellationToken);
+            if (existing != null) return Result<ReservationDto>.Success(ToDto(existing));
+        }
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (locations == null || !locations.Any(l => l.Id == locationId))
             return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe."));
@@ -163,20 +169,29 @@ public class ReservationEngine : IReservationEngine
         if (timeOnly < openTime || localEndTime.Date != localDateTime.Date || localEndTime.TimeOfDay > closeTime)
             return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "La hora solicitada está fuera del horario comercial."));
 
+        Domain.Entities.Reservation? created = null;
+        OutboxMessage? createdEvent = null;
         try
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
             {
+                if (sourceMessageId != null)
+                {
+                    var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, cancellationToken);
+                    if (existing != null) return Result<ReservationDto>.Success(ToDto(existing));
+                }
                 var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, startTimeUtc, endTimeUtc, null, cancellationToken);
-                if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El horario ya fue tomado por otro cliente."));
+                if (!isAvailable) throw new ConcurrencyException("El horario ya fue tomado por otro cliente.");
 
-                var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTimeUtc, endTimeUtc);
+                var reservation = Domain.Entities.Reservation.Create(workspaceId, locationId, serviceId, customerIdentifier, customerName, startTimeUtc, endTimeUtc, sourceMessageId);
+                created = reservation;
                 _reservationRepository.Add(reservation);
 
                 var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CREATED", Guid.NewGuid().ToString(), $"res_{reservation.Id}", DateTime.UtcNow, dto);
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CREATED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
 
+                createdEvent = outboxMessage;
                 await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -184,9 +199,17 @@ public class ReservationEngine : IReservationEngine
                 return Result<ReservationDto>.Success(dto);
             }
         }
-        catch (Exception ex) when (IsConcurrencyConflict(ex))
+        catch (Exception ex) when (ex is ConcurrencyException || IsConcurrencyConflict(ex))
         {
-            // 🔥 SPRINT 07: Captura elegante de Error de Concurrencia (Serialization Failure)
+            // The ambient transaction has rolled back. Do not leave a losing
+            // reservation/event tracked for a later SaveChanges in this scope.
+            if (created != null) _unitOfWork.DiscardChanges(created);
+            if (createdEvent != null) _unitOfWork.DiscardChanges(createdEvent);
+            if (sourceMessageId != null)
+            {
+                var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, cancellationToken);
+                if (existing != null) return Result<ReservationDto>.Success(ToDto(existing));
+            }
             return Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "El horario acaba de ser tomado por otro cliente. Por favor, selecciona otro."));
         }
     }
@@ -346,6 +369,10 @@ public class ReservationEngine : IReservationEngine
             return Result.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
+    private static ReservationDto ToDto(Domain.Entities.Reservation reservation) => new(
+        reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
+        reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
+
     private static bool IsConcurrencyConflict(Exception exception)
     {
         // Npgsql exposes PostgreSQL SQLSTATE through DbException.SqlState;

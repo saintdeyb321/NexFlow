@@ -103,6 +103,10 @@ public class ConversationsController : ControllerBase
             return StatusCode(503, new { code = "Dependency.EvolutionUnavailable", message = "El proveedor no pudo completar el envío.", correlationId = HttpContext.TraceIdentifier });
         }
 
+        if (finalRecord.Status is MessageStatus.Attempting or MessageStatus.UnknownDelivery)
+            return Accepted(finalRecord);
+        if (finalRecord.Status == MessageStatus.Failed)
+            return StatusCode(502, finalRecord);
         return Ok(finalRecord);
     }
 

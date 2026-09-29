@@ -20,7 +20,8 @@ public interface IReservationEngine
         string customerIdentifier,
         string customerName,    
         DateTime dateTime,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? sourceMessageId = null);
 
 
     // Cancela una reserva existente

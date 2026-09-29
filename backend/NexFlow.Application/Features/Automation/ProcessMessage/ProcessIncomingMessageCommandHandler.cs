@@ -54,7 +54,7 @@ public class ProcessIncomingMessageCommandHandler
         {
             // 🔥 SPRINT 02: Inyectamos request.MessageId como clave de idempotencia
             var outbound = await _outboundMessageService.SendMessageAsync(guardResult.WorkspaceId, stateResult.Record.Id, guardResult.NormalizedPhone, stateResult.FastReply, SenderType.AI, request.MessageId, cancellationToken);
-            EnsureMessageSent(outbound);
+            EnsureOutboundFinalized(outbound);
             return Result.Success();
         }
 
@@ -64,7 +64,7 @@ public class ProcessIncomingMessageCommandHandler
             if (!await TryHandleZeroTokenKnowledgeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request.MessageText, request.MessageId, stateResult.Record, cancellationToken))
             {
                 var outbound = await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
-                EnsureMessageSent(outbound);
+                EnsureOutboundFinalized(outbound);
             }
         }
 
@@ -109,15 +109,15 @@ public class ProcessIncomingMessageCommandHandler
 
             var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone,
                 result.ToResponse(), SenderType.AI, sourceMessageId, ct);
-            EnsureMessageSent(outbound);
+            EnsureOutboundFinalized(outbound);
             return true;
         }
         return false;
     }
 
-    private static void EnsureMessageSent(MessageRecord message)
+    private static void EnsureOutboundFinalized(MessageRecord message)
     {
-        if (message.Status != MessageStatus.Sent)
-            throw new InvalidOperationException("El envío de la respuesta no fue confirmado.");
+        if (message.Status is not (MessageStatus.Sent or MessageStatus.UnknownDelivery or MessageStatus.Failed))
+            throw new InvalidOperationException("El resultado del envío aún no está persistido.");
     }
 }

@@ -8,7 +8,9 @@ public interface IConversationRepository
     Task<(int Conversations, int? Handoffs)> CountForPeriodAsync(Guid workspaceId, DateTime start, DateTime end, CancellationToken ct);
     Task<(MessageRecord Message, bool SendRequired)> PrepareOutboundAsync(Guid workspaceId, string conversationId, string phone, MessageRecord message, CancellationToken cancellationToken);
     Task ConfirmOutboundAsync(Guid workspaceId, string messageId, string externalMessageId, CancellationToken cancellationToken);
-    Task RecordOutboundFailureAsync(Guid workspaceId, string messageId, string error, bool rejected, CancellationToken cancellationToken);
+    Task<bool> StartOutboundAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken);
+    Task RecordOutboundFailureAsync(Guid workspaceId, string messageId, string error, MessageStatus status, CancellationToken cancellationToken, string? providerConfirmationId = null);
+    Task<OutboundReconciliationResult> ReconcileOutboundEchoAsync(Guid workspaceId, string? conversationId, string phone, string content, string externalMessageId, DateTime observedAt, CancellationToken cancellationToken);
     Task<(MessageRecord Message, string ConversationId, string Phone)?> GetOutboundAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken);
     Task<MessageOrigin?> GetMessageOriginAsync(Guid workspaceId, string phone, string externalMessageId, CancellationToken cancellationToken);
     Task<bool> HasUnconfirmedOutboundAsync(Guid workspaceId, string phone, CancellationToken cancellationToken);

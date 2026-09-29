@@ -74,7 +74,8 @@ public class EvolutionWebhookController : ControllerBase
             MessageText: messageText,
             MessageId: payload.Data.Key.Id,
             FromMe: payload.Data.Key.FromMe,
-            WorkspaceId: workspaceId
+            WorkspaceId: workspaceId,
+            ObservedAtUtc: DateTime.UtcNow
         );
 
         // 🔥 SPRINT 01: Persistencia Transaccional. Guardamos y respondemos rápido.

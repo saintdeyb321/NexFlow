@@ -20,7 +20,7 @@ using NexFlow.Application.Features.Services.DTOs;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
-public interface IBookingFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct); }
+public interface IBookingFlow { Task<string?> TryResumeAsync(Guid workspaceId, string phone, string sourceMessageId, ConversationContextDto context, CancellationToken ct); Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct); }
 public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, string sourceMessageId, CancellationToken ct); }
 public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, string conversationId, CancellationToken ct); }
 public interface IChatFlow { Task<string> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, CancellationToken ct); }
@@ -31,6 +31,7 @@ public class BookingFlow : IBookingFlow
     private readonly IOfferingService _offeringService;
     private readonly ILocationResolverService _locationResolver;
     private readonly IReservationEngine _reservationEngine;
+    private readonly IReservationRepository _reservationRepository;
     private readonly ILocationRepository _locationRepo;
     private readonly IBusinessHoursRepository _hoursRepo;
     private readonly IMessageGateway _messageGateway;
@@ -40,23 +41,52 @@ public class BookingFlow : IBookingFlow
         IOfferingService offeringService, ILocationResolverService locationResolver,
         IReservationEngine reservationEngine, ILocationRepository locationRepo,
         IBusinessHoursRepository hoursRepo, IMessageGateway messageGateway, IEntitlementService entitlementService,
-        IContextRecoveryService contextStore)
+        IContextRecoveryService contextStore, IReservationRepository reservationRepository)
     {
         _offeringService = offeringService; _locationResolver = locationResolver;
         _reservationEngine = reservationEngine; _locationRepo = locationRepo;
         _hoursRepo = hoursRepo; _messageGateway = messageGateway;
         _contextStore = contextStore;
+        _reservationRepository = reservationRepository;
         _entitlementService = entitlementService;
     }
 
-    public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct)
+    public async Task<string?> TryResumeAsync(Guid workspaceId, string phone, string sourceMessageId, ConversationContextDto context, CancellationToken ct)
     {
-        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, context, interpretation, fallbackName, ct);
+        var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, ct);
+        if (existing == null) return null;
+        if (existing.CustomerIdentifier != phone) throw new InvalidOperationException("Reservation inbound recipient mismatch.");
+        if (context.CurrentGoal is "BOOKING" or "RESERVATION")
+        {
+            ClearDraft(context);
+            await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
+        }
+        return $"✅ Tu reserva ya está registrada con el código {existing.Id}.";
+    }
+
+    private static void ClearDraft(ConversationContextDto context)
+    {
+        context.CurrentGoal = null;
+        context.CurrentStep = null;
+        context.SelectedLocationId = null;
+        context.SelectedServiceId = null;
+        context.TargetDate = null;
+        context.TargetTime = null;
+        context.MissingFields.Clear();
+        context.LastQuestion = null;
+    }
+
+    public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
+        var replay = await TryResumeAsync(workspaceId, phone, sourceMessageId, context, ct);
+        if (replay != null) return replay;
+        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, context, interpretation, fallbackName, sourceMessageId, ct);
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         return response;
     }
 
-    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct)
+    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct)
     {
         var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (!activeModules.Contains("SERVICES")) return AiIntentAccess.ServicesUnavailable;
@@ -180,17 +210,10 @@ public class BookingFlow : IBookingFlow
                 var rawDateTime = $"{context.TargetDate} {context.TargetTime}";
                 if (DateTime.TryParseExact(rawDateTime, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var exactDateTime))
                 {
-                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv!.Id, phone, context.RealCustomerName!, DateTime.SpecifyKind(exactDateTime, DateTimeKind.Unspecified), ct);
+                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv!.Id, phone, context.RealCustomerName!, DateTime.SpecifyKind(exactDateTime, DateTimeKind.Unspecified), ct, sourceMessageId);
                     if (result.IsSuccess)
                     {
-                        context.CurrentGoal = null;
-                        context.CurrentStep = null;
-                        context.SelectedLocationId = null;
-                        context.SelectedServiceId = null;
-                        context.TargetDate = null;
-                        context.TargetTime = null;
-                        context.MissingFields.Clear();
-                        context.LastQuestion = null;
+                        ClearDraft(context);
                         return $"✅ *¡Todo listo, {context.RealCustomerName}!*\n\nTu cita ha sido confirmada exitosamente:\n🦷 Servicio: *{finalSrv.Name}*\n📅 Fecha: *{exactDateTime:dd/MM/yyyy}*\n⏰ Hora: *{exactDateTime:HH:mm}*\n\n¡Te esperamos!";
                     }
                     context.TargetTime = null; return $"Inconveniente: {result.Error.Description}. Indícame otro horario.";

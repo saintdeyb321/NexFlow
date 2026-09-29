@@ -88,11 +88,14 @@ public class OrdersController : ControllerBase
     public async Task<IActionResult> UpdateStatus(string id, [FromBody] UpdateOrderStatusRequest request, CancellationToken cancellationToken)
     {
         if (!await HasAccessAsync(cancellationToken)) return StatusCode(403, "Módulo de Pedidos no contratado.");
+        if (!Enum.IsDefined(request.Status)) return BadRequest(new { code = "Order.InvalidStatus", message = "Estado inválido." });
 
         var order = await _orderRepository.GetOrderByIdAsync(WorkspaceId, id, cancellationToken);
         if (order == null) return NotFound(new { message = "Pedido no encontrado." });
 
-        await _orderRepository.UpdateOrderStatusAsync(WorkspaceId, id, request.Status, cancellationToken);
+        if (!OrderLifecycle.CanTransition(order.Status, request.Status))
+            return Conflict(new { code = "Order.InvalidTransition", message = "La transición del pedido no es válida." });
+        await _orderRepository.UpdateOrderStatusAsync(WorkspaceId, id, order.Status, request.Status, cancellationToken);
 
         return Ok(new { message = "Estado actualizado exitosamente." });
     }

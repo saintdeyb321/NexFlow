@@ -43,6 +43,14 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
         var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        if (activeModules.Contains("RESERVATIONS") && activeModules.Contains("SERVICES"))
+        {
+            var replay = await _bookingFlow.TryResumeAsync(workspaceId, normalizedPhone, request.MessageId, context, cancellationToken);
+            if (replay != null)
+                return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone,
+                    replay, SenderType.AI, request.MessageId, cancellationToken);
+        }
+
         var interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", activeModules, cancellationToken);
 
         string finalResponse;
@@ -70,7 +78,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             {
                 finalResponse = !activeModules.Contains("SERVICES")
                     ? AiIntentAccess.ServicesUnavailable
-                    : await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, cancellationToken);
+                    : await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, request.MessageId, cancellationToken);
             }
             else if ((context.CurrentGoal == "ORDER" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Order)) && activeModules.Contains("ORDERS"))
             {

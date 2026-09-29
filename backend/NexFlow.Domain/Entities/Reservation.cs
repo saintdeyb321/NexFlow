@@ -15,10 +15,11 @@ public class Reservation : Entity
     public DateTime EndTime { get; private set; }
     public ReservationStatus Status { get; private set; }
     public uint RowVersion { get; private set; }
+    public string? SourceMessageId { get; private set; }
 
     private Reservation() { }
 
-    public static Reservation Create(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime startTime, DateTime endTime)
+    public static Reservation Create(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime startTime, DateTime endTime, string? sourceMessageId = null)
     {
         if (endTime <= startTime)
             throw new DomainException("La fecha de finalización debe ser estrictamente posterior a la fecha de inicio.");
@@ -31,6 +32,7 @@ public class Reservation : Entity
             ServiceId = serviceId,
             CustomerIdentifier = customerIdentifier,
             CustomerName = customerName,
+            SourceMessageId = sourceMessageId,
             StartTime = startTime,
             EndTime = endTime,
             Status = ReservationStatus.Confirmed // Iniciamos directo en Confirmed

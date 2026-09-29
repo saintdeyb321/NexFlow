@@ -37,7 +37,7 @@ public class EvolutionMessageGateway : IMessageGateway
         }
     }
 
-    public async Task<string> SendTextAsync(Guid workspaceId, string customerIdentifier, string message, string messageId, CancellationToken cancellationToken)
+    public async Task<string> SendTextAsync(Guid workspaceId, string customerIdentifier, string message, string messageId, Func<CancellationToken, Task> transportStarting, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
@@ -47,7 +47,7 @@ public class EvolutionMessageGateway : IMessageGateway
 
         // Idempotency is enforced by the durable outbound repository, not provider options.
         var payload = new { number = customerIdentifier, text = message, options = new { delay = 1200, presence = "composing" } };
-        return await ExecutePostAsync(url, payload, cancellationToken);
+        return await ExecutePostAsync(url, payload, cancellationToken, transportStarting);
     }
 
     public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, string messageId, CancellationToken cancellationToken)
@@ -70,13 +70,19 @@ public class EvolutionMessageGateway : IMessageGateway
         return await ExecutePostAsync(url, payload, cancellationToken);
     }
 
-    private async Task<string> ExecutePostAsync(string url, object payload, CancellationToken cancellationToken)
+    private async Task<string> ExecutePostAsync(string url, object payload, CancellationToken cancellationToken, Func<CancellationToken, Task>? transportStarting = null)
     {
-        using var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
+        // Resolve, validate and serialize before claiming a durable transport attempt.
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(url, UriKind.Absolute))
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json")
+        };
+        cancellationToken.ThrowIfCancellationRequested();
+        if (transportStarting != null) await transportStarting(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("Evolution API Error. Status={StatusCode}, Details={ErrorDetails}", response.StatusCode, errorDetails);
+            _logger.LogError("Evolution API Error. Status={StatusCode}", response.StatusCode);
             throw new HttpRequestException($"Error de Evolution: {response.StatusCode}", null, response.StatusCode);
         }
 

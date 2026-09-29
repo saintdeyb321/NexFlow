@@ -113,13 +113,20 @@ public class FirestoreOrderRepository : IOrderRepository
         return snapshot.Documents.Select(MapToOrderRecord).ToList();
     }
 
-    public async Task UpdateOrderStatusAsync(Guid workspaceId, string orderId, OrderStatus newStatus, CancellationToken cancellationToken)
+    public async Task UpdateOrderStatusAsync(Guid workspaceId, string orderId, OrderStatus expectedStatus, OrderStatus newStatus, CancellationToken cancellationToken)
     {
         var docRef = GetCollection(workspaceId).Document(orderId);
-        await docRef.UpdateAsync(new Dictionary<string, object>
+        await _firestoreDb.RunTransactionAsync(async transaction =>
         {
-            { "Status", newStatus.ToString() },
-            { "UpdatedAt", DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc) }
+            var snapshot = await transaction.GetSnapshotAsync(docRef, cancellationToken);
+            if (!snapshot.Exists) throw new KeyNotFoundException("Pedido no encontrado.");
+            var current = Enum.Parse<OrderStatus>(snapshot.GetValue<string>("Status"));
+            if (current != expectedStatus || !OrderLifecycle.CanTransition(current, newStatus))
+                throw new ConcurrencyException("El estado cambió o la transición del pedido no es válida.");
+            transaction.Update(docRef, new Dictionary<string, object>
+            {
+                ["Status"] = newStatus.ToString(), ["UpdatedAt"] = DateTime.UtcNow
+            });
         }, cancellationToken: cancellationToken);
     }
 

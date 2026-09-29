@@ -35,9 +35,12 @@ public record MessageRecord
     public SenderType Sender { get; init; }
     public string Content { get; init; } = string.Empty;
     public string? ExternalMessageId { get; init; }
+    public string? ProviderConfirmationId { get; init; }
     public string? IdempotencyKey { get; init; }
     public string? LastError { get; init; }
     public MessageOrigin? Origin { get; init; }
+    public DateTime? TransportStartedAt { get; init; }
+    public DateTime? TransportLeaseUntil { get; init; }
 
     // 🔥 Sprint 4.1: Estado del mensaje
     public MessageStatus Status { get; init; } = MessageStatus.Sent;
@@ -45,3 +48,5 @@ public record MessageRecord
     public DateTime Timestamp { get; init; }
     public DateTime ExpiresAt { get; init; }
 }
+
+public record OutboundReconciliationResult(MessageOrigin? Origin, bool Ambiguous);

@@ -7,5 +7,6 @@ public record ProcessIncomingMessageCommand(
     string MessageText,
     string MessageId,
     bool FromMe,
-    Guid? WorkspaceId = null
+    Guid? WorkspaceId = null,
+    DateTime? ObservedAtUtc = null
 );

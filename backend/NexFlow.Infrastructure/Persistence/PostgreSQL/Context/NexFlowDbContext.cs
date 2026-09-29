@@ -29,6 +29,11 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
 
     public Guid TenantId => _workspaceContext?.CurrentWorkspaceId ?? Guid.Empty;
 
+    public void DiscardChanges(params object[] entities)
+    {
+        foreach (var entity in entities) Entry(entity).State = EntityState.Detached;
+    }
+
     public NexFlowDbContext(DbContextOptions<NexFlowDbContext> options, IWorkspaceContext? workspaceContext = null) : base(options)
     {
         _workspaceContext = workspaceContext;

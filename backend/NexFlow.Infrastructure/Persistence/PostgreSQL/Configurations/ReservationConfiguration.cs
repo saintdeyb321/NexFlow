@@ -14,6 +14,8 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
 
         // Npgsql maps uint row versions to PostgreSQL's system xmin column.
         builder.Property(r => r.RowVersion).IsRowVersion().HasColumnName("xmin");
+        builder.HasIndex(r => new { r.WorkspaceId, r.SourceMessageId }).IsUnique()
+            .HasFilter("\"SourceMessageId\" IS NOT NULL");
 
         // RESTRICCIÓN DE HIERRO (Nivel BD): Evita doble reserva exacta al mismo tiempo
         builder.HasIndex(r => new { r.WorkspaceId, r.LocationId, r.ServiceId, r.StartTime }).IsUnique();
