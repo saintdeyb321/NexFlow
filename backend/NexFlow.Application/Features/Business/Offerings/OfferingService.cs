@@ -59,7 +59,7 @@ public sealed class OfferingService : IOfferingService
         if (string.Equals(item.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return item.LocationIds != null && item.LocationIds.Contains(locationId);
+        return string.Equals(item.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && item.LocationIds != null && item.LocationIds.Contains(locationId);
     }
 
     private IEnumerable<T> FilterItems<T>(IEnumerable<T> items, string? locationId, string? query) where T : BusinessOfferingDto
@@ -68,7 +68,7 @@ public sealed class OfferingService : IOfferingService
         {
             items = items.Where(i =>
                 string.Equals(i.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase) ||
-                (i.LocationIds != null && i.LocationIds.Contains(locationId)));
+                (string.Equals(i.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && i.LocationIds != null && i.LocationIds.Contains(locationId)));
         }
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -108,7 +108,7 @@ public static class OfferingServiceReservationExtensions
         var matches = services
             .Where(s => s.Type == "SERVICE" && s.IsActive && s.RequiresReservation)
             .Where(s => string.Equals(s.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
-                || (s.LocationIds != null && s.LocationIds.Contains(locationId)))
+                || (string.Equals(s.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && s.LocationIds != null && s.LocationIds.Contains(locationId)))
             .Where(s => string.Equals(s.Name.Trim(), serviceName.Trim(), StringComparison.OrdinalIgnoreCase))
             .Take(2)
             .ToList();

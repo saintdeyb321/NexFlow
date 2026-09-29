@@ -1,8 +1,9 @@
-﻿using Google.Cloud.Firestore;
+using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -52,13 +53,37 @@ public class FirestoreCatalogRepository : ICatalogRepository
             DisplayOrder = category.DisplayOrder
         };
 
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+        category.Name = category.Name?.Trim() ?? "";
+        category.Scope = category.Scope?.Trim().ToUpperInvariant() ?? "";
+        if (category.Name.Length == 0 || category.Scope is not ("PRODUCT" or "SERVICE" or "SHARED"))
+            throw new DomainException("Nombre o scope de categoría inválido.");
+        data.Name = category.Name;
+        data.Scope = category.Scope;
+        var workspace = docRef.Parent.Parent!;
+        await _firestoreDb.RunTransactionAsync(async tx =>
+        {
+            await tx.GetSnapshotAsync(workspace, cancellationToken);
+            var references = await tx.GetSnapshotAsync(workspace.Collection("catalogItems").WhereEqualTo("CategoryId", docId), cancellationToken);
+            if (references.Documents.Select(MapToItemDto).Any(i =>
+                (i.IsActive && !category.IsActive) || (category.Scope != "SHARED" && category.Scope != i.Type)))
+                throw new DomainException("La categoría tiene offerings activos o de un tipo incompatible con el cambio.");
+            tx.Set(docRef, data, SetOptions.MergeAll);
+            tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
+        }, cancellationToken: cancellationToken);
     }
 
     public async Task DeleteCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories").Document(categoryId);
-        await docRef.DeleteAsync(Precondition.None, cancellationToken);
+        var workspace = docRef.Parent.Parent!;
+        await _firestoreDb.RunTransactionAsync(async tx =>
+        {
+            await tx.GetSnapshotAsync(workspace, cancellationToken);
+            var references = await tx.GetSnapshotAsync(workspace.Collection("catalogItems").WhereEqualTo("CategoryId", categoryId).Limit(1), cancellationToken);
+            if (references.Count > 0) throw new DomainException("La categoría sigue siendo utilizada por productos o servicios.");
+            tx.Delete(docRef);
+            tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
+        }, cancellationToken: cancellationToken);
     }
 
     // =========================================================
@@ -90,8 +115,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
     public async Task<IEnumerable<BusinessOfferingDto>> GetItemsByCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems")
-            .WhereEqualTo("CategoryId", categoryId)
-            .WhereEqualTo("IsActive", true);
+            .WhereEqualTo("CategoryId", categoryId);
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
         return snapshot.Documents.Select(MapToItemDto);
     }
@@ -107,6 +131,29 @@ public class FirestoreCatalogRepository : ICatalogRepository
 
     public async Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken)
     {
+        item.Name = item.Name?.Trim() ?? "";
+        item.Currency = item.Currency?.Trim().ToUpperInvariant() ?? "";
+        item.LocationScope = item.LocationScope?.Trim().ToUpperInvariant() ?? "";
+        item.CategoryId = item.CategoryId?.Trim() ?? "";
+        if (item.CategoryId == Guid.Empty.ToString()) item.CategoryId = "";
+        if (item.Name.Length == 0 || item.Currency.Length == 0 || item.PriceMinorUnits < 0)
+            throw new DomainException("Nombre, precio o moneda inválidos.");
+        if ((item is not ProductDto && item is not ServiceDto) || item.Type is not ("PRODUCT" or "SERVICE"))
+            throw new DomainException("Tipo de offering inválido.");
+        if (item.LocationScope is not ("ALL" or "SPECIFIC"))
+            throw new DomainException("LocationScope debe ser ALL o SPECIFIC.");
+        item.LocationIds = item.LocationScope == "ALL" ? new List<string>()
+            : (item.LocationIds ?? new List<string>()).Select(id => id?.Trim() ?? "").Distinct(StringComparer.Ordinal).ToList();
+        if (item.LocationScope == "SPECIFIC" && (item.LocationIds.Count == 0 || item.LocationIds.Any(id => string.IsNullOrWhiteSpace(id) || id.Contains('/'))))
+            throw new DomainException("SPECIFIC requiere al menos una sede válida.");
+        if (item.CategoryId.Contains('/') || item.Id?.Contains('/') == true)
+            throw new DomainException("ID de offering o categoría inválido.");
+        if (item is ServiceDto service)
+        {
+            if (service.RequiresReservation && (!service.DurationInMinutes.HasValue || service.DurationInMinutes < 5))
+                throw new DomainException("Un servicio reservable requiere una duración de al menos 5 minutos.");
+            if (!service.RequiresReservation) service.DurationInMinutes = null;
+        }
         var docId = string.IsNullOrEmpty(item.Id) ? Guid.NewGuid().ToString() : item.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(docId);
 
@@ -131,13 +178,36 @@ public class FirestoreCatalogRepository : ICatalogRepository
             Metadata = item.Metadata ?? new Dictionary<string, object>()
         };
 
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+        var workspace = docRef.Parent.Parent!;
+        await _firestoreDb.RunTransactionAsync(async tx =>
+        {
+            await tx.GetSnapshotAsync(workspace, cancellationToken);
+            var existing = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            if (existing.Exists && MapToItemDto(existing).Type != item.Type)
+                throw new DomainException("No se puede cambiar el tipo del offering.");
+            foreach (var locationId in item.LocationIds)
+            {
+                var location = await tx.GetSnapshotAsync(workspace.Collection("locations").Document(locationId), cancellationToken);
+                if (!location.Exists) throw new DomainException("Una de las sedes no existe en este workspace.");
+            }
+            if (item.CategoryId.Length > 0)
+            {
+                var categoryDoc = await tx.GetSnapshotAsync(workspace.Collection("catalogCategories").Document(item.CategoryId), cancellationToken);
+                if (!categoryDoc.Exists) throw new DomainException("La categoría no existe en este workspace.");
+                var category = MapToCategoryDto(categoryDoc);
+                if ((item.IsActive && !category.IsActive) || (category.Scope != "SHARED" && category.Scope != item.Type))
+                    throw new DomainException("La categoría está inactiva o tiene un scope incompatible.");
+            }
+            // Full replacement also removes legacy location references.
+            tx.Set(docRef, data);
+            tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
+        }, cancellationToken: cancellationToken);
     }
 
     public async Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(itemId);
-        await docRef.DeleteAsync(Precondition.None, cancellationToken);
+        await docRef.UpdateAsync(new Dictionary<string, object> { ["IsActive"] = false }, cancellationToken: cancellationToken);
     }
 
     // =========================================================
@@ -248,3 +318,4 @@ public class FirestoreCatalogRepository : ICatalogRepository
         [FirestoreProperty] public Dictionary<string, object> Metadata { get; set; } = new();
     }
 }
+

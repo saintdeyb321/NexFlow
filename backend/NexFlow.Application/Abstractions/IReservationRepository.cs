@@ -5,6 +5,7 @@ namespace NexFlow.Application.Abstractions;
 public interface IReservationRepository
 {
     void Add(Reservation reservation);
+    Task<bool> HasFutureConfirmedAtLocationAsync(Guid workspaceId, string locationId, CancellationToken cancellationToken);
 
     Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken);
 

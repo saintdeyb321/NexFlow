@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Services.DTOs;
@@ -42,7 +42,7 @@ public class ServicesController : ControllerBase
     {
         if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
 
-        var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
+        var allItems = await _catalogRepository.GetItemsByTypeAsync(WorkspaceId, "SERVICE", cancellationToken);
         var services = allItems.Where(i => i.Type == "SERVICE");
 
         if (!string.IsNullOrWhiteSpace(locationId))
@@ -61,50 +61,10 @@ public class ServicesController : ControllerBase
     {
         if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
 
-        // 🔥 SPRINT 09: Validaciones de Integridad del Servicio
-        if (string.IsNullOrWhiteSpace(service.Name))
-            return BadRequest(new { message = "El nombre del servicio es obligatorio." });
-
-        if (service.PriceMinorUnits < 0)
-            return BadRequest(new { message = "El precio no puede ser negativo." });
-
-        if (string.IsNullOrWhiteSpace(service.Currency))
-            return BadRequest(new { message = "La moneda del precio es obligatoria (ej. PEN, USD)." });
-
-        if (service.RequiresReservation)
-        {
-            if (!service.DurationInMinutes.HasValue || service.DurationInMinutes <= 0)
-                return BadRequest(new { message = "Un servicio que requiere reserva debe tener una duración válida mayor a 0 minutos." });
-        }
-
-        service.LocationScope = service.LocationScope?.Trim().ToUpperInvariant() ?? "ALL";
-        if (service.LocationScope == "SPECIFIC" && (service.LocationIds == null || !service.LocationIds.Any()))
-            return BadRequest(new { message = "Si el alcance es SPECIFIC, debes proveer al menos una sede (LocationIds)." });
-
-        if (service.Type != "SERVICE")
-            return BadRequest(new { message = "Este endpoint solo admite entidades SERVICE." });
-
+        if (service.Type != "SERVICE") return BadRequest(new { message = "Tipo de offering inválido." });
         if (string.IsNullOrWhiteSpace(service.Id)) service.Id = Guid.NewGuid().ToString();
-        else
-        {
-            var existing = await _catalogRepository.GetItemByIdAsync(WorkspaceId, service.Id, cancellationToken);
-            if (existing != null && existing.Type != "SERVICE")
-                return StatusCode(403, "No se permite sobrescribir una entidad de otro tipo.");
-        }
-
-        if (string.IsNullOrEmpty(service.CategoryId))
-        {
-            service.CategoryId = Guid.Empty.ToString();
-        }
-        else
-        {
-            var category = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, service.CategoryId, cancellationToken);
-            if (category == null) return BadRequest(new { message = "La categoría asignada no existe." });
-            if (category.Scope != "SERVICE" && category.Scope != "SHARED")
-                return BadRequest(new { message = "El servicio requiere una categoría SERVICE o SHARED." });
-        }
-
-        await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken);
+        try { await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken); }
+        catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
 
         QueueArtifactInvalidation(WorkspaceId);
 

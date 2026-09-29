@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
@@ -80,7 +80,7 @@ public class ReservationsController : ControllerBase
         var result = await _reservationEngine.CreateReservationAsync(
             WorkspaceId, request.LocationId, request.ServiceId, request.CustomerIdentifier, request.CustomerName, request.DateTime, cancellationToken);
 
-        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
+        if (result.IsFailure) return ReservationError(result.Error);
         return Ok(result.Value);
     }
 
@@ -92,7 +92,7 @@ public class ReservationsController : ControllerBase
         // 🔥 SPRINT 2: La edición usa el mismo contrato temporal que la creación.
         var result = await _reservationEngine.EditReservationAsync(WorkspaceId, id, request.NewDateTime, cancellationToken);
 
-        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
+        if (result.IsFailure) return ReservationError(result.Error);
         return Ok(result.Value);
     }
 
@@ -101,10 +101,10 @@ public class ReservationsController : ControllerBase
     {
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
 
-        if (request.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(request.Status, "Completed", StringComparison.OrdinalIgnoreCase))
         {
             var result = await _reservationEngine.CompleteReservationAsync(WorkspaceId, id, cancellationToken);
-            if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
+            if (result.IsFailure) return ReservationError(result.Error);
             return Ok();
         }
 
@@ -118,11 +118,18 @@ public class ReservationsController : ControllerBase
 
         var result = await _reservationEngine.CancelReservationAsync(WorkspaceId, id, cancellationToken);
 
-        if (result.IsFailure) return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
+        if (result.IsFailure) return ReservationError(result.Error);
         return NoContent();
+    }
+    private IActionResult ReservationError(NexFlow.Application.Common.Error error)
+    {
+        var status = error.Code.EndsWith(".NotFound", StringComparison.Ordinal) ? 404
+            : error.Code is "Reservation.Conflict" or "Reservation.ConcurrencyConflict" or "Reservation.InvalidTransition" ? 409 : 400;
+        return StatusCode(status, new { code = error.Code, message = error.Description });
     }
 }
 
 public record CreateReservationRequest(string LocationId, string ServiceId, string CustomerIdentifier, string CustomerName, DateTime DateTime);
 public record EditReservationRequest(DateTime NewDateTime);
 public record UpdateReservationStatusRequest(string Status);
+

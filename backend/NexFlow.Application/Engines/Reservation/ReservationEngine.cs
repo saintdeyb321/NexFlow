@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
@@ -9,6 +9,9 @@ using NexFlow.Domain.Entities.System;
 using NexFlow.Application.Features.Services.DTOs;
 using System.Transactions;
 using Microsoft.EntityFrameworkCore;
+using System.Data.Common;
+using System.Globalization;
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Application.Engines.Reservation;
 
@@ -96,7 +99,7 @@ public class ReservationEngine : IReservationEngine
         var localDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDate.DayOfWeek);
 
-        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
+        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParseExact(todayHours.OpenTime, @"hh\:mm", CultureInfo.InvariantCulture, out var openTime) || !TimeSpan.TryParseExact(todayHours.CloseTime, @"hh\:mm", CultureInfo.InvariantCulture, out var closeTime))
             return new List<TimeSlotDto>();
 
         var startOfDayUtc = TimeZoneInfo.ConvertTimeToUtc(localDate, workspaceZone);
@@ -115,7 +118,7 @@ public class ReservationEngine : IReservationEngine
             var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, workspaceZone);
             var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, workspaceZone);
 
-            bool isOccupied = existingReservations.Any(r => r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
+            bool isOccupied = existingReservations.Any(r => r.Status != Domain.Enums.ReservationStatus.Cancelled && r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
             bool isPast = currentSlotStartLocal <= localNow;
 
             if (!isOccupied && !isPast) availableSlots.Add(new TimeSlotDto(currentSlotStartLocal, currentSlotEndLocal, true));
@@ -138,7 +141,7 @@ public class ReservationEngine : IReservationEngine
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDateTime.DayOfWeek);
 
-        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
+        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParseExact(todayHours.OpenTime, @"hh\:mm", CultureInfo.InvariantCulture, out var openTime) || !TimeSpan.TryParseExact(todayHours.CloseTime, @"hh\:mm", CultureInfo.InvariantCulture, out var closeTime))
             return Result<ReservationDto>.Failure(new Error("Reservation.Closed", "El negocio se encuentra cerrado en el día y horario seleccionado."));
 
         var timeOnly = localDateTime.TimeOfDay;
@@ -146,7 +149,8 @@ public class ReservationEngine : IReservationEngine
         // 🔥 SPRINT 07: Optimizamos. Traemos solo 1 servicio, no el catálogo entero.
         var targetService = await _catalogRepository.GetItemByIdAsync(workspaceId, serviceId, cancellationToken) as ServiceDto;
 
-        if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe o está inactivo."));
+        if (targetService == null) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe."));
+        if (!targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.Inactive", "El servicio está inactivo."));
         if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Este servicio no requiere reservas."));
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
 
@@ -180,7 +184,7 @@ public class ReservationEngine : IReservationEngine
                 return Result<ReservationDto>.Success(dto);
             }
         }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("40001") == true || ex.InnerException?.Message.Contains("concurrent") == true)
+        catch (Exception ex) when (IsConcurrencyConflict(ex))
         {
             // 🔥 SPRINT 07: Captura elegante de Error de Concurrencia (Serialization Failure)
             return Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "El horario acaba de ser tomado por otro cliente. Por favor, selecciona otro."));
@@ -191,6 +195,8 @@ public class ReservationEngine : IReservationEngine
     {
         var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
         if (reservation == null) return Result<ReservationDto>.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+        if (reservation.Status != Domain.Enums.ReservationStatus.Confirmed)
+            return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", "Solo se pueden reagendar reservas confirmadas."));
 
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         if (!TryResolveReservationTime(newDateTime, workspaceZone, out var localDateTime, out var newStartTimeUtc))
@@ -199,7 +205,7 @@ public class ReservationEngine : IReservationEngine
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, reservation.LocationId, cancellationToken);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDateTime.DayOfWeek);
 
-        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParse(todayHours.OpenTime, out var openTime) || !TimeSpan.TryParse(todayHours.CloseTime, out var closeTime))
+        if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParseExact(todayHours.OpenTime, @"hh\:mm", CultureInfo.InvariantCulture, out var openTime) || !TimeSpan.TryParseExact(todayHours.CloseTime, @"hh\:mm", CultureInfo.InvariantCulture, out var closeTime))
             return Result<ReservationDto>.Failure(new Error("Reservation.Closed", "El negocio se encuentra cerrado en el día y horario seleccionado."));
 
         var timeOnly = localDateTime.TimeOfDay;
@@ -207,7 +213,8 @@ public class ReservationEngine : IReservationEngine
         // 🔥 SPRINT 07: Optimizamos. Traemos solo 1 servicio.
         var targetService = await _catalogRepository.GetItemByIdAsync(workspaceId, reservation.ServiceId, cancellationToken) as ServiceDto;
 
-        if (targetService == null || !targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "Servicio no válido."));
+        if (targetService == null) return Result<ReservationDto>.Failure(new Error("Service.NotFound", "El servicio no existe."));
+        if (!targetService.IsActive) return Result<ReservationDto>.Failure(new Error("Service.Inactive", "El servicio está inactivo."));
         if (!targetService.RequiresReservation) return Result<ReservationDto>.Failure(new Error("Service.NotReservable", "Servicio no reservable."));
         if (!targetService.DurationInMinutes.HasValue || targetService.DurationInMinutes.Value < 5) return Result<ReservationDto>.Failure(new Error("Service.InvalidDuration", "Duración inválida."));
 
@@ -227,7 +234,8 @@ public class ReservationEngine : IReservationEngine
                 var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
                 if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado."));
 
-                reservation.Reschedule(newStartTimeUtc, newEndTimeUtc);
+                try { reservation.Reschedule(newStartTimeUtc, newEndTimeUtc); }
+                catch (DomainException ex) { return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", ex.Message)); }
 
                 var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_RESCHEDULED", Guid.NewGuid().ToString(), $"res_upd_{reservation.Id}", DateTime.UtcNow, dto);
@@ -240,7 +248,7 @@ public class ReservationEngine : IReservationEngine
                 return Result<ReservationDto>.Success(dto);
             }
         }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("40001") == true || ex.InnerException?.Message.Contains("concurrent") == true)
+        catch (Exception ex) when (IsConcurrencyConflict(ex))
         {
             return Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "El horario acaba de ser tomado por otro cliente."));
         }
@@ -248,61 +256,106 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<Result> CancelReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
-        using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
+        try
         {
-            var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
-            if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
-
-            reservation.Cancel();
-
-            var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
-            var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
-
-            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            scope.Complete();
-            return Result.Success();
+            using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
+            {
+                var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
+                if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+    
+                reservation.Cancel();
+    
+                var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
+                var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+    
+                await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+    
+                scope.Complete();
+                return Result.Success();
+            }
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure(new Error("Reservation.InvalidTransition", ex.Message));
+        }
+        catch (Exception ex) when (IsConcurrencyConflict(ex))
+        {
+            return Result.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
 
     public async Task<Result<Domain.Entities.Reservation>> CancelActiveReservationAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
-        using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
+        try
         {
-            var reservation = await _reservationRepository.GetActiveReservationByPhoneAsync(workspaceId, customerPhone, cancellationToken);
-            if (reservation == null) return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.NotFound", "No tienes ninguna reserva activa."));
-
-            reservation.Cancel();
-
-            var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
-            var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
-
-            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            scope.Complete();
-            return Result<Domain.Entities.Reservation>.Success(reservation);
+            using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
+            {
+                var reservation = await _reservationRepository.GetActiveReservationByPhoneAsync(workspaceId, customerPhone, cancellationToken);
+                if (reservation == null) return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.NotFound", "No tienes ninguna reserva activa."));
+    
+                reservation.Cancel();
+    
+                var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
+                var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+    
+                await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+    
+                scope.Complete();
+                return Result<Domain.Entities.Reservation>.Success(reservation);
+            }
+        }
+        catch (DomainException ex)
+        {
+            return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.InvalidTransition", ex.Message));
+        }
+        catch (Exception ex) when (IsConcurrencyConflict(ex))
+        {
+            return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
 
     public async Task<Result> CompleteReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
-        using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
+        try
         {
-            var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
-            if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
-
-            reservation.Complete();
-
-            var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_COMPLETED", Guid.NewGuid().ToString(), $"res_comp_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "COMPLETED" });
-            var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_COMPLETED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
-
-            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            scope.Complete();
-            return Result.Success();
+            using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
+            {
+                var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
+                if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+    
+                reservation.Complete();
+    
+                var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_COMPLETED", Guid.NewGuid().ToString(), $"res_comp_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "COMPLETED" });
+                var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_COMPLETED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+    
+                await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+    
+                scope.Complete();
+                return Result.Success();
+            }
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure(new Error("Reservation.InvalidTransition", ex.Message));
+        }
+        catch (Exception ex) when (IsConcurrencyConflict(ex))
+        {
+            return Result.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
+    private static bool IsConcurrencyConflict(Exception exception)
+    {
+        // Npgsql exposes PostgreSQL SQLSTATE through DbException.SqlState;
+        // this also covers failures raised when TransactionScope commits.
+        for (Exception? current = exception; current != null; current = current.InnerException)
+        {
+            if (current is DbUpdateConcurrencyException) return true;
+            if (current is DbException { SqlState: "40001" or "40P01" or "23505" or "23P01" }) return true;
+        }
+        return false;
+    }
 }
+

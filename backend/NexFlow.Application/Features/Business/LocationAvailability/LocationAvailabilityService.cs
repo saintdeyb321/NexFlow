@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions;
 // 🔥 NUEVO NAMESPACE
 using NexFlow.Application.Features.Shared.DTOs;
 
@@ -31,6 +31,6 @@ public class LocationAvailabilityService : ILocationAvailabilityService
         if (offering == null) return false;
         if (string.Equals(offering.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)) return true;
         if (string.IsNullOrWhiteSpace(locationId)) return false;
-        return offering.LocationIds != null && offering.LocationIds.Contains(locationId);
+        return string.Equals(offering.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && offering.LocationIds != null && offering.LocationIds.Contains(locationId);
     }
 }

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
@@ -104,21 +104,8 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        var currentLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
-        bool isNewLocation = string.IsNullOrEmpty(location.Id) || !currentLocations.Any(l => l.Id == location.Id);
-
-        if (isNewLocation)
-        {
-            int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
-            if (currentLocations.Count() >= maxLocations)
-            {
-                return StatusCode(403, new { code = "BusinessRuleViolation", message = $"Has alcanzado el límite máximo de {maxLocations} sede(s) permitido por tu plan actual." });
-            }
-        }
-
-        var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
-        if (result.IsFailure) return StatusCode(400, new { message = result.Error });
-
+        var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location, IsCreate: true), cancellationToken);
+        if (result.IsFailure) return LocationError(result.Error);
         return Ok();
     }
 
@@ -131,23 +118,9 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        var currentLocations = await _locationRepository.GetLocationsAsync(WorkspaceId, cancellationToken);
-        bool exists = currentLocations.Any(l => l.Id == locationId);
-
-        if (!exists)
-        {
-            int maxLocations = await _entitlementService.GetMaxLocationsAsync(WorkspaceId, cancellationToken);
-            if (currentLocations.Count() >= maxLocations)
-            {
-                return StatusCode(403, new { code = "BusinessRuleViolation", message = $"Has alcanzado el límite máximo de {maxLocations} sede(s) permitido por tu plan actual." });
-            }
-        }
-
         location = location with { Id = locationId };
-
-        var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location), cancellationToken);
-        if (result.IsFailure) return StatusCode(400, new { message = result.Error });
-
+        var result = await handler.Handle(new SaveLocationCommand(WorkspaceId, location, IsCreate: false), cancellationToken);
+        if (result.IsFailure) return LocationError(result.Error);
         return Ok();
     }
 
@@ -159,32 +132,11 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("LOCATIONS", cancellationToken)) return StatusCode(403, "Módulo LOCATIONS no contratado.");
 
-        // 🔥 SPRINT 10: Validación Estricta. No se puede borrar si hay reservas futuras en esta sede.
-        var futureReservations = await reservationRepository.GetReservationsForDateAsync(
-            WorkspaceId,
-            locationId,
-            DateTime.UtcNow,
-            DateTime.UtcNow.AddYears(1),
-            cancellationToken);
-
-        if (futureReservations.Any(r => r.Status == ReservationStatus.Confirmed))
-        {
-            return BadRequest(new { message = "No puedes eliminar una sede que tiene reservas confirmadas a futuro. Por favor, reasigna o cancela esas reservas primero." });
-        }
-
-        var items = await _catalogRepository.GetActiveItemsAsync(WorkspaceId, cancellationToken);
-        var affectedItems = items.Where(i => i.LocationIds != null && i.LocationIds.Contains(locationId)).ToList();
-
-        foreach (var item in affectedItems)
-        {
-            item.LocationIds.Remove(locationId);
-            await _catalogRepository.SaveItemAsync(WorkspaceId, item, cancellationToken);
-        }
-
-        // 🔥 SPRINT 10: Limpiamos los horarios de la sede borrada para no dejar datos huérfanos.
-        await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, Array.Empty<BusinessHoursDto>(), cancellationToken);
-        await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
-
+        if (await reservationRepository.HasFutureConfirmedAtLocationAsync(WorkspaceId, locationId, cancellationToken))
+            return Conflict(new { message = "No puedes eliminar una sede con reservas futuras confirmadas." });
+        // References, hours and the replacement main location are handled atomically.
+        var result = await _locationRepository.DeleteLocationAsync(WorkspaceId, locationId, cancellationToken);
+        if (result.IsFailure) return LocationError(result.Error);
         return NoContent();
     }
 
@@ -201,7 +153,9 @@ public class BusinessController : ControllerBase
     public async Task<IActionResult> SaveHours(string locationId, [FromBody] BusinessHoursDto[] hours, CancellationToken cancellationToken)
     {
         if (!await HasAccessTo("BUSINESS_HOURS", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_HOURS no contratado.");
-        await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, hours, cancellationToken);
+        try { await _hoursRepository.SaveBusinessHoursAsync(WorkspaceId, locationId, hours, cancellationToken); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
         return NoContent();
     }
 
@@ -288,4 +242,13 @@ public class BusinessController : ControllerBase
 
         return Ok(new { message = "Instancia desconectada." });
     }
+    private IActionResult LocationError(NexFlow.Application.Common.Error error) =>
+        StatusCode(error.Code switch
+        {
+            "Location.NotFound" => 404,
+            "Location.Conflict" => 409,
+            "Location.LimitReached" => 403,
+            _ => 400
+        }, new { code = error.Code, message = error.Description });
 }
+

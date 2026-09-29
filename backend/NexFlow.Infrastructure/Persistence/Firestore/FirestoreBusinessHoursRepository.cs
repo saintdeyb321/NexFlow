@@ -1,4 +1,4 @@
-﻿using Google.Cloud.Firestore;
+using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Exceptions; // 🔥 Necesario para la excepción de dominio
@@ -30,40 +30,42 @@ public class FirestoreBusinessHoursRepository : IBusinessHoursRepository
 
     public async Task SaveBusinessHoursAsync(Guid workspaceId, string? locationId, IEnumerable<BusinessHoursDto> hours, CancellationToken cancellationToken)
     {
-        // 🔥 CORRECCIÓN (Fallos #54 y #55): Validación estricta de formato y lógica de horas.
-        foreach (var hour in hours)
+        var schedule = hours.ToList();
+        if (schedule.Any(h => h.DayOfWeek < 0 || h.DayOfWeek > 6) || schedule.Select(h => h.DayOfWeek).Distinct().Count() != schedule.Count)
+            throw new DomainException("Los días deben ser únicos y estar entre 0 y 6.");
+        foreach (var hour in schedule)
         {
-            if (!hour.IsClosed)
-            {
-                if (!TimeSpan.TryParse(hour.OpenTime, out var open) || !TimeSpan.TryParse(hour.CloseTime, out var close))
-                    throw new DomainException($"El formato de hora para el día {hour.DayOfWeek} no es válido. Use formato HH:mm.");
-
-                if (open >= close)
-                    throw new DomainException($"Para el día {hour.DayOfWeek}, la hora de apertura ({hour.OpenTime}) debe ser menor que la de cierre ({hour.CloseTime}).");
-            }
+            if (!TimeOnly.TryParseExact(hour.OpenTime, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var open) ||
+                !TimeOnly.TryParseExact(hour.CloseTime, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var close))
+                throw new DomainException("Las horas deben tener formato HH:mm válido.");
+            if (!hour.IsClosed && open >= close)
+                throw new DomainException("La apertura debe ser anterior al cierre.");
         }
-
+        if (locationId?.Contains('/') == true) throw new DomainException("ID de sede inválido.");
         var docId = string.IsNullOrEmpty(locationId) ? "global" : locationId;
-        var collectionRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("hours").Document(docId).Collection("schedule");
-
-        var batch = _firestoreDb.StartBatch();
-
-        foreach (var hour in hours)
+        var workspace = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString());
+        var collectionRef = workspace.Collection("hours").Document(docId).Collection("schedule");
+        await _firestoreDb.RunTransactionAsync(async tx =>
         {
-            var docRef = collectionRef.Document(hour.DayOfWeek.ToString());
-            var data = new FirestoreBusinessHours
+            await tx.GetSnapshotAsync(workspace, cancellationToken);
+            if (!string.IsNullOrEmpty(locationId))
             {
-                DayOfWeek = hour.DayOfWeek,
-                OpenTime = hour.OpenTime,
-                CloseTime = hour.CloseTime,
-                IsClosed = hour.IsClosed
-            };
-            batch.Set(docRef, data, SetOptions.MergeAll);
-        }
-
-        await batch.CommitAsync(cancellationToken);
+                var location = await tx.GetSnapshotAsync(workspace.Collection("locations").Document(locationId), cancellationToken);
+                if (!location.Exists) throw new KeyNotFoundException("La sede no existe.");
+            }
+            var previous = await tx.GetSnapshotAsync(collectionRef, cancellationToken);
+            var ids = schedule.Select(h => h.DayOfWeek.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToHashSet();
+            foreach (var doc in previous.Documents.Where(d => !ids.Contains(d.Id))) tx.Delete(doc.Reference);
+            foreach (var hour in schedule)
+                tx.Set(collectionRef.Document(hour.DayOfWeek.ToString(System.Globalization.CultureInfo.InvariantCulture)), new FirestoreBusinessHours
+                {
+                    DayOfWeek = hour.DayOfWeek, OpenTime = hour.OpenTime, CloseTime = hour.CloseTime, IsClosed = hour.IsClosed
+                });
+            tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
+        }, cancellationToken: cancellationToken);
     }
-
     [FirestoreData]
     private class FirestoreBusinessHours
     {

@@ -14,7 +14,7 @@ public class Reservation : Entity
     public DateTime StartTime { get; private set; }
     public DateTime EndTime { get; private set; }
     public ReservationStatus Status { get; private set; }
-    public byte[] RowVersion { get; private set; } = null!;
+    public uint RowVersion { get; private set; }
 
     private Reservation() { }
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Catalog.DTOs;
@@ -102,7 +102,8 @@ public class CatalogController : ControllerBase
                     return BadRequest(new { message = "No se permite cambiar el scope de una categoría existente." });
             }
         }
-        await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
+        try { await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken); }
+        catch (DomainException ex) { return BadRequest(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
         return Ok(category);
@@ -124,7 +125,8 @@ public class CatalogController : ControllerBase
             return BadRequest(new { message = "No se permite cambiar el scope de una categoría existente." });
 
         category.Id = categoryId;
-        await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken);
+        try { await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken); }
+        catch (DomainException ex) { return BadRequest(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
         return Ok(category);
@@ -143,7 +145,8 @@ public class CatalogController : ControllerBase
         var items = await _catalogRepository.GetItemsByCategoryAsync(WorkspaceId, categoryId, cancellationToken);
         if (items.Any()) return BadRequest(new { message = "No puedes eliminar una categoría que contiene productos o servicios." });
 
-        await _catalogRepository.DeleteCategoryAsync(WorkspaceId, categoryId, cancellationToken);
+        try { await _catalogRepository.DeleteCategoryAsync(WorkspaceId, categoryId, cancellationToken); }
+        catch (DomainException ex) { return Conflict(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
         return NoContent();
@@ -157,7 +160,7 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        var allItems = await _catalogRepository.GetItemsAsync(WorkspaceId, cancellationToken);
+        var allItems = await _catalogRepository.GetItemsByTypeAsync(WorkspaceId, "PRODUCT", cancellationToken);
         var products = allItems.Where(i => i.Type == "PRODUCT");
 
         if (!string.IsNullOrWhiteSpace(locationId))
@@ -176,44 +179,10 @@ public class CatalogController : ControllerBase
     {
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
-        // 🔥 SPRINT 09: Validaciones de Integridad del Producto
-        if (string.IsNullOrWhiteSpace(product.Name))
-            return BadRequest(new { message = "El nombre del producto es obligatorio." });
-
-        if (product.PriceMinorUnits < 0)
-            return BadRequest(new { message = "El precio no puede ser negativo." });
-
-        if (string.IsNullOrWhiteSpace(product.Currency))
-            return BadRequest(new { message = "La moneda del precio es obligatoria (ej. PEN, USD)." });
-
-        product.LocationScope = product.LocationScope?.Trim().ToUpperInvariant() ?? "ALL";
-        if (product.LocationScope == "SPECIFIC" && (product.LocationIds == null || !product.LocationIds.Any()))
-            return BadRequest(new { message = "Si el alcance es SPECIFIC, debes proveer al menos una sede (LocationIds)." });
-
-        if (product.Type != "PRODUCT")
-            return BadRequest(new { message = "Este endpoint solo admite entidades PRODUCT." });
-
+        if (product.Type != "PRODUCT") return BadRequest(new { message = "Tipo de offering inválido." });
         if (string.IsNullOrWhiteSpace(product.Id)) product.Id = Guid.NewGuid().ToString();
-        else
-        {
-            var existing = await _catalogRepository.GetItemByIdAsync(WorkspaceId, product.Id, cancellationToken);
-            if (existing != null && existing.Type != "PRODUCT")
-                return StatusCode(403, "No se permite sobrescribir una entidad de otro tipo.");
-        }
-
-        if (string.IsNullOrEmpty(product.CategoryId))
-        {
-            product.CategoryId = Guid.Empty.ToString();
-        }
-        else
-        {
-            var category = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, product.CategoryId, cancellationToken);
-            if (category == null) return BadRequest(new { message = "La categoría asignada no existe." });
-            if (category.Scope != "PRODUCT" && category.Scope != "SHARED")
-                return BadRequest(new { message = "El producto requiere una categoría PRODUCT o SHARED." });
-        }
-
-        await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken);
+        try { await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken); }
+        catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
         return Ok(product);

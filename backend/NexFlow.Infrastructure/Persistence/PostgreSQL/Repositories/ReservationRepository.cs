@@ -20,6 +20,10 @@ public class ReservationRepository : IReservationRepository
 
     public void Add(Reservation reservation) => _context.Reservations.Add(reservation);
 
+    public Task<bool> HasFutureConfirmedAtLocationAsync(Guid workspaceId, string locationId, CancellationToken cancellationToken) =>
+        _context.Reservations.AnyAsync(r => r.WorkspaceId == workspaceId && r.LocationId == locationId
+            && r.Status == ReservationStatus.Confirmed && r.StartTime >= _clock.UtcNow, cancellationToken);
+
     public async Task<Reservation?> GetByIdAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
         return await _context.Reservations

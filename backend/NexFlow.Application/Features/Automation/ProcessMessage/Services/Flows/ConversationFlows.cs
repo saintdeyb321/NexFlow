@@ -1,3 +1,4 @@
+using System.Globalization;
 using NexFlow.Application.Features.Knowledge;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
@@ -163,7 +164,7 @@ public class BookingFlow : IBookingFlow
                 context.LastQuestion = "¿Para qué fecha te gustaría programar tu cita?";
                 return $"¡Excelente! 🏥\n\n{context.LastQuestion}\n👉 *(Ej: 'mañana', o 'el 25 de octubre').*";
             case "COLLECT_TIME":
-                if (!DateTime.TryParse(context.TargetDate, out var parsedDate)) { context.TargetDate = null; return "No logré entender la fecha. ¿Podrías decírmela en formato YYYY-MM-DD o 'mañana'?"; }
+                if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)) { context.TargetDate = null; return "No logré entender la fecha. ¿Podrías decírmela en formato YYYY-MM-DD o 'mañana'?"; }
                 var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId!, context.SelectedServiceId!, parsedDate, ct);
                 if (!slots.Any()) { context.TargetDate = null; return $"Lo lamento mucho, tenemos la agenda llena el {parsedDate:dd/MM/yyyy}. ¿Intentamos otro día?"; }
                 context.LastQuestion = "¿A qué hora prefieres que te agendemos?";
@@ -177,9 +178,9 @@ public class BookingFlow : IBookingFlow
                     return context.LastQuestion;
                 }
                 var rawDateTime = $"{context.TargetDate} {context.TargetTime}";
-                if (DateTime.TryParse(rawDateTime, out var exactDateTime))
+                if (DateTime.TryParseExact(rawDateTime, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var exactDateTime))
                 {
-                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv!.Id, phone, context.RealCustomerName!, exactDateTime, ct);
+                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv!.Id, phone, context.RealCustomerName!, DateTime.SpecifyKind(exactDateTime, DateTimeKind.Unspecified), ct);
                     if (result.IsSuccess)
                     {
                         context.CurrentGoal = null;
@@ -313,3 +314,4 @@ public class ChatFlow : IChatFlow
         return result.ToResponse();
     }
 }
+

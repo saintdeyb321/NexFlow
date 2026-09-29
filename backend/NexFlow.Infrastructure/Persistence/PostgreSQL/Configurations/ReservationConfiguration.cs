@@ -12,8 +12,8 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
 
         builder.Property(r => r.Status).HasConversion<string>().IsRequired();
 
-        // Mapeo del Token de Concurrencia Optimista
-        builder.Property(r => r.RowVersion).IsRowVersion();
+        // Npgsql maps uint row versions to PostgreSQL's system xmin column.
+        builder.Property(r => r.RowVersion).IsRowVersion().HasColumnName("xmin");
 
         // RESTRICCIÓN DE HIERRO (Nivel BD): Evita doble reserva exacta al mismo tiempo
         builder.HasIndex(r => new { r.WorkspaceId, r.LocationId, r.ServiceId, r.StartTime }).IsUnique();
