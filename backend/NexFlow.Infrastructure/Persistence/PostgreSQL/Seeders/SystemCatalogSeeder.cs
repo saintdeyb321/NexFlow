@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
@@ -12,27 +12,33 @@ public static class SystemCatalogSeeder
         // 1. Módulos Core con sus Capacidades Granulares
         var coreModules = new[]
         {
-            new { Code = "BUSINESS_PROFILE", Name = "Perfil del Negocio", Desc = "Configuración general.", Caps = new[] { new { Code = "READ", Desc = "Leer perfil" } } },
-            new { Code = "LOCATIONS", Name = "Gestión de Sedes", Desc = "Administración de locales.", Caps = new[] { new { Code = "READ", Desc = "Leer sedes" } } },
-            new { Code = "BUSINESS_HOURS", Name = "Horarios de Atención", Desc = "Control de disponibilidad.", Caps = new[] { new { Code = "READ", Desc = "Leer horarios" } } },
-            new { Code = "FAQ", Name = "Base de Conocimiento", Desc = "Preguntas frecuentes para la IA.", Caps = new[] { new { Code = "READ", Desc = "Consultar FAQs" } } },
+            new { Code = "BUSINESS_PROFILE", Name = "Perfil del Negocio", Desc = "Configuración general.", Caps = new[] { new { Code = "READ", Desc = "Leer perfil" }, new { Code = "UPDATE", Desc = "UPDATE" } } },
+            new { Code = "LOCATIONS", Name = "Gestión de Sedes", Desc = "Administración de locales.", Caps = new[] { new { Code = "READ", Desc = "Leer sedes" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" } } },
+            new { Code = "BUSINESS_HOURS", Name = "Horarios de Atención", Desc = "Control de disponibilidad.", Caps = new[] { new { Code = "READ", Desc = "Leer horarios" }, new { Code = "UPDATE", Desc = "UPDATE" } } },
+            new { Code = "FAQ", Name = "Base de Conocimiento", Desc = "Preguntas frecuentes para la IA.", Caps = new[] { new { Code = "READ", Desc = "Consultar FAQs" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" } } },
 
-            new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar servicios" } } },
-            new { Code = "CATALOG", Name = "Catálogo de Productos", Desc = "Productos físicos o consumibles.", Caps = new[] { new { Code = "READ", Desc = "Consultar productos" } } },
+            new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar servicios" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" }, new { Code = "GENERATE", Desc = "GENERATE" } } },
+            new { Code = "CATALOG", Name = "Catálogo de Productos", Desc = "Productos físicos o consumibles.", Caps = new[] { new { Code = "READ", Desc = "Consultar productos" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" }, new { Code = "GENERATE", Desc = "GENERATE" } } },
 
-            // 🔥 SPRINT 17: Nuevo Módulo de Pedidos (Coordinación)
             new { Code = "ORDERS", Name = "Gestión de Pedidos", Desc = "Coordinación y revisión de listas de compra.", Caps = new[] {
                 new { Code = "READ", Desc = "Consultar pedidos" },
+                new { Code = "CREATE", Desc = "Crear pedido" },
+                new { Code = "UPDATE", Desc = "Actualizar pedido" },
                 new { Code = "UPDATE_STATUS", Desc = "Aprobar o rechazar pedidos" }
             } },
 
             new { Code = "RESERVATIONS", Name = "Motor de Reservas", Desc = "Gestión de citas.", Caps = new[] {
+                new { Code = "READ", Desc = "Leer reservas" },
+                new { Code = "UPDATE", Desc = "Editar reservas" },
+                new { Code = "COMPLETE", Desc = "Completar reservas" },
                 new { Code = "CHECK_AVAILABILITY", Desc = "Consultar horarios libres" },
                 new { Code = "CREATE", Desc = "Crear nueva reserva" },
                 new { Code = "CANCEL", Desc = "Cancelar reserva" }
             } },
 
             new { Code = "REQUESTS", Name = "Solicitudes", Desc = "Gestión de trámites y afiliaciones.", Caps = new[] {
+                new { Code = "READ", Desc = "Leer solicitudes" },
+                new { Code = "ASSIGN", Desc = "Asignar solicitudes" },
                 new { Code = "CREATE", Desc = "Crear solicitud" },
                 new { Code = "UPDATE_STATUS", Desc = "Actualizar estado" }
             } },
@@ -40,7 +46,10 @@ public static class SystemCatalogSeeder
             new { Code = "CONVERSATIONS", Name = "Bandeja de Entrada", Desc = "Inbox y control de chats.", Caps = new[] {
                 new { Code = "READ", Desc = "Leer chats" },
                 new { Code = "SEND_MESSAGE", Desc = "Enviar mensaje manual" },
-                new { Code = "TAKEOVER", Desc = "Asumir control humano" }
+                new { Code = "TAKEOVER", Desc = "Asumir control humano" },
+                new { Code = "RELEASE", Desc = "Liberar chat" },
+                new { Code = "DELETE", Desc = "Eliminar chat" },
+                new { Code = "CONFIGURE", Desc = "Configurar conexión" }
             } }
         };
 
@@ -96,17 +105,16 @@ public static class SystemCatalogSeeder
         existingTemplates = await context.Templates.ToListAsync();
         var existingTemplateModules = await context.TemplateModules.ToListAsync();
 
-        // 🔥 SPRINT 17: Ajustamos las plantillas para incluir "ORDERS" donde corresponda
         var templateConfig = new Dictionary<string, string[]>
         {
             { "SUPPORT", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CONVERSATIONS" } },
             { "BOOKING", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "RESERVATIONS", "CONVERSATIONS" } },
-            
+
             // 🔥 El plan Comercial ahora incluye Catálogo y la Gestión de Pedidos
             { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "ORDERS", "CONVERSATIONS" } },
 
             { "REQUESTS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "REQUESTS", "CONVERSATIONS" } },
-            
+
             // 🔥 El plan Full lo tiene absolutamente todo
             { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "ORDERS", "RESERVATIONS", "REQUESTS", "CONVERSATIONS" } }
         };
@@ -127,7 +135,6 @@ public static class SystemCatalogSeeder
         }
         await context.SaveChangesAsync();
 
-        // 🔥 SPRINT 4.4 / 17: Reconciliación total del Seeder del SuperAdmin
         var internalWorkspace = await context.Workspaces.FirstOrDefaultAsync(w => w.Name == "NexFlow Internal");
         if (internalWorkspace == null)
         {
@@ -168,17 +175,5 @@ public static class SystemCatalogSeeder
             }
         }
 
-        // Vincular a los SuperAdmins
-        var sysAdmins = await context.SystemAdministrators.ToListAsync();
-        foreach (var admin in sysAdmins)
-        {
-            var isMember = await context.Memberships.AnyAsync(m => m.UserId == admin.UserId && m.WorkspaceId == internalWorkspace.Id);
-            if (!isMember)
-            {
-                var membership = Membership.Create(admin.UserId, internalWorkspace.Id, MembershipRole.Owner);
-                context.Memberships.Add(membership);
-            }
-        }
-        await context.SaveChangesAsync();
     }
 }

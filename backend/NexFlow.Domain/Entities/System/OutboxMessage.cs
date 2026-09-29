@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Domain.Entities.System;
+namespace NexFlow.Domain.Entities.System;
 
 public enum OutboxStatus
 {
@@ -22,4 +22,7 @@ public class OutboxMessage
     public DateTime? ProcessedAt { get; set; }
     public string? Error { get; set; }
     public int RetryCount { get; set; } = 0;
+    public DateTime? ProcessingStartedAt { get; set; }
+    public DateTime? LeaseUntil { get; set; }
+    public DateTime? NextRetryAt { get; set; }
 }

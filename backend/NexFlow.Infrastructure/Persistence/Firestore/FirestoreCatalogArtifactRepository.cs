@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Cloud.Firestore;
@@ -22,14 +22,13 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
         var docRef = _firestoreDb.Collection("workspaces")
             .Document(workspaceId.ToString())
             .Collection("catalogArtifacts")
-            .Document($"current_{scope.ToLowerInvariant()}"); // Separamos por PRODUCT, SERVICE o COMBINED
+            .Document($"current_{scope.ToLowerInvariant()}");
 
         var snapshot = await docRef.GetSnapshotAsync(cancellationToken);
         if (!snapshot.Exists) return null;
 
         var data = snapshot.ConvertTo<FirestoreArtifact>();
 
-        // 🔥 SPRINT 4: Reconstrucción perfecta sin perder datos
         return CatalogArtifact.Restore(
             Guid.Parse(data.Id),
             workspaceId,
@@ -38,7 +37,7 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
             data.PdfUrl,
             Enum.Parse<CatalogArtifactStatus>(data.Status),
             data.LastGeneratedAt,
-            data.GenerationId
+            data.GenerationId, data.GenerationStartedAt, data.PersistenceVersion
         );
     }
 
@@ -57,14 +56,21 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
             PdfUrl = artifact.PdfUrl,
             Status = artifact.Status.ToString(),
             LastGeneratedAt = artifact.LastGeneratedAt,
-            GenerationId = artifact.GenerationId
+            GenerationId = artifact.GenerationId, GenerationStartedAt = artifact.GenerationStartedAt, PersistenceVersion = Guid.NewGuid().ToString("N")
         };
 
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+        await _firestoreDb.RunTransactionAsync(async tx =>
+        {
+            var current = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            var version = current.Exists && current.TryGetValue<string>("PersistenceVersion", out var stored) ? stored : null;
+            if (version != artifact.PersistenceVersion) throw new ConcurrencyException("Artifact changed concurrently.");
+            tx.Set(docRef, data);
+        }, cancellationToken: cancellationToken);
+        artifact.PersistenceVersion = data.PersistenceVersion;
     }
 
     // ==========================================
-    // CONTROL ATÓMICO DE LÍMITES DIARIOS (Sprint 4)
+
     // ==========================================
     public async Task IncrementUsageAtomicallyAsync(Guid workspaceId, DateTime date, CancellationToken cancellationToken)
     {
@@ -98,18 +104,20 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
             };
 
             transaction.Set(docRef, data, SetOptions.MergeAll);
-        });
+        }, cancellationToken: cancellationToken);
     }
 
     [FirestoreData]
     private class FirestoreArtifact
     {
         [FirestoreProperty] public string Id { get; set; } = string.Empty;
-        [FirestoreProperty] public string Scope { get; set; } = "COMBINED";
+        [FirestoreProperty] public string Scope { get; set; } = "PRODUCT";
         [FirestoreProperty] public string SourceHash { get; set; } = string.Empty;
         [FirestoreProperty] public string? PdfUrl { get; set; }
         [FirestoreProperty] public string Status { get; set; } = "NotGenerated";
         [FirestoreProperty] public DateTime? LastGeneratedAt { get; set; }
         [FirestoreProperty] public string? GenerationId { get; set; }
+        [FirestoreProperty] public DateTime? GenerationStartedAt { get; set; }
+        [FirestoreProperty] public string? PersistenceVersion { get; set; }
     }
 }

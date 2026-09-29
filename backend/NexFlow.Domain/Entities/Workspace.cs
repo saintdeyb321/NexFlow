@@ -1,4 +1,4 @@
-﻿using NexFlow.Domain.Enums;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Domain.Entities;
 
@@ -22,8 +22,13 @@ public class Workspace : Entity
     }
 
     public void Rename(string newName) => Name = newName;
-    public void Suspend() => Status = WorkspaceStatus.Suspended;
-    public void Activate() => Status = WorkspaceStatus.Active;
-    public void Archive() => Status = WorkspaceStatus.Archived;
+    public void Suspend() { EnsureNotDeleting(); Status = WorkspaceStatus.Suspended; }
+    public void Activate() { EnsureNotDeleting(); Status = WorkspaceStatus.Active; }
+    public void Archive() { EnsureNotDeleting(); Status = WorkspaceStatus.Archived; }
+    private void EnsureNotDeleting()
+    {
+        if (Status == WorkspaceStatus.Deleting) throw new NexFlow.Domain.Exceptions.DomainException("El workspace está en eliminación.");
+    }
+    public void BeginDeletion() => Status = WorkspaceStatus.Deleting;
     public void LinkEvolutionInstance(string instanceName) => EvolutionInstanceName = instanceName;
 }

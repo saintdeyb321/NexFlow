@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using NexFlow.Domain.Exceptions;
 
@@ -21,6 +21,7 @@ public class GlobalExceptionMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Excepción no controlada atrapada por el escudo global en {Path}", context.Request.Path);
@@ -34,30 +35,29 @@ public class GlobalExceptionMiddleware
 
         var statusCode = exception switch
         {
-            DomainException => (int)HttpStatusCode.BadRequest,
-            UnauthorizedAccessException => (int)HttpStatusCode.Unauthorized,
-            _ => (int)HttpStatusCode.InternalServerError
+            DomainException or ArgumentException => 400,
+            UnauthorizedAccessException => context.User.Identity?.IsAuthenticated == true ? 403 : 401,
+            KeyNotFoundException => 404,
+            ConcurrencyException or Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException => 409,
+            Npgsql.PostgresException pg when pg.SqlState is "23505" or "40001" or "23P01" => 409,
+            Grpc.Core.RpcException rpc when rpc.StatusCode == Grpc.Core.StatusCode.NotFound => 404,
+            Grpc.Core.RpcException rpc when rpc.StatusCode is Grpc.Core.StatusCode.AlreadyExists or Grpc.Core.StatusCode.Aborted => 409,
+            Grpc.Core.RpcException rpc when rpc.StatusCode == Grpc.Core.StatusCode.InvalidArgument => 400,
+            Grpc.Core.RpcException or Npgsql.NpgsqlException or HttpRequestException or TimeoutException or OperationCanceledException or StackExchange.Redis.RedisException => 503,
+            AggregateException aggregate when aggregate.Flatten().InnerExceptions.Any(e => e is HttpRequestException or Grpc.Core.RpcException or Npgsql.NpgsqlException or TimeoutException) => 503,
+            Microsoft.EntityFrameworkCore.DbUpdateException db when db.InnerException is Npgsql.PostgresException pg && pg.SqlState is "23505" or "40001" or "23P01" => 409,
+            Microsoft.EntityFrameworkCore.DbUpdateException db when db.InnerException is Npgsql.NpgsqlException => 503,
+            _ => 500
         };
-
         context.Response.StatusCode = statusCode;
-        var correlationId = context.Items["CorrelationId"]?.ToString() ?? "N/A";
-
-        // 🔥 SPRINT 2.1: Contrato estandarizado y blindado
-        var response = new
+        var code = statusCode switch { 400 => "Validation.Invalid", 401 => "Security.Unauthorized", 403 => "Security.Forbidden", 404 => "Resource.NotFound", 409 => "Resource.Conflict", 503 => "Dependency.Unavailable", _ => "System.InternalError" };
+        var message = statusCode switch
         {
-            code = exception switch
-            {
-                DomainException => "Domain.RuleViolation",
-                UnauthorizedAccessException => "Security.AccessDenied",
-                _ => "System.InternalError"
-            },
-            message = statusCode == 500
-                ? "Ha ocurrido un error inesperado en NexFlow. Nuestro equipo ha sido notificado."
-                : exception.Message,
-            correlationId = correlationId
+            400 when exception is DomainException => exception.Message,
+            400 => "La entrada no es válida.", 401 => "Autenticación requerida.", 403 => "Acceso denegado.",
+            404 => "Recurso no encontrado.", 409 => "El recurso cambió o la operación entra en conflicto.",
+            503 => "Una dependencia no está disponible. Inténtalo nuevamente.", _ => "Ha ocurrido un error inesperado."
         };
-
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-        return context.Response.WriteAsync(JsonSerializer.Serialize(response, options));
+        return context.Response.WriteAsJsonAsync(new { code, message, correlationId = context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier });
     }
 }

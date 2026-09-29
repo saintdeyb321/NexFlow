@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
@@ -45,6 +45,7 @@ public class ModuleRepository : IModuleRepository
     public async Task<IEnumerable<Module>> GetActiveModulesAsync(IEnumerable<Guid> moduleIds, CancellationToken cancellationToken)
     {
         return await _context.Modules
+            .Include(m => m.Capabilities)
             .Where(m => moduleIds.Contains(m.Id) && m.Status == ModuleStatus.Active)
             .ToListAsync(cancellationToken);
     }

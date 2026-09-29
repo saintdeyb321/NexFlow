@@ -1,9 +1,10 @@
-﻿using NexFlow.Application.Features.Shared.DTOs;
+using NexFlow.Application.Features.Shared.DTOs;
 
 namespace NexFlow.Application.Abstractions;
 
 public interface ICatalogRepository
 {
+    Task<int> CountActiveItemsByTypeAsync(Guid workspaceId, string type, CancellationToken ct);
     // ==========================================
     // GESTIÓN DE CATEGORÍAS (Infraestructura Compartida)
     // ==========================================
@@ -21,7 +22,6 @@ public interface ICatalogRepository
     Task<BusinessOfferingDto?> GetItemByIdAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken);
     Task<IEnumerable<BusinessOfferingDto>> GetItemsByCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
 
-    // 🔥 SPRINT 11 (Auditoría): Nuevo método para evitar $N+1 de RAM en el Catalog
     Task<IEnumerable<BusinessOfferingDto>> GetItemsByTypeAsync(Guid workspaceId, string type, CancellationToken cancellationToken);
 
     Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken);

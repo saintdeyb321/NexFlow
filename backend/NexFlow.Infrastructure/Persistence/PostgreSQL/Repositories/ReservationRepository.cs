@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
@@ -18,6 +18,17 @@ public class ReservationRepository : IReservationRepository
         _clock = clock;
     }
 
+    public async Task<(int Today, int Confirmed, int Cancelled)> CountForPeriodAsync(Guid workspaceId, DateTime from, DateTime to, DateTime today, DateTime tomorrow, CancellationToken ct)
+    {
+        var counts = await _context.Reservations.Where(r => r.WorkspaceId == workspaceId && r.StartTime >= from && r.StartTime < to)
+            .GroupBy(r => r.WorkspaceId).Select(g => new {
+                Today = g.Count(r => r.StartTime >= today && r.StartTime < tomorrow),
+                Confirmed = g.Count(r => r.Status == ReservationStatus.Confirmed),
+                Cancelled = g.Count(r => r.Status == ReservationStatus.Cancelled)
+            }).SingleOrDefaultAsync(ct);
+        return counts == null ? (0, 0, 0) : (counts.Today, counts.Confirmed, counts.Cancelled);
+    }
+
     public void Add(Reservation reservation) => _context.Reservations.Add(reservation);
 
     public Task<bool> HasFutureConfirmedAtLocationAsync(Guid workspaceId, string locationId, CancellationToken cancellationToken) =>
@@ -32,7 +43,7 @@ public class ReservationRepository : IReservationRepository
 
     public async Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 6: Usamos IClock inyectado en lugar de DateTime.UtcNow
+
         var nowUtc = _clock.UtcNow;
 
         return await _context.Reservations
@@ -46,7 +57,7 @@ public class ReservationRepository : IReservationRepository
 
     public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string? locationId, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 6: El repositorio ya no adivina el TimeZone. Compara directamente en UTC.
+
         var query = _context.Reservations
             .Where(r => r.WorkspaceId == workspaceId
                      && r.StartTime >= startUtc

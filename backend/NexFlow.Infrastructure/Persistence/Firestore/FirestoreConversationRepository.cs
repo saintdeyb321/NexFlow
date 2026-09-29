@@ -221,19 +221,31 @@ public class FirestoreConversationRepository : IConversationRepository
         await GetCollection(workspaceId).Document(conversation.Id).SetAsync(data, cancellationToken: cancellationToken);
     }
 
-    public async Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken)
+    public async Task SetHandoffAsync(Guid workspaceId, string conversationId, string phone, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken)
     {
-        var stateLock = ConversationStateService.GetStateLock(workspaceId, conversationId);
-        await stateLock.WaitAsync(cancellationToken);
-        try
+        var conversationRef = GetCollection(workspaceId).Document(conversationId);
+        var stateRef = _db.Collection("workspaces").Document(workspaceId.ToString()).Collection("conversationStates").Document(phone);
+        await _db.RunTransactionAsync(async transaction =>
         {
-            var updates = new Dictionary<string, object> { { "mode", mode.ToString() }, { "handoffReason", reason.ToString() } };
-            await GetCollection(workspaceId).Document(conversationId).UpdateAsync(updates, cancellationToken: cancellationToken);
-        }
-        finally
-        {
-            stateLock.Release();
-        }
+            var conversation = await transaction.GetSnapshotAsync(conversationRef, cancellationToken);
+            var state = await transaction.GetSnapshotAsync(stateRef, cancellationToken);
+            if (!conversation.Exists || conversation.GetValue<string>("consumerPhone") != phone)
+                throw new KeyNotFoundException("Conversation not found.");
+            var context = state.Exists
+                ? System.Text.Json.JsonSerializer.Deserialize<NexFlow.Application.Abstractions.Cache.ConversationContextDto>(state.GetValue<string>("contextJson"))
+                    ?? throw new InvalidOperationException("Persisted conversation state is invalid.")
+                : new NexFlow.Application.Abstractions.Cache.ConversationContextDto();
+            context.Mode = mode.ToString();
+            context.HandoffReason = mode == ConversationMode.Human ? reason.ToString() : null;
+            context.HandoffAt = mode == ConversationMode.Human ? DateTime.UtcNow : null;
+            context.LastUpdated = DateTime.UtcNow;
+            context.StateVersion = Guid.NewGuid().ToString("N");
+            transaction.Update(conversationRef, new Dictionary<string, object> { ["mode"] = mode.ToString(), ["handoffReason"] = reason.ToString() });
+            transaction.Set(stateRef, new Dictionary<string, object>
+            {
+                ["phone"] = phone, ["contextJson"] = System.Text.Json.JsonSerializer.Serialize(context), ["updatedAt"] = context.LastUpdated
+            });
+        }, cancellationToken: cancellationToken);
     }
 
     public async Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken)
@@ -252,6 +264,13 @@ public class FirestoreConversationRepository : IConversationRepository
 
         await GetCollection(workspaceId).Document(conversationId).Collection("messages").Document(message.Id).SetAsync(data, cancellationToken: cancellationToken);
         await GetCollection(workspaceId).Document(conversationId).UpdateAsync(new Dictionary<string, object> { { "lastMessageAt", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) }, { "expiresAt", expiresAt } }, cancellationToken: cancellationToken);
+    }
+
+    public async Task<(int Conversations, int? Handoffs)> CountForPeriodAsync(Guid workspaceId, DateTime start, DateTime end, CancellationToken ct)
+    {
+        var period = GetCollection(workspaceId).WhereGreaterThanOrEqualTo("startedAt", start).WhereLessThan("startedAt", end);
+        var total = await period.Count().GetSnapshotAsync(ct);
+        return (checked((int)total.Count!.Value), null);
     }
 
     public async Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken)
@@ -293,7 +312,6 @@ public class FirestoreConversationRepository : IConversationRepository
         return !snapshot.Exists ? null : MapToConversation(snapshot);
     }
 
-    // 🔥 SPRINT 03: Búsqueda precisa por conversationId en lugar de CollectionGroup global
     public async Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string conversationId, string externalMessageId, CancellationToken cancellationToken)
     {
         var msgQuery = GetCollection(workspaceId)

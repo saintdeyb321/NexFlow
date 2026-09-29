@@ -3,7 +3,7 @@ namespace NexFlow.Application.Abstractions.Cache;
 public class ConversationContextDto
 {
     public string? StateVersion { get; set; }
-    // 🔥 SPRINT 07: Nuevos campos para gestionar el Takeover sin borrar la memoria
+
     public string Mode { get; set; } = "Automatic"; // Automatic, Human
     public string? HandoffReason { get; set; }
     public DateTime? HandoffAt { get; set; }
@@ -18,6 +18,8 @@ public class ConversationContextDto
     public string? TargetDate { get; set; }
     public string? TargetTime { get; set; }
     public string? RealCustomerName { get; set; }
+    public string? OrderLastSourceMessageId { get; set; }
+    public string? OrderLastResponse { get; set; }
     public List<OrderDraftItem> OrderDraftItems { get; set; } = new();
 
 

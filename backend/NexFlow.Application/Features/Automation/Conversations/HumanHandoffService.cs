@@ -30,12 +30,8 @@ public class HumanHandoffService : IHumanHandoffService
     private async Task SetModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken ct)
     {
         var conversation = await _conversationRepo.GetConversationAsync(workspaceId, conversationId, ct)
-            ?? throw new InvalidOperationException("Conversation not found.");
-        var context = await _contextStore.GetOrRecoverContextAsync(workspaceId, conversation.ConsumerPhone, ct);
-        context.Mode = mode.ToString();
-        context.HandoffReason = mode == ConversationMode.Human ? reason.ToString() : null;
-        context.HandoffAt = mode == ConversationMode.Human ? DateTime.UtcNow : null;
-        await _contextStore.SaveContextAsync(workspaceId, conversation.ConsumerPhone, context, ct);
-        await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversationId, mode, reason, ct);
+            ?? throw new KeyNotFoundException("Conversation not found.");
+        await _conversationRepo.SetHandoffAsync(workspaceId, conversationId, conversation.ConsumerPhone, mode, reason, ct);
+        await _contextStore.GetOrRecoverContextAsync(workspaceId, conversation.ConsumerPhone, ct);
     }
 }

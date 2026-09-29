@@ -22,6 +22,12 @@ public class InboundMessageRepository : IInboundMessageRepository
         if (message.WorkspaceId is null || message.WorkspaceId == Guid.Empty)
             throw new ArgumentException("An inbound message requires a workspace.", nameof(message));
 
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await TenantLifecycleLock.AcquireAsync(_context, message.WorkspaceId.Value, false, cancellationToken);
+        var workspace = await _context.Workspaces.AsNoTracking().SingleOrDefaultAsync(w => w.Id == message.WorkspaceId.Value, cancellationToken)
+            ?? throw new KeyNotFoundException("Workspace not found.");
+        if (workspace.Status == NexFlow.Domain.Enums.WorkspaceStatus.Deleting)
+            throw new NexFlow.Domain.Exceptions.ConcurrencyException("Workspace is being deleted.");
         var inserted = await _context.Database.ExecuteSqlInterpolatedAsync($@"
             INSERT INTO ""InboundMessages""
                 (""Id"", ""WorkspaceId"", ""ExternalMessageId"", ""InstanceName"", ""Phone"", ""PayloadJson"", ""Status"", ""Attempts"", ""ReceivedAt"")
@@ -35,6 +41,7 @@ public class InboundMessageRepository : IInboundMessageRepository
             if (existing.WorkspaceId.HasValue && existing.WorkspaceId != message.WorkspaceId)
                 throw new InvalidOperationException("Inbound identity belongs to another workspace.");
         }
+        await transaction.CommitAsync(cancellationToken);
     }
     public async Task<IEnumerable<InboundMessage>> GetAndLockNextMessagesAsync(int limit, CancellationToken cancellationToken)
     {
@@ -87,6 +94,10 @@ public class InboundMessageRepository : IInboundMessageRepository
         await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            if (!claim.WorkspaceId.HasValue) throw new InvalidOperationException("Inbound workspace is missing.");
+            await TenantLifecycleLock.AcquireAsync(_context, claim.WorkspaceId.Value, false, cancellationToken);
+            if (!await _context.Workspaces.AnyAsync(w => w.Id == claim.WorkspaceId.Value && w.Status != NexFlow.Domain.Enums.WorkspaceStatus.Deleting, cancellationToken))
+                return;
             var rows = await _context.InboundMessages.FromSqlInterpolated(
                 $@"SELECT * FROM ""InboundMessages"" WHERE ""Id"" = {claim.Id} FOR UPDATE")
                 .ToListAsync(cancellationToken);

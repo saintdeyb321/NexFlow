@@ -1,9 +1,12 @@
+using Microsoft.EntityFrameworkCore;
+using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Exceptions;
+using NexFlow.Domain.Entities.Catalog;
 using NexFlow.API.Services.BackgroundServices;
 
 namespace NexFlow.API.Controllers.Business;
@@ -211,7 +214,7 @@ public class CatalogController : ControllerBase
     [HttpGet("artifact")]
     public async Task<IActionResult> GetArtifactStatus(
         [FromQuery] string? scope,
-        [FromServices] ICatalogArtifactRepository artifactRepository,
+        [FromServices] ICatalogGenerationService generationService,
         CancellationToken cancellationToken)
     {
         var targetScope = string.IsNullOrWhiteSpace(scope) ? "PRODUCT" : scope.Trim().ToUpperInvariant();
@@ -223,14 +226,14 @@ public class CatalogController : ControllerBase
         if (!await HasAccessTo(requiredModule, cancellationToken))
             return StatusCode(403, $"Módulo {requiredModule} no contratado.");
 
-        var artifact = await artifactRepository.GetCurrentArtifactAsync(WorkspaceId, targetScope, cancellationToken);
+        var artifact = await generationService.GetArtifactAsync(WorkspaceId, targetScope, cancellationToken);
 
         if (artifact == null)
             return Ok(new { status = "NOT_GENERATED", pdfUrl = (string?)null });
         return Ok(new
         {
             status = artifact.Status.ToString().ToUpperInvariant(),
-            pdfUrl = artifact.PdfUrl,
+            pdfUrl = artifact.Status == CatalogArtifactStatus.Current ? artifact.PdfUrl : null,
             lastGeneratedAt = artifact.LastGeneratedAt
         });
     }
@@ -270,6 +273,10 @@ public class CatalogController : ControllerBase
         _taskQueue.QueueBackgroundWorkItemAsync(async (serviceProvider, token) =>
         {
             using var scope = serviceProvider.CreateScope();
+            var lifecycleDb = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
+            await using var lifecycle = await lifecycleDb.Database.BeginTransactionAsync(token);
+            await TenantLifecycleLock.AcquireAsync(lifecycleDb, workspaceId, false, token);
+            if (!await lifecycleDb.Workspaces.AnyAsync(w => w.Id == workspaceId && w.Status != NexFlow.Domain.Enums.WorkspaceStatus.Deleting, token)) return;
             var generationService = scope.ServiceProvider.GetRequiredService<ICatalogGenerationService>();
 
             await generationService.CheckAndInvalidateStaleArtifactsAsync(workspaceId, token);

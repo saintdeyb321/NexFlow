@@ -19,6 +19,9 @@ public class FirestoreRequestRepository : IRequestRepository
     private CollectionReference GetCollection(Guid workspaceId) =>
         _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("requests");
 
+    public async Task<int> CountByStatusAsync(Guid workspaceId, RequestStatus status, CancellationToken ct) =>
+        checked((int)(await GetCollection(workspaceId).WhereEqualTo("Status", status.ToString().ToUpperInvariant()).Count().GetSnapshotAsync(ct)).Count!.Value);
+
     public async Task<(RequestRecord Request, bool Created)> CreateRequestAsync(Guid workspaceId, RequestRecord request, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(request.SourceMessageId))
@@ -73,7 +76,6 @@ public class FirestoreRequestRepository : IRequestRepository
         return snapshot.Documents.Select(MapToRequestRecord).FirstOrDefault();
     }
 
-    // 🔥 SPRINT 11 (Auditoría): Firma modificada para soportar Paginación y Filtrado Real
     public async Task<IEnumerable<RequestRecord>> GetRequestsAsync(Guid workspaceId, int limit, string? status, CancellationToken cancellationToken)
     {
         var query = GetCollection(workspaceId).OrderByDescending("CreatedAt").Limit(limit);
@@ -118,7 +120,6 @@ public class FirestoreRequestRepository : IRequestRepository
         }, cancellationToken: cancellationToken);
     }
 
-    // 🔥 SPRINT 11 (Auditoría): Nuevo método para asignar encargados
     public async Task AssignRequestAsync(Guid workspaceId, string requestId, string assignedTo, CancellationToken cancellationToken)
     {
         var docRef = GetCollection(workspaceId).Document(requestId);

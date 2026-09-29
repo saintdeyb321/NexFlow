@@ -29,8 +29,6 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IWorkspaceContext, WorkspaceContext>();
 builder.Services.AddMemoryCache();
 
-
-// 🔥 SPRINT 16: Colas y Workers Genéricos (Outbox Pattern para anular los Task.Run)
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 builder.Services.AddHostedService<GenericBackgroundWorker>();
 
@@ -80,7 +78,7 @@ builder.Services.AddRateLimiter(options =>
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     AutoReplenishment = true,
-                    PermitLimit = 1500, 
+                    PermitLimit = 1500,
                     Window = TimeSpan.FromMinutes(1)
                 });
         }
@@ -120,20 +118,11 @@ builder.Services.AddHealthChecks()
         "Redis",
         failureStatus: HealthStatus.Degraded,
         tags: new[] { "ready", "cache" })
-    .AddDbContextCheck<NexFlowDbContext>(
-        "PostgreSQL",
-        failureStatus: HealthStatus.Unhealthy,
-        tags: new[] { "ready", "database" })
-    .AddCheck("Firestore", () =>
-    {
-        if (string.IsNullOrWhiteSpace(builder.Configuration["Firebase:ProjectId"]))
-        {
-            return HealthCheckResult.Unhealthy("Firebase:ProjectId no configurado.");
-        }
-        return HealthCheckResult.Healthy("Firestore configurado.");
-    }, tags: new[] { "ready", "nosql" });
+    .AddCheck<PostgresHealthCheck>("PostgreSQL", failureStatus: HealthStatus.Unhealthy, tags: new[] { "ready", "database" }, timeout: TimeSpan.FromSeconds(6))
+    .AddCheck<FirestoreHealthCheck>("Firestore", failureStatus: HealthStatus.Unhealthy, tags: new[] { "ready", "nosql" }, timeout: TimeSpan.FromSeconds(6));
 
-builder.Services.AddControllers()
+builder.Services.AddScoped<TenantCapabilityFilter>();
+builder.Services.AddControllers(options => { options.Filters.AddService<TenantCapabilityFilter>(); options.Filters.Add<ApiErrorResultFilter>(); })
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -153,6 +142,11 @@ if (string.IsNullOrWhiteSpace(app.Configuration["Firebase:ProjectId"]))
 // --- PIPELINE DE MIDDLEWARES ---
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseStatusCodePages(async statusContext =>
+{
+    var http = statusContext.HttpContext;
+    await http.Response.WriteAsJsonAsync(new { code = ApiErrorResultFilter.Code(http.Response.StatusCode), message = "La operación no está disponible.", correlationId = http.Items["CorrelationId"]?.ToString() ?? http.TraceIdentifier });
+});
 
 if (app.Environment.IsDevelopment())
 {

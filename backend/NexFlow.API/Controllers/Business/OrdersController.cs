@@ -39,11 +39,12 @@ public class OrdersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetOrders([FromQuery] OrderStatus? status, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetOrders([FromQuery] OrderStatus? status, CancellationToken cancellationToken, [FromQuery] int limit = 50)
     {
         if (!await HasAccessAsync(cancellationToken)) return StatusCode(403, "Módulo de Pedidos no contratado.");
 
-        var orders = await _orderRepository.GetOrdersAsync(WorkspaceId, status, cancellationToken);
+        if (limit is < 1 or > 100) return BadRequest(new { code = "Pagination.Invalid", message = "El límite debe estar entre 1 y 100." });
+        var orders = await _orderRepository.GetOrdersAsync(WorkspaceId, status, cancellationToken, limit);
         return Ok(orders);
     }
 
@@ -70,7 +71,7 @@ public class OrdersController : ControllerBase
 
         try { await _orderRepository.CreateOrderAsync(WorkspaceId, order, cancellationToken); }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
-        // 🔥 SPRINT 11: Se envía al módulo "ORDERS", no a "CATALOG"
+
         await _notificationService.NotifyAsync(
             WorkspaceId,
             "ORDERS",
@@ -101,7 +102,6 @@ public class OrdersController : ControllerBase
     {
         if (!await HasAccessAsync(cancellationToken)) return StatusCode(403, "Módulo de Pedidos no contratado.");
 
-        // 🔥 SPRINT 11: Bloqueamos montos negativos
         if (request.TotalAmountMinorUnits < 0)
             return BadRequest(new { message = "El monto de la cotización no puede ser negativo." });
 

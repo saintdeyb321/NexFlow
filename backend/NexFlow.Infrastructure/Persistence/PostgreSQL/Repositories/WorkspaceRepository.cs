@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.SuperAdmin.Workspaces;
 using NexFlow.Domain.Entities;
@@ -46,6 +46,8 @@ public class WorkspaceRepository : IWorkspaceRepository
         if (audits.Any()) _context.AuditLogs.RemoveRange(audits);
         if (notifications.Any()) _context.Notifications.RemoveRange(notifications);
         if (inboundMsgs.Any()) _context.InboundMessages.RemoveRange(inboundMsgs);
+        var outbox = await _context.OutboxMessages.Where(m => m.WorkspaceId == workspace.Id).ToListAsync(cancellationToken);
+        _context.OutboxMessages.RemoveRange(outbox);
 
         foreach (var license in licenses)
         {
@@ -65,7 +67,7 @@ public class WorkspaceRepository : IWorkspaceRepository
                 .IgnoreQueryFilters()
                 .AnyAsync(m => m.UserId == userId && m.WorkspaceId != workspace.Id, cancellationToken);
 
-            if (!hasOtherWorkspaces)
+            if (!hasOtherWorkspaces && !await _context.SystemAdministrators.AnyAsync(a => a.UserId == userId, cancellationToken))
             {
                 var userToDelete = await _context.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
                 if (userToDelete != null) _context.Users.Remove(userToDelete);

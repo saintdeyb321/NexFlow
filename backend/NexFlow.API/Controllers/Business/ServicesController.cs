@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
@@ -93,6 +95,10 @@ public class ServicesController : ControllerBase
         _taskQueue.QueueBackgroundWorkItemAsync(async (serviceProvider, token) =>
         {
             using var scope = serviceProvider.CreateScope();
+            var lifecycleDb = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
+            await using var lifecycle = await lifecycleDb.Database.BeginTransactionAsync(token);
+            await TenantLifecycleLock.AcquireAsync(lifecycleDb, workspaceId, false, token);
+            if (!await lifecycleDb.Workspaces.AnyAsync(w => w.Id == workspaceId && w.Status != NexFlow.Domain.Enums.WorkspaceStatus.Deleting, token)) return;
             var generationService = scope.ServiceProvider.GetRequiredService<ICatalogGenerationService>();
             await generationService.CheckAndInvalidateStaleArtifactsAsync(workspaceId, token);
         });

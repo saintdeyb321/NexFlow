@@ -1,3 +1,5 @@
+using Grpc.Core;
+using NexFlow.Domain.Exceptions;
 using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Orders.DTOs;
@@ -24,6 +26,9 @@ public class FirestoreOrderRepository : IOrderRepository
     {
         if (order.Items == null || order.Items.Count == 0)
             throw new ArgumentException("El pedido debe contener productos.");
+        var docRef = GetCollection(workspaceId).Document(order.Id);
+        var existing = await docRef.GetSnapshotAsync(cancellationToken);
+        if (existing.Exists) return ValidateReplay(MapToOrderRecord(existing), order);
         foreach (var item in order.Items)
         {
             if (item.Quantity <= 0 || string.IsNullOrWhiteSpace(item.ProductId))
@@ -46,8 +51,6 @@ public class FirestoreOrderRepository : IOrderRepository
         catch (OverflowException) { throw new ArgumentException("El importe del pedido supera el máximo permitido."); }
         order.Status = OrderStatus.PendingReview;
         if (order.Currency == null) order.Notes = (order.Notes + " Total pendiente: los productos tienen monedas diferentes.").Trim();
-        var docRef = GetCollection(workspaceId).Document(order.Id);
-
         var data = new Dictionary<string, object>
         {
             { "Id", order.Id },
@@ -71,8 +74,21 @@ public class FirestoreOrderRepository : IOrderRepository
             }
         };
 
-        await docRef.SetAsync(data, cancellationToken: cancellationToken);
+        try { await docRef.CreateAsync(data, cancellationToken); }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists)
+        {
+            return ValidateReplay(MapToOrderRecord(await docRef.GetSnapshotAsync(cancellationToken)), order);
+        }
         return order;
+    }
+
+    private static OrderRecord ValidateReplay(OrderRecord existing, OrderRecord requested)
+    {
+        if (existing.ConsumerPhone != requested.ConsumerPhone || existing.ConversationId != requested.ConversationId ||
+            !existing.Items.Select(i => (i.ProductId, i.Quantity)).OrderBy(i => i.ProductId, StringComparer.Ordinal)
+                .SequenceEqual(requested.Items.Select(i => (i.ProductId, i.Quantity)).OrderBy(i => i.ProductId, StringComparer.Ordinal)))
+            throw new ConcurrencyException("Order identity was reused for different content.");
+        return existing;
     }
 
     public async Task<OrderRecord?> GetOrderByIdAsync(Guid workspaceId, string orderId, CancellationToken cancellationToken)
@@ -83,7 +99,7 @@ public class FirestoreOrderRepository : IOrderRepository
         return MapToOrderRecord(snapshot);
     }
 
-    public async Task<IEnumerable<OrderRecord>> GetOrdersAsync(Guid workspaceId, OrderStatus? status, CancellationToken cancellationToken)
+    public async Task<IEnumerable<OrderRecord>> GetOrdersAsync(Guid workspaceId, OrderStatus? status, CancellationToken cancellationToken, int limit = 50)
     {
         var query = GetCollection(workspaceId).OrderByDescending("CreatedAt");
 
@@ -92,7 +108,8 @@ public class FirestoreOrderRepository : IOrderRepository
             query = GetCollection(workspaceId).WhereEqualTo("Status", status.Value.ToString()).OrderByDescending("CreatedAt");
         }
 
-        var snapshot = await query.GetSnapshotAsync(cancellationToken);
+        if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+        var snapshot = await query.Limit(limit).GetSnapshotAsync(cancellationToken);
         return snapshot.Documents.Select(MapToOrderRecord).ToList();
     }
 

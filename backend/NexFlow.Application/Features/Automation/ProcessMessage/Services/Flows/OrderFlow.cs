@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -13,7 +14,7 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
 public interface IOrderFlow
 {
-    Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, CancellationToken ct);
+    Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, string sourceMessageId, CancellationToken ct);
 }
 
 public class OrderFlow : IOrderFlow
@@ -31,17 +32,21 @@ public class OrderFlow : IOrderFlow
         _offerings = offerings;
     }
 
-    public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, CancellationToken ct)
+    public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, string sourceMessageId, CancellationToken ct)
     {
         var context = await _contextStore.GetOrRecoverContextAsync(workspaceId, phone, ct);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
+        if (context.OrderLastSourceMessageId == sourceMessageId && context.OrderLastResponse != null) return context.OrderLastResponse;
         context.CurrentGoal = "ORDER";
-        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, customerName, messageText, interpretation, context, ct);
+        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, customerName, messageText, interpretation, context, sourceMessageId, ct);
+        context.OrderLastSourceMessageId = sourceMessageId;
+        context.OrderLastResponse = response;
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         return response;
     }
 
     private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, string customerName,
-        string messageText, AiInterpretation interpretation, ConversationContextDto context, CancellationToken ct)
+        string messageText, AiInterpretation interpretation, ConversationContextDto context, string sourceMessageId, CancellationToken ct)
     {
         var command = Normalize(messageText).Trim(' ', '.', '!', '?', '¿', '¡');
         if (command is "cancelar" or "cancelar pedido" or "cancela el pedido")
@@ -55,8 +60,11 @@ public class OrderFlow : IOrderFlow
         if (command is "enviar pedido" or "finalizar pedido" or "finalizar" || interpretation.SearchTerm == "FINALIZAR_PEDIDO")
         {
             if (context.OrderDraftItems.Count == 0) return "Tu pedido está vacío. ¿Qué producto deseas agregar?";
+            var orderId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));
+            var persisted = await _orderRepository.GetOrderByIdAsync(workspaceId, orderId, ct);
             var order = new OrderRecord
             {
+                Id = orderId,
                 ConversationId = conversationId,
                 ConsumerPhone = phone,
                 ConsumerName = string.IsNullOrWhiteSpace(interpretation.CustomerName) ? customerName : interpretation.CustomerName,
@@ -70,13 +78,12 @@ public class OrderFlow : IOrderFlow
             try
             {
                 // The repository validates every writer against the current catalog before persistence.
-                await _orderRepository.CreateOrderAsync(workspaceId, order, ct);
+                order = await _orderRepository.CreateOrderAsync(workspaceId, order, ct);
             }
             catch (ArgumentException ex) { return ex.Message + " Corrige o quita el producto antes de enviar."; }
 
             CloseDraft(context);
-            await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
-            await _notificationService.NotifyAsync(workspaceId, "ORDERS", NotificationType.NewCommercialRequest,
+            if (persisted == null) await _notificationService.NotifyAsync(workspaceId, "ORDERS", NotificationType.NewCommercialRequest,
                 "Pedido recibido", $"{order.ConsumerName} envió una solicitud con {order.Items.Count} ítems para revisión.", "/orders", ct);
             return $"Tu solicitud de pedido fue enviada. El negocio la revisará. Código: {order.Id[..6]}.";
         }

@@ -47,7 +47,6 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         string finalResponse;
 
-        // 🔥 SPRINT 05: Manejo determinista de errores de infraestructura
         if (interpretation.Intent == ConversationIntent.ProviderUnavailable || interpretation.Intent == ConversationIntent.RateLimited)
         {
             finalResponse = "Lo siento, en este momento estoy experimentando una alta demanda y no puedo procesar tu consulta. Por favor, intenta de nuevo en unos minutos.";
@@ -79,7 +78,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     finalResponse = AiIntentAccess.ProductsUnavailable;
                 else
                 {
-                    finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, request.MessageText, interpretation, cancellationToken);
+                    finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, request.MessageText, interpretation, request.MessageId, cancellationToken);
                 }
             }
             else if (interpretation.Intent == ConversationIntent.Request && activeModules.Contains("REQUESTS"))

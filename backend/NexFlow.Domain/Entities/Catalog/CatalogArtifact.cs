@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Domain.Entities.Catalog;
@@ -6,17 +6,20 @@ namespace NexFlow.Domain.Entities.Catalog;
 public class CatalogArtifact : Entity
 {
     public Guid WorkspaceId { get; private set; }
-    public string Scope { get; private set; } = "COMBINED"; // PRODUCT, SERVICE, COMBINED
+    public string Scope { get; private set; } = "PRODUCT";
     public string SourceHash { get; private set; } = string.Empty;
     public string? PdfUrl { get; private set; }
     public CatalogArtifactStatus Status { get; private set; }
     public DateTime? LastGeneratedAt { get; private set; }
     public string? GenerationId { get; private set; }
+    public DateTime? GenerationStartedAt { get; private set; }
+    public string? PersistenceVersion { get; set; }
 
     private CatalogArtifact() { }
 
     public static CatalogArtifact Initialize(Guid workspaceId, string scope)
     {
+        if (scope.ToUpperInvariant() is not ("PRODUCT" or "SERVICE")) throw new DomainException("Scope inválido.");
         return new CatalogArtifact
         {
             Id = Guid.NewGuid(),
@@ -26,8 +29,7 @@ public class CatalogArtifact : Entity
         };
     }
 
-    // 🔥 SPRINT 4: Método para reconstruir la entidad desde BD sin alterar su estado
-    public static CatalogArtifact Restore(Guid id, Guid workspaceId, string scope, string sourceHash, string? pdfUrl, CatalogArtifactStatus status, DateTime? lastGeneratedAt, string? generationId)
+    public static CatalogArtifact Restore(Guid id, Guid workspaceId, string scope, string sourceHash, string? pdfUrl, CatalogArtifactStatus status, DateTime? lastGeneratedAt, string? generationId, DateTime? generationStartedAt = null, string? persistenceVersion = null)
     {
         return new CatalogArtifact
         {
@@ -38,7 +40,9 @@ public class CatalogArtifact : Entity
             PdfUrl = pdfUrl,
             Status = status,
             LastGeneratedAt = lastGeneratedAt,
-            GenerationId = generationId
+            GenerationId = generationId,
+            GenerationStartedAt = generationStartedAt,
+            PersistenceVersion = persistenceVersion
         };
     }
 
@@ -47,6 +51,8 @@ public class CatalogArtifact : Entity
         Status = CatalogArtifactStatus.Generating;
         SourceHash = currentHash;
         GenerationId = generationId;
+        GenerationStartedAt = DateTime.UtcNow;
+        PdfUrl = null;
     }
 
     public void CompleteGeneration(string pdfUrl)

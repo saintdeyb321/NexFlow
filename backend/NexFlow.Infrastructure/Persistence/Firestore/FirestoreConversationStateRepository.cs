@@ -39,7 +39,7 @@ public class FirestoreConversationStateRepository : IConversationStateRepository
                     ?? throw new InvalidOperationException("Persisted conversation state is invalid.")
                 : null;
             if (current?.StateVersion != expectedVersion)
-                throw new InvalidOperationException("Conversation state changed concurrently; reload before saving.");
+                throw new NexFlow.Domain.Exceptions.ConcurrencyException("Conversation state changed concurrently; reload before saving.");
 
             transaction.Set(docRef, new Dictionary<string, object>
             {

@@ -5,6 +5,7 @@ namespace NexFlow.Application.Abstractions;
 
 public interface IConversationRepository
 {
+    Task<(int Conversations, int? Handoffs)> CountForPeriodAsync(Guid workspaceId, DateTime start, DateTime end, CancellationToken ct);
     Task<(MessageRecord Message, bool SendRequired)> PrepareOutboundAsync(Guid workspaceId, string conversationId, string phone, MessageRecord message, CancellationToken cancellationToken);
     Task ConfirmOutboundAsync(Guid workspaceId, string messageId, string externalMessageId, CancellationToken cancellationToken);
     Task RecordOutboundFailureAsync(Guid workspaceId, string messageId, string error, bool rejected, CancellationToken cancellationToken);
@@ -19,7 +20,7 @@ public interface IConversationRepository
     Task CreateConversationAsync(Guid workspaceId, ConversationRecord conversation, CancellationToken cancellationToken);
     Task DeleteConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
     Task CloseConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
-    Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken);
+    Task SetHandoffAsync(Guid workspaceId, string conversationId, string phone, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken);
     Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken);
     Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken);
     Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken);

@@ -23,8 +23,8 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
     public DbSet<SystemAdministrator> SystemAdministrators { get; set; } = null!;
     public DbSet<Notification> Notifications { get; set; } = null!;
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<TenantDeletionJob> TenantDeletionJobs => Set<TenantDeletionJob>();
 
-    // 🔥 SPRINT 01: Nueva Inbox Duradera reemplaza a ProcessedMessages
     public DbSet<InboundMessage> InboundMessages => Set<InboundMessage>();
 
     public Guid TenantId => _workspaceContext?.CurrentWorkspaceId ?? Guid.Empty;
@@ -49,12 +49,16 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
             entity.Property(e => e.PayloadJson).HasColumnType("jsonb");
             entity.HasIndex(e => e.Status);
         });
+        modelBuilder.Entity<TenantDeletionJob>(entity =>
+        {
+            entity.HasKey(j => j.WorkspaceId);
+            entity.HasIndex(j => new { j.Status, j.NextRetryAt, j.LeaseUntil });
+        });
 
         modelBuilder.Entity<Reservation>()
             .HasIndex(r => new { r.WorkspaceId, r.LocationId, r.Status, r.StartTime, r.EndTime })
             .HasDatabaseName("IX_Reservations_TimeRangeOverlap");
 
-        // 🔥 SPRINT 01: Configuración de la Inbox
         modelBuilder.Entity<InboundMessage>(entity =>
         {
             entity.HasKey(e => e.Id);

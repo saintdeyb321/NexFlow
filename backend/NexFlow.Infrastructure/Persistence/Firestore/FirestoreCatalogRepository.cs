@@ -16,6 +16,10 @@ public class FirestoreCatalogRepository : ICatalogRepository
     // =========================================================
     // CATEGORÍAS
     // =========================================================
+    public async Task<int> CountActiveItemsByTypeAsync(Guid workspaceId, string type, CancellationToken ct) =>
+        checked((int)(await _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems")
+            .WhereEqualTo("Type", type.ToUpperInvariant()).WhereEqualTo("IsActive", true).Count().GetSnapshotAsync(ct)).Count!.Value);
+
     public async Task<IEnumerable<BusinessCategoryDto>> GetCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories");
@@ -120,7 +124,6 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToItemDto);
     }
 
-    // 🔥 SPRINT 11 (Auditoría): Implementación de la búsqueda nativa por Tipo (PRODUCT o SERVICE) para ahorrar RAM
     public async Task<IEnumerable<BusinessOfferingDto>> GetItemsByTypeAsync(Guid workspaceId, string type, CancellationToken cancellationToken)
     {
         var query = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems")

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Memory;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Enums;
@@ -10,15 +10,11 @@ public class EntitlementService : IEntitlementService
     private readonly ILicenseRepository _licenseRepository;
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly IModuleRepository _moduleRepository;
-    private readonly IMembershipRepository _membershipRepository; // 🔥 SPRINT 12: Inyectado para Aislamiento B2B
+    private readonly IMembershipRepository _membershipRepository;
     private readonly IClock _clock;
     private readonly IMemoryCache _cache;
     private readonly ICurrentUser _currentUser;
     private readonly ISystemAdministratorRepository _sysAdminRepository;
-
-    private readonly string[] _baseModules = {
-        "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "CONVERSATIONS", "FAQ"
-    };
 
     public EntitlementService(
         ILicenseRepository licenseRepository,
@@ -49,91 +45,57 @@ public class EntitlementService : IEntitlementService
         }
     }
 
-    private async Task<bool> IsSuperAdminAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (_currentUser == null || _currentUser.UserId == Guid.Empty) return false;
-            return await _cache.GetOrCreateAsync($"is_superadmin_{_currentUser.UserId}", async entry =>
-            {
-                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-                return await _sysAdminRepository.IsUserSuperAdminAsync(_currentUser.UserId, cancellationToken);
-            });
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private async Task<bool> IsSuperAdminAsync(CancellationToken ct) =>
+        _currentUser.UserId != Guid.Empty && await _sysAdminRepository.IsUserSuperAdminAsync(_currentUser.UserId, ct);
 
-    // 🔥 SPRINT 12: Verificación de Aislamiento de Tenant. 
-    // Garantiza que un usuario no pueda consultar datos de un Tenant al que no pertenece.
-    private async Task<string?> GetUserRoleAsync(Guid workspaceId, CancellationToken cancellationToken)
+    private async Task<string?> GetUserRoleAsync(Guid workspaceId, CancellationToken ct)
     {
-        if (_currentUser == null || _currentUser.UserId == Guid.Empty) return null;
-
-        var cacheKey = $"role_{workspaceId}_{_currentUser.UserId}";
-        return await _cache.GetOrCreateAsync(cacheKey, async entry =>
-        {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
-            var membership = await _membershipRepository.GetMembershipAsync(workspaceId, _currentUser.UserId, cancellationToken);
-            return membership != null ? membership.Role.ToString().ToUpperInvariant() : null;
-        });
+        if (_currentUser.UserId == Guid.Empty) return null;
+        var membership = await _membershipRepository.GetMembershipAsync(workspaceId, _currentUser.UserId, ct);
+        return membership?.Role.ToString().ToUpperInvariant();
     }
 
     private async Task<EntitlementSnapshot> GetSnapshotAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
         if (workspaceId == Guid.Empty) return new EntitlementSnapshot();
 
-        var cacheKey = $"entitlement_{workspaceId}";
+        var snapshot = new EntitlementSnapshot();
 
-        return await _cache.GetOrCreateAsync(cacheKey, async entry =>
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
+        if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
         {
-            var snapshot = new EntitlementSnapshot();
-
-            var workspace = await _workspaceRepository.GetByIdAsync(workspaceId, cancellationToken);
-            if (workspace == null || (workspace.Status != WorkspaceStatus.Active && workspace.Status != WorkspaceStatus.Pending))
-            {
-                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-                return snapshot;
-            }
-
-            var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
-
-            if (license == null || !license.IsValidAt(_clock.UtcNow))
-            {
-                snapshot.IsValid = true;
-                snapshot.MaxLocations = 1;
-                snapshot.ActiveModuleCodes.Add("CONVERSATIONS");
-                snapshot.ActiveModuleCodes.Add("FAQ");
-                return snapshot;
-            }
-
-            foreach (var baseMod in _baseModules) snapshot.ActiveModuleCodes.Add(baseMod);
-
-            snapshot.IsValid = true;
-            snapshot.MaxLocations = license.MaxLocations > 0 ? license.MaxLocations : 1;
-            var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
-
-            if (assignedModuleIds.Any())
-            {
-                var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
-                foreach (var mod in activeModules)
-                {
-                    var code = mod.Code.ToUpperInvariant();
-                    snapshot.ActiveModuleCodes.Add(code);
-                    snapshot.ActiveModuleIds.Add(mod.Id);
-                    snapshot.ModuleCapabilities[code] = mod.Capabilities.Select(c => c.Code.ToUpperInvariant()).ToHashSet();
-                }
-            }
-
             return snapshot;
-        }) ?? new EntitlementSnapshot();
+        }
+
+        var license = await _licenseRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+
+        if (license == null || !license.IsValidAt(_clock.UtcNow))
+        {
+            return snapshot;
+        }
+
+
+        snapshot.IsValid = true;
+        snapshot.MaxLocations = license.MaxLocations > 0 ? license.MaxLocations : 1;
+        var assignedModuleIds = license.LicenseModules.Select(m => m.ModuleId).ToList();
+
+        if (assignedModuleIds.Any())
+        {
+            var activeModules = await _moduleRepository.GetActiveModulesAsync(assignedModuleIds, cancellationToken);
+            foreach (var mod in activeModules)
+            {
+                var code = mod.Code.ToUpperInvariant();
+                snapshot.ActiveModuleCodes.Add(code);
+                snapshot.ActiveModuleIds.Add(mod.Id);
+                snapshot.ModuleCapabilities[code] = mod.Capabilities.Select(c => c.Code.ToUpperInvariant()).ToHashSet();
+            }
+        }
+
+        return snapshot;
     }
 
     // =========================================================================
-    // MATRIZ DE AUTORIZACIÓN (Capabilities RBAC) - SPRINT 12
+
     // =========================================================================
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
@@ -151,11 +113,11 @@ public class EntitlementService : IEntitlementService
 
         var code = moduleCode.ToUpperInvariant();
         var cap = capabilityCode.ToUpperInvariant();
+        if (!snapshot.ActiveModuleCodes.Contains(code)) return false;
 
-        bool hasLicenseCap = _baseModules.Contains(code) ||
-            (snapshot.ModuleCapabilities.TryGetValue(code, out var caps) && caps.Contains(cap));
+        bool hasLicenseCap = snapshot.ModuleCapabilities.TryGetValue(code, out var caps) && caps.Contains(cap);
 
-        if (!hasLicenseCap && !_baseModules.Contains(code)) return false;
+        if (!hasLicenseCap) return false;
 
         // 3. Evaluar Matriz de Permisos (Rol vs Capacidad)
         return EvaluateRoleMatrix(userRole, code, cap);

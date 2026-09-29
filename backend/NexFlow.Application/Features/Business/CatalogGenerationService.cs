@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
@@ -12,6 +12,7 @@ namespace NexFlow.Application.Features.Business;
 
 public interface ICatalogGenerationService
 {
+    Task<CatalogArtifact?> GetArtifactAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
     Task<string> GetCurrentSourceHashAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
     Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
     Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken);
@@ -25,7 +26,7 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly ICatalogHashService _hashService;
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly IOutboxRepository _outboxRepository;
-    private readonly IUnitOfWork _unitOfWork; // 🔥 SPRINT 11: Requerido para guardar el Outbox
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CatalogGenerationService> _logger;
 
     public CatalogGenerationService(
@@ -48,133 +49,91 @@ public class CatalogGenerationService : ICatalogGenerationService
         _logger = logger;
     }
 
-    public async Task<string> GetCurrentSourceHashAsync(Guid workspaceId, string scope, CancellationToken cancellationToken)
+    private static string ValidateScope(string scope)
     {
-        var targetScope = scope.Trim().ToUpperInvariant();
-        if (targetScope != "PRODUCT" && targetScope != "SERVICE")
-            throw new ArgumentException("El scope debe ser PRODUCT o SERVICE.", nameof(scope));
-
-        var categories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
-        var items = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
-        return _hashService.ComputeHash(
-            categories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList(),
-            items.Where(i => i.Type == targetScope).ToList());
+        var value = scope.Trim().ToUpperInvariant();
+        if (value is not ("PRODUCT" or "SERVICE")) throw new ArgumentException("Scope debe ser PRODUCT o SERVICE.");
+        return value;
     }
 
-    public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    private async Task<(object BusinessData, object CatalogData)> GetContentAsync(Guid workspaceId, string scope, CancellationToken ct)
     {
-        var scopesToVerify = new[] { "PRODUCT", "SERVICE" };
-        var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
-        var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
-
-        foreach (var scope in scopesToVerify)
-        {
-            var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, cancellationToken);
-
-            if (artifact != null && artifact.Status == CatalogArtifactStatus.Current)
-            {
-                var filteredCategories = allCategories.Where(c => c.Scope == scope || c.Scope == "SHARED").ToList();
-                var filteredItems = allItems.Where(i => i.Type == scope).ToList();
-
-                var currentHash = _hashService.ComputeHash(filteredCategories, filteredItems);
-
-                if (artifact.SourceHash != currentHash)
-                {
-                    artifact.MarkAsStale();
-                    await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
-                    _logger.LogInformation("El catálogo '{Scope}' del workspace {WorkspaceId} ha mutado. Artefacto invalidado (STALE).", scope, workspaceId);
-                }
-            }
-        }
+        var profile = await _profileRepository.GetProfileAsync(workspaceId, ct)
+            ?? throw new KeyNotFoundException("Perfil comercial no encontrado.");
+        var categories = (await _catalogRepository.GetActiveCategoriesAsync(workspaceId, ct))
+            .Where(c => c.Scope == scope || c.Scope == "SHARED").OrderBy(c => c.DisplayOrder).ThenBy(c => c.Id, StringComparer.Ordinal).ToList();
+        var categoryIds = categories.Select(c => c.Id).ToHashSet();
+        var items = (await _catalogRepository.GetItemsByTypeAsync(workspaceId, scope, ct))
+            .Where(i => i.IsActive && (string.IsNullOrEmpty(i.CategoryId) || categoryIds.Contains(i.CategoryId)))
+            .OrderBy(i => i.Id, StringComparer.Ordinal).ToList();
+        return (new { Name = profile.CommercialName, Email = profile.ContactEmail, WhatsApp = profile.WhatsAppNumber, profile.Description, profile.TaxId, profile.TimeZone },
+            new {
+                Categories = categories.Select(c => new { c.Id, c.Name, c.Description, c.DisplayOrder, c.Scope }).ToArray(),
+                Items = items.Select(i => new { i.Id, i.CategoryId, i.Name, i.Description, Price = i.PriceMinorUnits / 100m,
+                    i.Currency, i.ImageUrl, i.LocationScope, LocationIds = i.LocationIds.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+                    DurationInMinutes = (i as ServiceDto)?.DurationInMinutes, RequiresReservation = (i as ServiceDto)?.RequiresReservation }).ToArray()
+            });
     }
 
-    public async Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken)
+    public async Task<string> GetCurrentSourceHashAsync(Guid workspaceId, string scope, CancellationToken ct)
     {
-        var targetScope = scope.ToUpperInvariant();
+        var content = await GetContentAsync(workspaceId, ValidateScope(scope), ct);
+        return _hashService.ComputeContentHash(new { content.BusinessData, content.CatalogData });
+    }
 
-        if (targetScope != "PRODUCT" && targetScope != "SERVICE")
+    public async Task<CatalogArtifact?> GetArtifactAsync(Guid workspaceId, string scope, CancellationToken ct)
+    {
+        scope = ValidateScope(scope);
+        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+        if (artifact == null) return null;
+        if (artifact.Status == CatalogArtifactStatus.Generating &&
+            (artifact.GenerationStartedAt == null || artifact.GenerationStartedAt < DateTime.UtcNow.AddHours(-1)))
         {
-            throw new ArgumentException("El scope del artefacto debe ser estrictamente PRODUCT o SERVICE.", nameof(scope));
+            artifact.MarkAsFailed();
+            await _artifactRepository.SaveArtifactAsync(artifact, ct);
         }
-
-        var allCategories = await _catalogRepository.GetCategoriesAsync(workspaceId, cancellationToken);
-        var allItems = await _catalogRepository.GetItemsAsync(workspaceId, cancellationToken);
-
-        var filteredCategories = allCategories.Where(c => c.Scope == targetScope || c.Scope == "SHARED").ToList();
-        var filteredItems = allItems.Where(i => i.Type == targetScope).ToList();
-
-        var currentHash = _hashService.ComputeHash(filteredCategories, filteredItems);
-
-        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, targetScope, cancellationToken)
-                       ?? CatalogArtifact.Initialize(workspaceId, targetScope);
-
-        if (artifact.Status == CatalogArtifactStatus.Current && artifact.SourceHash == currentHash)
+        if (artifact.Status == CatalogArtifactStatus.Current && artifact.SourceHash != await GetCurrentSourceHashAsync(workspaceId, scope, ct))
         {
-            return artifact;
+            artifact.MarkAsStale();
+            await _artifactRepository.SaveArtifactAsync(artifact, ct);
         }
+        return artifact;
+    }
 
-        await _usageRepository.IncrementUsageAtomicallyAsync(workspaceId, DateTime.UtcNow.Date, cancellationToken);
+    public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken ct)
+    {
+        foreach (var scope in new[] { "PRODUCT", "SERVICE" }) await GetArtifactAsync(workspaceId, scope, ct);
+    }
 
-        string generationId = Guid.NewGuid().ToString("N");
-        artifact.MarkAsGenerating(currentHash, generationId);
-        await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
-
+    public async Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, CancellationToken ct)
+    {
+        scope = ValidateScope(scope);
+        var content = await GetContentAsync(workspaceId, scope, ct);
+        var hash = _hashService.ComputeContentHash(new { content.BusinessData, content.CatalogData });
+        var artifact = await GetArtifactAsync(workspaceId, scope, ct) ?? CatalogArtifact.Initialize(workspaceId, scope);
+        if (artifact.SourceHash == hash && artifact.Status is CatalogArtifactStatus.Current or CatalogArtifactStatus.Generating) return artifact;
+        await _usageRepository.IncrementUsageAtomicallyAsync(workspaceId, DateTime.UtcNow.Date, ct);
+        var generationId = Guid.NewGuid().ToString("N");
+        artifact.MarkAsGenerating(hash, generationId);
         try
         {
-            var profile = await _profileRepository.GetProfileAsync(workspaceId, cancellationToken);
-
-            var rawPayload = new
-            {
-                GenerationId = generationId,
-                Scope = targetScope,
-                SourceHash = currentHash,
-                BusinessData = new
-                {
-                    Name = profile?.CommercialName ?? "Negocio sin nombre",
-                    Email = profile?.ContactEmail,
-                    WhatsApp = profile?.WhatsAppNumber
-                },
-                CatalogData = new
-                {
-                    Categories = filteredCategories.Select(c => new { c.Id, c.Name, c.Description }),
-                    Items = filteredItems.Select(i => new {
-                        i.Id,
-                        i.CategoryId,
-                        i.Name,
-                        i.Description,
-                        Price = i.PriceMinorUnits / 100m,
-                        i.Currency,
-                        DurationInMinutes = (i as ServiceDto)?.DurationInMinutes
-                    })
-                }
-            };
-
-            var wrappedPayload = new N8nEventPayload<object>(
-                workspaceId,
-                "CATALOG_GENERATION_REQUESTED",
-                Guid.NewGuid().ToString(),
-                $"catalog_{generationId}",
-                DateTime.UtcNow,
-                rawPayload);
-
-            var outboxMessage = new OutboxMessage
-            {
-                WorkspaceId = workspaceId,
-                EventType = "CATALOG_GENERATION_REQUESTED",
-                PayloadJson = JsonSerializer.Serialize(wrappedPayload)
-            };
-
-            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
-
-            // 🔥 SPRINT 11 (Auditoría): Guardamos el evento en la BD. Si no, nunca será procesado por el Worker.
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _artifactRepository.SaveArtifactAsync(artifact, ct);
+            var payload = new N8nEventPayload<object>(workspaceId, "CATALOG_GENERATION_REQUESTED", generationId,
+                $"catalog_{generationId}", DateTime.UtcNow,
+                new { GenerationId = generationId, Scope = scope, SourceHash = hash, content.BusinessData, content.CatalogData });
+            await _outboxRepository.AddAsync(new OutboxMessage { WorkspaceId = workspaceId, EventType = payload.EventType, PayloadJson = JsonSerializer.Serialize(payload) }, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error preparando el payload documental para n8n o guardando en Outbox");
-            throw; // Propagamos. No tocamos el estado interno con reflexión para no ensuciar el Dominio.
+            _logger.LogError(ex, "Catalog generation enqueue failed for {WorkspaceId}/{GenerationId}", workspaceId, generationId);
+            artifact.MarkAsFailed();
+            // A request cancellation must not prevent the durable failure marker.
+            using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try { await _artifactRepository.SaveArtifactAsync(artifact, recovery.Token); }
+            catch (Exception failure) { _logger.LogError(failure, "Failed to persist artifact failure; read reconciliation will recover {GenerationId}", generationId); }
+            throw;
         }
-
         return artifact;
     }
 }

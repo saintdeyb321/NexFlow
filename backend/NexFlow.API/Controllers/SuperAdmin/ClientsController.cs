@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 using NexFlow.Application.Features.SuperAdmin.Workspaces;
@@ -85,24 +85,12 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost("delete")]
-    public IActionResult DeleteClient([FromBody] DeleteClientRequest request, [FromServices] IServiceScopeFactory scopeFactory)
+    public async Task<IActionResult> DeleteClient([FromBody] DeleteClientRequest request,
+        [FromServices] DeleteClientCommandHandler handler, CancellationToken cancellationToken)
     {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                using var scope = scopeFactory.CreateScope();
-                var handler = scope.ServiceProvider.GetRequiredService<DeleteClientCommandHandler>();
-                await handler.Handle(new DeleteClientCommand(request.WorkspaceId), CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CRITICAL] Error en proceso background (DeleteClient): {ex.Message}");
-            }
-        });
-
-        return Accepted(new { code = "Workspace.DeletionStarted", message = "La purga completa de datos del negocio ha comenzado en segundo plano." });
+        var result = await handler.Handle(new DeleteClientCommand(request.WorkspaceId), cancellationToken);
+        if (result.IsFailure) return NotFound(new { code = result.Error.Code, message = result.Error.Description });
+        return Accepted(new { code = "Workspace.DeletionScheduled", message = "Eliminación durable solicitada." });
     }
-
 }
 public record DeleteClientRequest(Guid WorkspaceId);

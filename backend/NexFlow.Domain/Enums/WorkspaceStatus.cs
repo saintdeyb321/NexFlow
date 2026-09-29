@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Domain.Enums;
+namespace NexFlow.Domain.Enums;
 
 public enum WorkspaceStatus
 {
@@ -6,5 +6,6 @@ public enum WorkspaceStatus
     Active = 1,
     Suspended = 2,
     Cancelled = 3,
-    Archived = 4
+    Archived = 4,
+    Deleting = 5
 }

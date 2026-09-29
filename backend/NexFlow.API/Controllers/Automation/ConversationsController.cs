@@ -66,7 +66,7 @@ public class ConversationsController : ControllerBase
     [HttpPost("{conversationId}/release")]
     public async Task<IActionResult> ReleaseConversation(string conversationId, [FromServices] IHumanHandoffService handoffService, CancellationToken cancellationToken)
     {
-        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para liberar el chat.");
+        if (!await CheckCapabilityAsync("RELEASE", cancellationToken)) return StatusCode(403, "No tiene permisos para liberar el chat.");
 
         await handoffService.ReleaseToAutomaticAsync(WorkspaceId, conversationId, cancellationToken);
 
@@ -90,6 +90,7 @@ public class ConversationsController : ControllerBase
         var clientKey = Request.Headers["Idempotency-Key"].FirstOrDefault();
         if (clientKey?.Length > 200) return BadRequest(new { message = "Idempotency-Key demasiado larga." });
         var sourceId = $"manual:{conversationId}:{(string.IsNullOrWhiteSpace(clientKey) ? Guid.NewGuid().ToString("N") : clientKey)}";
+        await handoffService.EscalateToHumanAsync(WorkspaceId, conversation.Id, HandoffReason.ManualIntervention, cancellationToken);
         MessageRecord finalRecord;
         try
         {
@@ -99,9 +100,8 @@ public class ConversationsController : ControllerBase
         }
         catch (HttpRequestException ex) when (ex.StatusCode.HasValue)
         {
-            return StatusCode((int)ex.StatusCode.Value, new { message = "Evolution rechazó el envío.", providerStatus = (int)ex.StatusCode.Value });
+            return StatusCode(503, new { code = "Dependency.EvolutionUnavailable", message = "El proveedor no pudo completar el envío.", correlationId = HttpContext.TraceIdentifier });
         }
-        await handoffService.EscalateToHumanAsync(WorkspaceId, conversation.Id, HandoffReason.ManualIntervention, cancellationToken);
 
         return Ok(finalRecord);
     }
@@ -109,7 +109,7 @@ public class ConversationsController : ControllerBase
     [HttpDelete("{conversationId}")]
     public async Task<IActionResult> DeleteConversation(string conversationId, [FromServices] IContextRecoveryService contextStore, CancellationToken cancellationToken)
     {
-        if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para eliminar conversaciones.");
+        if (!await CheckCapabilityAsync("DELETE", cancellationToken)) return StatusCode(403, "No tiene permisos para eliminar conversaciones.");
 
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });

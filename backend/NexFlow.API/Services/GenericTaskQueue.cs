@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,7 +21,7 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     {
         var options = new BoundedChannelOptions(capacity)
         {
-            FullMode = BoundedChannelFullMode.Wait
+            FullMode = BoundedChannelFullMode.DropWrite
         };
         _queue = Channel.CreateBounded<Func<IServiceProvider, CancellationToken, ValueTask>>(options);
     }
@@ -65,8 +65,7 @@ public class GenericBackgroundWorker : BackgroundService
             {
                 var workItem = await _taskQueue.DequeueAsync(stoppingToken);
 
-                // Disparamos la tarea de forma concurrente sin bloquear la cola
-                _ = ProcessWorkItemAsync(workItem, stoppingToken);
+                await ProcessWorkItemAsync(workItem, stoppingToken);
             }
             catch (OperationCanceledException)
             {

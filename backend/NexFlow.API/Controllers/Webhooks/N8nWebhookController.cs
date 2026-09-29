@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
@@ -28,9 +30,10 @@ public class N8nWebhookController : ControllerBase
         [FromHeader(Name = "X-NexFlow-Signature")] string providedSignature,
         [FromHeader(Name = "X-NexFlow-Timestamp")] string timestampString,
         [FromServices] ICatalogGenerationService generationService,
+        [FromServices] NexFlowDbContext db,
         CancellationToken cancellationToken)
     {
-        // 🔥 SPRINT 11 (Auditoría): Protección estricta contra Replay Attacks y Hash de Raw Body
+
         if (string.IsNullOrWhiteSpace(providedSignature) || string.IsNullOrWhiteSpace(timestampString))
             return Unauthorized(new { message = "Firma o timestamp ausente." });
 
@@ -48,10 +51,12 @@ public class N8nWebhookController : ControllerBase
         var payloadToHash = $"{timestampString}.{rawBody}";
         var expectedSignature = ComputeHmacSha256(payloadToHash, _webhookSecret);
 
-        if (providedSignature != expectedSignature)
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(providedSignature), Encoding.UTF8.GetBytes(expectedSignature)))
             return Unauthorized(new { message = "Firma HMAC inválida. Intento de inyección bloqueado." });
 
-        var payload = JsonSerializer.Deserialize<CatalogReadyPayload>(rawBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        CatalogReadyPayload? payload;
+        try { payload = JsonSerializer.Deserialize<CatalogReadyPayload>(rawBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch (JsonException) { return BadRequest(new { code = "Validation.Invalid", message = "Payload JSON inválido." }); }
 
         if (payload == null || string.IsNullOrWhiteSpace(payload.PdfUrl) || payload.WorkspaceId == Guid.Empty || string.IsNullOrWhiteSpace(payload.GenerationId))
             return BadRequest(new { message = "Payload inválido o incompleto." });
@@ -60,7 +65,11 @@ public class N8nWebhookController : ControllerBase
         if (scope != "PRODUCT" && scope != "SERVICE")
             return BadRequest(new { message = "Scope inválido." });
 
-        var artifact = await _artifactRepository.GetCurrentArtifactAsync(payload.WorkspaceId, scope, cancellationToken);
+        await using var lifecycle = await db.Database.BeginTransactionAsync(cancellationToken);
+        await TenantLifecycleLock.AcquireAsync(db, payload.WorkspaceId, false, cancellationToken);
+        if (!await db.Workspaces.AnyAsync(w => w.Id == payload.WorkspaceId && w.Status != NexFlow.Domain.Enums.WorkspaceStatus.Deleting, cancellationToken))
+            return NotFound(new { code = "Workspace.NotFound", message = "Workspace no disponible." });
+        var artifact = await generationService.GetArtifactAsync(payload.WorkspaceId, scope, cancellationToken);
 
         if (artifact != null && artifact.Status == CatalogArtifactStatus.Generating)
         {

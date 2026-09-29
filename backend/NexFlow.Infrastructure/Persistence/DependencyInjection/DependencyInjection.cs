@@ -1,4 +1,4 @@
-﻿using Google.Cloud.Firestore;
+using Google.Cloud.Firestore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -58,7 +58,6 @@ public static class DependencyInjection
             services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
             services.AddScoped<IConversationStateRepository, FirestoreConversationStateRepository>();
 
-            // 🔥 SPRINT 4: Repositorio de Solicitudes
             services.AddScoped<IRequestRepository, FirestoreRequestRepository>();
             services.AddScoped<ITenantCleanupService, FirestoreTenantCleanupService>();
 
@@ -74,6 +73,8 @@ public static class DependencyInjection
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();
+        services.AddScoped<ITenantDeletionScheduler, TenantDeletionScheduler>();
+        services.AddHostedService<TenantDeletionWorker>();
 
         services.AddScoped<IInboundMessageRepository, InboundMessageRepository>();
         services.AddHostedService<InboundMessageWorker>();
