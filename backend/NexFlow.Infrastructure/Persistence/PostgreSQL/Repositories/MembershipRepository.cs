@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
@@ -12,6 +12,9 @@ public class MembershipRepository : IMembershipRepository
     public MembershipRepository(NexFlowDbContext context) => _context = context;
 
     public void Add(Membership membership) => _context.Memberships.Add(membership);
+
+    public async Task<IEnumerable<Membership>> GetByWorkspaceIdAsync(Guid workspaceId, CancellationToken cancellationToken) =>
+        await _context.Memberships.AsNoTracking().Where(m => m.WorkspaceId == workspaceId).ToListAsync(cancellationToken);
 
     public async Task<Membership?> GetUserMembershipAsync(Guid userId, Guid workspaceId, CancellationToken cancellationToken)
     {

@@ -20,7 +20,7 @@ using NexFlow.Application.Features.Services.DTOs;
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
 public interface IBookingFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct); }
-public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, CancellationToken ct); }
+public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, string sourceMessageId, CancellationToken ct); }
 public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, string conversationId, CancellationToken ct); }
 public interface IChatFlow { Task<string> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, CancellationToken ct); }
 
@@ -210,8 +210,9 @@ public class RequestFlow : IRequestFlow
         _requestService = requestService; _handoffService = handoffService;
     }
 
-    public async Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, CancellationToken ct)
+    public async Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, string sourceMessageId, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
         var type = RequestType.Support;
         var title = "Solicitud de Atención";
         var lowerText = messageText.ToLowerInvariant();
@@ -223,7 +224,7 @@ public class RequestFlow : IRequestFlow
         {
             type = RequestType.Tramite; title = "Trámite Administrativo";
         }
-        var ticketId = await _requestService.CreateRequestAsync(workspaceId, phone, conversationId, type, title, messageText, null, null, ct);
+        var ticketId = await _requestService.CreateRequestAsync(workspaceId, phone, conversationId, type, title, messageText, sourceMessageId, null, ct);
         await _handoffService.EscalateToHumanAsync(workspaceId, conversationId, HandoffReason.AiEscalation, ct);
         return $"He registrado tu solicitud con el código {ticketId}. Un asesor la revisará y se pondrá en contacto contigo a la brevedad.";
     }

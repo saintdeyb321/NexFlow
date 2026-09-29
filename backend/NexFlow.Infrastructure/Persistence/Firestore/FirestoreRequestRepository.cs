@@ -1,6 +1,9 @@
-﻿using Google.Cloud.Firestore;
+using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Requests;
+using System.Security.Cryptography;
+using System.Text;
+using Grpc.Core;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -16,8 +19,14 @@ public class FirestoreRequestRepository : IRequestRepository
     private CollectionReference GetCollection(Guid workspaceId) =>
         _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("requests");
 
-    public async Task CreateRequestAsync(Guid workspaceId, RequestRecord request, CancellationToken cancellationToken)
+    public async Task<(RequestRecord Request, bool Created)> CreateRequestAsync(Guid workspaceId, RequestRecord request, CancellationToken cancellationToken)
     {
+        if (!string.IsNullOrWhiteSpace(request.SourceMessageId))
+        {
+            var existing = await GetBySourceMessageIdAsync(workspaceId, request.SourceMessageId, cancellationToken);
+            if (existing != null) return (existing, false);
+            request.Id = SourceDocumentId(request.SourceMessageId);
+        }
         var docRef = GetCollection(workspaceId).Document(request.Id);
 
         var data = new Dictionary<string, object>
@@ -30,12 +39,38 @@ public class FirestoreRequestRepository : IRequestRepository
             { "Description", request.Description },
             { "Status", request.Status.ToString().ToUpperInvariant() },
             { "AssignedTo", request.AssignedTo ?? "" },
+            { "SourceMessageId", request.SourceMessageId ?? "" },
             { "Metadata", request.Metadata ?? new Dictionary<string, object>() },
             { "CreatedAt", request.CreatedAt.ToUniversalTime() },
             { "UpdatedAt", request.UpdatedAt.ToUniversalTime() }
         };
 
-        await docRef.SetAsync(data, cancellationToken: cancellationToken);
+        try { await docRef.CreateAsync(data, cancellationToken); }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists && !string.IsNullOrWhiteSpace(request.SourceMessageId))
+        {
+            var existing = await GetByIdAsync(workspaceId, request.Id, cancellationToken);
+            if (existing == null || existing.SourceMessageId != request.SourceMessageId) throw;
+            return (existing, false);
+        }
+        return (request, true);
+    }
+
+    private static string SourceDocumentId(string sourceMessageId) =>
+        "message_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));
+
+    public async Task<RequestRecord?> GetByIdAsync(Guid workspaceId, string requestId, CancellationToken cancellationToken)
+    {
+        var doc = await GetCollection(workspaceId).Document(requestId).GetSnapshotAsync(cancellationToken);
+        return doc.Exists ? MapToRequestRecord(doc) : null;
+    }
+
+    public async Task<RequestRecord?> GetBySourceMessageIdAsync(Guid workspaceId, string sourceMessageId, CancellationToken cancellationToken)
+    {
+        var existing = await GetByIdAsync(workspaceId, SourceDocumentId(sourceMessageId), cancellationToken);
+        if (existing != null) return existing;
+        var snapshot = await GetCollection(workspaceId).WhereEqualTo("SourceMessageId", sourceMessageId)
+            .Limit(1).GetSnapshotAsync(cancellationToken);
+        return snapshot.Documents.Select(MapToRequestRecord).FirstOrDefault();
     }
 
     // 🔥 SPRINT 11 (Auditoría): Firma modificada para soportar Paginación y Filtrado Real
@@ -66,11 +101,20 @@ public class FirestoreRequestRepository : IRequestRepository
 
     public async Task UpdateRequestStatusAsync(Guid workspaceId, string requestId, string status, CancellationToken cancellationToken)
     {
+        if (!Enum.TryParse<RequestStatus>(status, true, out var next) || !Enum.IsDefined(next))
+            throw new ArgumentException("Estado inválido.");
         var docRef = GetCollection(workspaceId).Document(requestId);
-        await docRef.UpdateAsync(new Dictionary<string, object>
+        await _firestoreDb.RunTransactionAsync(async transaction =>
         {
-            { "Status", status.ToUpperInvariant() },
-            { "UpdatedAt", DateTime.UtcNow }
+            var snapshot = await transaction.GetSnapshotAsync(docRef, cancellationToken);
+            if (!snapshot.Exists) throw new KeyNotFoundException("Solicitud no encontrada.");
+            if (!RequestRecord.CanTransition(MapToRequestRecord(snapshot).Status, next))
+                throw new InvalidOperationException("Transición de estado no permitida.");
+            transaction.Update(docRef, new Dictionary<string, object>
+            {
+                { "Status", next.ToString().ToUpperInvariant() },
+                { "UpdatedAt", DateTime.UtcNow }
+            });
         }, cancellationToken: cancellationToken);
     }
 
@@ -78,10 +122,15 @@ public class FirestoreRequestRepository : IRequestRepository
     public async Task AssignRequestAsync(Guid workspaceId, string requestId, string assignedTo, CancellationToken cancellationToken)
     {
         var docRef = GetCollection(workspaceId).Document(requestId);
-        await docRef.UpdateAsync(new Dictionary<string, object>
+        await _firestoreDb.RunTransactionAsync(async transaction =>
         {
-            { "AssignedTo", assignedTo },
-            { "UpdatedAt", DateTime.UtcNow }
+            var snapshot = await transaction.GetSnapshotAsync(docRef, cancellationToken);
+            if (!snapshot.Exists) throw new KeyNotFoundException("Solicitud no encontrada.");
+            transaction.Update(docRef, new Dictionary<string, object>
+            {
+                { "AssignedTo", assignedTo },
+                { "UpdatedAt", DateTime.UtcNow }
+            });
         }, cancellationToken: cancellationToken);
     }
 
@@ -107,6 +156,7 @@ public class FirestoreRequestRepository : IRequestRepository
             Description = doc.GetValue<string>("Description"),
             Status = statusEnum,
             AssignedTo = assignedTo,
+            SourceMessageId = doc.TryGetValue("SourceMessageId", out string sourceMessageId) ? sourceMessageId : null,
             Metadata = metadata ?? new Dictionary<string, object>(),
             CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
             UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")

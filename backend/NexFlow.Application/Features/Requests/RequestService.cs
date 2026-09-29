@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.Abstractions.Repositories;
+using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Notifications;
 using NexFlow.Domain.Enums;
 
@@ -26,8 +26,8 @@ public class RequestService : IRequestService
         // 🔥 SPRINT 08: Idempotencia estricta. Evitamos crear duplicados si el mensaje ya generó un Request.
         if (!string.IsNullOrWhiteSpace(sourceMessageId))
         {
-            var latestRequest = await _requestRepo.GetLatestRequestByPhoneAsync(workspaceId, phone, ct);
-            if (latestRequest != null && latestRequest.SourceMessageId == sourceMessageId)
+            var latestRequest = await _requestRepo.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, ct);
+            if (latestRequest != null)
             {
                 return latestRequest.Id; // Ya existía, devolvemos el ID en silencio
             }
@@ -48,7 +48,8 @@ public class RequestService : IRequestService
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _requestRepo.CreateRequestAsync(workspaceId, newRequest, ct);
+        var persisted = await _requestRepo.CreateRequestAsync(workspaceId, newRequest, ct);
+        if (!persisted.Created) return persisted.Request.Id;
 
         var notificationType = type == RequestType.CommercialInquiry
             ? NotificationType.NewCommercialRequest

@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.Application.Abstractions.Repositories;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -13,10 +14,12 @@ namespace NexFlow.API.Controllers.Business;
 public class MembersController : ControllerBase
 {
     private readonly IWorkspaceContext _workspaceContext;
+    private readonly IMembershipRepository _memberships;
 
-    public MembersController(IWorkspaceContext workspaceContext)
+    public MembersController(IWorkspaceContext workspaceContext, IMembershipRepository memberships)
     {
         _workspaceContext = workspaceContext;
+        _memberships = memberships;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -24,8 +27,8 @@ public class MembersController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetMembers(CancellationToken cancellationToken)
     {
-        // TODO: Inyectar un QueryHandler que llame a IMembershipRepository.GetByWorkspaceIdAsync()
-        return Ok(new { Message = "Endpoint de lectura de miembros listo para ser conectado al Handler." });
+        var members = await _memberships.GetByWorkspaceIdAsync(WorkspaceId, cancellationToken);
+        return Ok(members.Select(m => new { m.UserId, m.WorkspaceId, Role = m.Role.ToString() }));
     }
 
     // [HttpPost("invite")]

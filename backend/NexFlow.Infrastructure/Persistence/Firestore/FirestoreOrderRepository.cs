@@ -1,21 +1,51 @@
-﻿using Google.Cloud.Firestore;
+using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.Orders.DTOs;
 using NexFlow.Domain.Enums;
+using NexFlow.Application.Features.Business.Offerings;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreOrderRepository : IOrderRepository
 {
     private readonly FirestoreDb _firestoreDb;
+    private readonly IOfferingService _offerings;
 
-    public FirestoreOrderRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
+    public FirestoreOrderRepository(FirestoreDb firestoreDb, IOfferingService offerings)
+    {
+        _firestoreDb = firestoreDb;
+        _offerings = offerings;
+    }
 
     private CollectionReference GetCollection(Guid workspaceId) =>
         _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("orders");
 
     public async Task<OrderRecord> CreateOrderAsync(Guid workspaceId, OrderRecord order, CancellationToken cancellationToken)
     {
+        if (order.Items == null || order.Items.Count == 0)
+            throw new ArgumentException("El pedido debe contener productos.");
+        foreach (var item in order.Items)
+        {
+            if (item.Quantity <= 0 || string.IsNullOrWhiteSpace(item.ProductId))
+                throw new ArgumentException("Cada producto debe tener un ID de catálogo y cantidad mayor que cero.");
+            var product = await _offerings.GetProductByIdAsync(workspaceId, item.ProductId, cancellationToken);
+            if (product == null)
+                throw new ArgumentException($"El producto '{item.ProductName}' no está disponible en el catálogo.");
+            if (product.PriceMinorUnits < 0 || string.IsNullOrWhiteSpace(product.Currency))
+                throw new ArgumentException($"El producto '{product.Name}' no tiene un precio/moneda válido.");
+            item.ProductId = product.Id;
+            item.ProductName = product.Name;
+            item.UnitPriceMinorUnits = product.PriceMinorUnits;
+            item.Currency = product.Currency;
+            try { _ = item.SubtotalMinorUnits; }
+            catch (OverflowException) { throw new ArgumentException("El importe del producto supera el máximo permitido."); }
+        }
+        var currencies = order.Items.Select(i => i.Currency).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        order.Currency = currencies.Count == 1 ? currencies[0] : null;
+        try { order.TotalAmountMinorUnits = order.Currency == null ? null : order.Items.Sum(i => i.SubtotalMinorUnits); }
+        catch (OverflowException) { throw new ArgumentException("El importe del pedido supera el máximo permitido."); }
+        order.Status = OrderStatus.PendingReview;
+        if (order.Currency == null) order.Notes = (order.Notes + " Total pendiente: los productos tienen monedas diferentes.").Trim();
         var docRef = GetCollection(workspaceId).Document(order.Id);
 
         var data = new Dictionary<string, object>
@@ -25,8 +55,8 @@ public class FirestoreOrderRepository : IOrderRepository
             { "ConsumerPhone", order.ConsumerPhone },
             { "ConsumerName", order.ConsumerName },
             { "Status", order.Status.ToString() },
-            { "Currency", order.Currency },
-            { "TotalAmountMinorUnits", order.TotalAmountMinorUnits },
+            { "Currency", order.Currency! },
+            { "TotalAmountMinorUnits", order.TotalAmountMinorUnits! },
             { "Notes", order.Notes ?? "" },
             { "CreatedAt", DateTime.SpecifyKind(order.CreatedAt, DateTimeKind.Utc) },
             { "UpdatedAt", DateTime.SpecifyKind(order.UpdatedAt, DateTimeKind.Utc) },
@@ -35,7 +65,8 @@ public class FirestoreOrderRepository : IOrderRepository
                     { "ProductId", i.ProductId },
                     { "ProductName", i.ProductName },
                     { "Quantity", i.Quantity },
-                    { "UnitPriceMinorUnits", i.UnitPriceMinorUnits }
+                    { "UnitPriceMinorUnits", i.UnitPriceMinorUnits },
+                    { "Currency", i.Currency! }
                 }).ToList()
             }
         };
@@ -95,7 +126,7 @@ public class FirestoreOrderRepository : IOrderRepository
             ConsumerName = doc.GetValue<string>("ConsumerName"),
             Status = Enum.Parse<OrderStatus>(doc.GetValue<string>("Status")),
             Currency = doc.GetValue<string>("Currency"),
-            TotalAmountMinorUnits = doc.GetValue<long>("TotalAmountMinorUnits"),
+            TotalAmountMinorUnits = doc.GetValue<long?>("TotalAmountMinorUnits"),
             Notes = doc.TryGetValue("Notes", out string notes) ? notes : null,
             CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
             UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
@@ -112,7 +143,8 @@ public class FirestoreOrderRepository : IOrderRepository
                         ProductId = itemDict.ContainsKey("ProductId") ? itemDict["ProductId"].ToString()! : "",
                         ProductName = itemDict.ContainsKey("ProductName") ? itemDict["ProductName"].ToString()! : "",
                         Quantity = itemDict.ContainsKey("Quantity") ? Convert.ToInt32(itemDict["Quantity"]) : 0,
-                        UnitPriceMinorUnits = itemDict.ContainsKey("UnitPriceMinorUnits") ? Convert.ToInt64(itemDict["UnitPriceMinorUnits"]) : 0
+                        UnitPriceMinorUnits = itemDict.ContainsKey("UnitPriceMinorUnits") ? Convert.ToInt64(itemDict["UnitPriceMinorUnits"]) : 0,
+                        Currency = itemDict.TryGetValue("Currency", out var currency) ? currency?.ToString() : record.Currency
                     });
                 }
             }

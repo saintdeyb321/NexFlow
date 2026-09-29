@@ -1,4 +1,4 @@
-﻿using NexFlow.Domain.Enums;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Orders.DTOs;
 
@@ -10,8 +10,8 @@ public class OrderRecord
     public string ConsumerName { get; set; } = string.Empty;
 
     public OrderStatus Status { get; set; } = OrderStatus.PendingReview;
-    public string Currency { get; set; } = "PEN";
-    public long TotalAmountMinorUnits { get; set; }
+    public string? Currency { get; set; }
+    public long? TotalAmountMinorUnits { get; set; }
 
     public List<OrderItemRecord> Items { get; set; } = new();
 
@@ -26,5 +26,6 @@ public class OrderItemRecord
     public string ProductName { get; set; } = string.Empty;
     public int Quantity { get; set; }
     public long UnitPriceMinorUnits { get; set; }
-    public long SubtotalMinorUnits => Quantity * UnitPriceMinorUnits;
+    public string? Currency { get; set; }
+    public long SubtotalMinorUnits => checked(Quantity * UnitPriceMinorUnits);
 }

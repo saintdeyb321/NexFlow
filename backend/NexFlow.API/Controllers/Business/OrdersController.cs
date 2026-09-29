@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
@@ -68,15 +68,8 @@ public class OrdersController : ControllerBase
         order.UpdatedAt = DateTime.UtcNow;
         order.Status = OrderStatus.PendingReview;
 
-        // 🔥 SPRINT 11: Forzamos a que todo pedido nuevo entre como cotización (0.00)
-        foreach (var item in order.Items)
-        {
-            item.UnitPriceMinorUnits = 0;
-        }
-        order.TotalAmountMinorUnits = 0;
-
-        await _orderRepository.CreateOrderAsync(WorkspaceId, order, cancellationToken);
-
+        try { await _orderRepository.CreateOrderAsync(WorkspaceId, order, cancellationToken); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         // 🔥 SPRINT 11: Se envía al módulo "ORDERS", no a "CATALOG"
         await _notificationService.NotifyAsync(
             WorkspaceId,
@@ -115,7 +108,12 @@ public class OrdersController : ControllerBase
         var order = await _orderRepository.GetOrderByIdAsync(WorkspaceId, id, cancellationToken);
         if (order == null) return NotFound(new { message = "Pedido no encontrado." });
 
-        await _orderRepository.UpdateOrderAmountAsync(WorkspaceId, id, request.TotalAmountMinorUnits, cancellationToken);
+        if (string.IsNullOrWhiteSpace(order.Currency))
+            return BadRequest(new { message = "No se puede fijar un total sin una moneda única." });
+        var factualTotal = order.Items.Sum(i => i.SubtotalMinorUnits);
+        if (request.TotalAmountMinorUnits != factualTotal)
+            return BadRequest(new { message = "El total debe corresponder a los precios registrados de los ítems." });
+        await _orderRepository.UpdateOrderAmountAsync(WorkspaceId, id, factualTotal, cancellationToken);
 
         return Ok(new { message = "Monto actualizado exitosamente." });
     }

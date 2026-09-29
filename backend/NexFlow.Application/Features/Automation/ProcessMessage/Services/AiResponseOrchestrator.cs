@@ -79,12 +79,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     finalResponse = AiIntentAccess.ProductsUnavailable;
                 else
                 {
-                    finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, interpretation, cancellationToken);
+                    finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, request.MessageText, interpretation, cancellationToken);
                 }
             }
             else if (interpretation.Intent == ConversationIntent.Request && activeModules.Contains("REQUESTS"))
             {
-                finalResponse = await _requestFlow.ProcessAsync(workspaceId, normalizedPhone, request.MessageText, conversation.Id, cancellationToken);
+                finalResponse = await _requestFlow.ProcessAsync(workspaceId, normalizedPhone, request.MessageText, conversation.Id, request.MessageId, cancellationToken);
             }
             else if (interpretation.Intent == ConversationIntent.Support)
             {

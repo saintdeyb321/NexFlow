@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.Features.Requests;
+namespace NexFlow.Application.Features.Requests;
 
 public enum RequestStatus
 {
@@ -21,6 +21,14 @@ public enum RequestType
 
 public class RequestRecord
 {
+    public static bool CanTransition(RequestStatus current, RequestStatus next) =>
+        Enum.IsDefined(current) && Enum.IsDefined(next) && (current == next || (current switch
+        {
+            RequestStatus.Pending => next is RequestStatus.InReview or RequestStatus.Approved or RequestStatus.Rejected or RequestStatus.Cancelled,
+            RequestStatus.InReview => next is RequestStatus.Approved or RequestStatus.Rejected or RequestStatus.Completed or RequestStatus.Cancelled,
+            RequestStatus.Approved => next is RequestStatus.Completed or RequestStatus.Cancelled,
+            _ => false
+        }));
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ConversationId { get; set; } = string.Empty;
     public string ConsumerPhone { get; set; } = string.Empty;

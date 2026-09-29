@@ -1,10 +1,12 @@
-﻿using NexFlow.Application.Features.Requests;
+using NexFlow.Application.Features.Requests;
 
 namespace NexFlow.Application.Abstractions.Repositories;
 
 public interface IRequestRepository
 {
-    Task CreateRequestAsync(Guid workspaceId, RequestRecord request, CancellationToken cancellationToken);
+    Task<(RequestRecord Request, bool Created)> CreateRequestAsync(Guid workspaceId, RequestRecord request, CancellationToken cancellationToken);
+    Task<RequestRecord?> GetByIdAsync(Guid workspaceId, string requestId, CancellationToken cancellationToken);
+    Task<RequestRecord?> GetBySourceMessageIdAsync(Guid workspaceId, string sourceMessageId, CancellationToken cancellationToken);
 
     // 🔥 SPRINT 11 + SPRINT 00: Firma actualizada con paginación
     Task<IEnumerable<RequestRecord>> GetRequestsAsync(Guid workspaceId, int limit, string? status, CancellationToken cancellationToken);
