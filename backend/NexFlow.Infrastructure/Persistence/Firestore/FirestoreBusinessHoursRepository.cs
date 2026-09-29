@@ -30,11 +30,13 @@ public class FirestoreBusinessHoursRepository : IBusinessHoursRepository
 
     public async Task SaveBusinessHoursAsync(Guid workspaceId, string? locationId, IEnumerable<BusinessHoursDto> hours, CancellationToken cancellationToken)
     {
-        var schedule = hours.ToList();
+        var schedule = hours.Select(hour => hour.IsClosed
+            ? hour with { OpenTime = string.Empty, CloseTime = string.Empty } : hour).ToList();
         if (schedule.Any(h => h.DayOfWeek < 0 || h.DayOfWeek > 6) || schedule.Select(h => h.DayOfWeek).Distinct().Count() != schedule.Count)
             throw new DomainException("Los días deben ser únicos y estar entre 0 y 6.");
         foreach (var hour in schedule)
         {
+            if (hour.IsClosed) continue;
             if (!TimeOnly.TryParseExact(hour.OpenTime, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.None, out var open) ||
                 !TimeOnly.TryParseExact(hour.CloseTime, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
