@@ -1,6 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
@@ -23,20 +22,19 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly ISupportFlow _supportFlow;
     private readonly IChatFlow _chatFlow;
     private readonly IContextRecoveryService _contextRecovery;
-    private readonly IConversationCache _cache;
     private readonly IOutboundMessageService _outboundMessageService;
     private readonly ILogger<AiResponseOrchestrator> _logger;
 
     public AiResponseOrchestrator(
         IAiInterpreter interpreter, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
-        IContextRecoveryService contextRecovery, IConversationCache cache, IOutboundMessageService outboundMessageService,
+        IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger)
     {
         _interpreter = interpreter; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
         _supportFlow = supportFlow; _chatFlow = chatFlow;
-        _contextRecovery = contextRecovery; _cache = cache; _outboundMessageService = outboundMessageService;
+        _contextRecovery = contextRecovery; _outboundMessageService = outboundMessageService;
         _logger = logger;
     }
 
@@ -56,25 +54,26 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         else
         {
-            var deniedResponse = OfferingQueryAccess.GetDeniedResponse(interpretation.Intent.ToString().ToUpperInvariant(), activeModules);
+            var deniedResponse = string.IsNullOrWhiteSpace(context.CurrentGoal)
+                ? OfferingQueryAccess.GetDeniedResponse(interpretation.Intent.ToString().ToUpperInvariant(), activeModules)
+                : null;
             if (deniedResponse != null)
             {
                 finalResponse = deniedResponse;
             }
-            else if ((interpretation.Intent == ConversationIntent.Reservation || context.CurrentGoal == "BOOKING" || context.CurrentGoal == "RESERVATION") && activeModules.Contains("RESERVATIONS"))
+            else if ((context.CurrentGoal == "BOOKING" || context.CurrentGoal == "RESERVATION" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Reservation)) && activeModules.Contains("RESERVATIONS"))
             {
                 finalResponse = !activeModules.Contains("SERVICES")
                     ? OfferingQueryAccess.ServicesUnavailable
                     : await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, cancellationToken);
             }
-            else if (interpretation.Intent == ConversationIntent.Order && activeModules.Contains("ORDERS"))
+            else if ((context.CurrentGoal == "ORDER" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Order)) && activeModules.Contains("ORDERS"))
             {
                 if (!activeModules.Contains("CATALOG"))
                     finalResponse = OfferingQueryAccess.ProductsUnavailable;
                 else
                 {
                     finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, interpretation, cancellationToken);
-                    context.CurrentGoal = null;
                 }
             }
             else if (interpretation.Intent == ConversationIntent.Request && activeModules.Contains("REQUESTS"))
@@ -90,8 +89,6 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 finalResponse = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, cancellationToken);
             }
         }
-
-        await _cache.SetContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
 
         return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, SenderType.AI, request.MessageId, cancellationToken);
     }

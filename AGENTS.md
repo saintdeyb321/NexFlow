@@ -1,266 +1,66 @@
-\# NexFlow — Agent Instructions
-
-
-
-\## Scope
-
-
-
-These instructions apply to the whole repository.
-
-
-
-NexFlow is a multi-tenant SaaS communication automation platform centered on WhatsApp. Its purpose is to automate customer-facing communication, business information, reservations, requests and product-interest lists.
-
-
-
-NexFlow is NOT an ERP, POS, inventory system, accounting platform, payment processor, stock manager, logistics platform or e-commerce engine.
-
-
-
-Before making architectural changes, read:
-
-
-
-\- `docs/NEXFLOW\_PRODUCT.md`
-
-\- `docs/BACKEND\_HARDENING\_PLAN.md`
-
-
-
-\## Core product rules
-
-
-
-1\. AI interprets and writes; deterministic software decides and executes.
-
-2\. Never allow an LLM to invent business facts, prices, availability, locations, schedules or reservations.
-
-3\. `CATALOG` means PRODUCTS.
-
-4\. `SERVICES` means SERVICES.
-
-5\. `CATALOG` and `SERVICES` may share technical infrastructure but remain commercially independent modules.
-
-6\. `ORDERS` integrates with `CATALOG`; it is not contained by it.
-
-7\. `RESERVATIONS` integrates with `SERVICES`; it is not contained by it.
-
-8\. `REQUESTS` is a transversal workflow for procedures, commercial inquiries, support and human attention.
-
-9\. Do not introduce ERP/POS/inventory/stock/payment/accounting behavior.
-
-10\. Every operation must preserve `WorkspaceId` tenant isolation.
-
-
-
-\## Backend architecture
-
-
-
-Preserve:
-
-
-
-\- `NexFlow.API`
-
-\- `NexFlow.Application`
-
-\- `NexFlow.Domain`
-
-\- `NexFlow.Infrastructure`
-
-
-
-Main persistence:
-
-
-
-\- PostgreSQL: transactional/control-plane data, Inbox, Outbox, reservations, licenses, notifications.
-
-\- Firestore: business configuration, catalog/services, conversations, requests/orders where currently designed.
-
-\- Redis: cache only; never the sole source of durable conversational state.
-
-
-
-Integrations:
-
-
-
-\- Evolution API: WhatsApp transport.
-
-\- n8n: external automation/integration layer.
-
-\- Gemini/Groq: interpretation/writing only.
-
-
-
-\## Reliability invariants
-
-
-
-A message acknowledged by the webhook must not be lost.
-
-
-
-The same inbound message must not create duplicate business effects.
-
-
-
-Messages belonging to the same conversation must be processed in order.
-
-
-
-Outbound messages must be idempotent.
-
-
-
-Redis loss must not destroy a conversation.
-
-
-
-Outbox and Inbox workers must recover stale `Processing` records.
-
-
-
-Retries must use durable state and bounded backoff.
-
-
-
-Do not use `Task.Run` or in-memory queues for business-critical durable work.
-
-
-
-\## Conversation invariants
-
-
-
-Conversation state must have one durable source of truth.
-
-
-
-Redis may cache that state but must not own it.
-
-
-
-A human takeover must not delete conversational context.
-
-
-
-AI-originated `FromMe` echoes must never be mistaken for human takeover.
-
-
-
-A real WhatsApp message sent manually by the business owner must switch/maintain Human mode correctly.
-
-
-
-An active transactional flow has priority over generic greeting/acknowledgement shortcuts.
-
-
-
-\## Development rules
-
-
-
-\- Inspect existing code before creating files or abstractions.
-
-\- Never implement something that already exists under another name.
-
-\- Prefer modifying existing architecture over duplicating services.
-
-\- Avoid speculative abstractions.
-
-\- Keep changes minimal and cohesive.
-
-\- Preserve backward-compatible API contracts unless fixing a documented defect.
-
-\- Do not silently change module licensing semantics.
-
-\- Do not modify `appsettings\*`, secrets or production configuration unless explicitly requested.
-
-\- Do not add or modify automated tests unless explicitly requested.
-
-\- Never suppress exceptions merely to make a flow appear successful.
-
-\- Never represent infrastructure failure as business `NotFound`.
-
-\- Never fabricate external provider IDs.
-
-
-
-\## Required validation after code changes
-
-
-
-At minimum run:
-
-
-
-`dotnet restore backend/NexFlow.sln`
-
-
-
-`dotnet build backend/NexFlow.sln --no-restore`
-
-
-
-If the solution path differs, discover the correct `.sln` and use it.
-
-
-
-Do not finish with known compiler errors.
-
-
-
-\## Working style
-
-
-
-For each assigned sprint:
-
-
-
-1\. Read only the files relevant to that sprint plus direct dependencies.
-
-2\. Verify whether the reported problem still exists in the current repository.
-
-3\. Do not blindly implement an audit recommendation if current code already solves it.
-
-4\. Implement the smallest complete fix.
-
-5\. Check all callers/interfaces/DI registrations affected.
-
-6\. Build.
-
-7\. Review the git diff for regressions or unrelated changes.
-
-8\. Update `docs/BACKEND\_HARDENING\_PLAN.md` only by marking completed work; do not rewrite history.
-
-
-
-\## Output discipline
-
-
-
-Keep final responses short.
-
-
-
-Report only:
-
-
-
-\- sprint completed;
-
-\- important files changed;
-
-\- validation/build result;
-
-\- blockers or decisions that genuinely require user input.
-
-
-
-Do not print entire modified classes unless explicitly requested.
-
+# NexFlow Agent Contract
+
+NexFlow is a multi-tenant WhatsApp communication SaaS.
+
+It is NOT an ERP, POS, inventory, accounting, payment, stock-management or logistics system.
+
+## Product invariants
+
+- AI interprets natural language; deterministic software validates, decides and persists.
+- AI must never invent business facts, prices, products, services, locations, schedules or availability.
+- CATALOG = products.
+- SERVICES = services.
+- ORDERS integrates with CATALOG but is an independent licensed module.
+- RESERVATIONS integrates with SERVICES but is an independent licensed module.
+- REQUESTS is an independent transversal workflow.
+- Preserve strict `WorkspaceId` isolation.
+
+## Backend invariants
+
+- PostgreSQL owns transactional/durable infrastructure such as Inbox, Outbox, reservations, licenses and notifications.
+- Firestore stores business configuration and current document-oriented business data.
+- Redis is cache only, never the durable source of conversation state.
+- Accepted inbound messages must not be lost.
+- Business effects and outbound messages must be idempotent.
+- Messages from the same conversation must be processed in order.
+- AI `FromMe` echoes must never be interpreted as human takeover.
+- Critical work must not depend only on in-memory queues or `Task.Run`.
+
+## Execution rules
+
+The current repository is the source of truth.
+
+For every task:
+
+- Work only on the scope explicitly requested by the user.
+- Do NOT audit the complete repository unless explicitly requested.
+- Do NOT read `docs/BACKEND_HARDENING_PLAN.md` unless explicitly requested.
+- Do NOT browse the web unless explicitly requested or implementation is impossible from local code.
+- Inspect existing implementations before creating new abstractions.
+- Reuse existing services/interfaces whenever possible.
+- Use targeted searches (`rg`) instead of broad exploration.
+- Do not modify frontend, tests or `appsettings*` during backend tasks unless explicitly requested.
+- Do not create commits or push to GitHub.
+- Do not update roadmap/documentation unless explicitly requested.
+- Do not run `dotnet restore` unless required by missing assets/dependencies.
+- Run one final build after completing all requested changes:
+  `dotnet build backend/backend.slnx --no-restore`
+- If that build fails because restore is required, restore once and retry.
+- Do not mark work complete merely because it compiles.
+
+## Completion rule
+
+A task is complete only when every acceptance criterion from the current user prompt is satisfied.
+
+Before finishing:
+
+1. inspect the modified diff;
+2. check the explicit acceptance criteria;
+3. run the final build once.
+
+Final response:
+- files changed;
+- build result;
+- unresolved blocker, if any.
+
+Maximum final response: 10 lines.

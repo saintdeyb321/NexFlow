@@ -87,6 +87,7 @@ public class ProcessIncomingMessageCommandHandler
         if (topic.HasValue)
         {
             var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, phone, ct);
+            if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return false;
             var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
             var mentionedLocations = locations.Where(l => !string.IsNullOrWhiteSpace(l.Name) && message.Contains(l.Name, StringComparison.OrdinalIgnoreCase)).ToList();
             if (mentionedLocations.Count > 1) return false;

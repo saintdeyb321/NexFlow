@@ -25,7 +25,6 @@ public class RedisConversationCache : IConversationCache
         try
         {
             var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
-            context.LastUpdated = DateTime.UtcNow;
 
             var json = JsonSerializer.Serialize(context);
             await _redisDb.StringSetAsync(key, json, TimeSpan.FromMinutes(30));
@@ -66,6 +65,7 @@ public class RedisConversationCache : IConversationCache
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Degradación: No se pudo eliminar el contexto en Redis para {Phone}.", customerPhone);
+            throw;
         }
     }
 

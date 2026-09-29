@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
@@ -32,23 +32,31 @@ public class BookingFlow : IBookingFlow
     private readonly ILocationRepository _locationRepo;
     private readonly IBusinessHoursRepository _hoursRepo;
     private readonly IMessageGateway _messageGateway;
+    private readonly IContextRecoveryService _contextStore;
 
     public BookingFlow(
         IOfferingService offeringService, ILocationResolverService locationResolver,
         IReservationEngine reservationEngine, ILocationRepository locationRepo,
-        IBusinessHoursRepository hoursRepo, IMessageGateway messageGateway, IEntitlementService entitlementService)
+        IBusinessHoursRepository hoursRepo, IMessageGateway messageGateway, IEntitlementService entitlementService,
+        IContextRecoveryService contextStore)
     {
         _offeringService = offeringService; _locationResolver = locationResolver;
         _reservationEngine = reservationEngine; _locationRepo = locationRepo;
         _hoursRepo = hoursRepo; _messageGateway = messageGateway;
+        _contextStore = contextStore;
         _entitlementService = entitlementService;
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct)
     {
+        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, context, interpretation, fallbackName, ct);
+        await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
+        return response;
+    }
+
+    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct)
+    {
         var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var deniedResponse = OfferingQueryAccess.GetDeniedResponse(interpretation.Intent.ToString().ToUpperInvariant(), activeModules);
-        if (deniedResponse != null) return deniedResponse;
         if (!activeModules.Contains("SERVICES")) return OfferingQueryAccess.ServicesUnavailable;
         if (!activeModules.Contains("RESERVATIONS")) return "No hay información de reservas disponible en este momento.";
 
@@ -174,6 +182,13 @@ public class BookingFlow : IBookingFlow
                     if (result.IsSuccess)
                     {
                         context.CurrentGoal = null;
+                        context.CurrentStep = null;
+                        context.SelectedLocationId = null;
+                        context.SelectedServiceId = null;
+                        context.TargetDate = null;
+                        context.TargetTime = null;
+                        context.MissingFields.Clear();
+                        context.LastQuestion = null;
                         return $"✅ *¡Todo listo, {context.RealCustomerName}!*\n\nTu cita ha sido confirmada exitosamente:\n🦷 Servicio: *{finalSrv.Name}*\n📅 Fecha: *{exactDateTime:dd/MM/yyyy}*\n⏰ Hora: *{exactDateTime:HH:mm}*\n\n¡Te esperamos!";
                     }
                     context.TargetTime = null; return $"Inconveniente: {result.Error.Description}. Indícame otro horario.";

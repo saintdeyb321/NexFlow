@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Notifications;
 using NexFlow.Domain.Enums;
@@ -28,7 +27,8 @@ public sealed class ConversationStateService : IConversationStateService
 
     private readonly IConversationRepository _conversationRepo;
     private readonly IConsumerIdentityRepository _consumerRepo;
-    private readonly IConversationCache _conversationCache;
+    private readonly IContextRecoveryService _contextStore;
+    private readonly IHumanHandoffService _handoffService;
     private readonly INotificationService _notificationService;
     private readonly ILogger<ConversationStateService> _logger;
 
@@ -37,13 +37,15 @@ public sealed class ConversationStateService : IConversationStateService
     public ConversationStateService(
         IConversationRepository conversationRepo,
         IConsumerIdentityRepository consumerRepo,
-        IConversationCache conversationCache,
+        IContextRecoveryService contextStore,
+        IHumanHandoffService handoffService,
         INotificationService notificationService,
         ILogger<ConversationStateService> logger)
     {
         _conversationRepo = conversationRepo;
         _consumerRepo = consumerRepo;
-        _conversationCache = conversationCache;
+        _contextStore = contextStore;
+        _handoffService = handoffService;
         _notificationService = notificationService;
         _logger = logger;
     }
@@ -52,11 +54,13 @@ public sealed class ConversationStateService : IConversationStateService
     {
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
 
-        if (!request.FromMe && conversation != null && conversation.Mode == ConversationMode.Automatic && (DateTime.UtcNow - conversation.LastMessageAt) > _sessionTimeout)
+        var sessionContext = await _contextStore.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+
+        if (!request.FromMe && string.IsNullOrWhiteSpace(sessionContext.CurrentGoal) && conversation != null && conversation.Mode == ConversationMode.Automatic && (DateTime.UtcNow - conversation.LastMessageAt) > _sessionTimeout)
         {
             _logger.LogInformation("La conversación {ConvId} ha expirado por inactividad. Cerrando sesión.", conversation.Id);
             await _conversationRepo.CloseConversationAsync(workspaceId, conversation.Id, cancellationToken);
-            await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
+            await _contextStore.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
             conversation = null;
         }
 
@@ -82,19 +86,8 @@ public sealed class ConversationStateService : IConversationStateService
             if (origin == MessageOrigin.NexFlowAI) return (false, conversation!, null);
 
             conversation ??= await _conversationRepo.GetOrCreateActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
-            if (conversation.Mode != ConversationMode.Human)
-            {
-                await _conversationRepo.UpdateConversationModeAsync(workspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
-
-                var context = await _conversationCache.GetContextAsync(workspaceId, normalizedPhone, cancellationToken) ?? new ConversationContextDto();
-                context.Mode = "Human";
-                context.HandoffReason = HandoffReason.ManualIntervention.ToString();
-                context.HandoffAt = DateTime.UtcNow;
-                await _conversationCache.SetContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
-
-                conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
-            }
-
+            await _handoffService.EscalateToHumanAsync(workspaceId, conversation.Id, HandoffReason.ManualIntervention, cancellationToken);
+            conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
             // Registramos el mensaje como enviado por el humano
             if (origin == null)
                 await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Origin = MessageOrigin.WhatsAppHuman, Direction = "outbound", Sender = SenderType.BusinessUser, Content = request.MessageText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
@@ -116,7 +109,8 @@ public sealed class ConversationStateService : IConversationStateService
                 return (false, conversation, null);
             conversation = latestConversation;
 
-            if (conversation.Mode != ConversationMode.Automatic)
+            var context = await _contextStore.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+            if (conversation.Mode != ConversationMode.Automatic || context.Mode == "Human")
             {
                 await _notificationService.NotifyAsync(
                     workspaceId,
@@ -130,13 +124,14 @@ public sealed class ConversationStateService : IConversationStateService
                 return (false, conversation, null);
             }
 
+            if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return (true, conversation, null);
+
             var txt = request.MessageText.Trim().ToLowerInvariant();
             var wordCount = txt.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
             string? fastResponse = null;
             if (wordCount <= 3 && Regex.IsMatch(txt, @"^(hola|buenas|ola|buenos dias|buenas tardes|hey)$"))
             {
-                await _conversationCache.DeleteContextAsync(workspaceId, normalizedPhone, cancellationToken);
                 fastResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
             }
             else if (wordCount <= 3 && Regex.IsMatch(txt, @"^(gracias|ok|perfecto|entendido|vale|listo)$"))

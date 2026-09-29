@@ -1,4 +1,4 @@
-﻿using NexFlow.Application.Abstractions.Cache;
+using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Notifications;
@@ -16,18 +16,27 @@ public class OrderFlow : IOrderFlow
 {
     private readonly IOrderRepository _orderRepository;
     private readonly INotificationService _notificationService;
-    private readonly IConversationStateRepository _stateRepo; // 🔥 SPRINT 06: Guardado durable directo
+    private readonly IContextRecoveryService _contextStore;
 
-    public OrderFlow(IOrderRepository orderRepository, INotificationService notificationService, IConversationStateRepository stateRepo)
+    public OrderFlow(IOrderRepository orderRepository, INotificationService notificationService, IContextRecoveryService contextStore)
     {
         _orderRepository = orderRepository;
         _notificationService = notificationService;
-        _stateRepo = stateRepo;
+        _contextStore = contextStore;
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, AiInterpretation interpretation, CancellationToken ct)
     {
-        var context = await _stateRepo.GetStateAsync(workspaceId, phone, ct) ?? new ConversationContextDto();
+        var context = await _contextStore.GetOrRecoverContextAsync(workspaceId, phone, ct);
+        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, customerName, interpretation, context, ct);
+        await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
+        return response;
+    }
+
+    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, string customerName,
+        AiInterpretation interpretation, ConversationContextDto context, CancellationToken ct)
+    {
+        context.CurrentGoal = "ORDER";
 
         if (interpretation.SearchTerm == "FINALIZAR_PEDIDO" || interpretation.SearchTerm?.Contains("FINALIZAR") == true)
         {
@@ -74,7 +83,6 @@ public class OrderFlow : IOrderFlow
 
             context.CurrentGoal = null;
             context.OrderDraftItems.Clear();
-            await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
 
             return $"¡Excelente! He enviado tu lista de pedido. En este momento estoy transfiriendo el chat a un asesor humano para que confirme el stock y los precios exactos. Tu código de atención es {order.Id.Substring(0, 6)}.";
         }
@@ -113,9 +121,6 @@ public class OrderFlow : IOrderFlow
         {
             return "No logré identificar los productos. ¿Podrías detallar tu pedido?";
         }
-
-        context.CurrentGoal = "ORDER"; // 🔥 Mantiene el flujo activo.
-        await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
 
         var listText = string.Join("\n", context.OrderDraftItems.Select(i => $"- {i.Quantity}x {i.ProductName}"));
         return $"Anotado. Hasta el momento tu lista tiene:\n{listText}\n\n¿Deseas agregar algo más? (Si ya terminaste, escribe 'enviar pedido').";

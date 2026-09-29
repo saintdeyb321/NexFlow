@@ -1,19 +1,19 @@
-﻿using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
-using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 public interface IContextRecoveryService
 {
     Task<ConversationContextDto> GetOrRecoverContextAsync(Guid workspaceId, string phone, CancellationToken ct);
+    Task SaveContextAsync(Guid workspaceId, string phone, ConversationContextDto context, CancellationToken ct);
+    Task DeleteContextAsync(Guid workspaceId, string phone, CancellationToken ct);
 }
 
 public class ContextRecoveryService : IContextRecoveryService
 {
     private readonly IConversationCache _cache;
-    private readonly IConversationStateRepository _stateRepo; // 🔥 SPRINT 04: Nueva fuente de verdad
+    private readonly IConversationStateRepository _stateRepo;
 
     public ContextRecoveryService(IConversationCache cache, IConversationStateRepository stateRepo)
     {
@@ -23,21 +23,32 @@ public class ContextRecoveryService : IContextRecoveryService
 
     public async Task<ConversationContextDto> GetOrRecoverContextAsync(Guid workspaceId, string phone, CancellationToken ct)
     {
-        // 1. Intentamos leer de Redis (Ruta feliz y ultra-rápida)
-        var context = await _cache.GetContextAsync(workspaceId, phone, ct);
-        if (context != null) return context;
-
-        // 🔥 SPRINT 04: 2. Recuperación Segura y Durable desde Firestore (Cero conjeturas de texto)
-        context = await _stateRepo.GetStateAsync(workspaceId, phone, ct);
-
-        if (context == null)
+        var cached = await _cache.GetContextAsync(workspaceId, phone, ct);
+        // Validate even a cache hit: a failed cache write, concurrent refill or
+        // restart must never make an older Redis value authoritative.
+        var durable = await _stateRepo.GetStateAsync(workspaceId, phone, ct);
+        if (durable == null)
         {
-            context = new ConversationContextDto(); // Estado completamente limpio
+            if (cached != null) await _cache.DeleteContextAsync(workspaceId, phone, ct);
+            return new ConversationContextDto();
         }
+        if (cached?.StateVersion != null && cached.StateVersion == durable.StateVersion)
+            return cached;
 
-        // 3. Volvemos a guardar en Redis para el siguiente turno
+        await _cache.SetContextAsync(workspaceId, phone, durable, ct);
+        return durable;
+    }
+
+    public async Task SaveContextAsync(Guid workspaceId, string phone, ConversationContextDto context, CancellationToken ct)
+    {
+        context.LastUpdated = DateTime.UtcNow;
+        await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
         await _cache.SetContextAsync(workspaceId, phone, context, ct);
+    }
 
-        return context;
+    public async Task DeleteContextAsync(Guid workspaceId, string phone, CancellationToken ct)
+    {
+        await _stateRepo.DeleteStateAsync(workspaceId, phone, ct);
+        await _cache.DeleteContextAsync(workspaceId, phone, ct);
     }
 }

@@ -1,4 +1,4 @@
-﻿using Google.Cloud.Firestore;
+using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
 using System.Text.Json;
@@ -20,18 +20,35 @@ public class FirestoreConversationStateRepository : IConversationStateRepository
         if (!snapshot.Exists) return null;
 
         var json = snapshot.GetValue<string>("contextJson");
-        return string.IsNullOrEmpty(json) ? null : JsonSerializer.Deserialize<ConversationContextDto>(json);
+        return JsonSerializer.Deserialize<ConversationContextDto>(json)
+            ?? throw new InvalidOperationException("Persisted conversation state is invalid.");
     }
 
     public async Task UpsertStateAsync(Guid workspaceId, string phone, ConversationContextDto state, CancellationToken cancellationToken)
     {
-        var data = new Dictionary<string, object>
+        var docRef = GetDocRef(workspaceId, phone);
+        var expectedVersion = state.StateVersion;
+        var nextVersion = Guid.NewGuid().ToString("N");
+        var persisted = JsonSerializer.Deserialize<ConversationContextDto>(JsonSerializer.Serialize(state))!;
+        persisted.StateVersion = nextVersion;
+        await _db.RunTransactionAsync(async transaction =>
         {
-            { "phone", phone },
-            { "contextJson", JsonSerializer.Serialize(state) },
-            { "updatedAt", DateTime.UtcNow }
-        };
-        await GetDocRef(workspaceId, phone).SetAsync(data, cancellationToken: cancellationToken);
+            var snapshot = await transaction.GetSnapshotAsync(docRef, cancellationToken);
+            var current = snapshot.Exists
+                ? JsonSerializer.Deserialize<ConversationContextDto>(snapshot.GetValue<string>("contextJson"))
+                    ?? throw new InvalidOperationException("Persisted conversation state is invalid.")
+                : null;
+            if (current?.StateVersion != expectedVersion)
+                throw new InvalidOperationException("Conversation state changed concurrently; reload before saving.");
+
+            transaction.Set(docRef, new Dictionary<string, object>
+            {
+                ["phone"] = phone,
+                ["contextJson"] = JsonSerializer.Serialize(persisted),
+                ["updatedAt"] = persisted.LastUpdated
+            });
+        }, cancellationToken: cancellationToken);
+        state.StateVersion = nextVersion;
     }
 
     public async Task DeleteStateAsync(Guid workspaceId, string phone, CancellationToken cancellationToken)

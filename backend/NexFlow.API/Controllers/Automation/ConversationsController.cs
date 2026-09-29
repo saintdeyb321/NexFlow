@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
-using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Conversations;
@@ -55,41 +54,21 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpPost("{conversationId}/takeover")]
-    public async Task<IActionResult> TakeOverConversation(string conversationId, [FromServices] IConversationCache cache, CancellationToken cancellationToken)
+    public async Task<IActionResult> TakeOverConversation(string conversationId, [FromServices] IHumanHandoffService handoffService, CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para asumir el control.");
 
-        await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
-
-        var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
-        if (conversation != null)
-        {
-            var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
-            context.Mode = "Human";
-            context.HandoffReason = HandoffReason.ManualIntervention.ToString();
-            context.HandoffAt = DateTime.UtcNow;
-            await cache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, context, cancellationToken);
-        }
+        await handoffService.EscalateToHumanAsync(WorkspaceId, conversationId, HandoffReason.ManualIntervention, cancellationToken);
 
         return Ok(new { message = "Control humano asumido. La IA ha sido silenciada temporalmente.", mode = ConversationMode.Human.ToString() });
     }
 
     [HttpPost("{conversationId}/release")]
-    public async Task<IActionResult> ReleaseConversation(string conversationId, [FromServices] IConversationCache cache, CancellationToken cancellationToken)
+    public async Task<IActionResult> ReleaseConversation(string conversationId, [FromServices] IHumanHandoffService handoffService, CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para liberar el chat.");
 
-        await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversationId, ConversationMode.Automatic, HandoffReason.None, cancellationToken);
-
-        var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
-        if (conversation != null)
-        {
-            var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
-            context.Mode = "Automatic";
-            context.HandoffReason = null;
-            context.HandoffAt = null;
-            await cache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, context, cancellationToken);
-        }
+        await handoffService.ReleaseToAutomaticAsync(WorkspaceId, conversationId, cancellationToken);
 
         return Ok(new { message = "Chat liberado. La Inteligencia Artificial vuelve a tomar el control.", mode = ConversationMode.Automatic.ToString() });
     }
@@ -99,7 +78,7 @@ public class ConversationsController : ControllerBase
         string conversationId,
         [FromBody] SendManualMessageRequest request,
         [FromServices] IOutboundMessageService outboundMessageService,
-        [FromServices] IConversationCache cache,
+        [FromServices] IHumanHandoffService handoffService,
         CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("SEND_MESSAGE", cancellationToken)) return StatusCode(403, "No tiene permisos para enviar mensajes.");
@@ -122,30 +101,22 @@ public class ConversationsController : ControllerBase
         {
             return StatusCode((int)ex.StatusCode.Value, new { message = "Evolution rechazó el envío.", providerStatus = (int)ex.StatusCode.Value });
         }
-        if (conversation.Mode != ConversationMode.Human)
-        {
-            await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);
-
-            var context = await cache.GetContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken) ?? new ConversationContextDto();
-            context.Mode = "Human";
-            context.HandoffReason = HandoffReason.ManualIntervention.ToString();
-            context.HandoffAt = DateTime.UtcNow;
-            await cache.SetContextAsync(WorkspaceId, conversation.ConsumerPhone, context, cancellationToken);
-        }
+        await handoffService.EscalateToHumanAsync(WorkspaceId, conversation.Id, HandoffReason.ManualIntervention, cancellationToken);
 
         return Ok(finalRecord);
     }
 
     [HttpDelete("{conversationId}")]
-    public async Task<IActionResult> DeleteConversation(string conversationId, [FromServices] IConversationCache conversationCache, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteConversation(string conversationId, [FromServices] IContextRecoveryService contextStore, CancellationToken cancellationToken)
     {
         if (!await CheckCapabilityAsync("TAKEOVER", cancellationToken)) return StatusCode(403, "No tiene permisos para eliminar conversaciones.");
 
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
+        // Keep the conversation/phone available for retry if state or cache deletion fails.
+        await contextStore.DeleteContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken);
         await _conversationRepository.DeleteConversationAsync(WorkspaceId, conversationId, cancellationToken);
-        await conversationCache.DeleteContextAsync(WorkspaceId, conversation.ConsumerPhone, cancellationToken);
 
         return NoContent();
     }
