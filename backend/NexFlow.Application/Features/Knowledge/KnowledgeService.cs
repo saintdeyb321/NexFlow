@@ -1,6 +1,7 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business.Offerings;
+using NexFlow.Application.Features.Business;
 using System.Text;
 
 namespace NexFlow.Application.Features.Knowledge;
@@ -53,138 +54,130 @@ public sealed class KnowledgeService : IKnowledgeService
     {
         try
         {
-            var topicString = query.Topic.ToString().ToUpper();
-
-            if (topicString == "LOCATIONS")
+            if (snapshot.WorkspaceId != workspaceId) throw new InvalidOperationException("Knowledge workspace mismatch.");
+            var locationId = query.LocationId;
+            List<LocationDto>? locations = null;
+            if (query.Topic == KnowledgeTopic.Locations || !string.IsNullOrWhiteSpace(locationId))
             {
-                var data = new BusinessKnowledgeSnapshot
-                {
-                    WorkspaceId = workspaceId,
-                    Locations = (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList()
-                };
-                return QueryLocations(data, query.LocationId);
-            }
-            if (topicString == "BUSINESSHOURS")
-            {
-                var data = new BusinessKnowledgeSnapshot
-                {
-                    WorkspaceId = workspaceId,
-                    Hours = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, query.LocationId, cancellationToken)).ToList()
-                };
-                return QueryHours(data);
-            }
-            if (topicString == "FAQS")
-            {
-                var data = new BusinessKnowledgeSnapshot
-                {
-                    WorkspaceId = workspaceId,
-                    Faqs = (await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList()
-                };
-                return QueryFaqs(data, query.SearchTerm);
-            }
-            if (topicString == "PROFILE")
-            {
-                var data = new BusinessKnowledgeSnapshot
-                {
-                    WorkspaceId = workspaceId,
-                    Profile = await _profileRepo.GetProfileAsync(workspaceId, cancellationToken)
-                };
-                return QueryProfile(data);
+                locations = (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList();
+                if (!string.IsNullOrWhiteSpace(locationId) && !locations.Any(l => l.Id == locationId)) return Result(query, locationId);
             }
 
-            if (topicString == "PRODUCTS" || topicString == "OFFERINGS")
-                return await QueryProductsAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
-
-            if (topicString == "SERVICES")
-                return await QueryServicesAsync(workspaceId, query.LocationId, query.SearchTerm, cancellationToken);
-
-            return new KnowledgeResult { Found = false, Source = query.Topic };
+            string facts;
+            switch (query.Topic)
+            {
+                case KnowledgeTopic.Locations:
+                    facts = QueryLocations(locations!, locationId);
+                    break;
+                case KnowledgeTopic.BusinessHours:
+                    facts = QueryHours((await _hoursRepo.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken)).ToList());
+                    break;
+                case KnowledgeTopic.Faqs:
+                    facts = QueryFaqs((await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList(), query.SearchTerm);
+                    break;
+                case KnowledgeTopic.Profile:
+                    facts = QueryProfile(await _profileRepo.GetProfileAsync(workspaceId, cancellationToken));
+                    break;
+                case KnowledgeTopic.Products:
+                case KnowledgeTopic.Offerings: // Existing callers used Offerings for products.
+                    facts = await QueryProductsAsync(workspaceId, locationId, query.SearchTerm, cancellationToken);
+                    break;
+                case KnowledgeTopic.Services:
+                    facts = await QueryServicesAsync(workspaceId, locationId, query.SearchTerm, cancellationToken);
+                    break;
+                default:
+                    return Result(query, locationId);
+            }
+            return Result(query, locationId, facts);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            // 🔥 SPRINT 05: Si hay un error de conexión a la BD, no devolvemos una lista vacía que podría confundir a la IA.
-            _logger.LogError(ex, "Falla al consultar el Knowledge Engine para el workspace {WorkspaceId}.", workspaceId);
-            return new KnowledgeResult { Found = false };
+            _logger.LogError(ex, "Falla al consultar Knowledge {Topic} para el workspace {WorkspaceId}.", query.Topic, workspaceId);
+            return new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = query.Topic, LocationId = query.LocationId };
         }
     }
 
-    private static KnowledgeResult QueryLocations(BusinessKnowledgeSnapshot snapshot, string? locationId)
+    private static KnowledgeResult Result(KnowledgeQuery query, string? locationId, string facts = "") => new()
     {
-        var locs = string.IsNullOrWhiteSpace(locationId) ? snapshot.Locations : snapshot.Locations.Where(l => l.Id == locationId).ToList();
-        if (!locs.Any()) return new KnowledgeResult { Found = false };
+        Status = string.IsNullOrWhiteSpace(facts) ? KnowledgeStatus.NotFound : KnowledgeStatus.Found,
+        Facts = facts,
+        Source = query.Topic,
+        LocationId = locationId
+    };
 
+    private static string QueryLocations(IEnumerable<LocationDto> locations, string? locationId)
+    {
         var sb = new StringBuilder();
-        foreach (var l in locs)
+        foreach (var location in locations.Where(l => string.IsNullOrWhiteSpace(locationId) || l.Id == locationId))
         {
-            sb.AppendLine($"- {l.Name} {(l.IsMain ? "(Sede Principal)" : "")}. Dirección: {l.Address}");
+            sb.AppendLine($"- {location.Name} {(location.IsMain ? "(Sede Principal)" : "")}. Dirección: {location.Address}");
+            if (!string.IsNullOrWhiteSpace(location.Reference)) sb.AppendLine($"  Referencia: {location.Reference}");
+            if (!string.IsNullOrWhiteSpace(location.MapUrl)) sb.AppendLine($"  Mapa: {location.MapUrl}");
         }
-        return new KnowledgeResult { Found = true, Facts = sb.ToString() };
+        return sb.ToString().Trim();
     }
 
-    private async Task<KnowledgeResult> QueryProductsAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
+    private async Task<string> QueryProductsAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
     {
         var products = await _offeringService.GetProductsAsync(workspaceId, locationId, searchTerm, ct);
-        var resultList = products.Take(10).ToList();
-
-        if (!resultList.Any()) return new KnowledgeResult { Found = false };
-
         var sb = new StringBuilder();
-        foreach (var item in resultList)
+        foreach (var item in products.Take(10))
         {
-            sb.AppendLine($"- Producto: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100.0m}");
+            sb.AppendLine($"- Producto: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
             if (!string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
         }
-        return new KnowledgeResult { Found = true, Facts = sb.ToString() };
+        return sb.ToString().Trim();
     }
 
-    private async Task<KnowledgeResult> QueryServicesAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
+    private async Task<string> QueryServicesAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
     {
         var services = await _offeringService.GetServicesAsync(workspaceId, locationId, searchTerm, ct);
-        var resultList = services.Take(10).ToList();
-
-        if (!resultList.Any()) return new KnowledgeResult { Found = false };
-
         var sb = new StringBuilder();
-        foreach (var item in resultList)
+        foreach (var item in services.Take(10))
         {
-            sb.AppendLine($"- Servicio: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100.0m}");
+            sb.AppendLine($"- Servicio: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
             if (item.DurationInMinutes.HasValue) sb.AppendLine($"  Duración: {item.DurationInMinutes} min");
             if (!string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
         }
-        return new KnowledgeResult { Found = true, Facts = sb.ToString() };
+        return sb.ToString().Trim();
     }
 
-    private static KnowledgeResult QueryHours(BusinessKnowledgeSnapshot snapshot)
+    private static string QueryHours(IEnumerable<BusinessHoursDto> hours)
     {
-        if (!snapshot.Hours.Any()) return new KnowledgeResult { Found = false };
+        string[] days = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
         var sb = new StringBuilder();
-        foreach (var h in snapshot.Hours.OrderBy(x => x.DayOfWeek))
+        foreach (var hour in hours.OrderBy(h => (h.DayOfWeek + 6) % 7))
         {
-            sb.AppendLine(h.IsClosed ? $"- Día {h.DayOfWeek}: Cerrado" : $"- Día {h.DayOfWeek}: {h.OpenTime} a {h.CloseTime}");
+            if (hour.DayOfWeek is < 0 or > 6) throw new InvalidOperationException("Invalid stored day of week.");
+            sb.AppendLine(hour.IsClosed ? $"- {days[hour.DayOfWeek]}: Cerrado" : $"- {days[hour.DayOfWeek]}: {hour.OpenTime} a {hour.CloseTime}");
         }
-        return new KnowledgeResult { Found = true, Facts = sb.ToString() };
+        return sb.ToString().Trim();
     }
 
-    private static KnowledgeResult QueryFaqs(BusinessKnowledgeSnapshot snapshot, string? searchTerm)
+    private static string QueryFaqs(IEnumerable<FaqDto> faqs, string? searchTerm)
     {
-        var faqs = snapshot.Faqs.Where(f => f.IsActive);
+        var active = faqs.Where(f => f.IsActive && !string.IsNullOrWhiteSpace(f.Answer));
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
-            var term = searchTerm.ToLowerInvariant();
-            faqs = faqs.Where(f => f.Question.ToLowerInvariant().Contains(term) || f.Answer.ToLowerInvariant().Contains(term));
+            var term = Normalize(searchTerm);
+            active = active.Where(f => Normalize(f.Question).Contains(term) || Normalize(f.Answer).Contains(term));
         }
-        var resultList = faqs.Take(5).ToList();
-        if (!resultList.Any()) return new KnowledgeResult { Found = false };
-
-        var sb = new StringBuilder();
-        foreach (var f in resultList) sb.AppendLine($"P: {f.Question}\nR: {f.Answer}\n");
-        return new KnowledgeResult { Found = true, Facts = sb.ToString() };
+        return string.Join("\n\n", active.Take(5).Select(f => $"P: {f.Question}\nR: {f.Answer}"));
     }
 
-    private static KnowledgeResult QueryProfile(BusinessKnowledgeSnapshot snapshot)
+    private static string QueryProfile(BusinessProfileDto? profile)
     {
-        return snapshot.Profile == null
-            ? new KnowledgeResult { Found = false }
-            : new KnowledgeResult { Found = true, Facts = snapshot.Profile.Description ?? "Sin descripción" };
+        if (profile == null) return string.Empty;
+        var facts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(profile.CommercialName)) facts.Add($"Negocio: {profile.CommercialName}");
+        if (!string.IsNullOrWhiteSpace(profile.Description)) facts.Add(profile.Description);
+        if (!string.IsNullOrWhiteSpace(profile.ContactEmail)) facts.Add($"Correo: {profile.ContactEmail}");
+        if (!string.IsNullOrWhiteSpace(profile.WhatsAppNumber)) facts.Add($"WhatsApp: {profile.WhatsAppNumber}");
+        return string.Join("\n", facts);
     }
+
+    private static string Normalize(string value) => new string(value.Normalize(System.Text.NormalizationForm.FormD)
+        .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+        .ToArray()).ToLowerInvariant().Trim().Trim('¿', '?', '¡', '!').Trim();
 }

@@ -1,3 +1,4 @@
+using NexFlow.Application.Features.Knowledge;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
@@ -57,7 +58,7 @@ public class BookingFlow : IBookingFlow
     private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, CancellationToken ct)
     {
         var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!activeModules.Contains("SERVICES")) return OfferingQueryAccess.ServicesUnavailable;
+        if (!activeModules.Contains("SERVICES")) return AiIntentAccess.ServicesUnavailable;
         if (!activeModules.Contains("RESERVATIONS")) return "No hay información de reservas disponible en este momento.";
 
         context.CurrentGoal = "RESERVATION";
@@ -242,105 +243,72 @@ public class SupportFlow : ISupportFlow
 
 public class ChatFlow : IChatFlow
 {
+    private readonly IKnowledgeService _knowledgeService;
     private readonly ILocationResolverService _locationResolver;
-    private readonly IEntitlementService _entitlementService;
-    private readonly IAiRouter _aiRouter;
-    private readonly IOfferingService _offeringService;
-    private readonly IBusinessProfileRepository _profileRepo;
     private readonly ILogger<ChatFlow> _logger;
+    private readonly IEntitlementService _entitlementService;
 
-    public ChatFlow(IAiRouter aiRouter, IOfferingService offeringService, IBusinessProfileRepository profileRepo, ILogger<ChatFlow> logger,
-        IEntitlementService entitlementService, ILocationResolverService locationResolver)
+    public ChatFlow(IKnowledgeService knowledgeService, IEntitlementService entitlementService,
+        ILocationResolverService locationResolver, ILogger<ChatFlow> logger)
     {
-        _aiRouter = aiRouter; _offeringService = offeringService;
-        _profileRepo = profileRepo; _logger = logger;
-        _entitlementService = entitlementService;
+        _knowledgeService = knowledgeService;
         _locationResolver = locationResolver;
+        _logger = logger;
+        _entitlementService = entitlementService;
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, CancellationToken ct)
     {
-        string InformationUnavailable()
+        var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var denied = interpretation.DeniedResponse ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
+        if (denied != null) return denied;
+
+        KnowledgeTopic? topic = interpretation.Intent switch
         {
-            interpretation.Intent = ConversationIntent.Support;
-            return "No tengo esa información en este momento";
-        }
+            ConversationIntent.ProductQuery => KnowledgeTopic.Products,
+            ConversationIntent.ServiceQuery => KnowledgeTopic.Services,
+            ConversationIntent.Faq => KnowledgeTopic.Faqs,
+            ConversationIntent.Location => KnowledgeTopic.Locations,
+            ConversationIntent.BusinessHours => KnowledgeTopic.BusinessHours,
+            ConversationIntent.General => KnowledgeTopic.Faqs,
+            _ => null
+        };
+        if (!topic.HasValue) return "No puedo resolver esa consulta con la información disponible.";
 
-        string businessName;
-        string? extractedData = null;
-
-        try
+        string? locationId = null;
+        if (topic != KnowledgeTopic.Faqs && !string.IsNullOrWhiteSpace(interpretation.Location))
         {
-            var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var deniedResponse = OfferingQueryAccess.GetDeniedResponse(interpretation.Intent.ToString().ToUpperInvariant(), activeModules);
-            if (deniedResponse != null) return deniedResponse;
-
-            string? locationId = null;
-            if (!string.IsNullOrWhiteSpace(interpretation.Location))
+            try
             {
                 locationId = await _locationResolver.ResolveLocationIdAsync(workspaceId, interpretation.Location, ct);
                 if (string.IsNullOrWhiteSpace(locationId))
-                    return "No pude identificar la sede. ¿Podrías indicar su nombre exacto?";
+                    return new KnowledgeResult { Status = KnowledgeStatus.NotFound, Source = topic.Value }.ToResponse();
             }
-
-            var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
-            if (profile == null || string.IsNullOrWhiteSpace(profile.CommercialName)) return InformationUnavailable();
-            businessName = profile.CommercialName;
-
-            if (interpretation.Intent == ConversationIntent.ProductQuery)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
             {
-                var products = await _offeringService.GetProductsAsync(workspaceId, locationId, interpretation.SearchTerm, ct);
-                if (products.Any())
-                    extractedData = string.Join("\n", products.Take(10).Select(p => $"- {p.Name}: {p.Currency} {(p.PriceMinorUnits / 100m):0.00}. {p.Description}"));
-                else return InformationUnavailable();
-            }
-            else if (interpretation.Intent == ConversationIntent.ServiceQuery)
-            {
-                var services = await _offeringService.GetServicesAsync(workspaceId, locationId, interpretation.SearchTerm, ct);
-                if (services.Any())
-                    extractedData = string.Join("\n", services.Take(10).Select(s => $"- {s.Name}: {s.Currency} {(s.PriceMinorUnits / 100m):0.00}. {s.Description}"));
-                else return InformationUnavailable();
-            }
-            else if (interpretation.Intent == ConversationIntent.General)
-            {
-                extractedData = "No se requirió consultar catálogo.";
+                _logger.LogError(ex, "Knowledge location resolution failed for workspace {WorkspaceId}.", workspaceId);
+                return new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value }.ToResponse();
             }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception ex)
+
+        var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
+        var result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery
         {
-            _logger.LogWarning(ex, "Error al recuperar datos para el workspace {WorkspaceId} en ChatFlow.", workspaceId);
-            return InformationUnavailable();
+            Topic = topic.Value,
+            LocationId = locationId,
+            SearchTerm = interpretation.Intent is ConversationIntent.Faq or ConversationIntent.General
+                ? interpretation.SearchTerm ?? text : interpretation.SearchTerm
+        }, ct);
+
+        if (interpretation.Intent == ConversationIntent.General && result.Status == KnowledgeStatus.NotFound)
+        {
+            result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery { Topic = KnowledgeTopic.Profile }, ct);
+            if (result.Found) return $"Esta es la información registrada del negocio:\n{result.Facts}\nSi necesitas otro dato, indícame cuál.";
         }
 
-        if (string.IsNullOrWhiteSpace(extractedData)) return InformationUnavailable();
-
-        var systemPrompt = $@"Eres el asistente virtual de ventas y atención al cliente de '{businessName}'.
-Tu objetivo es responder de forma amable, persuasiva y concisa a las dudas del cliente.
-
-AQUÍ ESTÁN LOS DATOS QUE ENCONTRÉ EN LA BASE DE DATOS SOBRE LO QUE PREGUNTÓ EL CLIENTE:{extractedData}
-
-REGLAS ESTRICTAS:
-1. SIEMPRE responde basándote en los datos de arriba.
-2. Si el cliente pregunta por un precio, dale el precio exacto extraído de la lista.
-3. Si la lista dice que no tenemos el producto, indícale educadamente que no contamos con ello. ¡NUNCA INVENTES PRECIOS!
-4. Mantén tus respuestas precisas, cálidas y cortas (ideales para leer en WhatsApp).";
-
-        return await _aiRouter.ExecuteTaskAsync(AiTaskType.ComplexChat, systemPrompt, text, false, ct);
+        // Business facts are returned verbatim from the factual query, never
+        // expanded by an unconstrained generation step.
+        return result.ToResponse();
     }
-}
-
-internal static class OfferingQueryAccess
-{
-    internal const string ProductsUnavailable = "No hay información de productos disponible en este momento.";
-    internal const string ServicesUnavailable = "No hay información de servicios disponible en este momento.";
-
-    internal static string? GetDeniedResponse(string? intent, ISet<string> activeModules) =>
-        intent?.Trim().ToUpperInvariant() switch
-        {
-            "PRODUCTQUERY" when !activeModules.Contains("CATALOG") => ProductsUnavailable,
-            "SERVICEQUERY" when !activeModules.Contains("SERVICES") => ServicesUnavailable,
-            _ => null
-        };
 }

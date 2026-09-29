@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.AI.Router;
@@ -9,7 +10,10 @@ namespace NexFlow.Application.Features.AI.Interpretation;
 public class AiInterpretation
 {
     // 🔥 SPRINT 05: Fuertemente tipado
+    [JsonRequired]
     public ConversationIntent Intent { get; set; } = ConversationIntent.General;
+    [JsonIgnore]
+    public string? DeniedResponse { get; set; }
     public string? Service { get; set; }
     public string? Location { get; set; }
     public string? Date { get; set; }
@@ -53,7 +57,7 @@ public class AiInterpreter : IAiInterpreter
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
 Tu ÚNICO trabajo es extraer intenciones y entidades en JSON.
 MÓDULOS PAGADOS POR ESTE NEGOCIO: {activeModulesList}
-(CRÍTICO: Si el negocio NO tiene 'RESERVATIONS', no puedes devolver 'Reservation'. Si no tiene 'ORDERS', no devuelvas 'Order').
+Identifica la intención real aunque el módulo no esté habilitado; el software validará el acceso.
 
 FECHA ACTUAL: {localBusinessTime:yyyy-MM-dd}
 HORA ACTUAL: {localBusinessTime:HH:mm}
@@ -61,6 +65,7 @@ OBJETIVO ACTUAL: {(string.IsNullOrWhiteSpace(currentGoal) ? "NINGUNO" : currentG
 
 - Intent: 'ProductQuery', 'ServiceQuery', 'Reservation', 'Request', 'Order', 'Faq', 'Location', 'General', 'Support', 'BusinessHours'.
 - SearchTerm: Si el cliente hace un PEDIDO (Order), extrae los productos y SUS CANTIDADES (Ej: '2x martillos', '1x clavo'). Si el cliente indica que ya terminó de pedir, o dice 'enviar pedido', pon EXACTAMENTE: 'FINALIZAR_PEDIDO'.
+- SearchTerm: Para ProductQuery, ServiceQuery o Faq, extrae sólo el producto, servicio o tema consultado; no la pregunta completa.
 - Service: Nombre del servicio (Solo si Intent es Reservation).
 - Location: La sede mencionada.
 - Date: Fecha en formato YYYY-MM-DD.
@@ -74,12 +79,16 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
             var responseText = await _router.ExecuteTaskAsync(AiTaskType.IntentExtraction, prompt, userMessage, true, ct);
             var cleanJson = responseText.Replace("```json", "").Replace("```", "").Trim();
 
-            var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                   ?? new AiInterpretation { Intent = ConversationIntent.General };
+            var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter(allowIntegerValues: false) } })
+                   ?? throw new JsonException("Interpretation was null.");
 
+            if (!Enum.IsDefined(interpretation.Intent) || interpretation.Intent is ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
+                throw new JsonException("Invalid model intent.");
+            interpretation.DeniedResponse = AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules);
             return interpretation;
         }
-        catch (HttpRequestException ex) when (ex.Message.Contains("429"))
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
         {
             _logger.LogWarning(ex, "Rate Limit alcanzado en el proveedor de IA.");
             return new AiInterpretation { Intent = ConversationIntent.RateLimited };
@@ -90,5 +99,27 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
             _logger.LogError(ex, "Error crítico en IA. Proveedor inalcanzable o timeout.");
             return new AiInterpretation { Intent = ConversationIntent.ProviderUnavailable };
         }
+    }
+}
+
+internal static class AiIntentAccess
+{
+    internal const string ProductsUnavailable = "No hay información de productos disponible en este momento.";
+    internal const string ServicesUnavailable = "No hay información de servicios disponible en este momento.";
+
+    internal static string? GetDeniedResponse(ConversationIntent intent, ISet<string> activeModules)
+    {
+        bool Has(string module) => activeModules.Any(m => string.Equals(m, module, StringComparison.OrdinalIgnoreCase));
+        return intent switch
+        {
+            ConversationIntent.ProductQuery when !Has("CATALOG") => ProductsUnavailable,
+            ConversationIntent.ServiceQuery when !Has("SERVICES") => ServicesUnavailable,
+            ConversationIntent.Reservation when !Has("RESERVATIONS") => "Este negocio no tiene habilitadas las reservas.",
+            ConversationIntent.Reservation when !Has("SERVICES") => ServicesUnavailable,
+            ConversationIntent.Order when !Has("ORDERS") => "Este negocio no tiene habilitados los pedidos.",
+            ConversationIntent.Order when !Has("CATALOG") => ProductsUnavailable,
+            ConversationIntent.Request when !Has("REQUESTS") => "Este negocio no tiene habilitado el registro de solicitudes.",
+            _ => null
+        };
     }
 }

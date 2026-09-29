@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
 
 namespace NexFlow.Application.Features.AI.Router;
@@ -41,6 +41,7 @@ public class AiRouter : IAiRouter
             _logger.LogDebug("Intentando ejecutar tarea {TaskType} con {Provider}", taskType, primaryProvider.ProviderType);
             return await primaryProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) when (IsTransientError(ex))
         {
             // 🔥 SPRINT 10: Solo ejecutamos Fallback si el error es transitorio (caída temporal)
@@ -50,10 +51,11 @@ public class AiRouter : IAiRouter
             {
                 return await fallbackProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception fallbackEx)
             {
                 _logger.LogError(fallbackEx, "Fallo catastrófico. Ambos proveedores IA ({Primary} y {Fallback}) fallaron para la tarea {TaskType}.", primaryProvider.ProviderType, fallbackProvider.ProviderType, taskType);
-                throw new InvalidOperationException("Todos los servicios de inteligencia artificial están inactivos.", fallbackEx);
+                throw; // Preserve the provider HTTP status for the interpreter.
             }
         }
         catch (Exception ex)
@@ -70,26 +72,12 @@ public class AiRouter : IAiRouter
                ?? _providers.First();
     }
 
-    // Clasificador determinista de excepciones de API
-    private static bool IsTransientError(Exception ex)
+    private static bool IsTransientError(Exception ex) => ex switch
     {
-        if (ex is TimeoutException || ex is TaskCanceledException) return true;
-
-        if (ex is HttpRequestException httpEx)
-        {
-            var code = (int?)httpEx.StatusCode;
-            // 429: Too Many Requests (Rate Limit). 5xx: Server Errors de la IA.
-            if (code == 429 || (code >= 500 && code <= 599)) return true;
-
-            // 400, 401, 403, 404 NO son transitorios (son culpa nuestra, no de Groq/Gemini).
-            return false;
-        }
-
-        // Red de seguridad por si los SDKs (como Gemini SDK) envuelven la excepción HTTP
-        var msg = ex.Message.ToLowerInvariant();
-        if (msg.Contains("429") || msg.Contains("too many requests") || msg.Contains("500") || msg.Contains("503") || msg.Contains("timeout"))
-            return true;
-
-        return false;
-    }
+        TimeoutException or OperationCanceledException => true,
+        HttpRequestException http => http.StatusCode == null ||
+            http.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.RequestTimeout ||
+            (int)http.StatusCode.Value >= 500,
+        _ => false
+    };
 }

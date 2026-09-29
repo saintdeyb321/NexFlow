@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Catalog.DTOs;
@@ -21,7 +21,7 @@ public sealed class OfferingService : IOfferingService
         // Esto evita traer 5,000 servicios a memoria solo para descartarlos.
         var items = await _catalogRepo.GetItemsByTypeAsync(workspaceId, "PRODUCT", ct);
 
-        var products = items.Select(MapToSpecific<ProductDto>);
+        var products = items.Where(i => i.IsActive).Select(MapToSpecific<ProductDto>);
         return FilterItems(products, locationId, query);
     }
 
@@ -40,7 +40,7 @@ public sealed class OfferingService : IOfferingService
     public async Task<ProductDto?> GetProductByIdAsync(Guid workspaceId, string productId, CancellationToken ct)
     {
         var item = await _catalogRepo.GetItemByIdAsync(workspaceId, productId, ct);
-        if (item == null || item.Type != "PRODUCT") return null;
+        if (item == null || item.Type != "PRODUCT" || !item.IsActive) return null;
         return MapToSpecific<ProductDto>(item);
     }
 

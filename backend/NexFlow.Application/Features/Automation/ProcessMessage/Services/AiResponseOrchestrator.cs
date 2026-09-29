@@ -54,9 +54,15 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         else
         {
-            var deniedResponse = string.IsNullOrWhiteSpace(context.CurrentGoal)
-                ? OfferingQueryAccess.GetDeniedResponse(interpretation.Intent.ToString().ToUpperInvariant(), activeModules)
-                : null;
+            var effectiveIntent = context.CurrentGoal switch
+            {
+                "BOOKING" or "RESERVATION" => ConversationIntent.Reservation,
+                "ORDER" => ConversationIntent.Order,
+                _ => interpretation.Intent
+            };
+            var deniedResponse = interpretation.DeniedResponse
+                ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules)
+                ?? AiIntentAccess.GetDeniedResponse(effectiveIntent, activeModules);
             if (deniedResponse != null)
             {
                 finalResponse = deniedResponse;
@@ -64,13 +70,13 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             else if ((context.CurrentGoal == "BOOKING" || context.CurrentGoal == "RESERVATION" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Reservation)) && activeModules.Contains("RESERVATIONS"))
             {
                 finalResponse = !activeModules.Contains("SERVICES")
-                    ? OfferingQueryAccess.ServicesUnavailable
+                    ? AiIntentAccess.ServicesUnavailable
                     : await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, cancellationToken);
             }
             else if ((context.CurrentGoal == "ORDER" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Order)) && activeModules.Contains("ORDERS"))
             {
                 if (!activeModules.Contains("CATALOG"))
-                    finalResponse = OfferingQueryAccess.ProductsUnavailable;
+                    finalResponse = AiIntentAccess.ProductsUnavailable;
                 else
                 {
                     finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, interpretation, cancellationToken);

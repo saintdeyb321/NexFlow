@@ -88,25 +88,29 @@ public class ProcessIncomingMessageCommandHandler
         {
             var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, phone, ct);
             if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return false;
-            var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
-            var mentionedLocations = locations.Where(l => !string.IsNullOrWhiteSpace(l.Name) && message.Contains(l.Name, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (mentionedLocations.Count > 1) return false;
-
-            var locationId = mentionedLocations.Count == 1 ? mentionedLocations[0].Id : context.SelectedLocationId;
-            if (!string.IsNullOrWhiteSpace(locationId) && !locations.Any(l => l.Id == locationId)) return false;
-
-            var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
-            var result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery { Topic = topic.Value, LocationId = locationId }, ct);
-
-            if (result.Found)
+            KnowledgeResult result;
+            try
             {
-                string reply = $"Aquí tienes la información solicitada:\n\n{result.Facts}\n¿En qué más te puedo ayudar?";
+                var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+                var mentionedLocations = locations.Where(l => !string.IsNullOrWhiteSpace(l.Name) && message.Contains(l.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (mentionedLocations.Count > 1) return false;
 
-                // 🔥 SPRINT 02: Inyectamos sourceMessageId como clave de idempotencia
-                var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone, reply, SenderType.AI, sourceMessageId, ct);
-                EnsureMessageSent(outbound);
-                return true;
+                var locationId = mentionedLocations.Count == 1 ? mentionedLocations[0].Id : context.SelectedLocationId;
+                var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
+                result = await _knowledgeService.QueryAsync(workspaceId, snapshot,
+                    new KnowledgeQuery { Topic = topic.Value, LocationId = locationId }, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Knowledge location lookup failed for workspace {WorkspaceId}.", workspaceId);
+                result = new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value };
+            }
+
+            var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone,
+                result.ToResponse(), SenderType.AI, sourceMessageId, ct);
+            EnsureMessageSent(outbound);
+            return true;
         }
         return false;
     }
