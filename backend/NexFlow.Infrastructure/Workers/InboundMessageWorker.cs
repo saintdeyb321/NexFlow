@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -43,25 +43,40 @@ public class InboundMessageWorker : BackgroundService
                 {
                     using var messageScope = _serviceProvider.CreateScope();
                     var msgRepo = messageScope.ServiceProvider.GetRequiredService<IInboundMessageRepository>();
-                    var handler = messageScope.ServiceProvider.GetRequiredService<ProcessIncomingMessageCommandHandler>();
+                    using var handlerScope = _serviceProvider.CreateScope();
+                    var handler = handlerScope.ServiceProvider.GetRequiredService<ProcessIncomingMessageCommandHandler>();
 
                     try
                     {
-                        var command = JsonSerializer.Deserialize<ProcessIncomingMessageCommand>(msg.PayloadJson);
-                        if (command != null)
+                        await msgRepo.ProcessClaimedAsync(msg, async () =>
                         {
-                            await handler.Handle(command, stoppingToken);
-                        }
-                        await msgRepo.CompleteMessageAsync(msg.Id, stoppingToken);
+                            var command = JsonSerializer.Deserialize<ProcessIncomingMessageCommand>(msg.PayloadJson)
+                                ?? throw new JsonException("Inbound payload is null.");
+                            if (string.IsNullOrWhiteSpace(command.MessageText) ||
+                                string.IsNullOrWhiteSpace(command.MessageId) || string.IsNullOrWhiteSpace(command.InstanceName) ||
+                                command.MessageId != msg.ExternalMessageId || command.InstanceName != msg.InstanceName ||
+                                command.CustomerPhone != msg.Phone ||
+                                (command.WorkspaceId.HasValue && command.WorkspaceId != msg.WorkspaceId))
+                                throw new JsonException("Inbound payload does not match its durable envelope.");
+                            await handler.Handle(command with { WorkspaceId = msg.WorkspaceId }, stoppingToken);
+                        }, stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error procesando mensaje Inbound {Id}", msg.Id);
-                        await msgRepo.FailMessageAsync(msg.Id, ex.Message, stoppingToken);
+                        await msgRepo.FailMessageAsync(msg.Id, msg.ProcessingStartedAt!.Value, ex.Message, stoppingToken);
                     }
                 });
 
                 await Task.WhenAll(tasks);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
             }
             catch (Exception ex)
             {

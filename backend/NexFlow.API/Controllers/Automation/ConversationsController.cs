@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
@@ -107,20 +107,21 @@ public class ConversationsController : ControllerBase
         var conversation = await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken);
         if (conversation == null) return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        var finalRecord = await outboundMessageService.SendMessageAsync(
-            WorkspaceId,
-            conversation.Id,
-            conversation.ConsumerPhone,
-            request.Content,
-            SenderType.BusinessUser,
-            "", // 🔥 SPRINT 02 FIX: Pasamos string vacío como clave de idempotencia, ya que es un mensaje proactivo humano
-            cancellationToken);
-
-        if (finalRecord.Status == MessageStatus.Failed)
+        if (string.IsNullOrWhiteSpace(request.Content)) return BadRequest(new { message = "El mensaje no puede estar vacío." });
+        var clientKey = Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (clientKey?.Length > 200) return BadRequest(new { message = "Idempotency-Key demasiado larga." });
+        var sourceId = $"manual:{conversationId}:{(string.IsNullOrWhiteSpace(clientKey) ? Guid.NewGuid().ToString("N") : clientKey)}";
+        MessageRecord finalRecord;
+        try
         {
-            return StatusCode(500, new { message = "No se pudo entregar el mensaje a WhatsApp." });
+            finalRecord = await outboundMessageService.SendMessageAsync(
+                WorkspaceId, conversation.Id, conversation.ConsumerPhone, request.Content,
+                SenderType.BusinessUser, sourceId, cancellationToken);
         }
-
+        catch (HttpRequestException ex) when (ex.StatusCode.HasValue)
+        {
+            return StatusCode((int)ex.StatusCode.Value, new { message = "Evolution rechazó el envío.", providerStatus = (int)ex.StatusCode.Value });
+        }
         if (conversation.Mode != ConversationMode.Human)
         {
             await _conversationRepository.UpdateConversationModeAsync(WorkspaceId, conversation.Id, ConversationMode.Human, HandoffReason.ManualIntervention, cancellationToken);

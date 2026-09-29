@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.Text.Json;
 using System.Threading;
@@ -69,34 +69,4 @@ public class RedisConversationCache : IConversationCache
         }
     }
 
-    // 🔥 SPRINT 03: Usamos Redis para identificar instantáneamente los mensajes que nosotros mismos disparamos.
-    public async Task MarkMessageAsAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Limpiamos la clave para evitar fallos por si llega con el prefijo "response:X"
-            var cleanMessageId = messageId.Contains(':') ? messageId.Split(':')[0] : messageId;
-            var key = $"workspace:{workspaceId}:aimessage:{cleanMessageId}";
-            await _redisDb.StringSetAsync(key, "1", TimeSpan.FromMinutes(10));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Degradación: No se pudo marcar el mensaje en caché.");
-        }
-    }
-
-    public async Task<bool> IsMessageAiGeneratedAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var cleanMessageId = messageId.Contains(':') ? messageId.Split(':')[0] : messageId;
-            var key = $"workspace:{workspaceId}:aimessage:{cleanMessageId}";
-            return await _redisDb.KeyExistsAsync(key);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Degradación: Falla al verificar origen del mensaje.");
-            return false;
-        }
-    }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Automation.Conversations;
@@ -35,6 +35,9 @@ public record MessageRecord
     public SenderType Sender { get; init; }
     public string Content { get; init; } = string.Empty;
     public string? ExternalMessageId { get; init; }
+    public string? IdempotencyKey { get; init; }
+    public string? LastError { get; init; }
+    public MessageOrigin? Origin { get; init; }
 
     // 🔥 Sprint 4.1: Estado del mensaje
     public MessageStatus Status { get; init; } = MessageStatus.Sent;

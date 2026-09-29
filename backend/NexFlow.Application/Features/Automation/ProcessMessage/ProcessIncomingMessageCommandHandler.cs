@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
@@ -44,6 +44,9 @@ public class ProcessIncomingMessageCommandHandler
     {
         var guardResult = await _guard.CheckMessageAsync(request, cancellationToken);
         if (!guardResult.IsValid) return Result.Success();
+
+        if (!request.FromMe && await _outboundMessageService.TryResumeResponseAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken))
+            return Result.Success();
 
         var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Entities.System;
@@ -61,6 +61,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
             // Evita que Evolution duplique el mismo mensaje en caso de reintentos suyos
             entity.HasIndex(e => new { e.InstanceName, e.ExternalMessageId }).IsUnique();
             entity.HasIndex(e => e.Status); // Agiliza el Worker
+            entity.Property(e => e.ProcessingStartedAt).IsConcurrencyToken();
         });
 
         base.OnModelCreating(modelBuilder);

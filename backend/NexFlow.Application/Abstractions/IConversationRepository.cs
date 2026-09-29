@@ -1,11 +1,17 @@
-﻿using NexFlow.Application.Features.Automation.Conversations;
+using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Abstractions;
 
 public interface IConversationRepository
 {
-    // 🔥 SPRINT 03: Firma ajustada para obligar a pasar el ConversationId
+    Task<(MessageRecord Message, bool SendRequired)> PrepareOutboundAsync(Guid workspaceId, string conversationId, string phone, MessageRecord message, CancellationToken cancellationToken);
+    Task ConfirmOutboundAsync(Guid workspaceId, string messageId, string externalMessageId, CancellationToken cancellationToken);
+    Task RecordOutboundFailureAsync(Guid workspaceId, string messageId, string error, bool rejected, CancellationToken cancellationToken);
+    Task<(MessageRecord Message, string ConversationId, string Phone)?> GetOutboundAsync(Guid workspaceId, string messageId, CancellationToken cancellationToken);
+    Task<MessageOrigin?> GetMessageOriginAsync(Guid workspaceId, string phone, string externalMessageId, CancellationToken cancellationToken);
+    Task<bool> HasUnconfirmedOutboundAsync(Guid workspaceId, string phone, CancellationToken cancellationToken);
+
     Task<MessageRecord?> GetMessageByExternalIdAsync(Guid workspaceId, string conversationId, string externalMessageId, CancellationToken cancellationToken);
 
     Task<ConversationRecord?> GetActiveConversationAsync(Guid workspaceId, string consumerPhone, CancellationToken cancellationToken);
@@ -15,7 +21,6 @@ public interface IConversationRepository
     Task CloseConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
     Task UpdateConversationModeAsync(Guid workspaceId, string conversationId, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken);
     Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken);
-    Task UpdateMessageStatusAsync(Guid workspaceId, string conversationId, string messageId, MessageStatus status, string? externalMessageId, CancellationToken cancellationToken);
     Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken);
     Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken);
     Task<ConversationRecord?> GetConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);

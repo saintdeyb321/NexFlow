@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using NexFlow.Application.Abstractions;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
+using Microsoft.AspNetCore.Mvc;
 using System.Text.Json.Serialization;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using Microsoft.Extensions.Logging;
@@ -26,7 +28,8 @@ public class EvolutionWebhookController : ControllerBase
     public async Task<IActionResult> ReceiveMessage(
         [FromBody] EvolutionWebhookPayload payload,
         [FromServices] IConfiguration configuration,
-        [FromServices] IInboundMessageRepository inboundRepo) // 🔥 SPRINT 01: Inyectamos el repo duradero
+        [FromServices] IInboundMessageRepository inboundRepo,
+        [FromServices] IInstanceResolver instanceResolver)
     {
         var expectedWebhookKey = configuration["Evolution:WebhookKey"]?.Trim();
 
@@ -45,8 +48,10 @@ public class EvolutionWebhookController : ControllerBase
         if (normalizedEvent != "MESSAGES_UPSERT")
             return Ok();
 
-        if (payload?.Data?.Message == null || string.IsNullOrEmpty(payload.Data.Key.Id))
-            return Ok();
+        if (payload?.Data?.Message == null || payload.Data.Key == null ||
+            string.IsNullOrWhiteSpace(payload.Data.Key.Id) || string.IsNullOrWhiteSpace(payload.Instance) ||
+            string.IsNullOrWhiteSpace(payload.Data.Key.RemoteJid))
+            return BadRequest(new { Error = "Malformed message envelope." });
 
         if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-") || payload.Data.Key.RemoteJid == "status@broadcast")
             return Ok();
@@ -54,21 +59,29 @@ public class EvolutionWebhookController : ControllerBase
         var messageText = payload.Data.Message.GetRealText();
 
         if (string.IsNullOrWhiteSpace(messageText))
-            return Ok();
+            return BadRequest(new { Error = "Unsupported or empty message." });
+
+        var phone = IncomingMessageGuard.NormalizePhone(payload.Data.Key.RemoteJid);
+        if (string.IsNullOrEmpty(phone)) return BadRequest(new { Error = "Invalid phone." });
+        var workspaceId = await instanceResolver.ResolveInstanceAsync(payload.Instance, HttpContext.RequestAborted);
+        if (!workspaceId.HasValue || workspaceId == Guid.Empty)
+            return BadRequest(new { Error = "Unknown instance." });
 
         var command = new ProcessIncomingMessageCommand(
             InstanceName: payload.Instance,
-            CustomerPhone: payload.Data.Key.RemoteJid.Replace("@s.whatsapp.net", ""),
+            CustomerPhone: phone,
             CustomerName: payload.Data.PushName ?? "Cliente",
             MessageText: messageText,
             MessageId: payload.Data.Key.Id,
-            FromMe: payload.Data.Key.FromMe
+            FromMe: payload.Data.Key.FromMe,
+            WorkspaceId: workspaceId
         );
 
         // 🔥 SPRINT 01: Persistencia Transaccional. Guardamos y respondemos rápido.
         var inboundMessage = new InboundMessage
         {
             Id = Guid.NewGuid(),
+            WorkspaceId = workspaceId,
             ExternalMessageId = payload.Data.Key.Id,
             InstanceName = payload.Instance,
             Phone = command.CustomerPhone,

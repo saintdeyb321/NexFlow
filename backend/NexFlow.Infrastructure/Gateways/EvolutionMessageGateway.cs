@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -43,10 +43,10 @@ public class EvolutionMessageGateway : IMessageGateway
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
 
         var url = $"{_baseUrl}/message/sendText/{instanceName}";
-        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Lo siento, tuve un pequeño problema. ¿Puedes repetir?" : message;
+        if (string.IsNullOrWhiteSpace(message)) throw new ArgumentException("Message content is required.", nameof(message));
 
-        // 🔥 SPRINT 02: messageId ahora es la clave determinista (Ej: msg_123:response:1)
-        var payload = new { number = customerIdentifier, text = safeMessage, options = new { delay = 1200, presence = "composing", messageId = messageId } };
+        // Idempotency is enforced by the durable outbound repository, not provider options.
+        var payload = new { number = customerIdentifier, text = message, options = new { delay = 1200, presence = "composing" } };
         return await ExecutePostAsync(url, payload, cancellationToken);
     }
 
@@ -56,7 +56,7 @@ public class EvolutionMessageGateway : IMessageGateway
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
 
         var url = $"{_baseUrl}/message/sendMedia/{instanceName}";
-        var payload = new { number = customerIdentifier, options = new { delay = 2000, presence = "composing", messageId = messageId }, mediaMessage = new { mediatype = "document", fileName = fileName, caption = caption, media = documentUrl } };
+        var payload = new { number = customerIdentifier, options = new { delay = 2000, presence = "composing" }, mediaMessage = new { mediatype = "document", fileName = fileName, caption = caption, media = documentUrl } };
         return await ExecutePostAsync(url, payload, cancellationToken);
     }
 
@@ -66,24 +66,27 @@ public class EvolutionMessageGateway : IMessageGateway
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
 
         var url = $"{_baseUrl}/message/sendMedia/{instanceName}";
-        var payload = new { number = customerIdentifier, options = new { delay = 1500, presence = "composing", messageId = messageId }, mediaMessage = new { mediatype = "image", caption = caption, media = imageUrl } };
+        var payload = new { number = customerIdentifier, options = new { delay = 1500, presence = "composing" }, mediaMessage = new { mediatype = "image", caption = caption, media = imageUrl } };
         return await ExecutePostAsync(url, payload, cancellationToken);
     }
 
     private async Task<string> ExecutePostAsync(string url, object payload, CancellationToken cancellationToken)
     {
-        var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
+        using var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             var errorDetails = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogError("Evolution API Error. Status={StatusCode}, Details={ErrorDetails}", response.StatusCode, errorDetails);
-            throw new HttpRequestException($"Error de Evolution: {response.StatusCode}");
+            throw new HttpRequestException($"Error de Evolution: {response.StatusCode}", null, response.StatusCode);
         }
 
         var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-        if (jsonResponse.TryGetProperty("key", out var keyProp) && keyProp.TryGetProperty("id", out var idProp))
-            return idProp.GetString() ?? Guid.NewGuid().ToString();
+        if (jsonResponse.ValueKind == JsonValueKind.Object &&
+            jsonResponse.TryGetProperty("key", out var keyProp) && keyProp.ValueKind == JsonValueKind.Object &&
+            keyProp.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(idProp.GetString()))
+            return idProp.GetString()!;
 
-        return Guid.NewGuid().ToString();
+        throw new InvalidOperationException("Evolution returned success without a provider message ID; delivery is unknown.");
     }
 }

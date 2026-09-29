@@ -1,4 +1,4 @@
-﻿namespace NexFlow.Application.Features.Automation.ProcessMessage;
+namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
 public record ProcessIncomingMessageCommand(
     string InstanceName,
@@ -6,5 +6,6 @@ public record ProcessIncomingMessageCommand(
     string CustomerName,
     string MessageText,
     string MessageId,
-    bool FromMe // <-- NUEVO
+    bool FromMe,
+    Guid? WorkspaceId = null
 );

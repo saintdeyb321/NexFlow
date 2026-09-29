@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,7 +26,7 @@ public class IncomingMessageGuard : IIncomingMessageGuard
         _logger = logger;
     }
 
-    private static string NormalizePhone(string phone)
+    public static string NormalizePhone(string phone)
     {
         if (string.IsNullOrWhiteSpace(phone) || phone.Contains("@g.us") || phone.Contains("status@broadcast")) return string.Empty;
         var clean = new string(phone.Split('@')[0].Where(char.IsDigit).ToArray());
@@ -39,20 +39,23 @@ public class IncomingMessageGuard : IIncomingMessageGuard
         if (string.IsNullOrEmpty(normalizedPhone))
         {
             _logger.LogWarning("Incoming message {MessageId} rejected: phone invalid or empty.", request.MessageId);
-            return (false, Guid.Empty, string.Empty);
+            throw new InvalidOperationException("Inbound phone or instance is invalid.");
         }
 
         var resolvedId = await _instanceResolver.ResolveInstanceAsync(request.InstanceName, cancellationToken);
         if (resolvedId == null || resolvedId == Guid.Empty)
         {
             _logger.LogWarning("Incoming message rejected: instance '{InstanceName}' not resolved.", request.InstanceName);
-            return (false, Guid.Empty, string.Empty);
+            throw new InvalidOperationException("Inbound phone or instance is invalid.");
         }
+
+        if (request.WorkspaceId.HasValue && request.WorkspaceId != resolvedId)
+            throw new InvalidOperationException("Inbound workspace does not match its instance.");
 
         if (!await _entitlementService.IsLicenseValidAsync(resolvedId.Value, cancellationToken))
         {
             _logger.LogWarning("Incoming message {MessageId} rejected: license for workspace {WorkspaceId} invalid.", request.MessageId, resolvedId.Value);
-            return (false, Guid.Empty, string.Empty);
+            return (false, resolvedId.Value, normalizedPhone);
         }
 
         // 🔥 SPRINT 02: Ya no bloqueamos ni guardamos en la vieja tabla ProcessedMessages 
