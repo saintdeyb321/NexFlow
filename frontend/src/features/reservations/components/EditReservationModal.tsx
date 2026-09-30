@@ -1,3 +1,4 @@
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { toBusinessLocalInput } from '../../../core/utils/dateTime';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
@@ -7,7 +8,7 @@ import type { ReservationDto } from '../types/reservation.types';
 interface EditReservationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (reservation: ReservationDto) => void;
   reservation: ReservationDto | null;
   timeZone: string; 
 }
@@ -15,7 +16,6 @@ interface EditReservationModalProps {
 export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, timeZone }: EditReservationModalProps) => {
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,21 +28,18 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
     }
   }, [reservation, timeZone]);
 
+  const saveMutation = useSessionMutation({
+    mutationFn: ({ id, dateTime }: { id: string; dateTime: string }) => editReservation(id, dateTime),
+    onSuccess: result => { onSuccess(result); onClose(); },
+    onError: error => setErrorMessage(getApiErrorPresentation(error)),
+  });
+  const isSaving = saveMutation.isPending;
+
   if (!isOpen || !reservation) return null;
 
   const handleSaveEdit = async () => {
     if (!editDate || !editTime) return;
-    setIsSaving(true);
-    try {
-      const newDateTime = `${editDate}T${editTime}:00`;
-      await editReservation(reservation.id, newDateTime);
-      onSuccess();
-      onClose();
-    } catch (error: unknown) {
-      setErrorMessage(getApiErrorPresentation(error));
-    } finally {
-      setIsSaving(false);
-    }
+    saveMutation.mutate({ id: reservation.id, dateTime: `${editDate}T${editTime}:00` });
   };
 
   return (

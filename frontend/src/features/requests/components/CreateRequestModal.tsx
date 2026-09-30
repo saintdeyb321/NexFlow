@@ -1,8 +1,10 @@
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { X, Save } from 'lucide-react';
 import { createRequest } from '../services/request.service';
 import type { RequestType } from '../types/request.types';
@@ -25,10 +27,10 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
     consumerPhone: ''
   });
 
-  const createMutation = useMutation({
+  const createMutation = useSessionMutation({
     mutationFn: createRequest,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.requests.lists(workspaceId) });
       onClose();
       setFormData({ type: 'Tramite', title: '', description: '', consumerPhone: '' });
       setErrorMessage(null);

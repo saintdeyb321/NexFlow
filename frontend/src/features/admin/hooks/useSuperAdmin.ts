@@ -1,3 +1,6 @@
+import { getQuerySession, isCurrentQuerySession } from '../../../core/query/queryPersistence';
+import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -6,55 +9,64 @@ import { getSystemWorkspaces, provisionNewWorkspace, suspendWorkspace, reactivat
 import type { WorkspaceSummaryDto, ProvisionWorkspaceRequest } from '../types/admin.types';
 
 export const useSuperAdmin = () => {
+  const isPageVisible = usePageVisible();
   const me = useAuthStore(state => state.me);
   const queryClient = useQueryClient();
-  const queryKey = ['systemWorkspaces', me?.user.id];
+  const queryKey = queryKeys.system.workspaces(me?.user.id);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { data: workspaces = [], isLoading, error } = useQuery({
-    queryKey, queryFn: getSystemWorkspaces, enabled: me?.user.isSuperAdmin === true,
-    refetchInterval: query => query.state.data?.some(workspace => workspace.status === 5) ? 5000 : false,
+    ...queryPolicies.dynamic,
+    queryKey, queryFn: ({ signal }) => getSystemWorkspaces(signal), enabled: me?.user.isSuperAdmin === true,
+    refetchInterval: query => isPageVisible && query.state.data?.some(workspace => workspace.status === 5) ? 5000 : false,
   });
   const loadWorkspaces = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['systemWorkspaces', me?.user.id] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.system.workspaces(me?.user.id) });
   }, [queryClient, me?.user.id]);
 
   const handleProvision = async (payload: ProvisionWorkspaceRequest, onSuccess: () => void) => {
+    const session = getQuerySession();
     setIsProvisioning(true);
     setErrorMessage(null);
     try {
       await provisionNewWorkspace(payload);
+      if (!isCurrentQuerySession(session)) return;
       await loadWorkspaces();
-      onSuccess();
+      if (isCurrentQuerySession(session)) onSuccess();
     } catch (error: unknown) {
-      setErrorMessage(getApiErrorPresentation(error));
+      if (isCurrentQuerySession(session)) setErrorMessage(getApiErrorPresentation(error));
     } finally {
-      setIsProvisioning(false);
+      if (isCurrentQuerySession(session)) setIsProvisioning(false);
     }
   };
 
   const handleToggleStatus = async (workspace: WorkspaceSummaryDto) => {
     if (workspace.status === 5) return;
+    const session = getQuerySession();
     setErrorMessage(null);
     try {
       if (workspace.status === 2) await reactivateWorkspace(workspace.id);
       else await suspendWorkspace(workspace.id);
+      if (!isCurrentQuerySession(session)) return;
       await loadWorkspaces();
     } catch (error: unknown) {
-      setErrorMessage(getApiErrorPresentation(error));
+      if (isCurrentQuerySession(session)) setErrorMessage(getApiErrorPresentation(error));
     }
   };
 
   const handleDelete = async (workspace: WorkspaceSummaryDto) => {
     if (workspace.status === 5) return;
+    const session = getQuerySession();
     setErrorMessage(null);
     try {
       await deleteWorkspace(workspace.id);
+      if (!isCurrentQuerySession(session)) return;
       queryClient.setQueryData<WorkspaceSummaryDto[]>(queryKey, previous =>
         previous?.map(item => item.id === workspace.id ? { ...item, status: 5 } : item));
+      if (!isCurrentQuerySession(session)) return;
       await loadWorkspaces();
     } catch (error: unknown) {
-      setErrorMessage(getApiErrorPresentation(error));
+      if (isCurrentQuerySession(session)) setErrorMessage(getApiErrorPresentation(error));
     }
   };
 

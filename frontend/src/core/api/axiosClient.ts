@@ -31,6 +31,7 @@ export const getApiErrorPresentation = (error: unknown): string => {
 };
 
 let activeWorkspaceId: string | null = null;
+const requestIdentities = new WeakMap<object, { userId: string | null; workspaceId: string | null }>();
 
 export const setActiveWorkspaceId = (id: string | null) => {
   activeWorkspaceId = id;
@@ -45,16 +46,15 @@ export const axiosClient = axios.create({
 
 axiosClient.interceptors.request.use(
   async (config) => {
+    // Capture the tenant before awaiting the token; a session switch must not retarget this request.
+    if (activeWorkspaceId && !config.headers['X-Workspace-Id']) config.headers['X-Workspace-Id'] = activeWorkspaceId;
     const user = auth.currentUser;
+    requestIdentities.set(config, { userId: user?.uid ?? null, workspaceId: activeWorkspaceId });
     if (user) {
       const token = await user.getIdToken();
       config.headers.Authorization = `Bearer ${token}`;
     }
     
-    if (activeWorkspaceId) {
-      config.headers['X-Workspace-Id'] = activeWorkspaceId;
-    }
-
     return config;
   },
   (error) => Promise.reject(error)
@@ -78,7 +78,9 @@ axiosClient.interceptors.response.use(
       const code = data?.code || data?.title || 'UNKNOWN_ERROR';
 
       // 🔥 SPRINT 01: Despachar evento de expiración para evitar apps congeladas
-      if (status === 401) {
+      const requestIdentity = requestIdentities.get(error.config);
+      if (status === 401 && requestIdentity?.userId === (auth.currentUser?.uid ?? null)
+        && requestIdentity.workspaceId === activeWorkspaceId) {
         window.dispatchEvent(new CustomEvent('session-expired'));
       }
 

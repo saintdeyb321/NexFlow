@@ -1,9 +1,9 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { ServiceDto, ServiceCategoryDto } from '../types/services.types';
 
-export const getServices = async (locationId?: string): Promise<ServiceDto[]> => {
+export const getServices = async (locationId?: string, signal?: AbortSignal): Promise<ServiceDto[]> => {
   const params = locationId && locationId !== 'all' ? { locationId } : {};
-  const { data } = await axiosClient.get<ServiceDto[]>('/services', { params });
+  const { data } = await axiosClient.get<ServiceDto[]>('/services', { params, signal });
   return data;
 };
 
@@ -20,8 +20,8 @@ export const deleteService = async (serviceId: string): Promise<void> => {
   await axiosClient.delete(`/services/${serviceId}`);
 };
 
-export const getServiceCategories = async (): Promise<ServiceCategoryDto[]> => {
-  const { data } = await axiosClient.get<ServiceCategoryDto[]>('/catalog/categories', { params: { scope: 'SERVICE' } });
+export const getServiceCategories = async (signal?: AbortSignal): Promise<ServiceCategoryDto[]> => {
+  const { data } = await axiosClient.get<ServiceCategoryDto[]>('/catalog/categories', { params: { scope: 'SERVICE' }, signal });
   return data;
 };
 

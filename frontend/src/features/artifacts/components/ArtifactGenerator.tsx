@@ -1,5 +1,9 @@
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, RefreshCw, Download, Loader2 } from 'lucide-react';
 import { getArtifactStatus, generateArtifact } from '../services/artifact.service'; // 🔥 Invocamos el servicio real
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -10,6 +14,7 @@ interface ArtifactGeneratorProps {
 }
 
 export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
+  const isPageVisible = usePageVisible();
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
@@ -17,21 +22,22 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const { data: artifact, isLoading } = useQuery({
-    queryKey: ['artifact', workspaceId, scope],
-    queryFn: () => getArtifactStatus(scope),
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.artifacts.byScope(workspaceId, scope),
+    queryFn: ({ signal }) => getArtifactStatus(scope, signal),
     enabled: !!workspaceId,
     // 🔥 SPRINT 11: Refetch seguro comprobando en MAYÚSCULAS
-    refetchInterval: (query) => (query.state.data?.status === 'GENERATING' ? 5000 : false),
+    refetchInterval: (query) => (isPageVisible && query.state.data?.status === 'GENERATING' ? 5000 : false),
   });
 
-  const generateMutation = useMutation({
+  const generateMutation = useSessionMutation({
     mutationFn: () => generateArtifact(scope),
     onSuccess: () => {
       setErrorMessage(null);
-      queryClient.invalidateQueries({ queryKey: ['artifact', workspaceId, scope] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, scope) });
     },
-    onError: (error: any) => {
-      setErrorMessage(error.message || `Error al solicitar la generación del documento de ${scope.toLowerCase()}s.`);
+    onError: (error: unknown) => {
+      setErrorMessage(getApiErrorPresentation(error));
     }
   });
 

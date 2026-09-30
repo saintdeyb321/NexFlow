@@ -1,30 +1,38 @@
+import { queryPolicies, usePageVisible } from '../../core/query/queryPolicies';
+import { useSessionMutation } from '../../core/query/useSessionMutation';
+import { queryKeys } from '../../core/query/queryKeys';
 import { useState, useRef, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, Calendar, MessageCircle, ClipboardList, AlertTriangle, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getNotifications, markNotificationAsRead, type NotificationDto } from '../../features/notifications/services/notification.service';
 import { useAuthStore } from '../../core/store/useAuthStore';
+import { usePermissions } from '../../core/auth/permissions';
 
 export const NotificationBell = () => {
+  const isPageVisible = usePageVisible();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const me = useAuthStore(state => state.me);
+  const { can } = usePermissions();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: notifications = [], isLoading, isError } = useQuery({
-    queryKey: ['notifications', workspaceId],
-    queryFn: getNotifications,
-    enabled: !!workspaceId,
-    refetchInterval: 15000, 
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.notifications.list(workspaceId),
+    queryFn: ({ signal }) => getNotifications(signal),
+    enabled: !!workspaceId && Object.values(me?.capabilities ?? {}).some(capabilities => capabilities.includes('READ')),
+    refetchInterval: isPageVisible ? 30000 : false,
   });
 
-  const readMutation = useMutation({
+  const readMutation = useSessionMutation({
     mutationFn: markNotificationAsRead,
     onSuccess: (_, notificationId) => {
-      queryClient.setQueryData<NotificationDto[]>(['notifications', workspaceId], (old) => {
+      queryClient.setQueryData<NotificationDto[]>(queryKeys.notifications.list(workspaceId), (old) => {
         if (!old) return [];
-        return old.map(n => n.id === notificationId ? { ...n, isRead: true } : n);
+        return old.filter(n => n.id !== notificationId);
       });
     },
   });
@@ -51,6 +59,7 @@ export const NotificationBell = () => {
   };
 
   const handleNotificationClick = (n: NotificationDto) => {
+    if (!can(n.moduleCode.toUpperCase(), 'READ')) return;
     if (!n.isRead) {
       readMutation.mutate(n.id);
     }

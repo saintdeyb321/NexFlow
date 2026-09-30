@@ -7,8 +7,8 @@ export interface ArtifactStatusDto {
   lastGeneratedAt?: string | null;
 }
 
-export const getArtifactStatus = async (scope: 'PRODUCT' | 'SERVICE'): Promise<ArtifactStatusDto> => {
-  const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`);
+export const getArtifactStatus = async (scope: 'PRODUCT' | 'SERVICE', signal?: AbortSignal): Promise<ArtifactStatusDto> => {
+  const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`, { signal });
   return data;
 };
 

@@ -1,8 +1,8 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { ProductCategoryDto, ProductDto } from '../types/catalog.types';
 
-export const getCategories = async (scope: 'PRODUCT' | 'SERVICE' | 'SHARED' = 'PRODUCT'): Promise<ProductCategoryDto[]> => {
-  const { data } = await axiosClient.get<ProductCategoryDto[]>('/catalog/categories', { params: { scope } });
+export const getCategories = async (scope: 'PRODUCT' | 'SERVICE' | 'SHARED' = 'PRODUCT', signal?: AbortSignal): Promise<ProductCategoryDto[]> => {
+  const { data } = await axiosClient.get<ProductCategoryDto[]>('/catalog/categories', { params: { scope }, signal });
   return data;
 };
 
@@ -15,9 +15,9 @@ export const saveCategory = async (category: ProductCategoryDto): Promise<Produc
   return data;
 };
 
-export const getProducts = async (locationId?: string): Promise<ProductDto[]> => {
+export const getProducts = async (locationId?: string, signal?: AbortSignal): Promise<ProductDto[]> => {
   const params = locationId && locationId !== 'all' ? { locationId } : {};
-  const { data } = await axiosClient.get<ProductDto[]>('/catalog', { params });
+  const { data } = await axiosClient.get<ProductDto[]>('/catalog', { params, signal });
   return data;
 };
 

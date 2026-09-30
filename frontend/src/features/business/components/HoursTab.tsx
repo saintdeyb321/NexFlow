@@ -1,7 +1,10 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getBusinessHours, saveBusinessHours } from '../services/business.service';
 import type { BusinessHoursDto } from '../types/business.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -17,26 +20,24 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
   const { can } = usePermissions();
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   const workspaceId = useAuthStore(state => state.me?.workspace?.id); // 🔥 SPRINT 9
-  const [hours, setHours] = useState<BusinessHoursDto[]>([]);
+  const [draft, setDraft] = useState<{ locationId: string; hours: BusinessHoursDto[] } | null>(null);
 
   const { data: fetchedHours, isLoading } = useQuery({
-    queryKey: ['businessHours', workspaceId, selectedLocationId],
-    queryFn: () => getBusinessHours(selectedLocationId),
+    ...queryPolicies.stable,
+    queryKey: queryKeys.hours.byLocation(workspaceId, selectedLocationId),
+    queryFn: ({ signal }) => getBusinessHours(selectedLocationId, signal),
     enabled: selectedLocationId !== 'all' && !!workspaceId && can('BUSINESS_HOURS', 'READ'),
   });
 
-  useEffect(() => {
-    if (fetchedHours && fetchedHours.length > 0) {
-      setHours(fetchedHours);
-    } else {
-      setHours(DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 })));
-    }
-  }, [fetchedHours, selectedLocationId]);
+  const hours = draft?.locationId === selectedLocationId ? draft.hours : fetchedHours?.length ? fetchedHours
+    : DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 }));
 
-  const saveMutation = useMutation({
-    mutationFn: (newHours: BusinessHoursDto[]) => saveBusinessHours(selectedLocationId, newHours),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['businessHours', workspaceId, selectedLocationId] });
+  const saveMutation = useSessionMutation({
+    mutationFn: ({ locationId, hours }: { locationId: string; hours: BusinessHoursDto[] }) => saveBusinessHours(locationId, hours),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hours.byLocation(workspaceId, variables.locationId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, variables.locationId) });
+      if (variables.locationId === selectedLocationId) setDraft(null);
       showMessage('Horarios actualizados correctamente', 'success');
     },
     onError: (error: unknown) => {
@@ -45,7 +46,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
   });
 
   const updateHour = <K extends keyof BusinessHoursDto>(day: number, field: K, value: BusinessHoursDto[K]) => {
-    setHours(hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h));
+    setDraft({ locationId: selectedLocationId, hours: hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h) });
   };
 
   const handleSave = async () => {
@@ -63,7 +64,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
         }
       }
     }
-    if (can('BUSINESS_HOURS', 'UPDATE')) saveMutation.mutate(hours);
+    if (can('BUSINESS_HOURS', 'UPDATE')) saveMutation.mutate({ locationId: selectedLocationId, hours });
   };
 
   // 🔥 Bloqueo Estricto si está en "Todas las sedes"

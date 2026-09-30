@@ -1,3 +1,7 @@
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import type { ReservationDto } from '../types/reservation.types';
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
@@ -12,7 +16,7 @@ import type { ServiceDto } from '../../services/types/services.types';
 interface CreateReservationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (reservation: ReservationDto) => void;
   locations: LocationDto[];
   services: ServiceDto[]; 
   timeZone: string;
@@ -22,7 +26,6 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
   const globalLocationId = useAuthStore(state => state.selectedLocationId);
   const { can } = usePermissions();
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
-  const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
@@ -47,11 +50,19 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
   }, [isOpen, services, timeZone]);
 
   // 🔥 SPRINT 04: Obtenemos disponibilidad real desde el Backend
-  const { data: slots = [], isLoading: isLoadingSlots } = useQuery({
-    queryKey: ['availability', workspaceId, globalLocationId, formData.serviceId, formData.date],
-    queryFn: () => getAvailability(globalLocationId, formData.serviceId, formData.date),
-    enabled: isOpen && !!workspaceId && !!globalLocationId && !!formData.serviceId && !!formData.date && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
+  const { data: slots = [], isLoading: isLoadingSlots, error: slotsError } = useQuery({
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.reservations.slots(workspaceId, globalLocationId, formData.serviceId, formData.date),
+    queryFn: ({ signal }) => getAvailability(globalLocationId, formData.serviceId, formData.date, signal),
+    enabled: isOpen && !!workspaceId && !!globalLocationId && globalLocationId !== 'all' && !!formData.serviceId && !!formData.date && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
   });
+
+  const saveMutation = useSessionMutation({
+    mutationFn: createReservation,
+    onSuccess: reservation => { onSuccess(reservation); onClose(); },
+    onError: error => setErrorMessage(getApiErrorPresentation(error)),
+  });
+  const isSaving = saveMutation.isPending;
 
   if (!isOpen) return null;
 
@@ -70,23 +81,13 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
       return;
     }
 
-    setIsSaving(true);
-    try {
-      await createReservation({
-        locationId: globalLocationId,
-        serviceId: formData.serviceId,
-        customerName: formData.customerName,
-        customerIdentifier: formData.customerIdentifier,
-        dateTime: formData.timeSlot // El slot ya viene como ISO 8601 del backend
-      });
-
-      onSuccess(); 
-      onClose();   
-    } catch (error: unknown) {
-      setErrorMessage(getApiErrorPresentation(error));
-    } finally {
-      setIsSaving(false);
-    }
+    saveMutation.mutate({
+      locationId: globalLocationId,
+      serviceId: formData.serviceId,
+      customerName: formData.customerName,
+      customerIdentifier: formData.customerIdentifier,
+      dateTime: formData.timeSlot
+    });
   };
 
   const formatTimeUI = (isoString: string) => {
@@ -147,6 +148,8 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
               <div className="flex justify-center items-center py-6 text-blue-600">
                 <Loader2 className="w-6 h-6 animate-spin" />
               </div>
+            ) : slotsError ? (
+              <p role="alert">{getApiErrorPresentation(slotsError)}</p>
             ) : slots.length === 0 ? (
               <div className="text-center py-6 text-sm text-gray-500 bg-white rounded-lg border border-dashed border-gray-200">
                 No hay turnos disponibles para esta fecha.

@@ -1,57 +1,42 @@
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions } from '../../../core/auth/permissions';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../../core/query/queryKeys';
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { Pencil, X } from 'lucide-react';
 import { getBusinessProfile, updateBusinessProfile } from '../services/business.service';
 import type { BusinessProfile } from '../types/business.types';
 
 export const ProfileTab = ({ showMessage }: { showMessage: (msg: string, type: 'success'|'error') => void }) => {
-  const [isLoading, setIsLoading] = useState(true);
   const { can } = usePermissions();
-  const [isSaving, setIsSaving] = useState(false);
-  const [isEditing, setIsEditing] = useState(false); // 🔥 NUEVO: Candado de seguridad
-  
-  const [profile, setProfile] = useState<BusinessProfile>({
-    commercialName: '', taxId: '', contactEmail: '', whatsAppNumber: '', description: '', timeZone: ''
-  });
-
-  const [originalProfile, setOriginalProfile] = useState<BusinessProfile | null>(null);
-
+  const queryClient = useQueryClient();
+  const [draft, setProfile] = useState<BusinessProfile | null>(null);
+  const isEditing = draft !== null;
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
-  useEffect(() => { setIsEditing(false); setOriginalProfile(null); loadProfile(); }, [workspaceId]);
-
-  const loadProfile = async () => {
-    try {
-      const data = await getBusinessProfile();
-      setProfile(data);
-      setOriginalProfile(data); // Guardamos la copia de seguridad
-    } catch (error) {
-      showMessage(getApiErrorPresentation(error), 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleCancel = () => {
-    if (originalProfile) setProfile(originalProfile); // Restauramos si cancela
-    setIsEditing(false);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!can('BUSINESS_PROFILE', 'UPDATE')) return;
-    setIsSaving(true);
-    try {
-      await updateBusinessProfile(profile);
-      setOriginalProfile(profile);
-      setIsEditing(false); // Bloqueamos los inputs de nuevo al terminar
+  const { data, isLoading, error } = useQuery({
+    ...queryPolicies.stable,
+    queryKey: queryKeys.business.profile(workspaceId),
+    queryFn: ({ signal }) => getBusinessProfile(signal),
+    enabled: Boolean(workspaceId) && can('BUSINESS_PROFILE', 'READ'),
+  });
+  const profile = draft ?? data;
+  const saveMutation = useSessionMutation({
+    mutationFn: updateBusinessProfile,
+    onSuccess: () => {
+      setProfile(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.business.profile(workspaceId) });
       showMessage('Perfil actualizado correctamente', 'success');
-    } catch (error) {
-      showMessage(getApiErrorPresentation(error), 'error');
-    } finally {
-      setIsSaving(false);
-    }
+    },
+    onError: error => showMessage(getApiErrorPresentation(error), 'error'),
+  });
+  const isSaving = saveMutation.isPending;
+  const handleCancel = () => setProfile(null);
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (profile && can('BUSINESS_PROFILE', 'UPDATE')) saveMutation.mutate(profile);
   };
 
   const inputClass = isEditing 
@@ -59,13 +44,14 @@ export const ProfileTab = ({ showMessage }: { showMessage: (msg: string, type: '
     : "w-full border border-transparent rounded-lg px-3 py-2 text-sm outline-none bg-gray-50 text-gray-700 cursor-not-allowed";
 
   if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando perfil...</div>;
+  if (error || !profile) return <p role="alert">{getApiErrorPresentation(error)}</p>;
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
       <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
         <h2 className="text-lg font-bold text-gray-800">Información General</h2>
         {!isEditing && (
-          <button disabled={!can('BUSINESS_PROFILE', 'UPDATE')} onClick={() => setIsEditing(true)} className="flex items-center text-sm text-blue-600 hover:text-blue-800 font-medium bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors">
+          <button disabled={!can('BUSINESS_PROFILE', 'UPDATE')} onClick={() => setProfile(profile)} className="flex items-center text-sm text-blue-600 hover:text-blue-800 font-medium bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors">
             <Pencil className="w-4 h-4 mr-2" /> Editar Perfil
           </button>
         )}

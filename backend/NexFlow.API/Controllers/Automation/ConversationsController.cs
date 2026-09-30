@@ -34,24 +34,34 @@ public class ConversationsController : ControllerBase
         await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CONVERSATIONS", capability, ct);
 
     [HttpGet]
-    public async Task<IActionResult> GetConversations([FromQuery] int limit = 50, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> GetConversations([FromQuery] int limit = 50, [FromQuery] DateTimeOffset? after = null,
+        [FromQuery] string? afterId = null, CancellationToken cancellationToken = default)
     {
         if (!await CheckCapabilityAsync("READ", cancellationToken)) return StatusCode(403, "No tiene permisos para leer chats.");
         if (limit < 1 || limit > 100) return BadRequest(new { code = "Pagination.Invalid", message = "El límite debe estar entre 1 y 100." });
+        if (!ValidCursor(after, afterId)) return BadRequest(new { code = "Pagination.InvalidCursor", message = "El cursor debe ser una fecha UTC válida." });
 
-        var conversations = await _conversationRepository.GetRecentConversationsAsync(WorkspaceId, limit, cancellationToken);
+        var conversations = await _conversationRepository.GetRecentConversationsAsync(WorkspaceId, limit, cancellationToken, after?.UtcDateTime, afterId);
         return Ok(conversations);
     }
 
     [HttpGet("{conversationId}/messages")]
-    public async Task<IActionResult> GetMessages(string conversationId, [FromQuery] int limit = 50, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> GetMessages(string conversationId, [FromQuery] int limit = 50, [FromQuery] DateTimeOffset? after = null,
+        [FromQuery] string? afterId = null, CancellationToken cancellationToken = default)
     {
         if (!await CheckCapabilityAsync("READ", cancellationToken)) return StatusCode(403, "No tiene permisos para leer chats.");
         if (limit < 1 || limit > 100) return BadRequest(new { code = "Pagination.Invalid", message = "El límite debe estar entre 1 y 100." });
+        if (!ValidCursor(after, afterId)) return BadRequest(new { code = "Pagination.InvalidCursor", message = "El cursor debe ser una fecha UTC válida." });
+        if (await _conversationRepository.GetConversationAsync(WorkspaceId, conversationId, cancellationToken) == null)
+            return NotFound(new { code = "Conversation.NotFound", message = "Conversación no encontrada." });
 
-        var messages = await _conversationRepository.GetMessagesAsync(WorkspaceId, conversationId, limit, cancellationToken);
+        var messages = await _conversationRepository.GetMessagesAsync(WorkspaceId, conversationId, limit, cancellationToken, after?.UtcDateTime, afterId);
         return Ok(messages);
     }
+
+    private static bool ValidCursor(DateTimeOffset? after, string? afterId) =>
+        (!after.HasValue || after.Value.Offset == TimeSpan.Zero)
+        && (afterId == null || (after.HasValue && !string.IsNullOrWhiteSpace(afterId) && afterId.Length <= 200 && !afterId.Contains('/')));
 
     [HttpPost("{conversationId}/takeover")]
     public async Task<IActionResult> TakeOverConversation(string conversationId, [FromServices] IHumanHandoffService handoffService, CancellationToken cancellationToken)

@@ -1,3 +1,5 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -8,6 +10,7 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 import type { ServiceDto, ServiceCategoryDto } from '../types/services.types'; 
 import { getServiceCategories } from '../services/services.service'; 
 import { ImageUploader } from '../../../components/ui/ImageUploader';
+import { usePermissions } from '../../../core/auth/permissions';
 
 interface ServiceModalProps {
   isOpen: boolean;
@@ -18,6 +21,7 @@ interface ServiceModalProps {
 
 export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceModalProps) => {
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const { can } = usePermissions();
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
@@ -25,15 +29,17 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
   const [formError, setFormError] = useState<string | null>(null);
   
   const { data: categories = [] } = useQuery({
-    queryKey: ['serviceCategories', workspaceId],
-    queryFn: getServiceCategories,
-    enabled: !!workspaceId && isOpen,
+    ...queryPolicies.stable,
+    queryKey: queryKeys.catalog.categories(workspaceId, 'SERVICE'),
+    queryFn: ({ signal }) => getServiceCategories(signal),
+    enabled: !!workspaceId && isOpen && can('SERVICES', 'READ'),
   });
 
   const { data: locations = [] } = useQuery({
-    queryKey: ['locations', workspaceId],
-    queryFn: getLocations,
-    enabled: !!workspaceId && isOpen,
+    ...queryPolicies.stable,
+    queryKey: queryKeys.locations.all(workspaceId),
+    queryFn: ({ signal }) => getLocations(signal),
+    enabled: !!workspaceId && isOpen && can('LOCATIONS', 'READ'),
   });
 
   const [formData, setFormData] = useState<Partial<ServiceDto>>({

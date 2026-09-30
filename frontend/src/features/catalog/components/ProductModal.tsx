@@ -1,9 +1,12 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '../../business/services/business.service';
 import { ImageUploader } from '../../../components/ui/ImageUploader';
 import type { ProductDto, ProductCategoryDto } from '../types/catalog.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import { usePermissions } from '../../../core/auth/permissions';
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -16,11 +19,13 @@ interface ProductModalProps {
 
 export const ProductModal = ({ isOpen, onClose, onSave, isSaving, categories, productToEdit }: ProductModalProps) => {
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  const { can } = usePermissions();
   
   const { data: locations = [] } = useQuery({
-    queryKey: ['locations', workspaceId],
-    queryFn: getLocations,
-    enabled: !!workspaceId && isOpen
+    ...queryPolicies.stable,
+    queryKey: queryKeys.locations.all(workspaceId),
+    queryFn: ({ signal }) => getLocations(signal),
+    enabled: !!workspaceId && isOpen && can('LOCATIONS', 'READ')
   });
 
   const [formData, setFormData] = useState<Partial<ProductDto>>({

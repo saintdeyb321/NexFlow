@@ -1,7 +1,10 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calendar as CalendarIcon, AlertCircle, MapPin } from 'lucide-react';
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
 import { getLocations, getBusinessProfile } from '../../business/services/business.service';
@@ -22,7 +25,8 @@ export const ReservationsPage = () => {
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   
   const { data: profile, error: profileError } = useQuery({
-    queryKey: ['businessProfile', workspaceId], queryFn: getBusinessProfile,
+    ...queryPolicies.stable,
+    queryKey: queryKeys.business.profile(workspaceId), queryFn: ({ signal }) => getBusinessProfile(signal),
     enabled: Boolean(workspaceId) && can('BUSINESS_PROFILE', 'READ'),
   });
   const timeZone = profile?.timeZone;
@@ -36,33 +40,37 @@ export const ReservationsPage = () => {
 
   // 🔥 SPRINT 11: Estado para confirmaciones y notificaciones sin alert()
   const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
-  const [confirmDialog, setConfirmDialog] = useState<{ action: 'cancel' | 'complete', id: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ action: 'cancel' | 'complete', id: string, locationId: string } | null>(null);
 
   const isValidLocationSelected = Boolean(selectedLocationId && selectedLocationId !== 'all');
 
   const { data: services = [] } = useQuery<ServiceDto[]>({
-    queryKey: ['services', workspaceId, selectedLocationId],
-    queryFn: () => getServices(selectedLocationId),
+    ...queryPolicies.stable,
+    queryKey: queryKeys.services.list(workspaceId, selectedLocationId),
+    queryFn: ({ signal }) => getServices(selectedLocationId, signal),
     enabled: Boolean(workspaceId) && isValidLocationSelected && can('SERVICES', 'READ'),
-    staleTime: 1000 * 60 * 10,
+
   });
 
   const { data: locations = [] } = useQuery<LocationDto[]>({
-    queryKey: ['locations', workspaceId],
-    queryFn: getLocations,
+    ...queryPolicies.stable,
+    queryKey: queryKeys.locations.all(workspaceId),
+    queryFn: ({ signal }) => getLocations(signal),
     enabled: Boolean(workspaceId) && can('LOCATIONS', 'READ'),
   });
 
   const { data: reservations = [], isLoading } = useQuery<ReservationDto[]>({
-    queryKey: ['reservations', workspaceId, selectedLocationId, selectedDate],
-    queryFn: () => getReservations(selectedLocationId, selectedDate),
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.reservations.list(workspaceId, selectedLocationId, selectedDate),
+    queryFn: ({ signal }) => getReservations(selectedLocationId, selectedDate, signal),
     enabled: Boolean(workspaceId && selectedDate) && isValidLocationSelected && can('RESERVATIONS', 'READ'),
   });
 
-  const cancelMutation = useMutation({
-    mutationFn: cancelReservation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
+  const cancelMutation = useSessionMutation({
+    mutationFn: ({ id }: { id: string; locationId: string }) => cancelReservation(id),
+    onSuccess: (_data, target) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, target.locationId) });
       setNotification({ msg: 'Reserva cancelada exitosamente.', type: 'success' });
       setConfirmDialog(null);
     },
@@ -72,10 +80,11 @@ export const ReservationsPage = () => {
     }
   });
 
-  const completeMutation = useMutation({
-    mutationFn: completeReservation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
+  const completeMutation = useSessionMutation({
+    mutationFn: ({ id }: { id: string; locationId: string }) => completeReservation(id),
+    onSuccess: (_data, target) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, target.locationId) });
       setNotification({ msg: 'Reserva marcada como completada.', type: 'success' });
       setConfirmDialog(null);
     },
@@ -86,8 +95,8 @@ export const ReservationsPage = () => {
   });
 
   const executeAction = () => {
-    if (confirmDialog?.action === 'cancel' && can('RESERVATIONS', 'CANCEL')) cancelMutation.mutate(confirmDialog.id);
-    if (confirmDialog?.action === 'complete' && can('RESERVATIONS', 'COMPLETE')) completeMutation.mutate(confirmDialog.id);
+    if (confirmDialog?.action === 'cancel' && can('RESERVATIONS', 'CANCEL')) cancelMutation.mutate(confirmDialog);
+    if (confirmDialog?.action === 'complete' && can('RESERVATIONS', 'COMPLETE')) completeMutation.mutate(confirmDialog);
   };
 
   return (
@@ -185,8 +194,8 @@ export const ReservationsPage = () => {
             services={services} 
             timeZone={timeZone}
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
-            onCancel={(id) => setConfirmDialog({ action: 'cancel', id })} 
-            onComplete={(id) => setConfirmDialog({ action: 'complete', id })}
+            onCancel={(id) => setConfirmDialog({ action: 'cancel', id, locationId: selectedLocationId })} 
+            onComplete={(id) => setConfirmDialog({ action: 'complete', id, locationId: selectedLocationId })}
           />
         )}
       </div>
@@ -194,8 +203,9 @@ export const ReservationsPage = () => {
       {timeZone && <CreateReservationModal
         isOpen={isCreateModalOpen && can('RESERVATIONS', 'CREATE') && Boolean(timeZone)}
         onClose={() => setIsCreateModalOpen(false)} 
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
+        onSuccess={reservation => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, reservation.locationId) });
           setNotification({ msg: 'Reserva creada exitosamente.', type: 'success' });
         }} 
         locations={locations} 
@@ -206,8 +216,9 @@ export const ReservationsPage = () => {
       {timeZone && <EditReservationModal
         isOpen={isEditModalOpen && can('RESERVATIONS', 'UPDATE') && Boolean(timeZone)}
         onClose={() => { setIsEditModalOpen(false); setEditingRes(null); }}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
+        onSuccess={reservation => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, reservation.locationId) });
           setNotification({ msg: 'Reserva reprogramada exitosamente.', type: 'success' });
         }}
         reservation={editingRes}

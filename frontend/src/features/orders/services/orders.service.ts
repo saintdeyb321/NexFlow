@@ -1,14 +1,14 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { OrderRecord, OrderStatus, UpdateOrderStatusRequest } from '../types/orders.types';
 
-export const getOrders = async (status?: OrderStatus | 'ALL'): Promise<OrderRecord[]> => {
+export const getOrders = async (status?: OrderStatus | 'ALL', signal?: AbortSignal): Promise<OrderRecord[]> => {
   const params = status && status !== 'ALL' ? { status } : {};
-  const { data } = await axiosClient.get<OrderRecord[]>('/orders', { params });
+  const { data } = await axiosClient.get<OrderRecord[]>('/orders', { params, signal });
   return data;
 };
 
-export const getOrderById = async (id: string): Promise<OrderRecord> => {
-  const { data } = await axiosClient.get<OrderRecord>(`/orders/${id}`);
+export const getOrderById = async (id: string, signal?: AbortSignal): Promise<OrderRecord> => {
+  const { data } = await axiosClient.get<OrderRecord>(`/orders/${id}`, { signal });
   return data;
 };
 

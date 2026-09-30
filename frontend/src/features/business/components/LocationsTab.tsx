@@ -1,7 +1,10 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Map, MapPin, Pencil, X } from 'lucide-react';
 import { getLocations, createLocation, updateLocation, deleteLocation } from '../services/business.service';
 import type { LocationDto } from '../types/business.types';
@@ -18,17 +21,18 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: locations = [], isLoading } = useQuery({
-    queryKey: ['locations', workspaceId],
-    queryFn: getLocations,
+    ...queryPolicies.stable,
+    queryKey: queryKeys.locations.all(workspaceId),
+    queryFn: ({ signal }) => getLocations(signal),
     enabled: !!workspaceId && can('LOCATIONS', 'READ'),
-    staleTime: 1000 * 60 * 15,
+
   });
 
   // 🔥 SPRINT 06: Decisión dinámica POST/PUT
-  const saveMutation = useMutation({
+  const saveMutation = useSessionMutation({
     mutationFn: (loc: LocationDto) => loc.id ? updateLocation(loc.id, loc) : createLocation(loc),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['locations', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.locations.all(workspaceId) });
       showMessage(newLocation.id ? 'Sede actualizada exitosamente' : 'Sede registrada exitosamente', 'success');
       setNewLocation(emptyLocation);
       setIsFormOpen(false);
@@ -36,10 +40,12 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
     onError: (error: unknown) => showMessage(getApiErrorPresentation(error), 'error')
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useSessionMutation({
     mutationFn: deleteLocation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['locations', workspaceId] });
+    onSuccess: (_, locationId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.locations.all(workspaceId) });
+      queryClient.removeQueries({ queryKey: queryKeys.hours.byLocation(workspaceId, locationId) });
+      queryClient.removeQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, locationId) });
       showMessage('Sede eliminada correctamente', 'success');
     },
     onError: (error: unknown) => {

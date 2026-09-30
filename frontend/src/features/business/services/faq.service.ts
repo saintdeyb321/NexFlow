@@ -3,9 +3,9 @@ import type { FaqDto } from '../types/business.types';
 
 export const faqService = {
   // 🔥 SPRINT 09: Añadimos locationId para aislar la data por sede
-  getFaqs: async (locationId?: string): Promise<FaqDto[]> => {
+  getFaqs: async (locationId?: string, signal?: AbortSignal): Promise<FaqDto[]> => {
     const params = locationId && locationId !== 'all' && locationId !== 'global' ? { locationId } : {};
-    const { data } = await axiosClient.get<FaqDto[]>('/business/faqs', { params });
+    const { data } = await axiosClient.get<FaqDto[]>('/business/faqs', { params, signal });
     return data;
   },
 

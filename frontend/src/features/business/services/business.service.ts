@@ -1,8 +1,8 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { BusinessHoursDto, BusinessProfile, LocationDto } from '../types/business.types';
 
-export const getBusinessProfile = async (): Promise<BusinessProfile> => {
-  const { data } = await axiosClient.get<BusinessProfile>('/business/profile');
+export const getBusinessProfile = async (signal?: AbortSignal): Promise<BusinessProfile> => {
+  const { data } = await axiosClient.get<BusinessProfile>('/business/profile', { signal });
   return data;
 };
 
@@ -11,8 +11,8 @@ export const updateBusinessProfile = async (profile: BusinessProfile): Promise<v
 };
 
 // --- LOCATIONS ---
-export const getLocations = async (): Promise<LocationDto[]> => {
-  const { data } = await axiosClient.get<LocationDto[]>('/business/locations');
+export const getLocations = async (signal?: AbortSignal): Promise<LocationDto[]> => {
+  const { data } = await axiosClient.get<LocationDto[]>('/business/locations', { signal });
   return data;
 };
 
@@ -30,8 +30,8 @@ export const deleteLocation = async (locationId: string): Promise<void> => {
 };
 
 // --- HOURS ---
-export const getBusinessHours = async (locationId: string): Promise<BusinessHoursDto[]> => {
-  const { data } = await axiosClient.get(`/business/locations/${locationId}/hours`);
+export const getBusinessHours = async (locationId: string, signal?: AbortSignal): Promise<BusinessHoursDto[]> => {
+  const { data } = await axiosClient.get<BusinessHoursDto[]>(`/business/locations/${locationId}/hours`, { signal });
   return data;
 };
 
@@ -42,8 +42,8 @@ export const saveBusinessHours = async (locationId: string, hours: BusinessHours
 // --- WHATSAPP (Evolution API) ---
 import type { WhatsAppStatusResponse, WhatsAppConnectResponse } from '../types/business.types';
 
-export const getWhatsAppStatus = async (): Promise<WhatsAppStatusResponse> => {
-  const { data } = await axiosClient.get<WhatsAppStatusResponse>('/business/whatsapp/status');
+export const getWhatsAppStatus = async (signal?: AbortSignal): Promise<WhatsAppStatusResponse> => {
+  const { data } = await axiosClient.get<WhatsAppStatusResponse>('/business/whatsapp/status', { signal });
   return data;
 };
 

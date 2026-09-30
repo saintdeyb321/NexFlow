@@ -1,9 +1,12 @@
+import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { requestTransitions } from '../types/request.types';
 import { RequestDetailModal } from '../components/RequestDetailModal';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, Clock, PlayCircle, CheckCircle, XCircle, FileText, Plus, MessageSquare, UserCircle } from 'lucide-react';
 import { getRequests, updateRequestStatus, assignRequest, getAssignees } from '../services/request.service';
@@ -12,6 +15,7 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 import { CreateRequestModal } from '../components/CreateRequestModal';
 
 export const RequestsPage = () => {
+  const isPageVisible = usePageVisible();
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const navigate = useNavigate(); 
@@ -29,14 +33,16 @@ export const RequestsPage = () => {
   const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
   const { data: requests = [], isLoading, isError } = useQuery({
-    queryKey: ['requests', workspaceId, limit, filterStatus],
-    queryFn: () => getRequests(limit, filterStatus === 'ALL' ? undefined : filterStatus),
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.requests.list(workspaceId, limit, filterStatus),
+    queryFn: ({ signal }) => getRequests(limit, filterStatus === 'ALL' ? undefined : filterStatus, signal),
     enabled: !!workspaceId && can('REQUESTS', 'READ'),
-    refetchInterval: 30000,
+    refetchInterval: isPageVisible ? 30000 : false,
   });
 
   const { data: assignees = [], error: assigneesError } = useQuery({
-    queryKey: ['requestAssignees', workspaceId], queryFn: getAssignees,
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.requests.assignees(workspaceId), queryFn: ({ signal }) => getAssignees(signal),
     enabled: !!workspaceId && can('REQUESTS', 'ASSIGN'),
   });
   const assigneeName = (userId: string) => {
@@ -44,10 +50,11 @@ export const RequestsPage = () => {
     return member ? `${member.firstName} ${member.lastName}`.trim() || member.userId : 'Asignado';
   };
 
-  const updateMutation = useMutation({
+  const updateMutation = useSessionMutation({
     mutationFn: ({ id, status }: { id: string; status: RequestStatus }) => updateRequestStatus(id, status),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.requests.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.requests.detail(workspaceId, variables.id) });
       setNotification({ msg: 'Estado actualizado correctamente.', type: 'success' });
     },
     onError: (error: unknown) => {
@@ -55,10 +62,11 @@ export const RequestsPage = () => {
     }
   });
 
-  const assignMutation = useMutation({
+  const assignMutation = useSessionMutation({
     mutationFn: ({ id, userId }: { id: string; userId: string }) => assignRequest(id, userId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.requests.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.requests.detail(workspaceId, variables.id) });
       setNotification({ msg: 'Solicitud asignada correctamente.', type: 'success' });
     },
     onError: (error: unknown) => {

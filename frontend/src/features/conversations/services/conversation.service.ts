@@ -1,13 +1,13 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { Conversation, Message, ConversationMode, ManualMessageResult } from '../types/conversation.types';
 
-export const getConversations = async (limit = 50): Promise<Conversation[]> => {
-  const { data } = await axiosClient.get<Conversation[]>('/conversations', { params: { limit } });
+export const getConversations = async (limit = 50, after?: string, signal?: AbortSignal, afterId?: string): Promise<Conversation[]> => {
+  const { data } = await axiosClient.get<Conversation[]>('/conversations', { params: { limit, after, afterId }, signal });
   return data;
 };
 
-export const getMessages = async (conversationId: string, limit = 50): Promise<Message[]> => {
-  const { data } = await axiosClient.get<Message[]>(`/conversations/${conversationId}/messages`, { params: { limit } });
+export const getMessages = async (conversationId: string, limit = 50, after?: string, signal?: AbortSignal, afterId?: string): Promise<Message[]> => {
+  const { data } = await axiosClient.get<Message[]>(`/conversations/${conversationId}/messages`, { params: { limit, after, afterId }, signal });
   return data;
 };
 

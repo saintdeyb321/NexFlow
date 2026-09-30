@@ -11,8 +11,8 @@ export interface NotificationDto {
   createdAt: string;
 }
 
-export const getNotifications = async (): Promise<NotificationDto[]> => {
-  const { data } = await axiosClient.get<NotificationDto[]>('/notifications');
+export const getNotifications = async (signal?: AbortSignal): Promise<NotificationDto[]> => {
+  const { data } = await axiosClient.get<NotificationDto[]>('/notifications', { signal });
   return data;
 };
 

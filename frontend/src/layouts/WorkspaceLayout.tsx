@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { queryPolicies } from '../core/query/queryPolicies';
+import { queryKeys } from '../core/query/queryKeys';
+import { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../core/store/useAuthStore';
 import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '../features/business/services/business.service';
+import type { LocationDto } from '../features/business/types/business.types';
+import { usePermissions } from '../core/auth/permissions';
 import { 
   LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
   ShieldAlert, MessageCircle, Package, ClipboardList, MapPin, ShoppingBag, Menu, X 
@@ -24,16 +28,24 @@ export const WorkspaceLayout = () => {
   const { pathname } = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const entitlements = me?.entitlements || [];
+  const { can } = usePermissions();
+  const canReadLocations = can('LOCATIONS', 'READ');
+  const canReadSettings = ['BUSINESS_PROFILE', 'LOCATIONS', 'BUSINESS_HOURS', 'CONVERSATIONS'].some(module => can(module, 'READ'));
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
   const workspaceId = me?.workspace?.id;
 
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations', workspaceId],
-    queryFn: getLocations,
-    enabled: !!workspaceId,
-    staleTime: 1000 * 60 * 15, 
+  const { data: locations = [], isSuccess: locationsLoaded } = useQuery<LocationDto[]>({
+    ...queryPolicies.stable,
+    queryKey: queryKeys.locations.all(workspaceId),
+    queryFn: ({ signal }) => getLocations(signal),
+    enabled: !!workspaceId && canReadLocations,
+
   });
+
+  useEffect(() => {
+    if (selectedLocationId !== 'all' && (!canReadLocations || (locationsLoaded && !locations.some(location => location.id === selectedLocationId))))
+      setSelectedLocationId('all');
+  }, [workspaceId, selectedLocationId, canReadLocations, locationsLoaded, locations, setSelectedLocationId]);
 
   const navItemClass = (path: string) => 
     `flex items-center px-4 py-3 mb-1 rounded-lg transition-colors ${
@@ -42,8 +54,8 @@ export const WorkspaceLayout = () => {
         : 'text-gray-600 hover:bg-gray-50'
     }`;
 
-  const activeModules = entitlements
-    .filter((code: string) => MODULE_REGISTRY[code])
+  const activeModules = Object.keys(MODULE_REGISTRY)
+    .filter(code => can(code, 'READ'))
     .map((code: string) => ({ code, ...MODULE_REGISTRY[code] }));
 
   const SidebarContent = () => (
@@ -62,7 +74,7 @@ export const WorkspaceLayout = () => {
             className="w-full pl-9 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm text-gray-700 font-medium"
           >
             <option value="all">Todas las sedes</option>
-            {locations.map((loc: any) => (
+            {locations.map((loc) => (
               <option key={loc.id} value={loc.id}>{loc.name}</option>
             ))}
           </select>
@@ -70,9 +82,9 @@ export const WorkspaceLayout = () => {
       </div>
 
       <nav className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-        <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className={navItemClass('/')}>
+        {can('CONVERSATIONS', 'READ') && <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className={navItemClass('/')}>
           <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
-        </Link>
+        </Link>}
 
         {activeModules.map(({ code, route, label, icon: Icon }: { code: string, route: string, label: string, icon: React.ElementType }) => (
           <Link key={code} to={route} onClick={() => setIsMobileMenuOpen(false)} className={navItemClass(route)}>
@@ -84,9 +96,9 @@ export const WorkspaceLayout = () => {
           Administración
         </div>
         
-        <Link to="/settings" onClick={() => setIsMobileMenuOpen(false)} className={navItemClass('/settings')}>
+        {canReadSettings && <Link to="/settings" onClick={() => setIsMobileMenuOpen(false)} className={navItemClass('/settings')}>
           <Settings className="w-5 h-5 mr-3" /> Negocio
-        </Link>
+        </Link>}
       </nav>
 
       <div className="p-4 border-t border-gray-200 bg-gray-50 shrink-0">

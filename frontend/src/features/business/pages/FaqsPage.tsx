@@ -1,7 +1,10 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Plus, Trash2, Pencil, MessageSquare } from 'lucide-react';
 import { faqService } from '../services/faq.service';
 import type { FaqDto } from '../types/business.types';
@@ -21,26 +24,27 @@ export const FaqsPage = () => {
 
   // 🔥 SPRINT 06: La IA usa la base de conocimiento de manera global. No se filtra por sede.
   const { data: faqs = [], isLoading: isFaqsLoading } = useQuery({
-    queryKey: ['faqs', workspaceId],
-    queryFn: () => faqService.getFaqs('global'), // Reemplazamos la ubicación dinámica
+    ...queryPolicies.stable,
+    queryKey: queryKeys.faqs.all(workspaceId),
+    queryFn: ({ signal }) => faqService.getFaqs('global', signal), // Reemplazamos la ubicación dinámica
     enabled: !!workspaceId && can('FAQ', 'READ'),
-    staleTime: 1000 * 60 * 10,
+
   });
 
-  const saveMutation = useMutation({
+  const saveMutation = useSessionMutation({
     mutationFn: faqService.saveFaq,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['faqs', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.faqs.all(workspaceId) });
       setIsModalOpen(false);
       setNotification({ msg: 'Pregunta guardada correctamente.', type: 'success' });
     },
     onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useSessionMutation({
     mutationFn: faqService.deleteFaq,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['faqs', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.faqs.all(workspaceId) });
       setDeleteConfirmId(null);
       setNotification({ msg: 'Pregunta eliminada exitosamente.', type: 'success' });
     },

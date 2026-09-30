@@ -1,18 +1,18 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { ProvisionWorkspaceRequest, WorkspaceSummaryDto } from '../types/admin.types';
+import type { ProvisionWorkspaceRequest, WorkspaceSummaryDto, SystemModuleDto, SystemTemplateDto } from '../types/admin.types';
 
-export const getSystemWorkspaces = async (): Promise<WorkspaceSummaryDto[]> => {
-  const { data } = await axiosClient.get<WorkspaceSummaryDto[]>('/superadmin/clients');
+export const getSystemWorkspaces = async (signal?: AbortSignal): Promise<WorkspaceSummaryDto[]> => {
+  const { data } = await axiosClient.get<WorkspaceSummaryDto[]>('/superadmin/clients', { signal });
   return data;
 };
 
-export const getSystemTemplates = async (): Promise<any[]> => {
-  const { data } = await axiosClient.get<any[]>('/superadmin/clients/templates');
+export const getSystemTemplates = async (signal?: AbortSignal): Promise<SystemTemplateDto[]> => {
+  const { data } = await axiosClient.get<SystemTemplateDto[]>('/superadmin/clients/templates', { signal });
   return data;
 };
 
-export const getSystemModules = async (): Promise<any[]> => {
-  const { data } = await axiosClient.get<any[]>('/superadmin/clients/modules');
+export const getSystemModules = async (signal?: AbortSignal): Promise<SystemModuleDto[]> => {
+  const { data } = await axiosClient.get<SystemModuleDto[]>('/superadmin/clients/modules', { signal });
   return data;
 };
 

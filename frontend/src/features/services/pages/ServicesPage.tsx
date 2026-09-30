@@ -1,8 +1,11 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { CategoryManager } from '../../catalog/components/CategoryManager';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Tag, Trash2, Scissors, FolderPlus } from 'lucide-react';
 import { getServices, saveService, deleteService } from '../services/services.service';
 import { ServiceModal } from '../components/ServiceModal';
@@ -25,26 +28,29 @@ export const ServicesPage = () => {
   const [showCategoryPrompt, setShowCategoryPrompt] = useState(false);
 
   const { data: services = [], isLoading: isServicesLoading } = useQuery({
-    queryKey: ['services', workspaceId, selectedLocationId],
-    queryFn: () => getServices(selectedLocationId),
+    ...queryPolicies.stable,
+    queryKey: queryKeys.services.list(workspaceId, selectedLocationId),
+    queryFn: ({ signal }) => getServices(selectedLocationId, signal),
     enabled: !!workspaceId && can('SERVICES', 'READ'),
-    staleTime: 1000 * 60 * 10,
+
   });
 
-  const saveMutation = useMutation({
+  const saveMutation = useSessionMutation({
     mutationFn: saveService,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['services', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.services.all(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, 'SERVICE') });
       setIsModalOpen(false);
       setNotification({ msg: 'Servicio guardado exitosamente.', type: 'success' });
     },
     onError: (error: unknown) => setNotification({ msg: `Error al guardar: ${getApiErrorPresentation(error)}`, type: 'error' })
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useSessionMutation({
     mutationFn: deleteService,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['services', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.services.all(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, 'SERVICE') });
       setDeleteConfirmId(null);
       setNotification({ msg: 'Servicio eliminado.', type: 'success' });
     },

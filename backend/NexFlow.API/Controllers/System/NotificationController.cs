@@ -14,29 +14,36 @@ public class NotificationController : ControllerBase
     private readonly INotificationRepository _notificationRepo;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+    private readonly ICurrentUser _currentUser;
+    private readonly ISystemAdministratorRepository _systemAdministrators;
 
     public NotificationController(
         INotificationRepository notificationRepo,
         IWorkspaceContext workspaceContext,
-        IEntitlementService entitlementService)
+        IEntitlementService entitlementService,
+        ICurrentUser currentUser,
+        ISystemAdministratorRepository systemAdministrators)
     {
         _notificationRepo = notificationRepo;
         _workspaceContext = workspaceContext;
         _entitlementService = entitlementService;
+        _currentUser = currentUser;
+        _systemAdministrators = systemAdministrators;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetActiveNotifications(CancellationToken cancellationToken)
     {
         var workspaceId = _workspaceContext.CurrentWorkspaceId;
-        var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken);
+        var capabilities = await _entitlementService.GetEffectiveCapabilitiesAsync(workspaceId, cancellationToken);
+        var isSuperAdmin = _currentUser.UserId != Guid.Empty &&
+            await _systemAdministrators.IsUserSuperAdminAsync(_currentUser.UserId, cancellationToken);
 
-        // Obtenemos las reales de Firestore
         var rawNotifications = await _notificationRepo.GetUnreadAsync(workspaceId, 50, cancellationToken);
 
-        // 🔥 FILTRO ESTRICTO DE LICENCIA: Solo se envían notificaciones de módulos contratados
         var authorizedNotifications = rawNotifications
-            .Where(n => activeModules.Contains(n.ModuleCode.ToUpperInvariant()))
+            .Where(n => isSuperAdmin ||
+                (capabilities.TryGetValue(n.ModuleCode.ToUpperInvariant(), out var allowed) && allowed.Contains("READ")))
             .Select(n => new NotificationDto
             {
                 Id = n.Id,
@@ -57,6 +64,10 @@ public class NotificationController : ControllerBase
     public async Task<IActionResult> MarkAsRead(string id, CancellationToken cancellationToken)
     {
         var workspaceId = _workspaceContext.CurrentWorkspaceId;
+        var notification = await _notificationRepo.GetByIdAsync(workspaceId, id, cancellationToken);
+        if (notification == null) return NotFound();
+        if (!await _entitlementService.HasCapabilityAccessAsync(workspaceId, notification.ModuleCode, "READ", cancellationToken))
+            return StatusCode(403, new { code = "Security.CapabilityDenied", message = "No tienes permiso para leer esta notificación." });
         await _notificationRepo.MarkAsReadAsync(workspaceId, id, cancellationToken);
         return NoContent();
     }

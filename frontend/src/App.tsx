@@ -1,37 +1,22 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from './app/config/firebase';
+import { getQuerySession } from './core/query/queryPersistence';
 import { useAuthStore } from './core/store/useAuthStore';
 import { AppRouter } from './app/router/AppRouter';
 import { Loader2 } from 'lucide-react'; 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './core/query/queryClient';
 import { ErrorBoundary } from './core/layout/ErrorBoundary';
 
-// 🔥 SPRINT 01: Exportado para permitir limpieza total en el flujo de logout
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1, 
-    },
-  },
-});
-
 function App() {
-  const { checkSession, isBootstrapping, logout } = useAuthStore();
-  const hasBootstrapped = useRef(false);
-
-  useEffect(() => {
-    if (!hasBootstrapped.current) {
-      checkSession();
-      hasBootstrapped.current = true;
-    }
-  }, [checkSession]);
+  const { checkSession, isBootstrapping, logout, me } = useAuthStore();
+  useEffect(() => onAuthStateChanged(auth, () => { void checkSession(true); }), [checkSession]);
 
   // 🔥 SPRINT 01: Limpieza absoluta de la caché de TanStack Query para evitar filtración de datos fantasma
   useEffect(() => {
     const handleSessionExpired = async () => {
-      queryClient.clear();
       await logout();
-      alert("Tu sesión ha expirado. Por favor, inicia sesión nuevamente."); 
     };
 
     window.addEventListener('session-expired', handleSessionExpired);
@@ -55,7 +40,7 @@ function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AppRouter />
+        <AppRouter key={`${me?.user.id ?? ''}:${me?.workspace?.id ?? ''}:${getQuerySession()}`} />
       </QueryClientProvider>
     </ErrorBoundary>
   );

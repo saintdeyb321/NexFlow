@@ -1,3 +1,5 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 import { Modal } from '../../../components/ui/Modal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -9,7 +11,8 @@ export const RequestDetailModal = ({ id, onClose }: { id: string; onClose: () =>
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const { can } = usePermissions();
   const { data, isLoading, error } = useQuery({
-    queryKey: ['requests', workspaceId, 'detail', id], queryFn: () => getRequest(id),
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.requests.detail(workspaceId, id), queryFn: ({ signal }) => getRequest(id, signal),
     enabled: Boolean(workspaceId) && can('REQUESTS', 'READ'),
   });
   return <Modal isOpen onClose={onClose} title="Detalle de solicitud" maxWidth="max-w-2xl">

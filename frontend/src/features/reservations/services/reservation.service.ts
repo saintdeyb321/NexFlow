@@ -7,13 +7,13 @@ export interface TimeSlotDto {
   isAvailable: boolean;
 }
 
-export const getReservations = async (locationId: string, date: string): Promise<ReservationDto[]> => {
-  const { data } = await axiosClient.get<ReservationDto[]>(`/reservations?locationId=${locationId}&date=${date}`);
+export const getReservations = async (locationId: string, date: string, signal?: AbortSignal): Promise<ReservationDto[]> => {
+  const { data } = await axiosClient.get<ReservationDto[]>(`/reservations?locationId=${locationId}&date=${date}`, { signal });
   return data;
 };
 
-export const getAvailability = async (locationId: string, serviceId: string, date: string): Promise<TimeSlotDto[]> => {
-  const { data } = await axiosClient.get<TimeSlotDto[]>(`/reservations/availability?locationId=${locationId}&serviceId=${serviceId}&date=${date}`);
+export const getAvailability = async (locationId: string, serviceId: string, date: string, signal?: AbortSignal): Promise<TimeSlotDto[]> => {
+  const { data } = await axiosClient.get<TimeSlotDto[]>(`/reservations/availability?locationId=${locationId}&serviceId=${serviceId}&date=${date}`, { signal });
   return data;
 };
 

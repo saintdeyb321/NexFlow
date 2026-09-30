@@ -38,7 +38,18 @@ public class NotificationRepository : INotificationRepository
             .Take(limit)
             .ToListAsync(ct);
 
-        return notifications.Select(n => new NotificationRecord
+        return notifications.Select(Map);
+    }
+
+    public async Task<NotificationRecord?> GetByIdAsync(Guid workspaceId, string notificationId, CancellationToken ct)
+    {
+        if (!Guid.TryParse(notificationId, out var id)) return null;
+        var notification = await _context.Notifications.AsNoTracking()
+            .SingleOrDefaultAsync(n => n.WorkspaceId == workspaceId && n.Id == id, ct);
+        return notification == null ? null : Map(notification);
+    }
+
+    private static NotificationRecord Map(Notification n) => new()
         {
             Id = n.Id.ToString(),
             ModuleCode = n.ModuleCode,
@@ -48,8 +59,7 @@ public class NotificationRepository : INotificationRepository
             ActionUrl = n.ActionUrl,
             IsRead = n.IsRead,
             CreatedAt = n.CreatedAt
-        });
-    }
+        };
 
     public async Task MarkAsReadAsync(Guid workspaceId, string id, CancellationToken ct)
     {

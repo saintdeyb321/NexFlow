@@ -2,114 +2,96 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
 import { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../../core/query/queryKeys';
+import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { QrCode, RefreshCw, PowerOff, ShieldCheck, MessageCircle, Clock } from 'lucide-react';
 import { getWhatsAppStatus, connectWhatsApp, disconnectWhatsApp } from '../services/business.service';
-import type { ConnectionStatus } from '../types/business.types';
+import type { ConnectionStatus, WhatsAppStatusResponse } from '../types/business.types';
 
 interface WhatsAppTabProps {
   showMessage: (text: string, type: 'success' | 'error') => void;
 }
 
 export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
-  const [status, setStatus] = useState<ConnectionStatus | 'QR_EXPIRED'>('DISCONNECTED');
   const { can } = usePermissions();
-  const [qrCode, setQrCode] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(30); 
-  
-  // 🔥 Nuevo estado para el modal de confirmación
-  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
-
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
-  useEffect(() => {
-    setQrCode(null);
-    setShowDisconnectConfirm(false);
-    setStatus('DISCONNECTED');
-    setIsLoading(true);
-  }, [workspaceId]);
-  const fetchStatus = async () => {
-    if (!can('CONVERSATIONS', 'READ')) { setIsLoading(false); return; }
-    try {
-      const response = await getWhatsAppStatus();
-      setStatus(response.status);
-    } catch (error) {
-      setStatus('ERROR');
-      showMessage(getApiErrorPresentation(error), 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(() => {
-      if (status === 'QR_AVAILABLE' || status === 'CONNECTING') {
-        fetchStatus();
+  const queryClient = useQueryClient();
+  const isPageVisible = usePageVisible();
+  const queryKey = queryKeys.business.whatsapp(workspaceId);
+  const [qrExpired, setQrExpired] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(30);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    ...queryPolicies.dynamic,
+    queryKey,
+    queryFn: ({ signal }) => getWhatsAppStatus(signal),
+    enabled: !!workspaceId && can('CONVERSATIONS', 'READ'),
+    refetchInterval: query => isPageVisible && !qrExpired &&
+      (query.state.data?.status === 'QR_AVAILABLE' || query.state.data?.status === 'CONNECTING') ? 5000 : false,
+  });
+  const connectMutation = useSessionMutation({
+    mutationFn: async () => {
+      const response = await connectWhatsApp();
+      if (!('qrBase64' in response && response.qrBase64) && !('status' in response && response.status === 'CONNECTED'))
+        throw new Error('Respuesta de conexión inválida.');
+      return response;
+    },
+    onSuccess: response => {
+      setQrExpired(false);
+      if ('qrBase64' in response && response.qrBase64) {
+        queryClient.setQueryData<WhatsAppStatusResponse>(queryKey, { status: 'QR_AVAILABLE' });
+        showMessage('Código QR generado. Tienes 30 segundos para escanearlo.', 'success');
+      } else if ('status' in response && response.status === 'CONNECTED') {
+        queryClient.setQueryData<WhatsAppStatusResponse>(queryKey, { status: 'CONNECTED' });
+        showMessage('El dispositivo ya estaba conectado.', 'success');
       }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [status, workspaceId]);
+    },
+    onError: error => showMessage(getApiErrorPresentation(error), 'error'),
+  });
+  const disconnectMutation = useSessionMutation({
+    mutationFn: disconnectWhatsApp,
+    onSuccess: () => {
+      queryClient.setQueryData<WhatsAppStatusResponse>(queryKey, { status: 'DISCONNECTED' });
+      connectMutation.reset();
+      setQrExpired(false);
+      showMessage('WhatsApp desconectado exitosamente.', 'success');
+    },
+    onError: error => showMessage(getApiErrorPresentation(error), 'error'),
+  });
+  const qrCode = connectMutation.data && 'qrBase64' in connectMutation.data
+    ? connectMutation.data.qrBase64 : null;
+  const status: ConnectionStatus | 'QR_EXPIRED' = connectMutation.isPending ? 'CONNECTING'
+    : data?.status === 'CONNECTED' ? 'CONNECTED'
+    : qrExpired ? 'QR_EXPIRED'
+    : error || connectMutation.isError ? 'ERROR'
+    : data?.status ?? 'DISCONNECTED';
+  const isProcessing = connectMutation.isPending || disconnectMutation.isPending;
 
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    if (status === 'QR_AVAILABLE' && qrCode) {
-      setTimeLeft(30);
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            setStatus('QR_EXPIRED'); 
-            setQrCode(null);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
+    if (status !== 'QR_AVAILABLE' || !qrCode) return;
+    setTimeLeft(30);
+    const timer = setInterval(() => {
+      setTimeLeft(previous => Math.max(0, previous - 1));
+    }, 1000);
     return () => clearInterval(timer);
   }, [status, qrCode]);
 
-  const handleConnect = async () => {
+  useEffect(() => {
+    if (timeLeft === 0 && status === 'QR_AVAILABLE') setQrExpired(true);
+  }, [timeLeft, status]);
+
+  const handleConnect = () => {
     if (!can('CONVERSATIONS', 'CONFIGURE')) return;
-    setIsProcessing(true);
-    setQrCode(null);
-    setStatus('CONNECTING');
-    try {
-      const response = await connectWhatsApp();
-      if ('qrBase64' in response && response.qrBase64) {
-        setQrCode(response.qrBase64);
-        setStatus('QR_AVAILABLE');
-        showMessage('Código QR generado. Tienes 30 segundos para escanearlo.', 'success');
-      } else if ('status' in response && response.status === 'CONNECTED') {
-        setStatus('CONNECTED');
-        showMessage('El dispositivo ya estaba conectado.', 'success');
-      } else {
-        throw new Error('Respuesta de conexión inválida.');
-      }
-    } catch (error) {
-      showMessage(getApiErrorPresentation(error), 'error');
-      setStatus('ERROR');
-    } finally {
-      setIsProcessing(false);
-    }
+    setQrExpired(false);
+    connectMutation.mutate();
   };
 
-  // 🔥 Se eliminó el window.confirm() bloqueante
-  const executeDisconnect = async () => {
+  const executeDisconnect = () => {
     if (!can('CONVERSATIONS', 'CONFIGURE')) return;
-    setIsProcessing(true);
     setShowDisconnectConfirm(false);
-    try {
-      await disconnectWhatsApp();
-      setStatus('DISCONNECTED');
-      setQrCode(null);
-      showMessage('WhatsApp desconectado exitosamente.', 'success');
-    } catch (error) {
-      showMessage(getApiErrorPresentation(error), 'error');
-    } finally {
-      setIsProcessing(false);
-    }
+    disconnectMutation.mutate();
   };
 
   if (isLoading) {
@@ -130,6 +112,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
         </div>
       </div>
 
+      {error && <p role="alert">{getApiErrorPresentation(error)}</p>}
       <div className="border border-gray-100 rounded-lg p-6 bg-gray-50">
         
         {status === 'DISCONNECTED' || status === 'ERROR' || status === 'QR_EXPIRED' ? (

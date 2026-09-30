@@ -1,36 +1,43 @@
+import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { orderTransitions } from '../types/orders.types';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShoppingBag, Clock, CheckCircle, Package, XCircle, Eye, ShoppingCart } from 'lucide-react';
 import { getOrders, updateOrderStatus } from '../services/orders.service';
 import { OrderDetailModal } from '../components/OrderDetailModal';
-import type { OrderStatus, OrderRecord } from '../types/orders.types';
+import type { OrderStatus } from '../types/orders.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const OrdersPage = () => {
+  const isPageVisible = usePageVisible();
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
-  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [selectedOrderId, setSelectedOrder] = useState<string | null>(null);
   
   // 🔥 SPRINT 07: Notificaciones de error/éxito al cambiar estado
   const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
   const { data: orders = [], isLoading, isError } = useQuery({
-    queryKey: ['orders', workspaceId, filterStatus],
-    queryFn: () => getOrders(filterStatus),
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.orders.list(workspaceId, filterStatus),
+    queryFn: ({ signal }) => getOrders(filterStatus, signal),
     enabled: !!workspaceId && can('ORDERS', 'READ'),
-    refetchInterval: 30000,
+    refetchInterval: isPageVisible ? 30000 : false,
   });
 
-  const updateMutation = useMutation({
+  const selectedOrder = orders.find(order => order.id === selectedOrderId) ?? null;
+  const updateMutation = useSessionMutation({
     mutationFn: ({ id, status }: { id: string; status: OrderStatus }) => updateOrderStatus(id, status),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders', workspaceId] });
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.lists(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(workspaceId, variables.id) });
       setNotification({ msg: 'Estado de la cotización actualizado.', type: 'success' });
     },
     onError: (error: unknown) => {
@@ -140,7 +147,7 @@ export const OrdersPage = () => {
                     </td>
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                       <button 
-                        onClick={() => setSelectedOrder(order)}
+                        onClick={() => setSelectedOrder(order.id)}
                         className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center"
                         title="Ver Detalles"
                       >

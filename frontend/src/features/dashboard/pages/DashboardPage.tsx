@@ -1,9 +1,12 @@
+import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 import { MessageSquare, Bot, UserCog, CalendarCheck, ClipboardList, ShoppingBag, Zap, Activity } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getDashboardSummary } from '../services/dashboard.service';
 
 export const DashboardPage = () => {
+  const isPageVisible = usePageVisible();
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
   
@@ -11,10 +14,11 @@ export const DashboardPage = () => {
   const adminName = me?.user?.firstName || me?.user?.email?.split('@')[0] || 'Administrador';
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['dashboard', workspaceId],
-    queryFn: getDashboardSummary,
+    ...queryPolicies.dynamic,
+    queryKey: queryKeys.dashboard.summary(workspaceId),
+    queryFn: ({ signal }) => getDashboardSummary(signal),
     enabled: !!workspaceId,
-    refetchInterval: 60000,
+    refetchInterval: isPageVisible ? 60000 : false,
   });
 
   if (isLoading) {

@@ -16,3 +16,14 @@ export interface WorkspaceSummaryDto {
   ownerEmail: string;
   createdAt: string;
 }
+
+export interface SystemModuleDto {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface SystemTemplateDto {
+  code: string;
+  name: string;
+}

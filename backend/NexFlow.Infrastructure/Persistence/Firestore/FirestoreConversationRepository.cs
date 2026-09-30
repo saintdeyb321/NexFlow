@@ -413,19 +413,30 @@ public class FirestoreConversationRepository : IConversationRepository
         return (checked((int)total.Count!.Value), null);
     }
 
-    public async Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken)
+    public async Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken, DateTime? after = null, string? afterId = null)
     {
-        var query = GetCollection(workspaceId).OrderByDescending("lastMessageAt").Limit(limit);
+        var collection = GetCollection(workspaceId);
+        var query = after.HasValue
+            ? collection.WhereGreaterThanOrEqualTo("lastMessageAt", after.Value).OrderBy("lastMessageAt").OrderBy(FieldPath.DocumentId)
+            : collection.OrderByDescending("lastMessageAt");
+        if (after.HasValue && afterId != null) query = query.StartAfter(after.Value, collection.Document(afterId));
+        query = query.Limit(limit);
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
         return snapshot.Documents.Select(MapToConversation);
     }
 
-    public async Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken)
+    public async Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken, DateTime? after = null, string? afterId = null)
     {
-        var query = GetCollection(workspaceId).Document(conversationId).Collection("messages").OrderByDescending("timestamp").Limit(limit);
+        var collection = GetCollection(workspaceId).Document(conversationId).Collection("messages");
+        var query = after.HasValue
+            ? collection.WhereGreaterThanOrEqualTo("timestamp", after.Value).OrderBy("timestamp").OrderBy(FieldPath.DocumentId)
+            : collection.OrderByDescending("timestamp");
+        if (after.HasValue && afterId != null) query = query.StartAfter(after.Value, collection.Document(afterId));
+        query = query.Limit(limit);
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
 
-        return snapshot.Documents.Select(MapMessage).Reverse();
+        var messages = snapshot.Documents.Select(MapMessage);
+        return after.HasValue ? messages : messages.Reverse();
     }
 
     private static ConversationRecord MapToConversation(DocumentSnapshot doc)

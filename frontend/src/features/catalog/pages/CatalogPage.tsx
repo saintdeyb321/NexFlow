@@ -1,8 +1,10 @@
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { CategoryManager } from '../../catalog/components/CategoryManager';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, Trash2, FolderPlus, Edit2 } from 'lucide-react';
 import { getProducts, saveProduct, deleteProduct, getCategories } from '../services/catalog.service';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -25,21 +27,22 @@ export const CatalogPage = () => {
   const [showCategoryPrompt, setShowCategoryPrompt] = useState(false);
   
   const { data: products = [], isLoading } = useQuery({ 
-    queryKey: ['catalog', workspaceId, selectedLocationId], 
-    queryFn: () => getProducts(selectedLocationId), 
+    queryKey: queryKeys.catalog.products(workspaceId, selectedLocationId), 
+    queryFn: ({ signal }) => getProducts(selectedLocationId, signal), 
     enabled: !!workspaceId && can('CATALOG', 'READ')
   });
   
   const { data: categories = [] } = useQuery({ 
-    queryKey: ['catalogCategories', workspaceId, 'PRODUCT'], 
-    queryFn: () => getCategories('PRODUCT'), 
+    queryKey: queryKeys.catalog.categories(workspaceId, 'PRODUCT'), 
+    queryFn: ({ signal }) => getCategories('PRODUCT', signal), 
     enabled: !!workspaceId && can('CATALOG', 'READ')
   });
 
-  const saveMutation = useMutation({
+  const saveMutation = useSessionMutation({
     mutationFn: saveProduct,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog.allProducts(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, 'PRODUCT') });
       setIsModalOpen(false);
       setProductToEdit(null);
       setNotification({ msg: 'Producto guardado exitosamente.', type: 'success' });
@@ -47,10 +50,11 @@ export const CatalogPage = () => {
     onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useSessionMutation({
     mutationFn: deleteProduct,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['catalog', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog.allProducts(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, 'PRODUCT') });
       setDeleteConfirmId(null);
       setNotification({ msg: 'Producto eliminado exitosamente.', type: 'success' });
     },

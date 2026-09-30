@@ -1,5 +1,9 @@
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { useAuthStore } from '../../../core/store/useAuthStore';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Calendar, Loader2 } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { renewWorkspaceLicense } from '../services/admin.service';
@@ -12,16 +16,14 @@ interface RenewLicenseModalProps {
 
 export const RenewLicenseModal = ({ workspace, onClose }: RenewLicenseModalProps) => {
   const queryClient = useQueryClient();
+  const userId = useAuthStore(state => state.me?.user.id);
   const [duration, setDuration] = useState<number>(1);
 
-  const renewMutation = useMutation({
+  const renewMutation = useSessionMutation({
     mutationFn: () => renewWorkspaceLicense(workspace!.id, duration),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['superadmin-workspaces'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.system.workspaces(userId) });
       onClose();
-    },
-    onError: (error: any) => {
-      alert(`Error al renovar: ${error.response?.data?.message || 'Error desconocido'}`);
     }
   });
 
@@ -55,6 +57,7 @@ export const RenewLicenseModal = ({ workspace, onClose }: RenewLicenseModalProps
           </select>
         </div>
 
+        {renewMutation.error && <p role="alert">{getApiErrorPresentation(renewMutation.error)}</p>}
         <div className="pt-4 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
             Cancelar

@@ -1,5 +1,8 @@
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { useSessionMutation } from '../../../core/query/useSessionMutation';
+import { queryKeys } from '../../../core/query/queryKeys';
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../../../components/ui/Modal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions } from '../../../core/auth/permissions';
@@ -21,16 +24,17 @@ export const CategoryManager = ({ scope, onClose }: { scope: 'PRODUCT' | 'SERVIC
     ? can('CATALOG', capability) && can('SERVICES', capability)
     : can(categoryScope === 'PRODUCT' ? 'CATALOG' : 'SERVICES', capability);
   const { data: categories = [], isLoading, error: loadError } = useQuery({
-    queryKey: ['catalogCategories', workspaceId, scope], queryFn: () => getCategories(scope),
+    ...queryPolicies.stable,
+    queryKey: queryKeys.catalog.categories(workspaceId, scope), queryFn: ({ signal }) => getCategories(scope, signal),
     enabled: Boolean(workspaceId) && can(scope === 'PRODUCT' ? 'CATALOG' : 'SERVICES', 'READ'),
   });
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['catalogCategories', workspaceId] });
-    queryClient.invalidateQueries({ queryKey: ['serviceCategories', workspaceId] });
+  const refresh = (categoryScope: Scope) => {
+    queryClient.invalidateQueries({ queryKey: categoryScope === 'SHARED' ? queryKeys.catalog.allCategories(workspaceId) : queryKeys.catalog.categories(workspaceId, categoryScope) });
+    queryClient.invalidateQueries({ queryKey: categoryScope === 'SHARED' ? queryKeys.artifacts.all(workspaceId) : queryKeys.artifacts.byScope(workspaceId, categoryScope) });
   };
-  const save = useMutation({ mutationFn: saveCategory, onSuccess: () => { refresh(); setForm(empty()); setError(null); },
+  const save = useSessionMutation({ mutationFn: saveCategory, onSuccess: (_, category) => { refresh(category.scope); setForm(empty()); setError(null); },
     onError: (err: unknown) => setError(getApiErrorPresentation(err)) });
-  const remove = useMutation({ mutationFn: deleteCategory, onSuccess: () => { refresh(); setDeleteId(null); setError(null); },
+  const remove = useSessionMutation({ mutationFn: (category: BusinessCategoryDto) => deleteCategory(category.id!), onSuccess: (_, category) => { refresh(category.scope); setDeleteId(null); setError(null); },
     onError: (err: unknown) => setError(getApiErrorPresentation(err)) });
   const canSave = allowed(form.scope, form.id ? 'UPDATE' : 'CREATE');
   return (
@@ -43,7 +47,7 @@ export const CategoryManager = ({ scope, onClose }: { scope: 'PRODUCT' | 'SERVIC
             <button disabled={!allowed(category.scope, 'UPDATE')} onClick={() => { setForm(category); setError(null); }}>Editar</button>
             <button disabled={!allowed(category.scope, 'DELETE') || remove.isPending} onClick={() => setDeleteId(category.id ?? null)}>Eliminar</button>
             {deleteId === category.id && <>
-              <button disabled={!allowed(category.scope, 'DELETE') || remove.isPending} onClick={() => category.id && remove.mutate(category.id)}>Confirmar eliminación</button>
+              <button disabled={!allowed(category.scope, 'DELETE') || remove.isPending} onClick={() => category.id && remove.mutate(category)}>Confirmar eliminación</button>
               <button onClick={() => setDeleteId(null)}>Volver</button>
             </>}
           </div>

@@ -1,4 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuthStore } from '../../../core/store/useAuthStore';
+import { queryKeys } from '../../../core/query/queryKeys';
+import { queryPolicies } from '../../../core/query/queryPolicies';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { Save } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { getSystemTemplates, getSystemModules } from '../services/admin.service';
@@ -14,8 +19,20 @@ interface ProvisionModalProps {
 export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvisioning }: ProvisionModalProps) => {
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
   
-  const [dbTemplates, setDbTemplates] = useState<any[]>([]);
-  const [dbModules, setDbModules] = useState<any[]>([]);
+  const me = useAuthStore(state => state.me);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { data: dbTemplates = [], error: templatesError } = useQuery({
+    ...queryPolicies.stable,
+    queryKey: queryKeys.system.templates(me?.user.id),
+    queryFn: ({ signal }) => getSystemTemplates(signal),
+    enabled: isOpen && me?.user.isSuperAdmin === true,
+  });
+  const { data: dbModules = [], error: modulesError } = useQuery({
+    ...queryPolicies.stable,
+    queryKey: queryKeys.system.modules(me?.user.id),
+    queryFn: ({ signal }) => getSystemModules(signal),
+    enabled: isOpen && me?.user.isSuperAdmin === true,
+  });
   const [selectedCustomModules, setSelectedCustomModules] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
@@ -26,29 +43,15 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
   });
 
   useEffect(() => {
-    const fetchCatalog = async () => {
-      try {
-        const [tplRes, modRes] = await Promise.all([
-          getSystemTemplates(),
-          getSystemModules()
-        ]);
-        setDbTemplates(tplRes);
-        setDbModules(modRes);
-        if (tplRes.length > 0) {
-          setFormData(prev => ({ ...prev, templateCode: tplRes[0].code }));
-        }
-      } catch (error) {
-        console.error("Error cargando catálogo", error);
-      }
-    };
-
     if (isOpen) {
-      fetchCatalog();
+      setErrorMessage(null);
       const defaultDate = new Date();
       defaultDate.setFullYear(defaultDate.getFullYear() + 1);
       setFormData(prev => ({ ...prev, expiresAt: defaultDate.toISOString().split('T')[0] }));
     }
   }, [isOpen]);
+
+  const templateCode = formData.templateCode || dbTemplates[0]?.code || '';
 
   const handleModuleToggle = (code: string) => {
     setSelectedCustomModules(prev => 
@@ -68,9 +71,9 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
     };
 
     if (provisionMode === 'template') {
-      payload.templateCode = formData.templateCode; 
+      payload.templateCode = templateCode; 
     } else {
-      if (selectedCustomModules.length === 0) return alert('Selecciona al menos 1 módulo custom');
+      if (selectedCustomModules.length === 0) { setErrorMessage('Selecciona al menos 1 módulo custom'); return; }
       payload.customModules = selectedCustomModules;
     }
     
@@ -107,7 +110,7 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
           {provisionMode === 'template' ? (
             <div className="animate-in fade-in slide-in-from-top-1">
               <select 
-                value={formData.templateCode} 
+                value={templateCode} 
                 onChange={e => setFormData({...formData, templateCode: e.target.value})} 
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all cursor-pointer"
               >
@@ -147,11 +150,12 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
           </div>
         </div>
 
+        {(errorMessage || templatesError || modulesError) && <p role="alert">{errorMessage || getApiErrorPresentation(templatesError || modulesError)}</p>}
         <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
             Cancelar
           </button>
-          <button type="submit" disabled={isProvisioning} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors disabled:opacity-50 shadow-sm">
+          <button type="submit" disabled={isProvisioning || (provisionMode === 'template' && !templateCode)} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors disabled:opacity-50 shadow-sm">
             <Save className="w-4 h-4 mr-2" />
             {isProvisioning ? 'Procesando...' : 'Aprovisionar Cliente'}
           </button>
