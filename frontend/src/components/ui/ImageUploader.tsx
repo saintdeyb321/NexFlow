@@ -1,6 +1,7 @@
+import { usePermissions } from '../../core/auth/permissions';
 import { useState, useRef } from 'react';
 import { UploadCloud, Loader2, X, AlertCircle } from 'lucide-react';
-import { axiosClient } from '../../core/api/axiosClient';
+import { getApiErrorPresentation, axiosClient } from '../../core/api/axiosClient';
 
 interface ImageUploaderProps {
   value?: string | null;
@@ -12,13 +13,15 @@ interface ImageUploaderProps {
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Imagen" }: ImageUploaderProps) => {
+  const { can } = usePermissions();
+  const canUpload = can('CATALOG', 'CREATE') || can('CATALOG', 'UPDATE') || can('SERVICES', 'CREATE') || can('SERVICES', 'UPDATE');
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !canUpload) return;
 
     setErrorMsg(null);
 
@@ -43,8 +46,8 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       onChange(data.secureUrl);
-    } catch (error: any) {
-      setErrorMsg("Ocurrió un error de red al subir la imagen.");
+    } catch (error: unknown) {
+      setErrorMsg(getApiErrorPresentation(error));
     } finally {
       setIsUploading(false);
       if (onUploadingContext) onUploadingContext(false);
@@ -68,7 +71,7 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
             <button 
               type="button" 
-              onClick={() => { onChange(null); setErrorMsg(null); }} 
+              disabled={!canUpload} onClick={() => { onChange(null); setErrorMsg(null); }}
               className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg transform transition-transform hover:scale-110"
               title="Eliminar imagen"
             >
@@ -80,7 +83,7 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
+          disabled={isUploading || !canUpload}
           className="w-full h-40 flex flex-col items-center justify-center bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isUploading ? (

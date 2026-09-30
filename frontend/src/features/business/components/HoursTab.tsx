@@ -1,3 +1,5 @@
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getBusinessHours, saveBusinessHours } from '../services/business.service';
@@ -12,6 +14,7 @@ const DAYS_OF_WEEK = [
 
 export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   const workspaceId = useAuthStore(state => state.me?.workspace?.id); // 🔥 SPRINT 9
   const [hours, setHours] = useState<BusinessHoursDto[]>([]);
@@ -19,7 +22,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
   const { data: fetchedHours, isLoading } = useQuery({
     queryKey: ['businessHours', workspaceId, selectedLocationId],
     queryFn: () => getBusinessHours(selectedLocationId),
-    enabled: selectedLocationId !== 'all' && !!workspaceId,
+    enabled: selectedLocationId !== 'all' && !!workspaceId && can('BUSINESS_HOURS', 'READ'),
   });
 
   useEffect(() => {
@@ -36,12 +39,12 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
       queryClient.invalidateQueries({ queryKey: ['businessHours', workspaceId, selectedLocationId] });
       showMessage('Horarios actualizados correctamente', 'success');
     },
-    onError: (error: any) => {
-      showMessage(error.message || 'Error guardando horarios', 'error');
+    onError: (error: unknown) => {
+      showMessage(getApiErrorPresentation(error), 'error');
     }
   });
 
-  const updateHour = (day: number, field: keyof BusinessHoursDto, value: any) => {
+  const updateHour = <K extends keyof BusinessHoursDto>(day: number, field: K, value: BusinessHoursDto[K]) => {
     setHours(hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h));
   };
 
@@ -60,7 +63,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
         }
       }
     }
-    saveMutation.mutate(hours);
+    if (can('BUSINESS_HOURS', 'UPDATE')) saveMutation.mutate(hours);
   };
 
   // 🔥 Bloqueo Estricto si está en "Todas las sedes"
@@ -90,19 +93,19 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
               <div className="w-32 font-medium text-gray-700">{day.name}</div>
               <div className="flex items-center space-x-4">
                 <label className="flex items-center text-sm text-gray-600 cursor-pointer">
-                  <input type="checkbox" checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-blue-600" />
+                  <input type="checkbox" disabled={!can('BUSINESS_HOURS', 'UPDATE')} checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-blue-600" />
                   Cerrado
                 </label>
-                <input type="time" disabled={h.isClosed} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
+                <input type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
                 <span className="text-gray-400">-</span>
-                <input type="time" disabled={h.isClosed} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
+                <input type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
               </div>
             </div>
           )
         })}
       </div>
       <div className="flex justify-end mt-6">
-        <button onClick={handleSave} disabled={saveMutation.isPending} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+        <button onClick={handleSave} disabled={saveMutation.isPending || !can('BUSINESS_HOURS', 'UPDATE')} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
           {saveMutation.isPending ? 'Guardando...' : 'Guardar Horarios'}
         </button>
       </div>

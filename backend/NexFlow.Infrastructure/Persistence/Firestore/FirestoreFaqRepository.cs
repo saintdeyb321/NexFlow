@@ -30,7 +30,7 @@ public class FirestoreFaqRepository : IFaqRepository
         });
     }
 
-    public async Task<FaqDto> SaveFaqAsync(Guid workspaceId, FaqDto faq, CancellationToken cancellationToken)
+    public async Task<FaqDto> SaveFaqAsync(Guid workspaceId, FaqDto faq, bool isCreate, CancellationToken cancellationToken)
     {
         var collectionRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("faqs");
         var docRef = collectionRef.Document(faq.Id);
@@ -46,7 +46,13 @@ public class FirestoreFaqRepository : IFaqRepository
             IsActive = faq.IsActive
         };
 
-        await docRef.SetAsync(firestoreEntity, cancellationToken: cancellationToken);
+        await _firestoreDb.RunTransactionAsync(async transaction =>
+        {
+            var existing = await transaction.GetSnapshotAsync(docRef, cancellationToken);
+            if (isCreate && existing.Exists) throw new ConcurrencyException("La FAQ ya existe.");
+            if (!isCreate && !existing.Exists) throw new KeyNotFoundException("FAQ no encontrada.");
+            transaction.Set(docRef, firestoreEntity);
+        }, cancellationToken: cancellationToken);
 
         return faq;
     }

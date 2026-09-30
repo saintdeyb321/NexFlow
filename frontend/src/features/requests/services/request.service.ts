@@ -1,5 +1,15 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { RequestRecord, RequestStatus, CreateRequestDto } from '../types/request.types';
+import type { RequestRecord, RequestStatus, CreateRequestDto, WorkspaceMember } from '../types/request.types';
+
+export const getRequest = async (id: string): Promise<RequestRecord> => {
+  const { data } = await axiosClient.get<RequestRecord>(`/requests/${id}`);
+  return data;
+};
+
+export const getAssignees = async (): Promise<WorkspaceMember[]> => {
+  const { data } = await axiosClient.get<WorkspaceMember[]>('/business/members');
+  return data;
+};
 
 // 🔥 SPRINT 11: Se añade limit y status para paginación/filtrado nativo
 export const getRequests = async (limit: number = 50, status?: string): Promise<RequestRecord[]> => {

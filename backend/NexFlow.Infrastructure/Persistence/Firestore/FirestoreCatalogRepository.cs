@@ -43,7 +43,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Exists ? MapToCategoryDto(snapshot) : null;
     }
 
-    public async Task SaveCategoryAsync(Guid workspaceId, BusinessCategoryDto category, CancellationToken cancellationToken)
+    public async Task SaveCategoryAsync(Guid workspaceId, BusinessCategoryDto category, bool isCreate, CancellationToken cancellationToken)
     {
         var docId = string.IsNullOrEmpty(category.Id) ? Guid.NewGuid().ToString() : category.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogCategories").Document(docId);
@@ -67,6 +67,11 @@ public class FirestoreCatalogRepository : ICatalogRepository
         await _firestoreDb.RunTransactionAsync(async tx =>
         {
             await tx.GetSnapshotAsync(workspace, cancellationToken);
+            var existing = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            if (isCreate && existing.Exists) throw new ConcurrencyException("La categoría ya existe.");
+            if (!isCreate && !existing.Exists) throw new KeyNotFoundException("Categoría no encontrada.");
+            if (existing.Exists && MapToCategoryDto(existing).Scope != category.Scope)
+                throw new DomainException("No se permite cambiar el scope de una categoría existente.");
             var references = await tx.GetSnapshotAsync(workspace.Collection("catalogItems").WhereEqualTo("CategoryId", docId), cancellationToken);
             if (references.Documents.Select(MapToItemDto).Any(i =>
                 (i.IsActive && !category.IsActive) || (category.Scope != "SHARED" && category.Scope != i.Type)))
@@ -132,7 +137,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToItemDto);
     }
 
-    public async Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken)
+    public async Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, CancellationToken cancellationToken)
     {
         item.Name = item.Name?.Trim() ?? "";
         item.Currency = item.Currency?.Trim().ToUpperInvariant() ?? "";
@@ -186,6 +191,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
         {
             await tx.GetSnapshotAsync(workspace, cancellationToken);
             var existing = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            if (isCreate && existing.Exists) throw new ConcurrencyException("El offering ya existe.");
+            if (!isCreate && !existing.Exists) throw new KeyNotFoundException("Offering no encontrado.");
             if (existing.Exists && MapToItemDto(existing).Type != item.Type)
                 throw new DomainException("No se puede cambiar el tipo del offering.");
             foreach (var locationId in item.LocationIds)

@@ -1,5 +1,3 @@
-import type { BusinessProfile } from "../../features/business/types/business.types";
-
 export interface User {
   id: string;
   email: string;
@@ -11,7 +9,7 @@ export interface User {
 export interface Workspace {
   id: string;
   name: string;
-  status: string;
+  status: 'Pending' | 'Active' | 'Suspended' | 'Cancelled' | 'Archived' | 'Deleting';
 }
 
 export interface License {
@@ -25,5 +23,6 @@ export interface MeResponse {
   workspace: Workspace | null;
   license: License | null;
   entitlements: string[]; 
-  businessProfile: BusinessProfile | null;
+  membershipRole: 'Owner' | 'Admin' | 'Member' | null;
+  capabilities: Record<string, string[]>;
 }

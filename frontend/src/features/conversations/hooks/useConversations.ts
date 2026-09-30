@@ -4,10 +4,16 @@ import { useSearchParams } from 'react-router-dom';
 import { getConversations, getMessages, takeOverConversation, releaseConversation, sendManualMessage, deleteConversation } from '../services/conversation.service';
 import type { Conversation, Message } from '../types/conversation.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import { usePermissions } from '../../../core/auth/permissions';
+import { ApiError, getApiErrorPresentation } from '../../../core/api/axiosClient';
 
 export const useConversations = () => {
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const { can } = usePermissions();
+  const requireCapability = (capability: string) => {
+    if (!can('CONVERSATIONS', capability)) throw new ApiError(403, 'Security.CapabilityDenied', 'No tienes permiso para esta operación.');
+  };
   
   // 🔥 SPRINT 05: Deep Links (Leemos el ID desde la URL)
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,7 +25,7 @@ export const useConversations = () => {
   const { data: conversations = [], isLoading: isLoadingConversations, isError: isErrorConversations } = useQuery({
     queryKey: ['conversations', workspaceId],
     queryFn: () => getConversations(),
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && can('CONVERSATIONS', 'READ'),
     refetchInterval: 15000, 
   });
 
@@ -29,7 +35,7 @@ export const useConversations = () => {
   const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
     queryKey: ['messages', workspaceId, selectedConversationId],
     queryFn: () => getMessages(selectedConversationId!),
-    enabled: !!workspaceId && !!selectedConversationId,
+    enabled: !!workspaceId && !!selectedConversationId && can('CONVERSATIONS', 'READ'),
     refetchInterval: 15000, 
   });
 
@@ -47,6 +53,7 @@ export const useConversations = () => {
 
   const takeOverMutation = useMutation({
     mutationFn: async () => {
+      requireCapability('TAKEOVER');
       if (!selectedConversationId) throw new Error("No chat selected");
       return await takeOverConversation(selectedConversationId);
     },
@@ -57,6 +64,7 @@ export const useConversations = () => {
 
   const releaseMutation = useMutation({
     mutationFn: async () => {
+      requireCapability('RELEASE');
       if (!selectedConversationId) throw new Error("No chat selected");
       return await releaseConversation(selectedConversationId);
     },
@@ -66,21 +74,23 @@ export const useConversations = () => {
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
-      if (!selectedConversationId) throw new Error("No chat selected");
-      return await sendManualMessage(selectedConversationId, content);
+    mutationFn: async ({ conversationId, content }: { workspaceId: string; conversationId: string; content: string }) => {
+      requireCapability('SEND_MESSAGE');
+      return await sendManualMessage(conversationId, content);
     },
-    onSuccess: (newMessage) => {
+    onSuccess: (result, variables) => {
       queryClient.setQueryData(
-        ['messages', workspaceId, selectedConversationId],
-        (old: Message[] | undefined) => [...(old || []), newMessage]
+        ['messages', variables.workspaceId, variables.conversationId],
+        (old: Message[] | undefined) => [...(old || []).filter(message => message.id !== result.message.id), result.message]
       );
-      queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations', variables.workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ['messages', variables.workspaceId, variables.conversationId] });
     }
   });
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
+      requireCapability('DELETE');
       if (!selectedConversationId) throw new Error("No chat selected");
       await deleteConversation(selectedConversationId);
     },
@@ -98,13 +108,21 @@ export const useConversations = () => {
     messages,
     isLoading: isLoadingConversations || isLoadingMessages,
     isError: isErrorConversations,
+    actionError: takeOverMutation.error || releaseMutation.error || deleteMutation.error
+      ? getApiErrorPresentation(takeOverMutation.error || releaseMutation.error || deleteMutation.error) : null,
     isChangingMode: takeOverMutation.isPending || releaseMutation.isPending,
     isSending: sendMessageMutation.isPending,
     isDeleting: deleteMutation.isPending,
-    setSelectedChat: (chat: Conversation) => handleSelectChat(chat.id),
-    handleTakeOver: () => takeOverMutation.mutateAsync(),
-    handleRelease: () => releaseMutation.mutateAsync(),
-    handleSendMessage: (content: string) => sendMessageMutation.mutateAsync(content), // Ahora devuelve una promesa
-    handleDelete: () => deleteMutation.mutateAsync() 
+    setSelectedChat: (chat: Conversation | null) => {
+      if (chat) handleSelectChat(chat.id);
+      else { setSelectedConversationId(null); setSearchParams({}); }
+    },
+    handleTakeOver: () => takeOverMutation.mutate(),
+    handleRelease: () => releaseMutation.mutate(),
+    handleSendMessage: (content: string) => {
+      if (!workspaceId || !selectedConversationId) return Promise.reject(new Error('No chat selected'));
+      return sendMessageMutation.mutateAsync({ workspaceId, conversationId: selectedConversationId, content });
+    },
+    handleDelete: () => deleteMutation.mutate()
   };
 };

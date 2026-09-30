@@ -1,3 +1,6 @@
+import { useAuthStore } from '../../../core/store/useAuthStore';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { usePermissions } from '../../../core/auth/permissions';
 import { useState, useEffect } from 'react';
 import { QrCode, RefreshCw, PowerOff, ShieldCheck, MessageCircle, Clock } from 'lucide-react';
 import { getWhatsAppStatus, connectWhatsApp, disconnectWhatsApp } from '../services/business.service';
@@ -9,6 +12,7 @@ interface WhatsAppTabProps {
 
 export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
   const [status, setStatus] = useState<ConnectionStatus | 'QR_EXPIRED'>('DISCONNECTED');
+  const { can } = usePermissions();
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -17,12 +21,21 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
   // 🔥 Nuevo estado para el modal de confirmación
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
 
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  useEffect(() => {
+    setQrCode(null);
+    setShowDisconnectConfirm(false);
+    setStatus('DISCONNECTED');
+    setIsLoading(true);
+  }, [workspaceId]);
   const fetchStatus = async () => {
+    if (!can('CONVERSATIONS', 'READ')) { setIsLoading(false); return; }
     try {
       const response = await getWhatsAppStatus();
       setStatus(response.status);
     } catch (error) {
       setStatus('ERROR');
+      showMessage(getApiErrorPresentation(error), 'error');
     } finally {
       setIsLoading(false);
     }
@@ -36,10 +49,10 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [status]);
+  }, [status, workspaceId]);
 
   useEffect(() => {
-    let timer: any;
+    let timer: ReturnType<typeof setInterval> | undefined;
     if (status === 'QR_AVAILABLE' && qrCode) {
       setTimeLeft(30);
       timer = setInterval(() => {
@@ -58,6 +71,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
   }, [status, qrCode]);
 
   const handleConnect = async () => {
+    if (!can('CONVERSATIONS', 'CONFIGURE')) return;
     setIsProcessing(true);
     setQrCode(null);
     setStatus('CONNECTING');
@@ -74,7 +88,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
         throw new Error('Respuesta de conexión inválida.');
       }
     } catch (error) {
-      showMessage('No se pudo generar el código QR. Intenta nuevamente.', 'error');
+      showMessage(getApiErrorPresentation(error), 'error');
       setStatus('ERROR');
     } finally {
       setIsProcessing(false);
@@ -83,6 +97,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
 
   // 🔥 Se eliminó el window.confirm() bloqueante
   const executeDisconnect = async () => {
+    if (!can('CONVERSATIONS', 'CONFIGURE')) return;
     setIsProcessing(true);
     setShowDisconnectConfirm(false);
     try {
@@ -91,7 +106,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
       setQrCode(null);
       showMessage('WhatsApp desconectado exitosamente.', 'success');
     } catch (error) {
-      showMessage('Ocurrió un error al intentar desconectar.', 'error');
+      showMessage(getApiErrorPresentation(error), 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -130,7 +145,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
             </p>
             <button 
               onClick={handleConnect} 
-              disabled={isProcessing}
+              disabled={isProcessing || !can('CONVERSATIONS', 'CONFIGURE')}
               className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-lg transition-colors flex items-center disabled:opacity-50"
             >
               {isProcessing ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <QrCode className="w-5 h-5 mr-2" />}
@@ -175,7 +190,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
 
             <button 
               onClick={() => setShowDisconnectConfirm(true)} 
-              disabled={isProcessing}
+              disabled={isProcessing || !can('CONVERSATIONS', 'CONFIGURE')}
               className="mt-2 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-medium py-2 px-6 rounded-lg transition-colors flex items-center disabled:opacity-50"
             >
               {isProcessing ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <PowerOff className="w-5 h-5 mr-2" />}
@@ -189,7 +204,7 @@ export const WhatsAppTab = ({ showMessage }: WhatsAppTabProps) => {
                 <p className="text-sm text-gray-600 mb-4">El bot dejará de funcionar y ya no responderá automáticamente a tus clientes.</p>
                 <div className="flex justify-end gap-2">
                   <button onClick={() => setShowDisconnectConfirm(false)} className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium">Cancelar</button>
-                  <button onClick={executeDisconnect} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Sí, Desconectar</button>
+                  <button disabled={!can('CONVERSATIONS', 'CONFIGURE') || isProcessing} onClick={executeDisconnect} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Sí, Desconectar</button>
                 </div>
               </div>
             )}

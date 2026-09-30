@@ -1,29 +1,34 @@
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar as CalendarIcon, AlertCircle, MapPin } from 'lucide-react';
 import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
-import { getLocations } from '../../business/services/business.service';
+import { getLocations, getBusinessProfile } from '../../business/services/business.service';
 import { getServices } from '../../services/services/services.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
 import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import { getBusinessToday } from '../../../core/utils/dateTime';
 import type { ReservationDto } from '../types/reservation.types';
 import type { ServiceDto } from '../../services/types/services.types';
 import type { LocationDto } from '../../business/types/business.types';
 
 export const ReservationsPage = () => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   
-  const timeZone = useAuthStore(state => (state.me as any)?.businessProfile?.timeZone) || 'America/Lima';
-
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
-    const today = new Date();
-    today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
-    return today.toISOString().split('T')[0];
+  const { data: profile, error: profileError } = useQuery({
+    queryKey: ['businessProfile', workspaceId], queryFn: getBusinessProfile,
+    enabled: Boolean(workspaceId) && can('BUSINESS_PROFILE', 'READ'),
   });
+  const timeZone = profile?.timeZone;
+
+  const [chosenDate, setSelectedDate] = useState('');
+  const selectedDate = chosenDate || (timeZone ? getBusinessToday(timeZone) : '');
   
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -38,31 +43,31 @@ export const ReservationsPage = () => {
   const { data: services = [] } = useQuery<ServiceDto[]>({
     queryKey: ['services', workspaceId, selectedLocationId],
     queryFn: () => getServices(selectedLocationId),
-    enabled: Boolean(workspaceId) && isValidLocationSelected,
+    enabled: Boolean(workspaceId) && isValidLocationSelected && can('SERVICES', 'READ'),
     staleTime: 1000 * 60 * 10,
   });
 
   const { data: locations = [] } = useQuery<LocationDto[]>({
     queryKey: ['locations', workspaceId],
     queryFn: getLocations,
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && can('LOCATIONS', 'READ'),
   });
 
   const { data: reservations = [], isLoading } = useQuery<ReservationDto[]>({
     queryKey: ['reservations', workspaceId, selectedLocationId, selectedDate],
     queryFn: () => getReservations(selectedLocationId, selectedDate),
-    enabled: Boolean(workspaceId) && isValidLocationSelected, 
+    enabled: Boolean(workspaceId && selectedDate) && isValidLocationSelected && can('RESERVATIONS', 'READ'),
   });
 
   const cancelMutation = useMutation({
     mutationFn: cancelReservation,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
+      queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
       setNotification({ msg: 'Reserva cancelada exitosamente.', type: 'success' });
       setConfirmDialog(null);
     },
-    onError: (error: any) => {
-      setNotification({ msg: error.message || 'Error al cancelar la reserva.', type: 'error' });
+    onError: (error: unknown) => {
+      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
       setConfirmDialog(null);
     }
   });
@@ -70,19 +75,19 @@ export const ReservationsPage = () => {
   const completeMutation = useMutation({
     mutationFn: completeReservation,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
+      queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
       setNotification({ msg: 'Reserva marcada como completada.', type: 'success' });
       setConfirmDialog(null);
     },
-    onError: (error: any) => {
-      setNotification({ msg: error.message || 'Error al completar la reserva.', type: 'error' });
+    onError: (error: unknown) => {
+      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
       setConfirmDialog(null);
     }
   });
 
   const executeAction = () => {
-    if (confirmDialog?.action === 'cancel') cancelMutation.mutate(confirmDialog.id);
-    if (confirmDialog?.action === 'complete') completeMutation.mutate(confirmDialog.id);
+    if (confirmDialog?.action === 'cancel' && can('RESERVATIONS', 'CANCEL')) cancelMutation.mutate(confirmDialog.id);
+    if (confirmDialog?.action === 'complete' && can('RESERVATIONS', 'COMPLETE')) completeMutation.mutate(confirmDialog.id);
   };
 
   return (
@@ -110,7 +115,7 @@ export const ReservationsPage = () => {
               <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 bg-gray-100 rounded-lg text-gray-700 font-medium hover:bg-gray-200 transition-colors">No, volver</button>
               <button 
                 onClick={executeAction} 
-                disabled={cancelMutation.isPending || completeMutation.isPending}
+                disabled={cancelMutation.isPending || completeMutation.isPending || !can('RESERVATIONS', confirmDialog.action === 'cancel' ? 'CANCEL' : 'COMPLETE')}
                 className={`px-4 py-2 text-white font-medium rounded-lg disabled:opacity-50 transition-colors ${confirmDialog.action === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
               >
                 Sí, {confirmDialog.action === 'cancel' ? 'cancelar' : 'completar'}
@@ -142,7 +147,7 @@ export const ReservationsPage = () => {
           <div className="relative group">
             <button 
               onClick={() => setIsCreateModalOpen(true)}
-              disabled={!isValidLocationSelected}
+              disabled={!isValidLocationSelected || !can('RESERVATIONS', 'CREATE') || !timeZone}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 flex items-center transition-colors shadow-sm"
             >
               Nueva Reserva
@@ -169,11 +174,16 @@ export const ReservationsPage = () => {
             <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
             <p className="text-sm">Cargando agenda...</p>
           </div>
+        ) : !timeZone ? (
+          <p className="p-6">{profileError ? getApiErrorPresentation(profileError) : 'Configura la zona horaria del perfil del negocio para ver la agenda.'}</p>
         ) : (
           <ReservationList 
+            canEdit={can('RESERVATIONS', 'UPDATE') && Boolean(timeZone)}
+            canCancel={can('RESERVATIONS', 'CANCEL')}
+            canComplete={can('RESERVATIONS', 'COMPLETE')}
             reservations={reservations} 
             services={services} 
-            timeZone={timeZone} 
+            timeZone={timeZone}
             onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }} 
             onCancel={(id) => setConfirmDialog({ action: 'cancel', id })} 
             onComplete={(id) => setConfirmDialog({ action: 'complete', id })}
@@ -181,28 +191,28 @@ export const ReservationsPage = () => {
         )}
       </div>
 
-      <CreateReservationModal 
-        isOpen={isCreateModalOpen} 
+      {timeZone && <CreateReservationModal
+        isOpen={isCreateModalOpen && can('RESERVATIONS', 'CREATE') && Boolean(timeZone)}
         onClose={() => setIsCreateModalOpen(false)} 
         onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['reservations'] });
+          queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
           setNotification({ msg: 'Reserva creada exitosamente.', type: 'success' });
         }} 
         locations={locations} 
         services={services}
-        timeZone={timeZone} 
-      />
+        timeZone={timeZone}
+      />}
 
-      <EditReservationModal 
-        isOpen={isEditModalOpen}
+      {timeZone && <EditReservationModal
+        isOpen={isEditModalOpen && can('RESERVATIONS', 'UPDATE') && Boolean(timeZone)}
         onClose={() => { setIsEditModalOpen(false); setEditingRes(null); }}
         onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['reservations'] });
+          queryClient.invalidateQueries({ queryKey: ['reservations', workspaceId] });
           setNotification({ msg: 'Reserva reprogramada exitosamente.', type: 'success' });
         }}
         reservation={editingRes}
         timeZone={timeZone}
-      />
+      />}
     </div>
   );
 };

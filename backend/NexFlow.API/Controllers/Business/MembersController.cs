@@ -15,11 +15,13 @@ public class MembersController : ControllerBase
 {
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IMembershipRepository _memberships;
+    private readonly IUserRepository _users;
 
-    public MembersController(IWorkspaceContext workspaceContext, IMembershipRepository memberships)
+    public MembersController(IWorkspaceContext workspaceContext, IMembershipRepository memberships, IUserRepository users)
     {
         _workspaceContext = workspaceContext;
         _memberships = memberships;
+        _users = users;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -28,7 +30,13 @@ public class MembersController : ControllerBase
     public async Task<IActionResult> GetMembers(CancellationToken cancellationToken)
     {
         var members = await _memberships.GetByWorkspaceIdAsync(WorkspaceId, cancellationToken);
-        return Ok(members.Select(m => new { m.UserId, m.WorkspaceId, Role = m.Role.ToString() }));
+        var result = new List<MemberDto>();
+        foreach (var member in members)
+        {
+            var user = await _users.GetByIdAsync(member.UserId, cancellationToken);
+            if (user != null) result.Add(new MemberDto(member.UserId, member.WorkspaceId, member.Role.ToString(), user.FirstName, user.LastName));
+        }
+        return Ok(result);
     }
 
     // [HttpPost("invite")]
@@ -37,3 +45,5 @@ public class MembersController : ControllerBase
     //     var result = await handler.Handle(command, ct); ... 
     // }
 }
+
+public record MemberDto(Guid UserId, Guid WorkspaceId, string Role, string FirstName, string LastName);

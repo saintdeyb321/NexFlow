@@ -1,3 +1,5 @@
+import { toBusinessLocalInput } from '../../../core/utils/dateTime';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
 import { editReservation } from '../services/reservation.service';
 import type { ReservationDto } from '../types/reservation.types';
@@ -14,14 +16,15 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (reservation) {
       // 🔥 SPRINT 11: Se eliminaron los "as any"
-      const localTime = new Date(new Date(reservation.startTime).toLocaleString('en-US', { timeZone }));
-      
-      setEditDate(localTime.toISOString().split('T')[0]);
-      setEditTime(`${localTime.getHours().toString().padStart(2, '0')}:${localTime.getMinutes().toString().padStart(2, '0')}`);
+      const local = toBusinessLocalInput(reservation.dateTime, timeZone);
+      setEditDate(local.split('T')[0] || '');
+      setEditTime(local.split('T')[1] || '');
+      setErrorMessage(null);
     }
   }, [reservation, timeZone]);
 
@@ -35,8 +38,8 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
       await editReservation(reservation.id, newDateTime);
       onSuccess();
       onClose();
-    } catch (error: any) {
-      alert(`Error al reagendar: ${error.message}`);
+    } catch (error: unknown) {
+      setErrorMessage(getApiErrorPresentation(error));
     } finally {
       setIsSaving(false);
     }
@@ -50,6 +53,7 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
           Cliente: <span className="font-semibold text-gray-700">{reservation.customerName}</span>
         </p>
         
+        {errorMessage && <p role="alert">{errorMessage}</p>}
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Nueva Fecha</label>

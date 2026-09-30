@@ -1,9 +1,6 @@
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { X, ShoppingCart, MessageSquare, User, Calendar, Pencil, Check, AlertCircle } from 'lucide-react';
+import { X, ShoppingCart, MessageSquare, User, Calendar } from 'lucide-react';
 import type { OrderRecord } from '../types/orders.types';
-import { updateOrderAmount } from '../services/orders.service';
 
 interface OrderDetailModalProps {
   order: OrderRecord;
@@ -11,41 +8,10 @@ interface OrderDetailModalProps {
 }
 
 export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
-  const queryClient = useQueryClient();
   const navigate = useNavigate(); 
   
-  const [isEditingPrice, setIsEditingPrice] = useState(false);
-  const [newPrice, setNewPrice] = useState((order.totalAmountMinorUnits / 100).toFixed(2));
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const formatCurrency = (minorUnits: number, currency: string) => 
-    `${currency} ${(minorUnits / 100).toFixed(2)}`;
-
-  const amountMutation = useMutation({
-    mutationFn: (minorUnits: number) => updateOrderAmount(order.id, minorUnits),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      setIsEditingPrice(false);
-      setErrorMsg(null);
-    },
-    onError: (error: any) => {
-      setErrorMsg(error.message || 'Error al actualizar el precio.');
-    }
-  });
-
-  const handleSavePrice = () => {
-    setErrorMsg(null);
-    const floatValue = parseFloat(newPrice || '0');
-    
-    // 🔥 SPRINT 07: Validación estricta para números negativos, vacíos o NaN.
-    if (isNaN(floatValue) || floatValue < 0 || !isFinite(floatValue)) {
-      setErrorMsg('Por favor, ingresa un monto válido igual o mayor a cero.');
-      return;
-    }
-
-    const minorUnits = Math.round(floatValue * 100);
-    amountMutation.mutate(minorUnits);
-  };
+  const formatCurrency = (minorUnits: number | null, currency: string | null) =>
+    minorUnits === null || currency === null ? '—' : `${currency} ${(minorUnits / 100).toFixed(2)}`;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
@@ -100,10 +66,10 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                     <td className="py-3 px-3 font-medium text-gray-900">{item.productName}</td>
                     <td className="py-3 px-3 text-center text-gray-600">{item.quantity}</td>
                     <td className="py-3 px-3 text-right text-gray-600">
-                      {item.unitPriceMinorUnits === 0 ? <span className="text-gray-400 italic text-xs">Por definir</span> : formatCurrency(item.unitPriceMinorUnits, order.currency)}
+                      {formatCurrency(item.unitPriceMinorUnits, item.currency)}
                     </td>
                     <td className="py-3 px-3 text-right font-medium text-gray-900">
-                      {item.unitPriceMinorUnits === 0 ? <span className="text-gray-400 italic text-xs">Por definir</span> : formatCurrency(item.quantity * item.unitPriceMinorUnits, order.currency)}
+                      {formatCurrency(item.quantity * item.unitPriceMinorUnits, item.currency)}
                     </td>
                   </tr>
                 ))}
@@ -124,55 +90,7 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
             <div className="text-right flex flex-col items-end">
               <p className="text-sm text-gray-500 mb-1">Total de Cotización</p>
               
-              {isEditingPrice ? (
-                <div className="flex flex-col items-end">
-                  <div className="flex items-center justify-end gap-2 mt-1">
-                    <span className="text-gray-500 font-bold">{order.currency}</span>
-                    <input
-                      type="number"
-                      step="0.10"
-                      min="0"
-                      value={newPrice}
-                      onChange={(e) => setNewPrice(e.target.value)}
-                      className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                      autoFocus
-                    />
-                    <button
-                      onClick={handleSavePrice}
-                      disabled={amountMutation.isPending}
-                      className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
-                    >
-                      <Check className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => { setIsEditingPrice(false); setErrorMsg(null); }}
-                      className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  {errorMsg && (
-                    <div className="text-xs text-red-500 mt-2 flex items-center">
-                      <AlertCircle className="w-3 h-3 mr-1" /> {errorMsg}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center justify-end gap-2 group">
-                  <p className="text-2xl font-bold text-blue-600">
-                    {order.status === 'PendingReview' && order.totalAmountMinorUnits === 0 
-                      ? 'Por definir' 
-                      : formatCurrency(order.totalAmountMinorUnits, order.currency)}
-                  </p>
-                  <button
-                    onClick={() => setIsEditingPrice(true)}
-                    className="p-1.5 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-50 rounded-lg"
-                    title="Definir/Editar Precio Total"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+              <p className="text-2xl font-bold text-blue-600">{formatCurrency(order.totalAmountMinorUnits, order.currency)}</p>
             </div>
           </div>
         </div>

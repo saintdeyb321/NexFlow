@@ -173,17 +173,14 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
 
-        if (string.IsNullOrEmpty(faq.Id))
+        faq.Id = Guid.NewGuid().ToString();
+        var currentFaqs = await _faqRepository.GetFaqsAsync(WorkspaceId, cancellationToken);
+        if (currentFaqs.Count() >= 20)
         {
-            var currentFaqs = await _faqRepository.GetFaqsAsync(WorkspaceId, cancellationToken);
-            if (currentFaqs.Count() >= 20)
-            {
-                return BadRequest(new { code = "Limit.Exceeded", message = "Has alcanzado el límite máximo de 20 preguntas frecuentes. Elimina una antigua para agregar una nueva." });
-            }
-            faq.Id = Guid.NewGuid().ToString();
+            return BadRequest(new { code = "Limit.Exceeded", message = "Has alcanzado el límite máximo de 20 preguntas frecuentes. Elimina una antigua para agregar una nueva." });
         }
 
-        var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
+        var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, true, cancellationToken);
         return Ok(savedFaq);
     }
 
@@ -192,7 +189,7 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("FAQ", cancellationToken)) return StatusCode(403, "Módulo FAQ no contratado.");
         faq.Id = faqId;
-        var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, cancellationToken);
+        var savedFaq = await _faqRepository.SaveFaqAsync(WorkspaceId, faq, false, cancellationToken);
         return Ok(savedFaq);
     }
 

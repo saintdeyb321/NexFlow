@@ -1,3 +1,6 @@
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { useAuthStore } from '../../../core/store/useAuthStore';
+import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Save } from 'lucide-react';
@@ -11,6 +14,8 @@ interface CreateRequestModalProps {
 
 export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps) => {
   const queryClient = useQueryClient();
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  const { can } = usePermissions();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
@@ -23,13 +28,13 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
   const createMutation = useMutation({
     mutationFn: createRequest,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
+      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
       onClose();
       setFormData({ type: 'Tramite', title: '', description: '', consumerPhone: '' });
       setErrorMessage(null);
     },
-    onError: (error: any) => {
-      setErrorMessage(error.message || 'Ocurrió un error al crear la solicitud.');
+    onError: (error: unknown) => {
+      setErrorMessage(getApiErrorPresentation(error));
     }
   });
 
@@ -37,6 +42,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!can('REQUESTS', 'CREATE')) return;
     setErrorMessage(null);
     createMutation.mutate({
       ...formData,
@@ -115,7 +121,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
             <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
               Cancelar
             </button>
-            <button type="submit" disabled={createMutation.isPending} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
+            <button type="submit" disabled={createMutation.isPending || !can('REQUESTS', 'CREATE')} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
               <Save className="w-4 h-4 mr-2" />
               {createMutation.isPending ? 'Guardando...' : 'Crear Solicitud'}
             </button>

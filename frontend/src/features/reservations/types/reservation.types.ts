@@ -13,6 +13,6 @@ export interface ReservationDto {
   serviceId: string;
   customerName: string;
   customerIdentifier: string;
-  startTime: string; 
-  status: string;
+  dateTime: string;
+  status: 'Confirmed' | 'Cancelled' | 'Completed' | 'Pending';
 }

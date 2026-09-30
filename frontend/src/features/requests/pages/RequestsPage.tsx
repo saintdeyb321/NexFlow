@@ -1,22 +1,27 @@
+import { requestTransitions } from '../types/request.types';
+import { RequestDetailModal } from '../components/RequestDetailModal';
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, Clock, PlayCircle, CheckCircle, XCircle, FileText, Plus, MessageSquare, UserCircle } from 'lucide-react';
-import { getRequests, updateRequestStatus, assignRequest } from '../services/request.service';
+import { getRequests, updateRequestStatus, assignRequest, getAssignees } from '../services/request.service';
 import type { RequestStatus, RequestType } from '../types/request.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { CreateRequestModal } from '../components/CreateRequestModal';
 
 export const RequestsPage = () => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const navigate = useNavigate(); 
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
   // 🔥 SPRINT 07: Nombre real usando el DTO correcto, no "any".
   const me = useAuthStore((state) => state.me);
-  const adminName = me?.user?.firstName || me?.user?.email?.split('@')[0] || 'Agente';
   
   const [filterStatus, setFilterStatus] = useState<RequestStatus | 'ALL'>('ALL');
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false); 
   const [limit, setLimit] = useState(50); 
   
@@ -26,29 +31,38 @@ export const RequestsPage = () => {
   const { data: requests = [], isLoading, isError } = useQuery({
     queryKey: ['requests', workspaceId, limit, filterStatus],
     queryFn: () => getRequests(limit, filterStatus === 'ALL' ? undefined : filterStatus),
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && can('REQUESTS', 'READ'),
     refetchInterval: 30000,
   });
+
+  const { data: assignees = [], error: assigneesError } = useQuery({
+    queryKey: ['requestAssignees', workspaceId], queryFn: getAssignees,
+    enabled: !!workspaceId && can('REQUESTS', 'ASSIGN'),
+  });
+  const assigneeName = (userId: string) => {
+    const member = assignees.find(member => member.userId === userId);
+    return member ? `${member.firstName} ${member.lastName}`.trim() || member.userId : 'Asignado';
+  };
 
   const updateMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: RequestStatus }) => updateRequestStatus(id, status),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
+      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
       setNotification({ msg: 'Estado actualizado correctamente.', type: 'success' });
     },
-    onError: (error: any) => {
-      setNotification({ msg: error.message || 'Error al cambiar el estado de la solicitud.', type: 'error' });
+    onError: (error: unknown) => {
+      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
     }
   });
 
   const assignMutation = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => assignRequest(id, name),
+    mutationFn: ({ id, userId }: { id: string; userId: string }) => assignRequest(id, userId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
-      setNotification({ msg: 'Solicitud asignada a ti correctamente.', type: 'success' });
+      queryClient.invalidateQueries({ queryKey: ['requests', workspaceId] });
+      setNotification({ msg: 'Solicitud asignada correctamente.', type: 'success' });
     },
-    onError: (error: any) => {
-      setNotification({ msg: error.message || 'Error al asignarte la solicitud.', type: 'error' });
+    onError: (error: unknown) => {
+      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
     }
   });
 
@@ -108,7 +122,7 @@ export const RequestsPage = () => {
             <option value="Completed">Completadas</option>
           </select>
           <button 
-            onClick={() => setIsModalOpen(true)}
+            disabled={!can('REQUESTS', 'CREATE')} onClick={() => setIsModalOpen(true)}
             className="flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4 mr-2" /> Nueva Solicitud
@@ -159,40 +173,42 @@ export const RequestsPage = () => {
                       {getTypeBadge(req.type)}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      <span className="font-semibold block text-gray-900 mb-1">{req.title}</span>
+                      <button onClick={() => setDetailId(req.id)} className="font-semibold block text-gray-900 mb-1">{req.title}</button>
                       <p className="line-clamp-2" title={req.description}>{req.description}</p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {req.assignedTo ? (
                         <span className="flex items-center text-gray-700 font-medium">
-                          <UserCircle className="w-4 h-4 mr-1.5 text-gray-400" /> {req.assignedTo}
+                          <UserCircle className="w-4 h-4 mr-1.5 text-gray-400" /> {assigneeName(req.assignedTo)}
                         </span>
                       ) : (
                         <button 
-                          onClick={() => assignMutation.mutate({ id: req.id, name: adminName })}
-                          disabled={assignMutation.isPending}
+                          onClick={() => { if (me && can('REQUESTS', 'ASSIGN')) assignMutation.mutate({ id: req.id, userId: me.user.id }); }}
+                          disabled={assignMutation.isPending || !can('REQUESTS', 'ASSIGN') || !me?.user.id}
                           className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
                         >
                           Asignarme
                         </button>
                       )}
+                      {can('REQUESTS', 'ASSIGN') && <select aria-label="Responsable" value={req.assignedTo ?? ''}
+                        disabled={assignMutation.isPending || Boolean(assigneesError)}
+                        onChange={event => { if (event.target.value) assignMutation.mutate({ id: req.id, userId: event.target.value }); }}>
+                        <option value="">Seleccionar responsable</option>
+                        {assignees.map(member => <option key={member.userId} value={member.userId}>{`${member.firstName} ${member.lastName}`.trim() || member.userId}</option>)}
+                      </select>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getStatusBadge(req.status)}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <select
-                        disabled={updateMutation.isPending}
+                        disabled={updateMutation.isPending || !can('REQUESTS', 'UPDATE_STATUS') || requestTransitions[req.status].length === 0}
                         value={req.status}
                         onChange={(e) => updateMutation.mutate({ id: req.id, status: e.target.value as RequestStatus })}
                         className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white hover:bg-gray-50 outline-none font-medium cursor-pointer"
                       >
-                        <option value="Pending">Marcar Pendiente</option>
-                        <option value="InReview">En Revisión</option>
-                        <option value="Approved">Aprobar</option>
-                        <option value="Completed">Completar</option>
-                        <option value="Rejected">Rechazar</option>
-                        <option value="Cancelled">Cancelar</option>
+                        <option value={req.status}>{req.status}</option>
+                        {requestTransitions[req.status].map(status => <option key={status} value={status}>{status}</option>)}
                       </select>
                     </td>
                   </tr>
@@ -214,8 +230,10 @@ export const RequestsPage = () => {
         </div>
       )}
 
+      {assigneesError && <p role="alert">{getApiErrorPresentation(assigneesError)}</p>}
+      {detailId && <RequestDetailModal id={detailId} onClose={() => setDetailId(null)} />}
       <CreateRequestModal 
-        isOpen={isModalOpen} 
+        isOpen={isModalOpen && can('REQUESTS', 'CREATE')}
         onClose={() => setIsModalOpen(false)} 
       />
     </div>

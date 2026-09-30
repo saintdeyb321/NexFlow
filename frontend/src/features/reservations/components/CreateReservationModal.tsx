@@ -1,3 +1,5 @@
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X, Clock, Calendar as CalendarIcon, Loader2 } from 'lucide-react';
@@ -18,6 +20,8 @@ interface CreateReservationModalProps {
 
 export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
   const globalLocationId = useAuthStore(state => state.selectedLocationId);
+  const { can } = usePermissions();
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
@@ -44,15 +48,16 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
   // 🔥 SPRINT 04: Obtenemos disponibilidad real desde el Backend
   const { data: slots = [], isLoading: isLoadingSlots } = useQuery({
-    queryKey: ['availability', globalLocationId, formData.serviceId, formData.date],
+    queryKey: ['availability', workspaceId, globalLocationId, formData.serviceId, formData.date],
     queryFn: () => getAvailability(globalLocationId, formData.serviceId, formData.date),
-    enabled: isOpen && !!globalLocationId && !!formData.serviceId && !!formData.date,
+    enabled: isOpen && !!workspaceId && !!globalLocationId && !!formData.serviceId && !!formData.date && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
   });
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!can('RESERVATIONS', 'CREATE')) return;
     setErrorMessage(null);
     
     if (!formData.timeSlot) {
@@ -77,8 +82,8 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
       onSuccess(); 
       onClose();   
-    } catch (error: any) {
-      setErrorMessage(error.message || 'Error al crear la reserva o conflicto de horario.');
+    } catch (error: unknown) {
+      setErrorMessage(getApiErrorPresentation(error));
     } finally {
       setIsSaving(false);
     }
@@ -179,7 +184,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
 
           <div className="pt-4 flex justify-end space-x-3">
             <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors">Cancelar</button>
-            <button type="submit" disabled={isSaving || !formData.timeSlot} className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
+            <button type="submit" disabled={isSaving || !formData.timeSlot || !can('RESERVATIONS', 'CREATE')} className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
               {isSaving ? 'Agendando...' : 'Confirmar Cita'}
             </button>
           </div>

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { Modal } from '../../../components/ui/Modal';
 import { ShieldAlert, Plus, Server } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { useSuperAdmin } from '../hooks/useSuperAdmin';
@@ -16,11 +17,22 @@ export const SuperAdminPage = () => {
   const [workspaceToRenew, setWorkspaceToRenew] = useState<WorkspaceSummaryDto | null>(null); // 🔥 Estado Renovación
   const [workspaceToModule, setWorkspaceToModule] = useState<WorkspaceSummaryDto | null>(null); // 🔥 Estado Módulo
 
-  const { workspaces, isLoading, isProvisioning, loadWorkspaces, handleProvision, handleToggleStatus, handleDelete } = useSuperAdmin();
-
-  useEffect(() => {
-    if (isSuperAdmin) loadWorkspaces();
-  }, [isSuperAdmin, loadWorkspaces]);
+  const { workspaces, isLoading, isProvisioning, errorMessage, handleProvision, handleToggleStatus, handleDelete } = useSuperAdmin();
+  const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'status'; workspace: WorkspaceSummaryDto } | null>(null);
+  const [confirmation, setConfirmation] = useState('');
+  const [isActing, setIsActing] = useState(false);
+  const executeAction = async () => {
+    if (!pendingAction || (pendingAction.kind === 'delete' && confirmation !== 'ELIMINAR')) return;
+    const workspace = workspaces.find(item => item.id === pendingAction.workspace.id);
+    if (!workspace || workspace.status === 5) return;
+    setIsActing(true);
+    try {
+      if (pendingAction.kind === 'delete') await handleDelete(workspace);
+      else await handleToggleStatus(workspace);
+      setPendingAction(null);
+      setConfirmation('');
+    } finally { setIsActing(false); }
+  };
 
   if (!isSuperAdmin) {
     return (
@@ -36,6 +48,15 @@ export const SuperAdminPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2">
+      {errorMessage && <p role="alert" className="mb-4 text-red-600">{errorMessage}</p>}
+      <Modal isOpen={Boolean(pendingAction)} onClose={() => { if (!isActing) { setPendingAction(null); setConfirmation(''); } }} title="Confirmar operación">
+        <p>{pendingAction?.workspace.name}</p>
+        {pendingAction?.kind === 'delete' ? <>
+          <p>La eliminación es irreversible. Escribe ELIMINAR para solicitarla.</p>
+          <input value={confirmation} onChange={event => setConfirmation(event.target.value)} className="border rounded-lg p-2 w-full" />
+        </> : <p>¿Confirmas el cambio de estado?</p>}
+        <button disabled={isActing || workspaces.find(item => item.id === pendingAction?.workspace.id)?.status === 5 || (pendingAction?.kind === 'delete' && confirmation !== 'ELIMINAR')} onClick={executeAction}>Confirmar</button>
+      </Modal>
       
       {/* Cabecera */}
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -67,8 +88,8 @@ export const SuperAdminPage = () => {
               <WorkspaceCard
                   key={ws.id} 
                   workspace={ws} 
-                  onToggleStatus={handleToggleStatus}
-                  onDelete={handleDelete}
+                  onToggleStatus={workspace => setPendingAction({ kind: 'status', workspace })}
+                  onDelete={workspace => { setConfirmation(''); setPendingAction({ kind: 'delete', workspace }); }}
                   onRenew={(w) => setWorkspaceToRenew(w)} // 🔥 Abre modal
                   onAssignModule={(w) => setWorkspaceToModule(w)} // 🔥 Abre modal
               />
@@ -85,12 +106,12 @@ export const SuperAdminPage = () => {
       />
 
       <RenewLicenseModal 
-        workspace={workspaceToRenew}
+        workspace={workspaces.find(workspace => workspace.id === workspaceToRenew?.id && workspace.status !== 5) ?? null}
         onClose={() => setWorkspaceToRenew(null)}
       />
 
       <AssignModuleModal 
-        workspace={workspaceToModule}
+        workspace={workspaces.find(workspace => workspace.id === workspaceToModule?.id && workspace.status !== 5) ?? null}
         onClose={() => setWorkspaceToModule(null)}
       />
       

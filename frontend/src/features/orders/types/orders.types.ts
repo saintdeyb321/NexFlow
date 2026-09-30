@@ -11,7 +11,8 @@ export interface OrderItemRecord {
   productName: string;
   quantity: number;
   unitPriceMinorUnits: number;
-  subtotalMinorUnits?: number; 
+  subtotalMinorUnits: number;
+  currency: string | null;
 }
 
 export interface OrderRecord {
@@ -20,10 +21,10 @@ export interface OrderRecord {
   consumerPhone: string;
   consumerName: string;
   status: OrderStatus;
-  currency: string;
-  totalAmountMinorUnits: number;
+  currency: string | null;
+  totalAmountMinorUnits: number | null;
   items: OrderItemRecord[];
-  notes?: string | null;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -35,3 +36,10 @@ export interface UpdateOrderStatusRequest {
 export interface UpdateOrderAmountRequest {
   totalAmountMinorUnits: number;
 }
+
+export const orderTransitions: Record<OrderStatus, readonly OrderStatus[]> = {
+  PendingReview: ['Approved', 'Rejected', 'Cancelled'],
+  Approved: ['Processing', 'Cancelled'],
+  Processing: ['Completed', 'Cancelled'],
+  Completed: [], Rejected: [], Cancelled: [],
+};

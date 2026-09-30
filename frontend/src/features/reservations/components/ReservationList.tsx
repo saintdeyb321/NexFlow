@@ -3,6 +3,9 @@ import type { ReservationDto } from '../types/reservation.types';
 import type { ServiceDto } from '../../services/types/services.types'; 
 
 interface ReservationListProps {
+  canEdit: boolean;
+  canCancel: boolean;
+  canComplete: boolean;
   reservations: ReservationDto[];
   services: ServiceDto[]; 
   timeZone: string; 
@@ -11,18 +14,11 @@ interface ReservationListProps {
   onComplete: (id: string) => void;
 }
 
-export const ReservationList = ({ reservations, services, timeZone, onEdit, onCancel, onComplete }: ReservationListProps) => {
+export const ReservationList = ({ canEdit, canCancel, canComplete, reservations, services, timeZone, onEdit, onCancel, onComplete }: ReservationListProps) => {
   
-  const normalizeStatus = (status: string | number) => {
-    if (status === 0 || status === '0') return 'PENDING';
-    if (status === 1 || status === '1') return 'CONFIRMED';
-    if (status === 2 || status === '2') return 'COMPLETED';
-    if (status === 3 || status === '3') return 'CANCELLED';
-    if (status === 4 || status === '4') return 'NOSHOW';
-    return String(status || '').toUpperCase();
-  };
+  const normalizeStatus = (status: ReservationDto['status']) => status.toUpperCase();
 
-  const getStatusBadge = (rawStatus: string | number) => {
+  const getStatusBadge = (rawStatus: ReservationDto['status']) => {
     const status = normalizeStatus(rawStatus);
     switch (status) {
       case 'CONFIRMED': return <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">Confirmada</span>;
@@ -44,8 +40,8 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
 
   // 🔥 SPRINT 11: Se eliminaron los "as any"
   const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
-    const dateA = new Date(a.startTime).getTime();
-    const dateB = new Date(b.startTime).getTime();
+    const dateA = new Date(a.dateTime).getTime();
+    const dateB = new Date(b.dateTime).getTime();
     return dateA - dateB;
   });
 
@@ -64,7 +60,7 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
         <tbody className="divide-y divide-gray-100">
           {sortedReservations.map((res) => {
             // 🔥 SPRINT 11: Se eliminaron los "as any"
-            const localTime = res.startTime ? new Date(new Date(res.startTime).toLocaleString('en-US', { timeZone })) : new Date();
+            const localTime = new Date(res.dateTime);
             
             const normalizedStatus = normalizeStatus(res.status);
             const isCancelled = normalizedStatus === 'CANCELLED';
@@ -73,7 +69,7 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
               <tr key={res.id} className={`hover:bg-gray-50 transition-colors ${isCancelled ? 'opacity-60 bg-gray-50/50' : ''}`}>
                 <td className="px-6 py-4">
                   <span className="font-semibold text-gray-900">
-                    {localTime.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
+                    {localTime.toLocaleTimeString('es-PE', { timeZone, hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </td>
                 <td className="px-6 py-4">
@@ -91,13 +87,13 @@ export const ReservationList = ({ reservations, services, timeZone, onEdit, onCa
                 <td className="px-6 py-4 text-right">
                   {normalizedStatus === 'PENDING' || normalizedStatus === 'CONFIRMED' ? (
                     <div className="flex justify-end gap-2">
-                      <button onClick={() => onComplete(res.id!)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
+                      <button disabled={!canComplete || res.status !== 'Confirmed'} onClick={() => onComplete(res.id!)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                       </button>
-                      <button onClick={() => onEdit(res)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Reagendar">
+                      <button disabled={!canEdit || res.status !== 'Confirmed'} onClick={() => onEdit(res)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Reagendar">
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => onCancel(res.id!)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
+                      <button disabled={!canCancel} onClick={() => onCancel(res.id!)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
                         <XCircle className="w-4 h-4" />
                       </button>
                     </div>

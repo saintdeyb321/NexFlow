@@ -1,3 +1,5 @@
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Map, MapPin, Pencil, X } from 'lucide-react';
@@ -7,16 +9,18 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
   const emptyLocation: Partial<LocationDto> = { name: '', address: '', reference: '', mapUrl: '', isMain: false };
   const [newLocation, setNewLocation] = useState<Partial<LocationDto>>(emptyLocation);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: locations = [], isLoading } = useQuery({
     queryKey: ['locations', workspaceId],
     queryFn: getLocations,
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && can('LOCATIONS', 'READ'),
     staleTime: 1000 * 60 * 15,
   });
 
@@ -29,16 +33,7 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
       setNewLocation(emptyLocation);
       setIsFormOpen(false);
     },
-    onError: (error: Error | Record<string, unknown>) => {
-      const err = error as { code?: string; message?: string };
-      const errorCode = err?.code || 'UNKNOWN_ERROR';
-      
-      if (errorCode === 'Licensing.LocationsLimitExceeded') {
-        showMessage('Has alcanzado el límite máximo de sedes permitidas por tu plan.', 'error');
-      } else {
-        showMessage(err?.message || 'Ocurrió un error al guardar la sede.', 'error');
-      }
-    }
+    onError: (error: unknown) => showMessage(getApiErrorPresentation(error), 'error')
   });
 
   const deleteMutation = useMutation({
@@ -47,8 +42,8 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
       queryClient.invalidateQueries({ queryKey: ['locations', workspaceId] });
       showMessage('Sede eliminada correctamente', 'success');
     },
-    onError: (error: any) => {
-      showMessage(error.message || 'Error al eliminar la sede.', 'error');
+    onError: (error: unknown) => {
+      showMessage(getApiErrorPresentation(error), 'error');
     }
   });
 
@@ -61,23 +56,24 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
   const handleSaveLocation = (e: React.FormEvent) => {
     e.preventDefault();
     const locToSave = { ...newLocation, isMain: locations.length === 0 ? true : newLocation.isMain } as LocationDto;
-    saveMutation.mutate(locToSave);
+    if (can('LOCATIONS', locToSave.id ? 'UPDATE' : 'CREATE')) saveMutation.mutate(locToSave);
   };
 
-  const handleDeleteLocation = (locationId: string) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar esta sede? Si tiene reservas a futuro, la acción será rechazada.')) {
-      deleteMutation.mutate(locationId);
-    }
-  };
+  const handleDeleteLocation = (locationId: string) => { if (can('LOCATIONS', 'DELETE')) setDeleteId(locationId); };
 
   if (isLoading) return <div className="p-6 text-center text-gray-500">Cargando sedes...</div>;
 
   return (
     <div className="space-y-6 animate-in fade-in">
+      {deleteId && <div role="dialog" className="bg-white border rounded-lg p-4">
+        <p>¿Eliminar esta sede? Las reservas futuras o referencias impedirán su eliminación.</p>
+        <button disabled={deleteMutation.isPending || !can('LOCATIONS', 'DELETE')} onClick={() => { deleteMutation.mutate(deleteId); setDeleteId(null); }}>Eliminar</button>
+        <button onClick={() => setDeleteId(null)}>Volver</button>
+      </div>}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
         <h3 className="font-bold text-gray-900">Gestión de Locales</h3>
         {!isFormOpen && (
-          <button onClick={() => { setNewLocation(emptyLocation); setIsFormOpen(true); }} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+          <button disabled={!can('LOCATIONS', 'CREATE')} onClick={() => { setNewLocation(emptyLocation); setIsFormOpen(true); }} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
             + Añadir Nueva Sede
           </button>
         )}
@@ -130,7 +126,7 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
             <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
               Cancelar
             </button>
-            <button type="submit" disabled={saveMutation.isPending} className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            <button type="submit" disabled={saveMutation.isPending || !can('LOCATIONS', newLocation.id ? 'UPDATE' : 'CREATE')} className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {saveMutation.isPending ? 'Guardando...' : (newLocation.id ? 'Guardar Cambios' : 'Añadir Sede')}
             </button>
           </div>
@@ -162,10 +158,10 @@ export const LocationsTab = ({ showMessage }: { showMessage: (msg: string, type:
                 </div>
                 
                 <div className="flex space-x-2">
-                  <button onClick={() => handleEditClick(loc)} className="p-2.5 opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded-lg transition-all" title="Editar Sede">
+                  <button disabled={!can('LOCATIONS', 'UPDATE')} onClick={() => handleEditClick(loc)} className="p-2.5 opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded-lg transition-all" title="Editar Sede">
                     <Pencil className="w-5 h-5" />
                   </button>
-                  <button onClick={() => handleDeleteLocation(loc.id!)} className="p-2.5 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-lg transition-all" title="Eliminar Sede">
+                  <button disabled={!can('LOCATIONS', 'DELETE')} onClick={() => handleDeleteLocation(loc.id!)} className="p-2.5 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-lg transition-all" title="Eliminar Sede">
                     <Trash2 className="w-5 h-5" />
                   </button>
                 </div>

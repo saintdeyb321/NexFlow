@@ -97,6 +97,24 @@ public class EntitlementService : IEntitlementService
     // =========================================================================
 
     // =========================================================================
+    public async Task<Dictionary<string, string[]>> GetEffectiveCapabilitiesAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        if (workspaceId == Guid.Empty) return new();
+        if (await IsSuperAdminAsync(cancellationToken))
+        {
+            var all = await _moduleRepository.GetAllAsync(cancellationToken);
+            var modules = await _moduleRepository.GetActiveModulesAsync(all.Select(m => m.Id), cancellationToken);
+            return modules.ToDictionary(m => m.Code.ToUpperInvariant(),
+                m => m.Capabilities.Select(c => c.Code.ToUpperInvariant()).Distinct().ToArray());
+        }
+        var role = await GetUserRoleAsync(workspaceId, cancellationToken);
+        if (string.IsNullOrEmpty(role)) return new();
+        var snapshot = await GetSnapshotAsync(workspaceId, cancellationToken);
+        if (!snapshot.IsValid) return new();
+        return snapshot.ModuleCapabilities.ToDictionary(m => m.Key,
+            m => m.Value.Where(c => EvaluateRoleMatrix(role, m.Key, c)).ToArray());
+    }
+
     public async Task<bool> HasCapabilityAccessAsync(Guid workspaceId, string moduleCode, string capabilityCode, CancellationToken cancellationToken)
     {
         if (await IsSuperAdminAsync(cancellationToken)) return true;

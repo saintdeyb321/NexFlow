@@ -1,15 +1,18 @@
 import { ConversationSidebar } from '../components/ConversationSidebar';
 import { ConversationThread } from '../components/ConversationThread';
 import { useConversations } from '../hooks/useConversations';
+import { usePermissions } from '../../../core/auth/permissions';
 import { ChevronLeft } from 'lucide-react'; // 🔥 Nuevo icono para volver
 
 export const InboxPage = () => {
+  const { can } = usePermissions();
   const {
     conversations,
     selectedChat,
     messages,
     isLoading,
     isError,
+    actionError,
     isChangingMode,
     isSending,
     isDeleting,
@@ -52,6 +55,8 @@ export const InboxPage = () => {
   }
 
   return (
+    <>
+    {actionError && <p role="alert">{actionError}</p>}
     <div className="flex h-[calc(100dvh-5rem)] md:h-[calc(100vh-8rem)] bg-white md:border md:border-gray-200 md:rounded-xl overflow-hidden shadow-sm -mx-4 md:mx-0">
       
       {/* 🔥 SPRINT 09: Master-Detail. Si hay chat seleccionado, ocultamos la lista en Móviles */}
@@ -71,7 +76,7 @@ export const InboxPage = () => {
             {/* Botón Volver para Móviles */}
             <div className="md:hidden absolute top-4 left-4 z-20">
               <button 
-                onClick={() => setSelectedChat(null as any)} 
+                onClick={() => setSelectedChat(null)}
                 className="p-1 bg-white border border-gray-200 text-gray-600 rounded-full shadow-sm hover:bg-gray-50 flex items-center"
               >
                 <ChevronLeft className="w-6 h-6" />
@@ -81,7 +86,7 @@ export const InboxPage = () => {
             <div className="absolute top-4 right-4 z-10 hidden md:block">
               <button 
                 onClick={handleDelete}
-                disabled={isDeleting}
+                disabled={isDeleting || !can('CONVERSATIONS', 'DELETE')}
                 className="px-3 py-1 bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 transition-colors text-sm font-medium disabled:opacity-50"
                 title="Eliminar permanentemente"
               >
@@ -120,5 +125,6 @@ export const InboxPage = () => {
         )}
       </div>
     </div>
+    </>
   );
 };

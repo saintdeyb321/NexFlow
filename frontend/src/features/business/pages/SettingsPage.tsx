@@ -5,19 +5,21 @@ import { ProfileTab } from '../components/ProfileTab';
 import { LocationsTab } from '../components/LocationsTab';
 import { HoursTab } from '../components/HoursTab';
 import { WhatsAppTab } from '../components/WhatsAppTab';
+import { usePermissions } from '../../../core/auth/permissions';
 
 export const SettingsPage = () => {
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
-  const entitlements = me?.entitlements || [];
+  const { hasModule, can } = usePermissions();
 
   // 🔥 SPRINT 08: Verificamos qué pestañas puede ver el usuario según la licencia
-  const hasLocations = entitlements.includes('LOCATIONS');
-  const hasHours = entitlements.includes('BUSINESS_HOURS');
-  const hasProfile = entitlements.includes('BUSINESS_PROFILE');
+  const hasLocations = can('LOCATIONS', 'READ');
+  const hasHours = can('BUSINESS_HOURS', 'READ');
+  const hasProfile = can('BUSINESS_PROFILE', 'READ');
+  const hasWhatsApp = hasModule('CONVERSATIONS') && can('CONVERSATIONS', 'READ');
   
   // Determinamos la pestaña por defecto
-  const defaultTab = hasProfile ? 'profile' : (hasLocations ? 'locations' : 'whatsapp');
+  const defaultTab = hasProfile ? 'profile' : hasLocations ? 'locations' : hasHours ? 'hours' : 'whatsapp';
   
   const [activeTab, setActiveTab] = useState<'profile' | 'locations' | 'hours' | 'whatsapp'>(defaultTab);
   const [message, setMessage] = useState({ text: '', type: '' });
@@ -27,7 +29,8 @@ export const SettingsPage = () => {
     if (activeTab === 'locations' && !hasLocations) setActiveTab(defaultTab);
     if (activeTab === 'hours' && !hasHours) setActiveTab(defaultTab);
     if (activeTab === 'profile' && !hasProfile) setActiveTab(defaultTab);
-  }, [hasLocations, hasHours, hasProfile]);
+    if (activeTab === 'whatsapp' && !hasWhatsApp) setActiveTab(defaultTab);
+  }, [activeTab, defaultTab, hasLocations, hasHours, hasProfile, hasWhatsApp]);
 
   const showMessage = (text: string, type: 'success' | 'error') => {
     setMessage({ text, type });
@@ -62,9 +65,9 @@ export const SettingsPage = () => {
           </button>
         )}
 
-        <button onClick={() => setActiveTab('whatsapp')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'whatsapp' ? 'border-green-600 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+        {hasWhatsApp && <button onClick={() => setActiveTab('whatsapp')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'whatsapp' ? 'border-green-600 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           <div className="flex items-center"><MessageCircle className="w-4 h-4 mr-2"/> WhatsApp</div>
-        </button>
+        </button>}
       </div>
 
       {message.text && (
@@ -77,7 +80,7 @@ export const SettingsPage = () => {
         {activeTab === 'profile' && hasProfile && <ProfileTab showMessage={showMessage} />}
         {activeTab === 'locations' && hasLocations && <LocationsTab showMessage={showMessage} />}
         {activeTab === 'hours' && hasHours && <HoursTab showMessage={showMessage} />}
-        {activeTab === 'whatsapp' && <WhatsAppTab showMessage={showMessage} />}
+        {activeTab === 'whatsapp' && hasWhatsApp && <WhatsAppTab showMessage={showMessage} />}
       </div>
     </div>
   );

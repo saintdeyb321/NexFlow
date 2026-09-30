@@ -56,7 +56,9 @@ public class ReservationsController : ControllerBase
         var endUtc = TimeZoneInfo.ConvertTimeToUtc(localDate.AddDays(1), workspaceZone);
 
         var reservations = await _reservationRepository.GetReservationsForDateAsync(WorkspaceId, locationId, startUtc, endUtc, cancellationToken);
-        return Ok(reservations);
+        return Ok(reservations.Select(reservation => new ReservationDto(
+            reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
+            reservation.CustomerName, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString())));
     }
 
     [HttpGet("availability")]

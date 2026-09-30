@@ -1,3 +1,5 @@
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Plus, Trash2, Pencil, MessageSquare } from 'lucide-react';
@@ -8,6 +10,7 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const FaqsPage = () => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -20,7 +23,7 @@ export const FaqsPage = () => {
   const { data: faqs = [], isLoading: isFaqsLoading } = useQuery({
     queryKey: ['faqs', workspaceId],
     queryFn: () => faqService.getFaqs('global'), // Reemplazamos la ubicación dinámica
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && can('FAQ', 'READ'),
     staleTime: 1000 * 60 * 10,
   });
 
@@ -31,7 +34,7 @@ export const FaqsPage = () => {
       setIsModalOpen(false);
       setNotification({ msg: 'Pregunta guardada correctamente.', type: 'success' });
     },
-    onError: (error: any) => setNotification({ msg: error.message || 'No se pudo guardar la pregunta.', type: 'error' })
+    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
   });
 
   const deleteMutation = useMutation({
@@ -41,7 +44,7 @@ export const FaqsPage = () => {
       setDeleteConfirmId(null);
       setNotification({ msg: 'Pregunta eliminada exitosamente.', type: 'success' });
     },
-    onError: (error: any) => setNotification({ msg: error.message || 'Error al eliminar la pregunta.', type: 'error' })
+    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
   });
 
   const handleOpenNew = () => {
@@ -88,7 +91,7 @@ export const FaqsPage = () => {
         
         <button 
           onClick={handleOpenNew}
-          disabled={faqs.length >= 20}
+          disabled={faqs.length >= 20 || !can('FAQ', 'CREATE')}
           className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm disabled:opacity-50 disabled:bg-gray-400"
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -131,10 +134,10 @@ export const FaqsPage = () => {
                 </div>
 
                 <div className="flex items-center space-x-2 md:self-start relative">
-                  <button onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
+                  <button disabled={!can('FAQ', 'UPDATE')} onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <button onClick={() => setDeleteConfirmId(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
+                  <button disabled={!can('FAQ', 'DELETE')} onClick={() => setDeleteConfirmId(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
                     <Trash2 className="w-4 h-4" />
                   </button>
 
@@ -143,7 +146,7 @@ export const FaqsPage = () => {
                       <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar pregunta?</p>
                       <div className="flex justify-between gap-2">
                         <button onClick={() => setDeleteConfirmId(null)} className="flex-1 text-xs bg-gray-100 py-1 rounded">No</button>
-                        <button onClick={() => deleteMutation.mutate(faq.id!)} disabled={deleteMutation.isPending} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí, borrar</button>
+                        <button onClick={() => deleteMutation.mutate(faq.id!)} disabled={deleteMutation.isPending || !can('FAQ', 'DELETE')} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí, borrar</button>
                       </div>
                     </div>
                   )}
@@ -155,7 +158,7 @@ export const FaqsPage = () => {
       </div>
 
       <FaqModal 
-        isOpen={isModalOpen} 
+        isOpen={isModalOpen && can('FAQ', faqToEdit ? 'UPDATE' : 'CREATE')}
         onClose={() => setIsModalOpen(false)}
         onSave={async (faq) => { await saveMutation.mutateAsync(faq); }}
         initialData={faqToEdit}

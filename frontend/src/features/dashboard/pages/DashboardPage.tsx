@@ -103,7 +103,7 @@ export const DashboardPage = () => {
   );
 };
 
-const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title: string, value: number, color: 'blue' | 'emerald' | 'purple' | 'orange' }) => {
+const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title: string, value: number | null, color: 'blue' | 'emerald' | 'purple' | 'orange' }) => {
   const colorStyles = {
     blue: 'bg-blue-50 text-blue-600',
     emerald: 'bg-emerald-50 text-emerald-600',
@@ -118,7 +118,7 @@ const StatCard = ({ icon, title, value, color }: { icon: React.ReactNode, title:
       </div>
       <div>
         <p className="text-sm text-gray-500 font-medium">{title}</p>
-        <h3 className="text-2xl font-bold text-gray-900">{value}</h3>
+        <h3 className="text-2xl font-bold text-gray-900">{value ?? '—'}</h3>
       </div>
     </div>
   );
@@ -134,9 +134,9 @@ const ModuleCard = ({ title, icon, colorClass, children }: { title: string, icon
   </div>
 );
 
-const MiniStat = ({ label, value }: { label: string, value: number }) => (
+const MiniStat = ({ label, value }: { label: string, value: number | null }) => (
   <div>
     <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{label}</p>
-    <p className="text-2xl font-bold text-gray-900">{value}</p>
+    <p className="text-2xl font-bold text-gray-900">{value ?? '—'}</p>
   </div>
 );

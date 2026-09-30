@@ -10,21 +10,40 @@ It is NOT an ERP, POS, inventory, accounting, payment, stock-management or logis
 - AI must never invent business facts, prices, products, services, locations, schedules or availability.
 - CATALOG = products.
 - SERVICES = services.
-- ORDERS integrates with CATALOG but is an independent licensed module.
-- RESERVATIONS integrates with SERVICES but is an independent licensed module.
+- ORDERS integrates with CATALOG but is independently licensed.
+- RESERVATIONS integrates with SERVICES but is independently licensed.
 - REQUESTS is an independent transversal workflow.
 - Preserve strict `WorkspaceId` isolation.
+- Backend is the security and business-rule authority.
+- Frontend permissions never replace backend authorization.
 
-## Backend invariants
+## Backend baseline
 
-- PostgreSQL owns transactional/durable infrastructure such as Inbox, Outbox, reservations, licenses and notifications.
-- Firestore stores business configuration and current document-oriented business data.
-- Redis is cache only, never the durable source of conversation state.
-- Accepted inbound messages must not be lost.
-- Business effects and outbound messages must be idempotent.
-- Messages from the same conversation must be processed in order.
-- AI `FromMe` echoes must never be interpreted as human takeover.
-- Critical work must not depend only on in-memory queues or `Task.Run`.
+Backend hardening A-H is considered stable.
+
+Do not redesign or re-audit hardened backend architecture unless the current task proves a concrete integration defect.
+
+- PostgreSQL owns transactional/durable infrastructure.
+- Firestore stores business configuration/document-oriented business data.
+- Redis is cache only.
+- Inbound/outbound/business effects must remain durable and idempotent.
+- Critical work must not depend only on memory or `Task.Run`.
+
+## Frontend invariants
+
+- Frontend contracts must exactly match current backend controllers/DTOs.
+- Never invent API fields or permissions.
+- Use `/me`/backend entitlements and capabilities as authorization metadata for UI.
+- Server state belongs to TanStack Query.
+- Do not duplicate server state in Zustand unless it is truly client/UI state.
+- Query/cache keys must include tenant/workspace identity where applicable.
+- Persisted cache must never leak data across users or workspaces.
+- Mutations must invalidate/update only the affected query keys.
+- Do not query Firestore directly for business data from frontend.
+- Avoid `any`; preserve TypeScript contracts.
+- Prefer React composition over inheritance.
+- Shared UI primitives belong in reusable components, not duplicated pages.
+- Never use `alert`, `confirm` or `prompt` for production UX after the shared dialog/toast system exists.
 
 ## Execution rules
 
@@ -32,35 +51,53 @@ The current repository is the source of truth.
 
 For every task:
 
-- Work only on the scope explicitly requested by the user.
+- Work only on the explicitly requested phase/scope.
 - Do NOT audit the complete repository unless explicitly requested.
-- Do NOT read `docs/BACKEND_HARDENING_PLAN.md` unless explicitly requested.
-- Do NOT browse the web unless explicitly requested or implementation is impossible from local code.
-- Inspect existing implementations before creating new abstractions.
-- Reuse existing services/interfaces whenever possible.
-- Use targeted searches (`rg`) instead of broad exploration.
-- Do not modify frontend, tests or `appsettings*` during backend tasks unless explicitly requested.
-- Do not create commits or push to GitHub.
-- Do not update roadmap/documentation unless explicitly requested.
-- Do not run `dotnet restore` unless required by missing assets/dependencies.
-- Run one final build after completing all requested changes:
-  `dotnet build backend/backend.slnx --no-restore`
-- If that build fails because restore is required, restore once and retry.
-- Do not mark work complete merely because it compiles.
+- Do NOT read roadmap/hardening documents unless the prompt explicitly asks for a specific one.
+- Do NOT browse the web unless explicitly requested or local code is insufficient.
+- Inspect existing implementation before adding abstractions.
+- Reuse existing services, hooks, components and patterns when appropriate.
+- Use targeted searches (`rg`) for direct callers/references.
+- Do not fix unrelated issues.
+- Do not perform cosmetic refactors outside scope.
+- Do not modify `appsettings*`, secrets, documentation or Git unless explicitly requested.
+- Do not create commits or push.
+- Do not update package versions unless explicitly required.
+- Do not advance to another phase.
+
+## Build rules
+
+Run builds only for projects touched by the task.
+
+If backend changed:
+
+`dotnet build backend/backend.slnx --no-restore`
+
+Restore once only if required.
+
+If frontend changed:
+
+run the existing frontend build command using the current lockfile/package manager.
+
+Do not upgrade dependencies merely to make a build pass.
+
+If both changed, build both.
 
 ## Completion rule
 
-A task is complete only when every acceptance criterion from the current user prompt is satisfied.
+A phase is complete only when every acceptance criterion in the current prompt is satisfied.
 
 Before finishing:
 
-1. inspect the modified diff;
-2. check the explicit acceptance criteria;
-3. run the final build once.
+1. inspect only the modified diff;
+2. verify the phase acceptance criteria;
+3. run required builds;
+4. report real blockers, never assumed success.
 
-Final response:
-- files changed;
-- build result;
-- unresolved blocker, if any.
+Final response should contain only:
+- files changed grouped by backend/frontend;
+- acceptance criteria OK/PENDING;
+- build results;
+- real blocker if any.
 
-Maximum final response: 10 lines.
+Keep the final response concise.

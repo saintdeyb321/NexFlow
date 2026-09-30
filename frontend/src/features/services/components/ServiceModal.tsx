@@ -1,3 +1,4 @@
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Save, MapPin, AlertCircle } from 'lucide-react';
@@ -16,7 +17,7 @@ interface ServiceModalProps {
 }
 
 export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceModalProps) => {
-  const workspaceId = useAuthStore((state: any) => state.me?.workspace?.id);
+  const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
@@ -94,8 +95,8 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
       
       await onSave(serviceToSave);
       onClose();
-    } catch (error: any) {
-      setFormError(error.message || "Ocurrió un error al guardar el servicio.");
+    } catch (error: unknown) {
+      setFormError(getApiErrorPresentation(error));
     } finally {
       setIsSaving(false);
     }

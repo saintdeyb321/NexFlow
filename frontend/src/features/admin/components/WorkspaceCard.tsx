@@ -14,6 +14,7 @@ export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete, onRenew, on
     switch (status) {
       case 0: return <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-yellow-100 text-yellow-700">PENDIENTE</span>;
       case 1: return <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-green-100 text-green-700">ACTIVO</span>;
+      case 5: return <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700">ELIMINACIÓN EN PROGRESO</span>;
       case 2: return <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-red-100 text-red-700">SUSPENDIDO</span>;
       default: return <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700">DESCONOCIDO</span>;
     }
@@ -38,15 +39,16 @@ export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete, onRenew, on
         
         <div className="flex items-center space-x-1 border-l border-gray-200 pl-4">
           
-          <button onClick={() => onAssignModule(workspace)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Asignar Módulo Extra">
+          <button disabled={workspace.status === 5} onClick={() => onAssignModule(workspace)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Asignar Módulo Extra">
             <Puzzle className="w-5 h-5" />
           </button>
 
-          <button onClick={() => onRenew(workspace)} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors" title="Renovar Licencia">
+          <button disabled={workspace.status === 5} onClick={() => onRenew(workspace)} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors" title="Renovar Licencia">
             <CalendarClock className="w-5 h-5" />
           </button>
 
           <button
+            disabled={workspace.status === 5}
             onClick={() => onToggleStatus(workspace)}
             className={`p-2 rounded-lg transition-colors ${workspace.status === 2 ? 'text-green-600 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50'}`}
             title={workspace.status === 2 ? 'Reactivar Licencia' : 'Suspender Licencia'}
@@ -55,6 +57,7 @@ export const WorkspaceCard = ({ workspace, onToggleStatus, onDelete, onRenew, on
           </button>
           
           <button
+            disabled={workspace.status === 5}
             onClick={() => onDelete(workspace)}
             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
             title="Eliminar Permanente"

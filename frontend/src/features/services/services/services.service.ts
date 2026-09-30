@@ -8,6 +8,10 @@ export const getServices = async (locationId?: string): Promise<ServiceDto[]> =>
 };
 
 export const saveService = async (service: ServiceDto): Promise<ServiceDto> => {
+  if (service.id) {
+    const { data } = await axiosClient.put<ServiceDto>(`/services/${service.id}`, service);
+    return data;
+  }
   const { data } = await axiosClient.post<ServiceDto>('/services', service);
   return data;
 };
@@ -22,6 +26,10 @@ export const getServiceCategories = async (): Promise<ServiceCategoryDto[]> => {
 };
 
 export const saveCategory = async (category: ServiceCategoryDto): Promise<ServiceCategoryDto> => {
+  if (category.id) {
+    const { data } = await axiosClient.put<ServiceCategoryDto>(`/catalog/categories/${category.id}`, category);
+    return data;
+  }
   const { data } = await axiosClient.post<ServiceCategoryDto>('/catalog/categories', category);
   return data;
 }

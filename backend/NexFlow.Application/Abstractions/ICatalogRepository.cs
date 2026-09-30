@@ -11,7 +11,7 @@ public interface ICatalogRepository
     Task<IEnumerable<BusinessCategoryDto>> GetCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken);
     Task<IEnumerable<BusinessCategoryDto>> GetActiveCategoriesAsync(Guid workspaceId, CancellationToken cancellationToken);
     Task<BusinessCategoryDto?> GetCategoryByIdAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
-    Task SaveCategoryAsync(Guid workspaceId, BusinessCategoryDto category, CancellationToken cancellationToken);
+    Task SaveCategoryAsync(Guid workspaceId, BusinessCategoryDto category, bool isCreate, CancellationToken cancellationToken);
     Task DeleteCategoryAsync(Guid workspaceId, string categoryId, CancellationToken cancellationToken);
 
     // ==========================================
@@ -24,6 +24,6 @@ public interface ICatalogRepository
 
     Task<IEnumerable<BusinessOfferingDto>> GetItemsByTypeAsync(Guid workspaceId, string type, CancellationToken cancellationToken);
 
-    Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, CancellationToken cancellationToken);
+    Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, CancellationToken cancellationToken);
     Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken);
 }

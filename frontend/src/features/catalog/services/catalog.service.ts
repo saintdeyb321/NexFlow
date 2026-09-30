@@ -1,7 +1,7 @@
 import { axiosClient } from '../../../core/api/axiosClient';
 import type { ProductCategoryDto, ProductDto } from '../types/catalog.types';
 
-export const getCategories = async (scope: 'PRODUCT' | 'SHARED' = 'PRODUCT'): Promise<ProductCategoryDto[]> => {
+export const getCategories = async (scope: 'PRODUCT' | 'SERVICE' | 'SHARED' = 'PRODUCT'): Promise<ProductCategoryDto[]> => {
   const { data } = await axiosClient.get<ProductCategoryDto[]>('/catalog/categories', { params: { scope } });
   return data;
 };
@@ -22,8 +22,16 @@ export const getProducts = async (locationId?: string): Promise<ProductDto[]> =>
 };
 
 export const saveProduct = async (product: ProductDto): Promise<ProductDto> => {
+  if (product.id) {
+    const { data } = await axiosClient.put<ProductDto>(`/catalog/${product.id}`, product);
+    return data;
+  }
   const { data } = await axiosClient.post<ProductDto>('/catalog', product);
   return data;
+};
+
+export const deleteCategory = async (id: string): Promise<void> => {
+  await axiosClient.delete(`/catalog/categories/${id}`);
 };
 
 export const deleteProduct = async (id: string): Promise<void> => {

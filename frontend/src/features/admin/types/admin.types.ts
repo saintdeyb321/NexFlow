@@ -12,7 +12,7 @@ export interface ProvisionWorkspaceRequest {
 export interface WorkspaceSummaryDto {
   id: string;
   name: string;
-  status: number;
+  status: 0 | 1 | 2 | 3 | 4 | 5;
   ownerEmail: string;
   createdAt: string;
 }

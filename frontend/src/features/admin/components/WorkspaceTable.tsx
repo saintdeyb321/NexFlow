@@ -25,7 +25,7 @@ export const WorkspaceTable = ({ workspaces }: { workspaces: WorkspaceSummaryDto
                 <td className="px-6 py-4 text-sm text-gray-500">{ws.ownerEmail}</td>
                 <td className="px-6 py-4">
                   <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                    Activo
+                    {{ 0: 'Pendiente', 1: 'Activo', 2: 'Suspendido', 3: 'Cancelado', 4: 'Archivado', 5: 'Eliminación en progreso' }[ws.status]}
                   </span>
                 </td>
               </tr>

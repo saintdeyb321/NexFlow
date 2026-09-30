@@ -1,14 +1,18 @@
+import { CategoryManager } from '../../catalog/components/CategoryManager';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, Trash2, FolderPlus, Edit2 } from 'lucide-react';
-import { getProducts, saveProduct, deleteProduct, getCategories, saveCategory } from '../services/catalog.service';
+import { getProducts, saveProduct, deleteProduct, getCategories } from '../services/catalog.service';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { ArtifactGenerator } from '../../artifacts/components/ArtifactGenerator';
 import { ProductModal } from '../components/ProductModal';
-import type { ProductCategoryDto, ProductDto } from '../types/catalog.types';
+import type { ProductDto } from '../types/catalog.types';
 
 export const CatalogPage = () => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const selectedLocationId = useAuthStore((state) => state.selectedLocationId);
 
@@ -19,18 +23,17 @@ export const CatalogPage = () => {
   const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showCategoryPrompt, setShowCategoryPrompt] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
   
   const { data: products = [], isLoading } = useQuery({ 
     queryKey: ['catalog', workspaceId, selectedLocationId], 
     queryFn: () => getProducts(selectedLocationId), 
-    enabled: !!workspaceId 
+    enabled: !!workspaceId && can('CATALOG', 'READ')
   });
   
   const { data: categories = [] } = useQuery({ 
     queryKey: ['catalogCategories', workspaceId, 'PRODUCT'], 
     queryFn: () => getCategories('PRODUCT'), 
-    enabled: !!workspaceId 
+    enabled: !!workspaceId && can('CATALOG', 'READ')
   });
 
   const saveMutation = useMutation({
@@ -41,7 +44,7 @@ export const CatalogPage = () => {
       setProductToEdit(null);
       setNotification({ msg: 'Producto guardado exitosamente.', type: 'success' });
     },
-    onError: (error: any) => setNotification({ msg: error.message || 'Error al guardar el producto.', type: 'error' })
+    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
   });
 
   const deleteMutation = useMutation({
@@ -51,31 +54,10 @@ export const CatalogPage = () => {
       setDeleteConfirmId(null);
       setNotification({ msg: 'Producto eliminado exitosamente.', type: 'success' });
     },
-    onError: (error: any) => setNotification({ msg: error.message || 'Error al eliminar el producto.', type: 'error' })
+    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
   });
 
-  const createCategoryMutation = useMutation({
-    mutationFn: saveCategory,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['catalogCategories', workspaceId] });
-      setShowCategoryPrompt(false);
-      setNewCategoryName('');
-      setNotification({ msg: 'Categoría creada exitosamente.', type: 'success' });
-    },
-    onError: (error: any) => setNotification({ msg: error.message || 'Error al crear la categoría.', type: 'error' })
-  });
 
-  const handleQuickAddCategory = () => {
-    if (newCategoryName.trim()) {
-      createCategoryMutation.mutate({ 
-        name: newCategoryName, 
-        isActive: true, 
-        displayOrder: 0, 
-        description: null, 
-        scope: 'PRODUCT' 
-      } as ProductCategoryDto);
-    }
-  };
 
   const handleCreateNew = () => {
     setProductToEdit(null);
@@ -99,25 +81,7 @@ export const CatalogPage = () => {
         </div>
       )}
 
-      {showCategoryPrompt && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl shadow-lg w-96">
-            <h3 className="text-lg font-bold mb-4">Nueva Categoría de Producto</h3>
-            <input 
-              type="text" 
-              autoFocus
-              placeholder="Ej: Bebidas, Postres, Herramientas..." 
-              value={newCategoryName} 
-              onChange={e => setNewCategoryName(e.target.value)}
-              className="w-full border rounded-lg p-2 mb-4"
-            />
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setShowCategoryPrompt(false)} className="px-4 py-2 bg-gray-100 rounded-lg text-gray-700">Cancelar</button>
-              <button onClick={handleQuickAddCategory} disabled={createCategoryMutation.isPending || !newCategoryName.trim()} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">Crear</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showCategoryPrompt && <CategoryManager scope="PRODUCT" onClose={() => setShowCategoryPrompt(false)} />}
 
       <div className="mb-6 flex justify-between items-end">
         <div>
@@ -128,16 +92,16 @@ export const CatalogPage = () => {
           <p className="text-sm text-gray-500 mt-1">Administra los productos que tu asistente puede mostrar a los clientes.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowCategoryPrompt(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
+          <button disabled={!can('CATALOG', 'READ')} onClick={() => setShowCategoryPrompt(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
             <FolderPlus className="w-4 h-4 mr-2" /> Categoría
           </button>
-          <button onClick={handleCreateNew} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+          <button disabled={!can('CATALOG', 'CREATE')} onClick={handleCreateNew} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
             <Plus className="w-4 h-4 mr-2" /> Producto
           </button>
         </div>
       </div>
       
-      <ArtifactGenerator scope="PRODUCT" title="Folleto de Productos (PDF)" />
+      {can('CATALOG', 'GENERATE') && <ArtifactGenerator scope="PRODUCT" title="Folleto de Productos (PDF)" />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.length === 0 ? (
@@ -169,7 +133,7 @@ export const CatalogPage = () => {
                   {/* Controles integrados CRUD */}
                   <div className="flex gap-1 relative">
                     <button 
-                      onClick={() => handleEdit(prod)}
+                      disabled={!can('CATALOG', 'UPDATE')} onClick={() => handleEdit(prod)}
                       className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
                       title="Editar"
                     >
@@ -177,7 +141,7 @@ export const CatalogPage = () => {
                     </button>
                     
                     <button 
-                      onClick={() => setDeleteConfirmId(prod.id!)} 
+                      disabled={!can('CATALOG', 'DELETE')} onClick={() => setDeleteConfirmId(prod.id!)}
                       className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
                       title="Eliminar"
                     >
@@ -189,7 +153,7 @@ export const CatalogPage = () => {
                         <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar producto?</p>
                         <div className="flex justify-between gap-2">
                           <button onClick={() => setDeleteConfirmId(null)} className="flex-1 text-xs bg-gray-100 py-1 rounded">No</button>
-                          <button onClick={() => deleteMutation.mutate(prod.id!)} disabled={deleteMutation.isPending} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí</button>
+                          <button onClick={() => deleteMutation.mutate(prod.id!)} disabled={deleteMutation.isPending || !can('CATALOG', 'DELETE')} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí</button>
                         </div>
                       </div>
                     )}
@@ -202,9 +166,9 @@ export const CatalogPage = () => {
       </div>
 
       <ProductModal
-        isOpen={isModalOpen}
+        isOpen={isModalOpen && can('CATALOG', productToEdit ? 'UPDATE' : 'CREATE')}
         onClose={() => { setIsModalOpen(false); setProductToEdit(null); }}
-        onSave={(data) => saveMutation.mutate(data)}
+        onSave={(data) => { if (can('CATALOG', data.id ? 'UPDATE' : 'CREATE')) saveMutation.mutate(data); }}
         isSaving={saveMutation.isPending}
         categories={categories}
         productToEdit={productToEdit}

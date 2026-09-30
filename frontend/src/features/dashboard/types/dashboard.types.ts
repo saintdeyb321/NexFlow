@@ -6,26 +6,26 @@ export interface ItemQueryMetricDto {
 
 export interface GlobalMetricsDto {
   conversationsToday: number;
-  aiMessagesHandled: number;
-  humanMessagesHandled: number;
-  totalHandoffsToday: number;
+  aiMessagesHandled: number | null;
+  humanMessagesHandled: number | null;
+  totalHandoffsToday: number | null;
 }
 
 export interface CatalogMetricsDto {
   totalProducts: number;
-  totalQueriesThisWeek: number;
-  topQueriedProducts: ItemQueryMetricDto[];
+  totalQueriesThisWeek: number | null;
+  topQueriedProducts: ItemQueryMetricDto[] | null;
 }
 
 export interface ServicesMetricsDto {
   totalServices: number;
-  totalQueriesThisWeek: number;
-  topQueriedServices: ItemQueryMetricDto[];
+  totalQueriesThisWeek: number | null;
+  topQueriedServices: ItemQueryMetricDto[] | null;
 }
 
 export interface ReservationsMetricsDto {
   reservationsToday: number;
-  pending: number;
+  pending: number | null;
   confirmed: number;
   cancelled: number;
 }

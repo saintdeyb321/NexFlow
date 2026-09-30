@@ -68,8 +68,8 @@ public class CatalogController : ControllerBase
 
         var modules = (await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var canReadProducts = modules.Contains("CATALOG");
-        var canReadServices = modules.Contains("SERVICES");
+        var canReadProducts = modules.Contains("CATALOG") && await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CATALOG", "READ", cancellationToken);
+        var canReadServices = modules.Contains("SERVICES") && await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "SERVICES", "READ", cancellationToken);
         if ((!canReadProducts && !canReadServices)
             || (targetScope == "PRODUCT" && !canReadProducts)
             || (targetScope == "SERVICE" && !canReadServices))
@@ -93,19 +93,8 @@ public class CatalogController : ControllerBase
         if (!await HasAccessToCategoryScope(category.Scope, true, cancellationToken))
             return StatusCode(403, "Acceso denegado al scope de la categoría.");
 
-        if (string.IsNullOrWhiteSpace(category.Id)) category.Id = Guid.NewGuid().ToString();
-        else
-        {
-            var existing = await _catalogRepository.GetCategoryByIdAsync(WorkspaceId, category.Id, cancellationToken);
-            if (existing != null)
-            {
-                if (!await HasAccessToCategoryScope(existing.Scope, true, cancellationToken))
-                    return StatusCode(403, "Acceso denegado a la categoría existente.");
-                if (existing.Scope != category.Scope)
-                    return BadRequest(new { message = "No se permite cambiar el scope de una categoría existente." });
-            }
-        }
-        try { await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken); }
+        category.Id = Guid.NewGuid().ToString();
+        try { await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, true, cancellationToken); }
         catch (DomainException ex) { return BadRequest(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
@@ -128,7 +117,7 @@ public class CatalogController : ControllerBase
             return BadRequest(new { message = "No se permite cambiar el scope de una categoría existente." });
 
         category.Id = categoryId;
-        try { await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, cancellationToken); }
+        try { await _catalogRepository.SaveCategoryAsync(WorkspaceId, category, false, cancellationToken); }
         catch (DomainException ex) { return BadRequest(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
@@ -183,11 +172,23 @@ public class CatalogController : ControllerBase
         if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
 
         if (product.Type != "PRODUCT") return BadRequest(new { message = "Tipo de offering inválido." });
-        if (string.IsNullOrWhiteSpace(product.Id)) product.Id = Guid.NewGuid().ToString();
-        try { await _catalogRepository.SaveItemAsync(WorkspaceId, product, cancellationToken); }
+        product.Id = Guid.NewGuid().ToString();
+        try { await _catalogRepository.SaveItemAsync(WorkspaceId, product, true, cancellationToken); }
         catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
         QueueArtifactInvalidation(WorkspaceId);
 
+        return Ok(product);
+    }
+
+    [HttpPut("{productId}")]
+    public async Task<IActionResult> UpdateProduct(string productId, [FromBody] ProductDto product, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessTo("CATALOG", cancellationToken)) return StatusCode(403, "Módulo CATALOG no contratado.");
+        if (product.Type != "PRODUCT") return BadRequest(new { message = "Tipo de offering inválido." });
+        product.Id = productId;
+        try { await _catalogRepository.SaveItemAsync(WorkspaceId, product, false, cancellationToken); }
+        catch (DomainException ex) { return BadRequest(new { message = ex.Message }); }
+        QueueArtifactInvalidation(WorkspaceId);
         return Ok(product);
     }
 

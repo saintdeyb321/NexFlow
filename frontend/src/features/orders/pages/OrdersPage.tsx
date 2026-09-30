@@ -1,3 +1,6 @@
+import { orderTransitions } from '../types/orders.types';
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ShoppingBag, Clock, CheckCircle, Package, XCircle, Eye, ShoppingCart } from 'lucide-react';
@@ -8,6 +11,7 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const OrdersPage = () => {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
@@ -19,7 +23,7 @@ export const OrdersPage = () => {
   const { data: orders = [], isLoading, isError } = useQuery({
     queryKey: ['orders', workspaceId, filterStatus],
     queryFn: () => getOrders(filterStatus),
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && can('ORDERS', 'READ'),
     refetchInterval: 30000,
   });
 
@@ -29,8 +33,8 @@ export const OrdersPage = () => {
       queryClient.invalidateQueries({ queryKey: ['orders', workspaceId] });
       setNotification({ msg: 'Estado de la cotización actualizado.', type: 'success' });
     },
-    onError: (error: any) => {
-      setNotification({ msg: error.message || 'Error al cambiar el estado de la cotización.', type: 'error' });
+    onError: (error: unknown) => {
+      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
     }
   });
 
@@ -127,7 +131,7 @@ export const OrdersPage = () => {
                       </p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-900">
-                      {order.status === 'PendingReview' && order.totalAmountMinorUnits === 0 
+                      {order.totalAmountMinorUnits === null || order.currency === null
                         ? <span className="text-gray-400 italic font-normal text-sm">Por definir</span>
                         : `${order.currency} ${(order.totalAmountMinorUnits / 100).toFixed(2)}`}
                     </td>
@@ -144,17 +148,13 @@ export const OrdersPage = () => {
                       </button>
                       
                       <select
-                        disabled={updateMutation.isPending}
+                        disabled={updateMutation.isPending || !can('ORDERS', 'UPDATE_STATUS') || orderTransitions[order.status].length === 0}
                         value={order.status}
                         onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
                         className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white hover:bg-gray-50 outline-none font-medium text-gray-700 cursor-pointer"
                       >
-                        <option value="PendingReview">Por Confirmar</option>
-                        <option value="Processing">En Revisión</option>
-                        <option value="Approved">Aprobar</option>
-                        <option value="Completed">Marcar Resuelto</option>
-                        <option value="Rejected">Rechazar</option>
-                        <option value="Cancelled">Cancelar</option>
+                        <option value={order.status}>{order.status}</option>
+                        {orderTransitions[order.status].map(status => <option key={status} value={status}>{status}</option>)}
                       </select>
                     </td>
                   </tr>

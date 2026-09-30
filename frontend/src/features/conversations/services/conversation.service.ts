@@ -1,5 +1,5 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { Conversation, Message, ConversationMode } from '../types/conversation.types';
+import type { Conversation, Message, ConversationMode, ManualMessageResult } from '../types/conversation.types';
 
 export const getConversations = async (limit = 50): Promise<Conversation[]> => {
   const { data } = await axiosClient.get<Conversation[]>('/conversations', { params: { limit } });
@@ -12,18 +12,18 @@ export const getMessages = async (conversationId: string, limit = 50): Promise<M
 };
 
 export const takeOverConversation = async (conversationId: string): Promise<{ message: string, mode: ConversationMode }> => {
-  const { data } = await axiosClient.post(`/conversations/${conversationId}/takeover`);
+  const { data } = await axiosClient.post<{ message: string; mode: ConversationMode }>(`/conversations/${conversationId}/takeover`);
   return data;
 };
 
 export const releaseConversation = async (conversationId: string): Promise<{ message: string, mode: ConversationMode }> => {
-  const { data } = await axiosClient.post(`/conversations/${conversationId}/release`);
+  const { data } = await axiosClient.post<{ message: string; mode: ConversationMode }>(`/conversations/${conversationId}/release`);
   return data;
 };
 
-export const sendManualMessage = async (conversationId: string, content: string): Promise<Message> => {
-  const { data } = await axiosClient.post<Message>(`/conversations/${conversationId}/messages`, { content });
-  return data;
+export const sendManualMessage = async (conversationId: string, content: string): Promise<ManualMessageResult> => {
+  const response = await axiosClient.post<Message>(`/conversations/${conversationId}/messages`, { content });
+  return { message: response.data, accepted: response.status === 202 };
 };
 
 export const deleteConversation = async (conversationId: string): Promise<void> => {

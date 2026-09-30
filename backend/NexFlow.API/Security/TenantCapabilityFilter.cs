@@ -15,6 +15,21 @@ public sealed class TenantCapabilityFilter(IEntitlementService entitlements, IWo
         if (context.ActionDescriptor is not ControllerActionDescriptor action) { await next(); return; }
         var read = HttpMethods.IsGet(context.HttpContext.Request.Method);
         var name = action.ActionName;
+        if (action.ControllerName == "Storage")
+        {
+            var ct = context.HttpContext.RequestAborted;
+            var allowed = false;
+            foreach (var offeringModule in new[] { "CATALOG", "SERVICES" })
+                allowed |= await entitlements.HasCapabilityAccessAsync(workspace.CurrentWorkspaceId, offeringModule, "CREATE", ct)
+                    || await entitlements.HasCapabilityAccessAsync(workspace.CurrentWorkspaceId, offeringModule, "UPDATE", ct);
+            if (!allowed)
+            {
+                context.Result = new ObjectResult(new { code = "Security.CapabilityDenied", message = "No tienes permiso para modificar productos o servicios." }) { StatusCode = 403 };
+                return;
+            }
+            await next();
+            return;
+        }
         if (action.ControllerName == "Clients" && name != "DeleteClient")
         {
             var target = context.ActionArguments.Values.Select(v => v?.GetType().GetProperty("WorkspaceId")?.GetValue(v)).OfType<Guid>().FirstOrDefault();
@@ -34,7 +49,7 @@ public sealed class TenantCapabilityFilter(IEntitlementService entitlements, IWo
         }
         var module = action.ControllerName switch
         {
-            "Reservations" => "RESERVATIONS", "Requests" => "REQUESTS", "Orders" => "ORDERS",
+            "Reservations" => "RESERVATIONS", "Requests" or "Members" => "REQUESTS", "Orders" => "ORDERS",
             "Services" => "SERVICES", "Catalog" => "CATALOG", "Conversations" or "Dashboard" => "CONVERSATIONS",
             "Business" => name.Contains("Hours") ? "BUSINESS_HOURS" : name.Contains("Location") ? "LOCATIONS"
                 : name.Contains("Faq") ? "FAQ" : name.Contains("WhatsApp") ? "CONVERSATIONS" : "BUSINESS_PROFILE",
@@ -50,6 +65,20 @@ public sealed class TenantCapabilityFilter(IEntitlementService entitlements, IWo
                 scope = (await context.HttpContext.RequestServices.GetRequiredService<ICatalogRepository>().GetCategoryByIdAsync(workspace.CurrentWorkspaceId, (string)categoryId!, context.HttpContext.RequestAborted))?.Scope;
             scope = scope?.Trim().ToUpperInvariant();
             if (string.Equals(scope, "SERVICE", StringComparison.OrdinalIgnoreCase)) module = "SERVICES";
+            if (scope == "SHARED" && name is "CreateCategory" or "UpdateCategory" or "DeleteCategory")
+            {
+                var cap = HttpMethods.IsDelete(context.HttpContext.Request.Method) ? "DELETE"
+                    : HttpMethods.IsPost(context.HttpContext.Request.Method) ? "CREATE" : "UPDATE";
+                var ct = context.HttpContext.RequestAborted;
+                if (!await entitlements.HasCapabilityAccessAsync(workspace.CurrentWorkspaceId, "CATALOG", cap, ct)
+                    || !await entitlements.HasCapabilityAccessAsync(workspace.CurrentWorkspaceId, "SERVICES", cap, ct))
+                {
+                    context.Result = new ObjectResult(new { code = "Security.CapabilityDenied", message = "La categoría compartida requiere permiso en productos y servicios." }) { StatusCode = 403 };
+                    return;
+                }
+                await next();
+                return;
+            }
             if (name == "GetCategories" && (string.IsNullOrWhiteSpace(scope) || string.Equals(scope, "SHARED", StringComparison.OrdinalIgnoreCase)))
             {
                 var ct = context.HttpContext.RequestAborted;
@@ -60,7 +89,7 @@ public sealed class TenantCapabilityFilter(IEntitlementService entitlements, IWo
         var capability = name switch
         {
             "GetAvailability" => "CHECK_AVAILABILITY", "UpdateReservationStatus" => "COMPLETE", "CancelReservation" => "CANCEL",
-            "AssignRequest" => "ASSIGN", "UpdateStatus" => "UPDATE_STATUS", "SendManualMessage" => "SEND_MESSAGE",
+            "AssignRequest" or "GetMembers" => "ASSIGN", "UpdateStatus" => "UPDATE_STATUS", "SendManualMessage" => "SEND_MESSAGE",
             "TakeOverConversation" => "TAKEOVER", "ReleaseConversation" => "RELEASE",
             "GenerateArtifact" => "GENERATE", "ConnectWhatsApp" or "DisconnectWhatsApp" => "CONFIGURE",
             _ => read ? "READ" : HttpMethods.IsDelete(context.HttpContext.Request.Method) ? "DELETE"

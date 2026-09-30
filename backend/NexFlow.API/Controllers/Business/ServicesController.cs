@@ -64,12 +64,24 @@ public class ServicesController : ControllerBase
         if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
 
         if (service.Type != "SERVICE") return BadRequest(new { message = "Tipo de offering inválido." });
-        if (string.IsNullOrWhiteSpace(service.Id)) service.Id = Guid.NewGuid().ToString();
-        try { await _catalogRepository.SaveItemAsync(WorkspaceId, service, cancellationToken); }
+        service.Id = Guid.NewGuid().ToString();
+        try { await _catalogRepository.SaveItemAsync(WorkspaceId, service, true, cancellationToken); }
         catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
 
         QueueArtifactInvalidation(WorkspaceId);
 
+        return Ok(service);
+    }
+
+    [HttpPut("{serviceId}")]
+    public async Task<IActionResult> UpdateService(string serviceId, [FromBody] ServiceDto service, CancellationToken cancellationToken)
+    {
+        if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
+        if (service.Type != "SERVICE") return BadRequest(new { message = "Tipo de offering inválido." });
+        service.Id = serviceId;
+        try { await _catalogRepository.SaveItemAsync(WorkspaceId, service, false, cancellationToken); }
+        catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
+        QueueArtifactInvalidation(WorkspaceId);
         return Ok(service);
     }
 

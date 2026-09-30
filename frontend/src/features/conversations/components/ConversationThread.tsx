@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Loader2, Image as ImageIcon } from 'lucide-react';
-import type { Conversation, Message } from '../types/conversation.types';
+import type { Conversation, Message, ManualMessageResult } from '../types/conversation.types';
+import { usePermissions } from '../../../core/auth/permissions';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 
 interface ConversationThreadProps {
   chat: Conversation;
@@ -9,12 +11,13 @@ interface ConversationThreadProps {
   isSending: boolean;
   onTakeOver: () => void;
   onRelease: () => void;
-  onSendMessage: (content: string) => Promise<any>; // 🔥 Acepta Promesa
+  onSendMessage: (content: string) => Promise<ManualMessageResult>;
 }
 
 export const ConversationThread = ({
   chat, messages, isChangingMode, isSending, onTakeOver, onRelease, onSendMessage
 }: ConversationThreadProps) => {
+  const { can } = usePermissions();
   const [newMessage, setNewMessage] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null); 
@@ -28,10 +31,12 @@ export const ConversationThread = ({
     if (!newMessage.trim()) return;
     setSendError(null);
     try {
-      await onSendMessage(newMessage.trim());
+      const result = await onSendMessage(newMessage.trim());
       setNewMessage(''); 
-    } catch (error: any) {
-      setSendError("No se pudo enviar el mensaje. Intenta nuevamente.");
+      if (result.message.status === 'UnknownDelivery') setSendError('Entrega sin confirmar. Revisa el estado antes de reenviar.');
+      else if (result.accepted) setSendError('Envío aceptado; la entrega aún no está confirmada.');
+    } catch (error: unknown) {
+      setSendError(getApiErrorPresentation(error));
     }
   };
 
@@ -46,12 +51,12 @@ export const ConversationThread = ({
         </div>
         <div>
           {chat.mode === 'Automatic' ? (
-            <button onClick={onTakeOver} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={onTakeOver} disabled={isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
               {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <User className="w-4 h-4 mr-2" />} 
               {isChangingMode ? 'Procesando...' : 'Asumir Control'}
             </button>
           ) : (
-            <button onClick={onRelease} disabled={isChangingMode} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={onRelease} disabled={isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
               {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bot className="w-4 h-4 mr-2" />} 
               {isChangingMode ? 'Procesando...' : 'Reactivar IA'}
             </button>
@@ -116,6 +121,7 @@ export const ConversationThread = ({
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   {/* 🔥 SPRINT 05: Mostramos si falló la entrega */}
                   {msg.status === 'Failed' && <span className="ml-2 text-red-500 font-bold">Error de envío</span>}
+                  {msg.direction === 'outbound' && msg.status !== 'Failed' && <span className="ml-2">{{ Pending: 'Pendiente', Attempting: 'Enviando', Sent: 'Enviado', UnknownDelivery: 'Entrega sin confirmar' }[msg.status]}</span>}
                 </div>
               </div>
             </div>
@@ -133,12 +139,12 @@ export const ConversationThread = ({
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder={chat.mode === 'Automatic' ? 'Bloqueado. Asume el control manual para enviar un mensaje...' : 'Escribe un mensaje al cliente...'}
-            disabled={chat.mode === 'Automatic' || isSending || isChangingMode}
+            disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !can('CONVERSATIONS', 'SEND_MESSAGE')}
             className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
           />
           <button 
             onClick={handleSend}
-            disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim()}
+            disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim() || !can('CONVERSATIONS', 'SEND_MESSAGE')}
             className="ml-3 p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
             {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
