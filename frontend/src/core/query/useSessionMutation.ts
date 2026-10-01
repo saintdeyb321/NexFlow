@@ -7,7 +7,7 @@ export const useSessionMutation = <TData, TVariables = void>(
   options: Omit<UseMutationOptions<TData, Error, TVariables, number>, 'onMutate'>,
 ) => {
   const sessionAtRender = getQuerySession();
-  return useMutation({
+  return useMutation<TData, Error, TVariables, number>({
   ...options,
   mutationFn: (variables, context) => {
     if (!isCurrentQuerySession(sessionAtRender)) return Promise.reject(new Error('La sesión ha cambiado.'));

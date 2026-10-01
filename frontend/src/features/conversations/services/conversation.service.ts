@@ -11,6 +11,14 @@ export const getMessages = async (conversationId: string, limit = 50, after?: st
   return data;
 };
 
+export const MESSAGE_STATUS_BATCH_LIMIT = 20;
+export const getMessagesByIds = async (conversationId: string, ids: readonly string[], signal?: AbortSignal): Promise<Message[]> => {
+  const params = new URLSearchParams();
+  for (const id of ids) params.append('ids', id);
+  const { data } = await axiosClient.get<Message[]>(`/conversations/${conversationId}/messages`, { params, signal });
+  return data;
+};
+
 export const takeOverConversation = async (conversationId: string): Promise<{ message: string, mode: ConversationMode }> => {
   const { data } = await axiosClient.post<{ message: string; mode: ConversationMode }>(`/conversations/${conversationId}/takeover`);
   return data;

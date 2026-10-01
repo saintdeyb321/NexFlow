@@ -439,6 +439,17 @@ public class FirestoreConversationRepository : IConversationRepository
         return after.HasValue ? messages : messages.Reverse();
     }
 
+    public async Task<IEnumerable<MessageRecord>> GetMessagesByIdsAsync(Guid workspaceId, string conversationId,
+        IReadOnlyCollection<string> ids, CancellationToken cancellationToken)
+    {
+        if (ids.Count is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(ids));
+        var collection = GetCollection(workspaceId).Document(conversationId).Collection("messages");
+        var documents = await _db.GetAllSnapshotsAsync(ids.Select(collection.Document), cancellationToken);
+        return documents.Where(document => document.Exists).Select(MapMessage)
+            .Where(message => message.Direction == "outbound")
+            .OrderBy(message => message.Timestamp).ThenBy(message => message.Id, StringComparer.Ordinal);
+    }
+
     private static ConversationRecord MapToConversation(DocumentSnapshot doc)
     {
         var record = new ConversationRecord

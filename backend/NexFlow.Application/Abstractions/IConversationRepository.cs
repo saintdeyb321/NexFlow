@@ -26,6 +26,7 @@ public interface IConversationRepository
     Task AddMessageAsync(Guid workspaceId, string conversationId, MessageRecord message, CancellationToken cancellationToken);
     Task<IEnumerable<ConversationRecord>> GetRecentConversationsAsync(Guid workspaceId, int limit, CancellationToken cancellationToken, DateTime? after = null, string? afterId = null);
     Task<IEnumerable<MessageRecord>> GetMessagesAsync(Guid workspaceId, string conversationId, int limit, CancellationToken cancellationToken, DateTime? after = null, string? afterId = null);
+    Task<IEnumerable<MessageRecord>> GetMessagesByIdsAsync(Guid workspaceId, string conversationId, IReadOnlyCollection<string> ids, CancellationToken cancellationToken);
     Task<ConversationRecord?> GetConversationAsync(Guid workspaceId, string conversationId, CancellationToken cancellationToken);
 }
 

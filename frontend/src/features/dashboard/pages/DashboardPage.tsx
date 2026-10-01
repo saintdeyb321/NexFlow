@@ -3,12 +3,14 @@ import { queryKeys } from '../../../core/query/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 import { MessageSquare, Bot, UserCog, CalendarCheck, ClipboardList, ShoppingBag, Zap, Activity } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
+import { usePermissions } from '../../../core/auth/permissions';
 import { getDashboardSummary } from '../services/dashboard.service';
 
 export const DashboardPage = () => {
   const isPageVisible = usePageVisible();
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
+  const { can } = usePermissions();
   
   // 🔥 SPRINT 09: Extracción de nombre segura sin any (usando la interfaz correcta)
   const adminName = me?.user?.firstName || me?.user?.email?.split('@')[0] || 'Administrador';
@@ -17,7 +19,7 @@ export const DashboardPage = () => {
     ...queryPolicies.dynamic,
     queryKey: queryKeys.dashboard.summary(workspaceId),
     queryFn: ({ signal }) => getDashboardSummary(signal),
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && can('CONVERSATIONS', 'READ'),
     refetchInterval: isPageVisible ? 60000 : false,
   });
 

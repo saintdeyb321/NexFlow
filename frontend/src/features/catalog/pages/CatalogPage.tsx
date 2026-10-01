@@ -1,5 +1,6 @@
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
+import { queryPolicies } from '../../../core/query/queryPolicies';
 import { CategoryManager } from '../../catalog/components/CategoryManager';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
@@ -27,12 +28,14 @@ export const CatalogPage = () => {
   const [showCategoryPrompt, setShowCategoryPrompt] = useState(false);
   
   const { data: products = [], isLoading } = useQuery({ 
+    ...queryPolicies.stable,
     queryKey: queryKeys.catalog.products(workspaceId, selectedLocationId), 
     queryFn: ({ signal }) => getProducts(selectedLocationId, signal), 
     enabled: !!workspaceId && can('CATALOG', 'READ')
   });
   
   const { data: categories = [] } = useQuery({ 
+    ...queryPolicies.stable,
     queryKey: queryKeys.catalog.categories(workspaceId, 'PRODUCT'), 
     queryFn: ({ signal }) => getCategories('PRODUCT', signal), 
     enabled: !!workspaceId && can('CATALOG', 'READ')

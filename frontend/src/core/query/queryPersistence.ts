@@ -1,11 +1,12 @@
 import { dehydrate, hashKey, hydrate } from '@tanstack/react-query';
-import type { DehydratedQuery, QueryKey } from '@tanstack/react-query';
+import type { DehydratedState, QueryKey } from '@tanstack/react-query';
 import type { MeResponse } from '../types/auth.types';
 import { queryClient } from './queryClient';
 import { STABLE_TTL, stableQueryModule } from './queryPolicies';
 
 const SCHEMA_VERSION = 1;
 const PREFIX = `nexflow:qcache:v${SCHEMA_VERSION}:`;
+type DehydratedQuery = DehydratedState['queries'][number];
 type Identity = { userId: string; workspaceId: string; permissions: string; readable: Set<string> };
 let identity: Identity | null = null;
 let generation = 0;

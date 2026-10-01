@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { compareTimestamps, fetchIncremental, mergeById } from '../../../core/query/incremental';
 import { useSearchParams } from 'react-router-dom';
-import { getConversations, getMessages, takeOverConversation, releaseConversation, sendManualMessage, deleteConversation } from '../services/conversation.service';
+import { getConversations, getMessages, getMessagesByIds, MESSAGE_STATUS_BATCH_LIMIT, takeOverConversation, releaseConversation, sendManualMessage, deleteConversation } from '../services/conversation.service';
 import type { Conversation, Message } from '../types/conversation.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions } from '../../../core/auth/permissions';
@@ -28,6 +28,7 @@ export const useConversations = () => {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(urlConversationId);
   const conversationsKey = queryKeys.conversations.list(workspaceId);
   const messagesKey = queryKeys.messages.list(workspaceId, selectedConversationId);
+  const reconciliationCursor = useRef<{ conversationId: string | null; lastId?: string }>({ conversationId: null });
   const compareConversations = (a: Conversation, b: Conversation) => compareTimestamps(b.lastMessageAt, a.lastMessageAt) || a.id.localeCompare(b.id);
   const compareMessages = (a: Message, b: Message) => compareTimestamps(a.timestamp, b.timestamp) || a.id.localeCompare(b.id);
 
@@ -53,11 +54,25 @@ export const useConversations = () => {
     queryFn: async ({ signal }) => {
       const current = queryClient.getQueryData<Message[]>(messagesKey);
       const newest = current?.[current.length - 1]?.timestamp;
-      // Include unresolved deliveries until their status settles, even if newer inbound messages arrive.
-      const unresolved = current?.find(message => message.direction === 'outbound' && ['Pending', 'Attempting', 'UnknownDelivery'].includes(message.status))?.timestamp;
-      const after = !queryClient.getQueryState(messagesKey)?.isInvalidated && (unresolved ?? newest) || undefined;
+      const after = !queryClient.getQueryState(messagesKey)?.isInvalidated && newest || undefined;
       const delta = await fetchIncremental((cursor, afterId) => getMessages(selectedConversationId!, 50, cursor, signal, afterId), record => record.timestamp, after);
-      return mergeById(after ? queryClient.getQueryData<Message[]>(messagesKey) ?? [] : [], delta, compareMessages);
+      const merged = mergeById(after ? queryClient.getQueryData<Message[]>(messagesKey) ?? [] : [], delta, compareMessages);
+      if (!after) return merged;
+
+      // Status writes already replace the mirrored message. Read at most 20 old unresolved IDs per poll,
+      // rotating through them; timeline reads always advance from the newest timestamp.
+      const fetchedIds = new Set(delta.map(message => message.id));
+      const unresolvedIds = merged.filter(message => message.direction === 'outbound'
+        && ['Pending', 'Attempting', 'UnknownDelivery'].includes(message.status) && !fetchedIds.has(message.id))
+        .map(message => message.id).sort();
+      if (unresolvedIds.length === 0) return merged;
+      const lastId = reconciliationCursor.current.conversationId === selectedConversationId ? reconciliationCursor.current.lastId : undefined;
+      const next = lastId ? unresolvedIds.findIndex(id => id > lastId) : 0;
+      const start = next < 0 ? 0 : next;
+      const ids = [...unresolvedIds.slice(start), ...unresolvedIds.slice(0, start)].slice(0, MESSAGE_STATUS_BATCH_LIMIT);
+      const statuses = await getMessagesByIds(selectedConversationId!, ids, signal);
+      reconciliationCursor.current = { conversationId: selectedConversationId, lastId: ids[ids.length - 1] };
+      return mergeById(merged, statuses, compareMessages);
     },
     enabled: !!workspaceId && !!selectedConversationId && can('CONVERSATIONS', 'READ'),
     refetchInterval: visible ? 15000 : false,
@@ -117,7 +132,7 @@ export const useConversations = () => {
       if (!queryClient.getQueryData(queryKeys.messages.list(variables.workspaceId, variables.conversationId)))
         void queryClient.invalidateQueries({ queryKey: messageFamily });
       queryClient.setQueriesData<Conversation[]>({ queryKey: queryKeys.conversations.lists(variables.workspaceId) }, current =>
-        current?.map(conversation => conversation.id === variables.conversationId
+        current?.map<Conversation>(conversation => conversation.id === variables.conversationId
           ? { ...conversation, lastMessageAt: result.message.timestamp, mode: 'Human', handoffReason: 'ManualIntervention' } : conversation).sort(compareConversations));
     }
   });
