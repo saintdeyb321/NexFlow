@@ -1,5 +1,6 @@
 import { Button, IconButton } from '../../../components/ui/Button';
-import { Card } from '../../../components/ui/Layout';
+import { OfferingImage } from '../../../components/ui/OfferingImage';
+import { Card, PageHeader } from '../../../components/ui/Layout';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, EmptyState, ErrorState, StatusBadge } from '../../../components/ui/Feedback';
 import { useToast } from '../../../components/ui/Toast';
@@ -11,7 +12,7 @@ import { CategoryManager } from '../../catalog/components/CategoryManager';
 import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Tag, Trash2, Scissors, FolderPlus } from 'lucide-react';
+import { Plus, Pencil, Trash2, Scissors, FolderPlus } from 'lucide-react';
 import { getServices, saveService, deleteService } from '../services/services.service';
 import { ServiceModal } from '../components/ServiceModal';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -77,78 +78,43 @@ export const ServicesPage = () => {
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   return (
-    <div className="max-w-5xl mx-auto animate-in fade-in">
+    <div className="nf-page">
 
       {showCategoryPrompt && <CategoryManager scope="SERVICE" onClose={() => setShowCategoryPrompt(false)} />}
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <div className="flex items-center">
-          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
-             <Scissors className="w-5 h-5 text-purple-600" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Servicios</h1>
-            <p className="text-sm text-gray-500 mt-1">Configura las prestaciones y su duración para las reservas.</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button variant="secondary"
-            disabled={!can('SERVICES', 'READ')} onClick={() => setShowCategoryPrompt(true)}
-            className="flex items-center px-4 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            <FolderPlus className="w-4 h-4 mr-2" />
-            Categoría
-          </Button>
-
-          <Button variant="primary"
-            disabled={!can('SERVICES', 'CREATE')} onClick={handleOpenNew}
-            className="flex items-center px-5 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Nuevo Servicio
-          </Button>
-        </div>
-      </div>
+      <PageHeader title="Servicios" description="Presenta tus servicios y gestiona su disponibilidad por sede." icon={<Scissors aria-hidden="true" className="w-5 h-5" />} actions={
+        <><Button variant="secondary" disabled={!can('SERVICES', 'READ')} onClick={() => setShowCategoryPrompt(true)}><FolderPlus aria-hidden="true" className="w-4 h-4" /> Categorías</Button>
+        <Button disabled={!can('SERVICES', 'CREATE')} onClick={handleOpenNew}><Plus aria-hidden="true" className="w-4 h-4" /> Nuevo servicio</Button></>
+      } />
 
       {can('SERVICES', 'GENERATE') && <ArtifactGenerator scope="SERVICE" title="Folleto de Servicios (PDF)" />}
 
       <Card className="mt-6">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-line pb-2">
           Lista de Servicios ({services.length})
         </h3>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {services.length === 0 ? (
-            <EmptyState title="No hay servicios disponibles en esta sede." />
+            <EmptyState className="col-span-full" title="No hay servicios disponibles en esta sede." action={can('SERVICES', 'CREATE') ? <Button onClick={handleOpenNew}>Crear servicio</Button> : undefined} />
           ) : (
             services.map((service) => (
-              <div key={service.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all">
-                <div className="flex items-center">
-                  <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center mr-4">
-                    <Tag className="w-5 h-5 text-blue-500" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-gray-900 text-sm md:text-base">{service.name}</h4>
-                    <div className="flex items-center mt-1">
-                      <StatusBadge label={service.isActive ? '● ACTIVO' : 'INACTIVO'} tone={service.isActive ? 'success' : 'neutral'} />
-                      <span className="ml-3 text-xs text-gray-500 border-l border-gray-200 pl-3">
-                        {service.durationInMinutes} min • {service.currency} {service.priceMinorUnits ? (service.priceMinorUnits / 100).toFixed(2) : '0.00'}
-                      </span>
-                    </div>
+              <article key={service.id} className="nf-panel p-4 min-w-0 flex flex-col gap-4">
+                <div className="flex items-start gap-4 min-w-0">
+                  <OfferingImage src={service.imageUrl} name={service.name} icon={<Scissors aria-hidden="true" className="w-6 h-6" />} className="w-20 h-20 rounded-xl shrink-0" />
+                  <div className="min-w-0"><h3 className="font-semibold text-foreground break-words">{service.name}</h3>
+                    <p className="text-sm text-muted mt-1">{service.durationInMinutes ?? '—'} min · {service.currency} {((service.priceMinorUnits ?? 0) / 100).toFixed(2)}</p>
+                    <p className="text-xs text-muted mt-2">{service.requiresReservation ? 'Requiere reserva' : 'Sin reserva requerida'}</p>
                   </div>
                 </div>
-
-                <div className="flex gap-2 relative">
-                  <IconButton variant="ghost" label="Editar" disabled={!can('SERVICES', 'UPDATE')} onClick={() => handleOpenEdit(service)} className="p-2.5 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
-                    <Pencil className="w-4 h-4" />
-                  </IconButton>
-                  <IconButton variant="ghost" label="Eliminar" disabled={!can('SERVICES', 'DELETE')} onClick={() => setDeleteConfirmId(service.id!)} className="p-2.5 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
-                    <Trash2 className="w-4 h-4" />
-                  </IconButton>
-
+                <p className="text-sm text-muted line-clamp-2">{service.description}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 mt-auto">
+                  <div className="space-y-2"><StatusBadge label={service.isActive ? 'Activo' : 'Inactivo'} tone={service.isActive ? 'success' : 'neutral'} />
+                    <p className="text-xs text-muted">{service.locationScope === 'ALL' ? 'Todas las sedes' : `${service.locationIds?.length ?? 0} sedes específicas`}</p></div>
+                  <div className="flex gap-1"><IconButton label="Editar servicio" disabled={!can('SERVICES', 'UPDATE')} onClick={() => handleOpenEdit(service)}><Pencil aria-hidden="true" className="w-4 h-4" /></IconButton>
+                    <IconButton label="Eliminar servicio" disabled={!can('SERVICES', 'DELETE')} onClick={() => setDeleteConfirmId(service.id!)} className=""><Trash2 aria-hidden="true" className="w-4 h-4" /></IconButton></div>
                 </div>
-              </div>
+              </article>
             ))
           )}
         </div>

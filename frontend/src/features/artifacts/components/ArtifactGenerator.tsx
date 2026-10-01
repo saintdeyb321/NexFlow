@@ -51,16 +51,16 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
   const isNotGenerated = !artifact || artifact.status === 'NOT_GENERATED';
 
   return (
-    <div className="mb-8 p-5 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col items-start gap-4">
+    <div className="mb-5 px-4 py-3 bg-indigo-50/50 border border-indigo-100 rounded-xl flex flex-col items-start gap-3">
 
       <div className="w-full flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div className={`p-3 rounded-lg ${isCurrent ? 'bg-green-100 text-green-700' : isStale ? 'bg-yellow-100 text-yellow-700' : isGenerating ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
-            <FileText className="w-6 h-6" />
+          <div className={`p-2 rounded-lg ${isCurrent ? 'bg-green-100 text-green-700' : isStale ? 'bg-yellow-100 text-yellow-700' : isGenerating ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+            <FileText aria-hidden="true" className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-gray-900">{title}</h3>
-            <p className="text-sm text-gray-500 mt-0.5">
+            <h3 className="font-semibold text-foreground text-sm">{title}</h3>
+            <p className="text-sm text-muted mt-0.5">
               {isCurrent && 'El documento PDF está actualizado y listo para enviarse a los clientes.'}
               {isStale && 'Se detectaron cambios recientes. Necesitas actualizar el documento.'}
               {isGenerating && 'Generando documento mediante IA. Esto puede tomar unos minutos...'}
@@ -78,23 +78,19 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
               rel="noreferrer"
               className="flex-1 md:flex-none flex items-center justify-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors"
             >
-              <Download className="w-4 h-4 mr-2" /> Ver PDF
+              <Download aria-hidden="true" className="w-4 h-4 mr-2" /> Ver PDF
             </a>
           )}
 
-          <Button variant="primary"
+          <Button variant="secondary"
             onClick={() => generateMutation.mutate()}
             disabled={isGenerating || (isCurrent && !isStale)}
-            className={`flex-1 md:flex-none flex items-center justify-center px-4 py-2 font-medium rounded-lg transition-colors ${
-              isGenerating || (isCurrent && !isStale)
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+            className="flex-1 md:flex-none"
           >
             {isGenerating ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Procesando...</>
+              <><Loader2 aria-hidden="true" className="w-4 h-4 mr-2 animate-spin" /> Procesando...</>
             ) : (
-              <><RefreshCw className="w-4 h-4 mr-2" /> {isNotGenerated ? 'Generar PDF' : 'Actualizar PDF'}</>
+              <><RefreshCw aria-hidden="true" className="w-4 h-4 mr-2" /> {isNotGenerated ? 'Generar PDF' : 'Actualizar PDF'}</>
             )}
           </Button>
         </div>

@@ -1,3 +1,4 @@
+import { PageHeader } from '../../../components/ui/Layout';
 import { Button, IconButton } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, EmptyState, ErrorState } from '../../../components/ui/Feedback';
@@ -76,31 +77,19 @@ export const FaqsPage = () => {
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
 
   return (
-    <div className="max-w-5xl mx-auto animate-in fade-in">
+    <div className="nf-page">
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <div className="flex items-center">
-          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
-             <BookOpen className="w-5 h-5 text-blue-600" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Base de Conocimiento</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Entrena al asistente virtual con preguntas frecuentes de tu negocio.</p>
-          </div>
-        </div>
-
-        <Button variant="ghost"
+      <PageHeader title="Base de conocimiento" description="Comparte respuestas reales de tu negocio con el asistente." icon={<BookOpen aria-hidden="true" className="w-5 h-5" />} actions={<Button variant="primary"
           onClick={handleOpenNew}
           disabled={faqs.length >= 20 || !can('FAQ', 'CREATE')}
-          className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm disabled:opacity-50 disabled:bg-gray-400"
+          className="flex items-center text-sm font-medium transition-colors disabled:opacity-50"
         >
-          <Plus className="w-4 h-4 mr-2" />
+          <Plus aria-hidden="true" className="w-4 h-4 mr-2" />
           Nueva Pregunta
-        </Button>
-      </div>
+        </Button>} />
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex justify-between items-center border-b border-gray-100 mb-4 pb-2">
+      <div className="bg-surface rounded-xl shadow-sm border border-line p-6">
+        <div className="flex justify-between items-center border-b border-line mb-4 pb-2">
           <h3 className="text-sm font-semibold text-gray-700">
             Preguntas Activas Globales ({faqs.length}/20)
           </h3>
@@ -108,33 +97,33 @@ export const FaqsPage = () => {
 
         <div className="space-y-3">
           {faqs.length === 0 ? (
-            <EmptyState icon={<MessageSquare className="w-12 h-12" />} title="Tu asistente aún no tiene información pre-programada." description={'Haz clic en "Nueva Pregunta" para entrenarlo.'} />
+            <EmptyState icon={<MessageSquare aria-hidden="true" className="w-12 h-12" />} title="Tu asistente aún no tiene información pre-programada." description={'Haz clic en "Nueva Pregunta" para entrenarlo.'} />
           ) : (
             faqs.map((faq) => (
               <div
                 key={faq.id}
-                className="flex flex-col md:flex-row md:items-start justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all gap-4"
+                className="flex flex-col md:flex-row md:items-start justify-between p-5 bg-surface border border-line rounded-xl hover:border-blue-200 hover:shadow-sm transition-all gap-4"
               >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-3 mb-2">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${getCategoryColor(faq.category || '')}`}>
                       {faq.category}
                     </span>
                   </div>
-                  <h4 className="font-bold text-gray-900 text-sm md:text-base mb-1">
-                    P: {faq.question}
+                  <h4 className="font-bold text-foreground text-sm md:text-base mb-1">
+                    {faq.question}
                   </h4>
-                  <p className="text-sm text-gray-600 line-clamp-2 md:line-clamp-none">
-                    <span className="font-semibold text-gray-800">R:</span> {faq.answer}
+                  <p className="text-sm text-muted leading-relaxed break-words">
+                    {faq.answer}
                   </p>
                 </div>
 
                 <div className="flex items-center space-x-2 md:self-start relative">
-                  <IconButton variant="ghost" label="Editar" disabled={!can('FAQ', 'UPDATE')} onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
-                    <Pencil className="w-4 h-4" />
+                  <IconButton variant="ghost" label="Editar" disabled={!can('FAQ', 'UPDATE')} onClick={() => handleOpenEdit(faq)} className="transition-colors" title="Editar">
+                    <Pencil aria-hidden="true" className="w-4 h-4" />
                   </IconButton>
-                  <IconButton variant="ghost" label="Eliminar" disabled={!can('FAQ', 'DELETE')} onClick={() => setDeleteConfirmId(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
-                    <Trash2 className="w-4 h-4" />
+                  <IconButton variant="ghost" label="Eliminar" disabled={!can('FAQ', 'DELETE')} onClick={() => setDeleteConfirmId(faq.id!)} className="transition-colors text-danger" title="Eliminar">
+                    <Trash2 aria-hidden="true" className="w-4 h-4" />
                   </IconButton>
 
                 </div>

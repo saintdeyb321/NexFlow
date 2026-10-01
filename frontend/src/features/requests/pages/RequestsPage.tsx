@@ -1,5 +1,7 @@
+import { getStatusTone, getStatusLabel } from '../../../components/ui/statusPresentation';
+import { PageHeader } from '../../../components/ui/Layout';
 import { Button } from '../../../components/ui/Button';
-import { LoadingState, EmptyState, ErrorState, Badge } from '../../../components/ui/Feedback';
+import { LoadingState, EmptyState, ErrorState, Badge, StatusBadge } from '../../../components/ui/Feedback';
 import { useToast } from '../../../components/ui/Toast';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
@@ -11,7 +13,7 @@ import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, Clock, PlayCircle, CheckCircle, XCircle, FileText, Plus, MessageSquare, UserCircle } from 'lucide-react';
+import { ClipboardList, FileText, Plus, MessageSquare, UserCircle } from 'lucide-react';
 import { getRequests, updateRequestStatus, assignRequest, getAssignees } from '../services/request.service';
 import type { RequestStatus, RequestType } from '../types/request.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -73,25 +75,14 @@ export const RequestsPage = () => {
     }
   });
 
-  const getStatusBadge = (status: RequestStatus) => {
-    switch (status) {
-      case 'Pending': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Pendiente</Badge>;
-      case 'InReview': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><PlayCircle className="w-3 h-3 mr-1" /> En Revisión</Badge>;
-      case 'Approved': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Aprobada</Badge>;
-      case 'Completed': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Completada</Badge>;
-      case 'Rejected': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Rechazada</Badge>;
-      case 'Cancelled': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Cancelada</Badge>;
-      default: return <Badge className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full w-fit">{status}</Badge>;
-    }
-  };
-
+  const getStatusBadge = (status: RequestStatus) => <StatusBadge tone={getStatusTone(status)} label={{ Pending: 'Pendiente', InReview: 'En revisión', Approved: 'Aprobada', Completed: 'Completada', Rejected: 'Rechazada', Cancelled: 'Cancelada' }[status]} />;
   const getTypeBadge = (type: RequestType) => {
     switch (type) {
       case 'Tramite': return <Badge className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-md">Trámite</Badge>;
       case 'CommercialInquiry': return <Badge className="px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 rounded-md">Comercial</Badge>;
       case 'Support': return <Badge className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-md">Soporte</Badge>;
       case 'HumanHandoff': return <Badge className="px-2 py-1 text-xs font-medium bg-pink-100 text-pink-800 rounded-md">Asesor Humano</Badge>;
-      default: return <Badge className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-md">General</Badge>;
+      default: return <Badge className="px-2 py-1 text-xs font-medium bg-gray-100 text-foreground rounded-md">General</Badge>;
     }
   };
 
@@ -99,23 +90,13 @@ export const RequestsPage = () => {
   if (isLoading) return <LoadingState title="Cargando solicitudes..." />;
 
   return (
-    <div className="max-w-7xl mx-auto animate-in fade-in">
+    <div className="nf-page">
 
-      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <ClipboardList className="w-6 h-6 mr-3 text-blue-600" /> Solicitudes y Requerimientos
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Gestiona trámites, consultas comerciales y pedidos de soporte clasificados por la IA.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <select
+      <PageHeader title="Solicitudes" description="Gestiona los trámites, consultas y solicitudes de tus clientes." icon={<ClipboardList aria-hidden="true" className="w-5 h-5" />} actions={<><div className="flex flex-wrap items-center gap-3">
+          <select aria-label="Filtrar solicitudes por estado"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as RequestStatus | 'ALL')}
-            className="border border-gray-200 rounded-lg px-4 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+            className="nf-control max-w-full"
           >
             <option value="ALL">Todas las solicitudes</option>
             <option value="Pending">Pendientes</option>
@@ -124,25 +105,24 @@ export const RequestsPage = () => {
           </select>
           <Button variant="primary"
             disabled={!can('REQUESTS', 'CREATE')} onClick={() => setIsModalOpen(true)}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+            className="flex items-center text-sm font-medium transition-colors"
           >
-            <Plus className="w-4 h-4 mr-2" /> Nueva Solicitud
+            <Plus aria-hidden="true" className="w-4 h-4 mr-2" /> Nueva Solicitud
           </Button>
-        </div>
-      </div>
+        </div></>} />
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-[400px]">
+      <div className="bg-surface border border-line rounded-xl shadow-sm overflow-hidden min-h-[400px]">
         {requests.length === 0 ? (
-          <EmptyState className="py-20" icon={<FileText className="w-12 h-12 text-gray-300" />} title="No hay solicitudes" description="Las solicitudes creadas por tus clientes aparecerán aquí." />
+          <EmptyState className="py-20" icon={<FileText aria-hidden="true" className="w-12 h-12 text-gray-300" />} title="No hay solicitudes" description="Las solicitudes creadas por tus clientes aparecerán aquí." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="nf-table nf-responsive-table">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase">
+                <tr className="bg-surface-soft border-b border-line text-xs font-semibold text-muted uppercase">
                   <th className="px-6 py-4">Fecha</th>
                   <th className="px-6 py-4">Cliente / Origen</th>
                   <th className="px-6 py-4">Tipo</th>
-                  <th className="px-6 py-4 w-1/3">Detalle</th>
+                  <th className="px-6 py-4">Detalle</th>
                   <th className="px-6 py-4">Asignado a</th>
                   <th className="px-6 py-4">Estado</th>
                   <th className="px-6 py-4 text-right">Acción</th>
@@ -150,62 +130,62 @@ export const RequestsPage = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {requests.map((req) => (
-                  <tr key={req.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                  <tr key={req.id} className="hover:bg-surface-soft transition-colors">
+                    <td data-label="Fecha" className="px-6 py-4 text-sm text-muted">
                       {new Date(req.createdAt).toLocaleDateString()} <br/>
                       <span className="text-xs text-gray-400">{new Date(req.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="font-medium text-gray-900 block">{req.consumerPhone}</span>
+                    <td data-label="Cliente / Origen" className="px-6 py-4"><div className="min-w-0">
+                      <span className="font-medium text-foreground block">{req.consumerPhone}</span>
                       {req.conversationId && req.conversationId !== 'MANUAL_ENTRY' && (
                         <Button variant="ghost"
                           onClick={() => navigate(`/inbox?conversation=${req.conversationId}`)}
-                          className="flex items-center text-xs text-blue-600 mt-1 hover:underline font-medium"
+                          className="flex items-center text-xs mt-1 hover:underline font-medium"
                         >
-                          <MessageSquare className="w-3 h-3 mr-1" /> Abrir chat
+                          <MessageSquare aria-hidden="true" className="w-3 h-3 mr-1" /> Abrir chat
                         </Button>
-                      )}
+                      )}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td data-label="Tipo" className="px-6 py-4">
                       {getTypeBadge(req.type)}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      <Button variant="ghost" onClick={() => setDetailId(req.id)} className="font-semibold block text-gray-900 mb-1">{req.title}</Button>
-                      <p className="line-clamp-2" title={req.description}>{req.description}</p>
+                    <td data-label="Detalle" className="px-6 py-4 text-sm text-muted"><div className="min-w-0">
+                      <Button variant="ghost" onClick={() => setDetailId(req.id)} className="font-semibold block mb-1">{req.title}</Button>
+                      <p className="line-clamp-2" title={req.description}>{req.description}</p></div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td data-label="Asignación" className="px-6 py-4 text-sm"><div className="min-w-0 max-w-full">
                       {req.assignedTo ? (
                         <span className="flex items-center text-gray-700 font-medium">
-                          <UserCircle className="w-4 h-4 mr-1.5 text-gray-400" /> {assigneeName(req.assignedTo)}
+                          <UserCircle aria-hidden="true" className="w-4 h-4 mr-1.5 text-gray-400" /> {assigneeName(req.assignedTo)}
                         </span>
                       ) : (
                         <Button variant="ghost" isLoading={assignMutation.isPending}
                           onClick={() => { if (me && can('REQUESTS', 'ASSIGN')) assignMutation.mutate({ id: req.id, userId: me.user.id }); }}
                           disabled={assignMutation.isPending || !can('REQUESTS', 'ASSIGN') || !me?.user.id}
-                          className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
+                          className="text-xs hover:underline disabled:opacity-50"
                         >
                           Asignarme
                         </Button>
                       )}
-                      {can('REQUESTS', 'ASSIGN') && <select aria-label="Responsable" value={req.assignedTo ?? ''}
+                      {can('REQUESTS', 'ASSIGN') && <select className="nf-control mt-2" aria-label="Responsable" value={req.assignedTo ?? ''}
                         disabled={assignMutation.isPending || Boolean(assigneesError)}
                         onChange={event => { if (event.target.value) assignMutation.mutate({ id: req.id, userId: event.target.value }); }}>
                         <option value="">Seleccionar responsable</option>
                         {assignees.map(member => <option key={member.userId} value={member.userId}>{`${member.firstName} ${member.lastName}`.trim() || member.userId}</option>)}
-                      </select>}
+                      </select>}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td data-label="Estado" className="px-6 py-4">
                       {getStatusBadge(req.status)}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <select
+                    <td data-label="Acciones" className="px-6 py-4 text-right">
+                      <select aria-label="Cambiar estado de solicitud"
                         disabled={updateMutation.isPending || !can('REQUESTS', 'UPDATE_STATUS') || requestTransitions[req.status].length === 0}
                         value={req.status}
                         onChange={(e) => updateMutation.mutate({ id: req.id, status: e.target.value as RequestStatus })}
-                        className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white hover:bg-gray-50 outline-none font-medium cursor-pointer"
+                        className="nf-control max-w-full"
                       >
-                        <option value={req.status}>{req.status}</option>
-                        {requestTransitions[req.status].map(status => <option key={status} value={status}>{status}</option>)}
+                        <option value={req.status}>{getStatusLabel(req.status)}</option>
+                        {requestTransitions[req.status].map(status => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
                       </select>
                     </td>
                   </tr>
@@ -220,7 +200,7 @@ export const RequestsPage = () => {
         <div className="flex justify-center mt-6">
           <Button variant="ghost"
             onClick={() => setLimit(l => l + 50)}
-            className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors"
+            className="border text-sm font-medium transition-colors"
           >
             Cargar más antiguas
           </Button>

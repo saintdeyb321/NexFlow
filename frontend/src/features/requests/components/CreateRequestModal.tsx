@@ -61,7 +61,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
             <Select
               value={formData.type}
               onChange={e => setFormData({...formData, type: e.target.value as RequestType})}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+              className="w-full border focus:ring-primary text-sm"
             >
               <option value="Tramite">Trámite Administrativo</option>
               <option value="CommercialInquiry">Consulta Comercial</option>
@@ -76,7 +76,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
               value={formData.consumerPhone}
               onChange={e => setFormData({...formData, consumerPhone: e.target.value})}
               placeholder="Ej: +51987654321"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full border focus:ring-primary text-sm"
               required
             />
           </FormField>
@@ -87,7 +87,7 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
               value={formData.title}
               onChange={e => setFormData({...formData, title: e.target.value})}
               placeholder="Ej: Solicitud de cotización mayorista"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full border focus:ring-primary text-sm"
               required
             />
           </FormField>
@@ -98,17 +98,17 @@ export const CreateRequestModal = ({ isOpen, onClose }: CreateRequestModalProps)
               value={formData.description}
               onChange={e => setFormData({...formData, description: e.target.value})}
               placeholder="Describe el requerimiento del cliente..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+              className="w-full border focus:ring-primary text-sm resize-none"
               required
             />
           </FormField>
 
-          <div className="pt-4 flex justify-end space-x-3 border-t border-gray-100">
-            <Button variant="secondary" type="button" disabled={createMutation.isPending} onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
+          <div className="pt-4 flex justify-end space-x-3 border-t border-line">
+            <Button variant="secondary" type="button" disabled={createMutation.isPending} onClick={onClose} className="text-sm font-medium transition-colors">
               Cancelar
             </Button>
-            <Button variant="primary" isLoading={createMutation.isPending} type="submit" disabled={createMutation.isPending || !can('REQUESTS', 'CREATE')} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
-              <Save className="w-4 h-4 mr-2" />
+            <Button variant="primary" isLoading={createMutation.isPending} type="submit" disabled={createMutation.isPending || !can('REQUESTS', 'CREATE')} className="flex items-center text-sm font-medium disabled:opacity-50 transition-colors">
+              <Save aria-hidden="true" className="w-4 h-4 mr-2" />
               {createMutation.isPending ? 'Guardando...' : 'Crear Solicitud'}
             </Button>
           </div>

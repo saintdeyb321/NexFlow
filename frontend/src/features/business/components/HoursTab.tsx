@@ -1,6 +1,6 @@
 import { Button } from '../../../components/ui/Button';
 import { useToast } from '../../../components/ui/Toast';
-import { LoadingState, ErrorState } from '../../../components/ui/Feedback';
+import { LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -73,44 +73,35 @@ export const HoursTab = () => {
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (selectedLocationId === 'all') {
-    return (
-      <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-12 text-center animate-in fade-in">
-        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
-          <MapPin className="w-8 h-8 text-blue-500" />
-        </div>
-        <h3 className="text-xl font-bold text-gray-900 mb-2">Selecciona una sede específica</h3>
-        <p className="text-gray-500 max-w-md mx-auto">
-          Los horarios de atención se configuran de manera individual por cada local. Por favor, usa el selector de sedes en la barra lateral izquierda para continuar.
-        </p>
-      </div>
-    );
+    return <EmptyState className="nf-panel" icon={<MapPin aria-hidden="true" className="w-6 h-6" />} title="Selecciona una sede" description="Los horarios se configuran por sede. Usa el selector del menú para continuar." />;
   }
 
   if (isLoading) return <LoadingState title="Cargando horarios de la sede..." />;
 
   return (
-    <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-6 animate-in fade-in">
+    <div className="bg-surface shadow-sm border border-line rounded-xl p-6 animate-in fade-in">
+      <h2 className="text-lg font-semibold mb-1">Horario semanal</h2><p className="text-sm text-muted mb-6">Define los días y las horas de atención de esta sede.</p>
       <div className="space-y-4 pt-2">
         {DAYS_OF_WEEK.map(day => {
           const h = hours.find(x => x.dayOfWeek === day.id) || { openTime: '', closeTime: '', isClosed: true, dayOfWeek: day.id };
           return (
-            <div key={day.id} className="flex items-center justify-between border-b pb-3">
+            <div key={day.id} className="grid grid-cols-1 sm:grid-cols-[8rem_1fr] items-center gap-3 border-b border-line pb-4">
               <div className="w-32 font-medium text-gray-700">{day.name}</div>
-              <div className="flex items-center space-x-4">
-                <label className="flex items-center text-sm text-gray-600 cursor-pointer">
-                  <input type="checkbox" disabled={!can('BUSINESS_HOURS', 'UPDATE')} checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-blue-600" />
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-3 min-w-0">
+                <label className="col-span-2 flex items-center text-sm text-muted cursor-pointer min-h-11">
+                  <input type="checkbox" disabled={!can('BUSINESS_HOURS', 'UPDATE')} checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-primary" />
                   Cerrado
                 </label>
-                <input aria-label={`Apertura ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
-                <span className="text-gray-400">-</span>
-                <input aria-label={`Cierre ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
+                <input aria-label={`Apertura ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="nf-control sm:w-36" />
+                <span aria-hidden="true" className="hidden sm:block text-muted">—</span>
+                <input aria-label={`Cierre ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="nf-control sm:w-36" />
               </div>
             </div>
           )
         })}
       </div>
       <div className="flex justify-end mt-6">
-        <Button variant="primary" isLoading={saveMutation.isPending} onClick={handleSave} disabled={saveMutation.isPending || !can('BUSINESS_HOURS', 'UPDATE')} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+        <Button variant="primary" isLoading={saveMutation.isPending} onClick={handleSave} disabled={saveMutation.isPending || !can('BUSINESS_HOURS', 'UPDATE')} className="disabled:opacity-50">
           {saveMutation.isPending ? 'Guardando...' : 'Guardar Horarios'}
         </Button>
       </div>

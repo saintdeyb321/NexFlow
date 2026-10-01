@@ -108,27 +108,27 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
         <form onSubmit={handleSubmit} className="space-y-5">
 
           <FormField label="Sede (Seleccionada en panel)">
-            <Input type="text" value={currentLocation?.name || 'Sede desconocida'} disabled className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-500 text-sm cursor-not-allowed" />
+            <Input type="text" value={currentLocation?.name || 'Sede desconocida'} disabled className="w-full border text-sm cursor-not-allowed" />
           </FormField>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
             <FormField label="Servicio">
-              <Select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value, timeSlot: ''})} className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white" required>
+              <Select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value, timeSlot: ''})} className="w-full border focus:ring-primary text-sm" required>
                 <option value="" disabled>Selecciona un servicio...</option>
                 {services.map(srv => <option key={srv.id} value={srv.id}>{srv.name} ({srv.durationInMinutes} min)</option>)}
               </Select>
             </FormField>
             <FormField required label="Fecha">
               {control => (<div className="relative">
-                <CalendarIcon className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-                <Input {...control} type="date" min={getBusinessToday(timeZone)} value={formData.date} onChange={e => setFormData({...formData, date: e.target.value, timeSlot: ''})} className="w-full border rounded-lg pl-9 pr-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
+                <CalendarIcon aria-hidden="true" className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                <Input {...control} type="date" min={getBusinessToday(timeZone)} value={formData.date} onChange={e => setFormData({...formData, date: e.target.value, timeSlot: ''})} className="w-full border pl-9 pr-3 focus:ring-primary text-sm" required />
               </div>)}
             </FormField>
           </div>
 
           <fieldset className="bg-blue-50/50 border border-blue-100 rounded-xl p-4">
             <legend className="text-sm font-medium text-blue-900 flex items-center">
-              <Clock className="w-4 h-4 mr-2" /> Horarios Disponibles
+              <Clock aria-hidden="true" className="w-4 h-4 mr-2" /> Horarios Disponibles
             </legend>
 
             {isLoadingSlots ? (
@@ -136,7 +136,7 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
             ) : slotsError ? (
               <ErrorState description={getApiErrorPresentation(slotsError)} onRetry={() => void refetchSlots()} />
             ) : slots.length === 0 ? (
-              <EmptyState className="py-6 bg-white rounded-lg" title="No hay turnos disponibles para esta fecha." />
+              <EmptyState className="py-6 bg-surface rounded-lg" title="No hay turnos disponibles para esta fecha." />
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
                 {slots.map((slot, idx) => (
@@ -158,18 +158,18 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
             )}
           </fieldset>
 
-          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+          <div className="grid gap-4 pt-2 border-t border-line grid-cols-1 sm:grid-cols-2">
             <FormField label="Nombre del Cliente">
-              <Input type="text" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} placeholder="Ej: Juan Pérez" className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
+              <Input type="text" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} placeholder="Ej: Juan Pérez" className="w-full border focus:ring-primary text-sm" required />
             </FormField>
             <FormField label="Teléfono (WhatsApp)">
-              <Input type="tel" pattern="^\+?[0-9]{9,15}$" title="El teléfono debe tener entre 9 y 15 números y puede incluir el código de país (Ej: +51987654321)" value={formData.customerIdentifier} onChange={e => setFormData({...formData, customerIdentifier: e.target.value})} placeholder="Ej: +51987654321" className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 text-sm" required />
+              <Input type="tel" pattern="^\+?[0-9]{9,15}$" title="El teléfono debe tener entre 9 y 15 números y puede incluir el código de país (Ej: +51987654321)" value={formData.customerIdentifier} onChange={e => setFormData({...formData, customerIdentifier: e.target.value})} placeholder="Ej: +51987654321" className="w-full border focus:ring-primary text-sm" required />
             </FormField>
           </div>
 
           <div className="pt-4 flex justify-end space-x-3">
-            <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors">Cancelar</Button>
-            <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || !formData.timeSlot || !can('RESERVATIONS', 'CREATE')} className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm">
+            <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="text-sm font-medium transition-colors">Cancelar</Button>
+            <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || !formData.timeSlot || !can('RESERVATIONS', 'CREATE')} className="text-sm font-medium disabled:opacity-50 transition-colors">
               {isSaving ? 'Agendando...' : 'Confirmar Cita'}
             </Button>
           </div>

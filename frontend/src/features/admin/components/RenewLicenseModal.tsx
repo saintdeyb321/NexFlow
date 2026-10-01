@@ -53,7 +53,7 @@ export const RenewLicenseModal = ({ workspace, onClose }: RenewLicenseModalProps
           <Select
             value={duration}
             onChange={(e) => setDuration(Number(e.target.value))}
-            className="w-full px-4 py-2 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500"
+            className="w-full border focus:ring-purple-500"
           >
             <option value={1}>1 Mes</option>
             <option value={3}>3 Meses (Trimestre)</option>
@@ -63,11 +63,11 @@ export const RenewLicenseModal = ({ workspace, onClose }: RenewLicenseModalProps
         </FormField>
 
         <div className="pt-4 flex justify-end gap-3">
-          <Button variant="secondary" type="button" disabled={renewMutation.isPending} onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
+          <Button variant="secondary" type="button" disabled={renewMutation.isPending} onClick={onClose} className="text-sm font-medium transition-colors">
             Cancelar
           </Button>
-          <Button variant="primary" isLoading={renewMutation.isPending} type="submit" disabled={renewMutation.isPending} className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm">
-            {!renewMutation.isPending && <Calendar className="w-4 h-4 mr-2" />}
+          <Button variant="primary" isLoading={renewMutation.isPending} type="submit" disabled={renewMutation.isPending} className="flex items-center text-sm font-medium disabled:opacity-50 transition-colors">
+            {!renewMutation.isPending && <Calendar aria-hidden="true" className="w-4 h-4 mr-2" />}
             Confirmar Renovación
           </Button>
         </div>

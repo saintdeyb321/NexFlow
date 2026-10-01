@@ -68,16 +68,16 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
       )}
 
       {value ? (
-        <div className="relative w-full h-40 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden group">
+        <div className="relative w-full h-40 bg-gray-100 rounded-xl border border-line overflow-hidden group">
           <img src={value} alt="Preview" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/40 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center">
             <IconButton label="Eliminar imagen" variant="danger"
               type="button"
               disabled={!canUpload} onClick={() => { onChange(null); setErrorMsg(null); }}
-              className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg transform transition-transform hover:scale-110"
+              className="transform transition-transform hover:scale-110"
               title="Eliminar imagen"
             >
-              <X className="w-5 h-5" />
+              <X aria-hidden="true" className="w-5 h-5" />
             </IconButton>
           </div>
         </div>
@@ -86,18 +86,18 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={isUploading || !canUpload}
-          className="w-full h-40 flex flex-col items-center justify-center bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full h-40 flex flex-col items-center justify-center border-2 border-dashed transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isUploading ? (
             <>
-              <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-2" />
-              <span className="text-sm text-gray-500 font-medium">Subiendo de forma segura...</span>
+              <Loader2 aria-hidden="true" className="w-8 h-8 text-primary animate-spin mb-2" />
+              <span className="text-sm text-muted font-medium">Subiendo de forma segura...</span>
             </>
           ) : (
             <>
-              <UploadCloud className="w-8 h-8 text-gray-400 mb-2" />
+              <UploadCloud aria-hidden="true" className="w-8 h-8 text-gray-400 mb-2" />
               <span className="text-sm font-medium text-gray-700">Haz clic para subir imagen</span>
-              <span className="text-xs text-gray-500 mt-1">PNG, JPG, WebP hasta 5MB</span>
+              <span className="text-xs text-muted mt-1">PNG, JPG, WebP hasta 5MB</span>
             </>
           )}
         </Button>
@@ -110,7 +110,7 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
         ref={fileInputRef}
         onChange={handleFileChange}
         accept={ALLOWED_TYPES.join(',')}
-        className="hidden"
+        className="nf-control"
       />
     </div>
   );

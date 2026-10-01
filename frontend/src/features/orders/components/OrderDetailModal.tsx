@@ -13,37 +13,37 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
   const navigate = useNavigate();
 
   const formatCurrency = (minorUnits: number | null, currency: string | null) =>
-    minorUnits === null || currency === null ? '—' : `${currency} ${(minorUnits / 100).toFixed(2)}`;
+    minorUnits === null || currency === null ? 'Total no disponible' : `${currency} ${(minorUnits / 100).toFixed(2)}`;
 
   return (
-    <Modal isOpen onClose={onClose} size="xl" title={<span className="flex items-center"><ShoppingCart className="w-5 h-5 mr-2 text-blue-600" />Detalle de la Cotización</span>}>
+    <Modal isOpen onClose={onClose} size="xl" title={<span className="flex items-center"><ShoppingCart aria-hidden="true" className="w-5 h-5 mr-2 text-primary" />Detalle del pedido</span>}>
         <div>
-          <div className="grid grid-cols-2 gap-6 mb-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 bg-surface-soft p-4 rounded-lg border border-line">
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1 flex items-center">
-                <User className="w-3 h-3 mr-1" /> Cliente
+              <p className="text-xs text-muted uppercase tracking-wide mb-1 flex items-center">
+                <User aria-hidden="true" className="w-3 h-3 mr-1" /> Cliente
               </p>
-              <p className="font-semibold text-gray-900">{order.consumerName}</p>
-              <p className="text-sm text-gray-600">{order.consumerPhone}</p>
+              <p className="font-semibold text-foreground">{order.consumerName}</p>
+              <p className="text-sm text-muted">{order.consumerPhone}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1 flex items-center">
-                <Calendar className="w-3 h-3 mr-1" /> Fecha
+              <p className="text-xs text-muted uppercase tracking-wide mb-1 flex items-center">
+                <Calendar aria-hidden="true" className="w-3 h-3 mr-1" /> Fecha
               </p>
-              <p className="font-semibold text-gray-900">
+              <p className="font-semibold text-foreground">
                 {new Date(order.createdAt).toLocaleDateString()}
               </p>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted">
                 {new Date(order.createdAt).toLocaleTimeString()}
               </p>
             </div>
           </div>
 
-          <h3 className="font-bold text-gray-800 mb-3 border-b border-gray-100 pb-2">Artículos Cotizados</h3>
+          <h3 className="font-bold text-foreground mb-3 border-b border-line pb-2">Productos solicitados</h3>
           <div className="max-h-60 overflow-y-auto mb-4">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 sticky top-0">
-                <tr className="text-gray-500">
+            <table className="nf-table nf-responsive-table">
+              <thead className="bg-surface-soft sticky top-0">
+                <tr className="text-muted">
                   <th className="py-2 px-3 font-medium">Producto</th>
                   <th className="py-2 px-3 font-medium text-center">Cant.</th>
                   <th className="py-2 px-3 font-medium text-right">Precio Unit.</th>
@@ -52,13 +52,13 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {order.items.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="py-3 px-3 font-medium text-gray-900">{item.productName}</td>
-                    <td className="py-3 px-3 text-center text-gray-600">{item.quantity}</td>
-                    <td className="py-3 px-3 text-right text-gray-600">
+                  <tr key={idx} className="hover:bg-surface-soft">
+                    <td data-label="Producto" className="py-3 px-3 font-medium text-foreground">{item.productName}</td>
+                    <td data-label="Cantidad" className="py-3 px-3 text-center text-muted">{item.quantity}</td>
+                    <td data-label="Precio unitario" className="py-3 px-3 text-right text-muted">
                       {formatCurrency(item.unitPriceMinorUnits, item.currency)}
                     </td>
-                    <td className="py-3 px-3 text-right font-medium text-gray-900">
+                    <td data-label="Subtotal" className="py-3 px-3 text-right font-medium text-foreground">
                       {formatCurrency(item.quantity * item.unitPriceMinorUnits, item.currency)}
                     </td>
                   </tr>
@@ -67,35 +67,35 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
             </table>
           </div>
 
-          <div className="flex justify-between items-start border-t border-gray-200 pt-4 mt-2">
-            <div className="w-1/2">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start border-t border-line pt-4 mt-2">
+            <div className="w-full sm:w-1/2 min-w-0">
               {order.notes && (
                 <>
-                  <p className="text-xs text-gray-500 uppercase font-medium">Notas del Sistema:</p>
+                  <p className="text-xs text-muted uppercase font-medium">Notas del Sistema:</p>
                   <p className="text-sm text-gray-700 italic bg-yellow-50 p-2 rounded border border-yellow-100 mt-1">"{order.notes}"</p>
                 </>
               )}
             </div>
 
             <div className="text-right flex flex-col items-end">
-              <p className="text-sm text-gray-500 mb-1">Total de Cotización</p>
+              <p className="text-sm text-muted mb-1">Total del pedido</p>
 
-              <p className="text-2xl font-bold text-blue-600">{formatCurrency(order.totalAmountMinorUnits, order.currency)}</p>
+              <p className="text-2xl font-bold text-primary">{formatCurrency(order.totalAmountMinorUnits, order.currency)}</p>
             </div>
           </div>
         </div>
 
-        <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
+        <div className="p-4 border-t border-line bg-surface-soft flex flex-wrap gap-2 justify-between items-center">
           {order.conversationId && order.conversationId !== 'MANUAL_ENTRY' ? (
             <Button variant="ghost"
               onClick={() => { onClose(); navigate(`/inbox?conversation=${order.conversationId}`); }}
-              className="flex items-center text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors"
+              className="flex items-center text-sm font-medium transition-colors"
             >
-              <MessageSquare className="w-4 h-4 mr-2" /> Ir a la conversación
+              <MessageSquare aria-hidden="true" className="w-4 h-4 mr-2" /> Ir a la conversación
             </Button>
           ) : <div></div>}
 
-          <Button variant="primary" onClick={onClose} className="px-5 py-2 bg-gray-800 text-white font-medium rounded-lg hover:bg-gray-900 transition-colors">
+          <Button variant="primary" onClick={onClose} className="font-medium transition-colors">
             Cerrar
           </Button>
         </div>

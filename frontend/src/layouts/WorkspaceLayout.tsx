@@ -7,10 +7,12 @@ import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '../features/business/services/business.service';
 import type { LocationDto } from '../features/business/types/business.types';
 import { usePermissions } from '../core/auth/permissions';
-import { 
-  LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors, 
-  ShieldAlert, MessageCircle, Package, ClipboardList, MapPin, ShoppingBag, Menu, X 
+import {
+  LayoutDashboard, BookOpen, Calendar, Settings, LogOut, Scissors,
+  ShieldAlert, MessageCircle, Package, ClipboardList, MapPin, ShoppingBag, Menu, ChevronRight, Layers
 } from 'lucide-react';
+import { Button, IconButton } from '../components/ui/Button';
+import { Modal } from '../components/ui/Modal';
 import { NotificationBell } from '../components/ui/NotificationBell';
 
 const MODULE_REGISTRY: Record<string, { route: string; label: string; icon: React.ElementType }> = {
@@ -47,128 +49,79 @@ export const WorkspaceLayout = () => {
       setSelectedLocationId('all');
   }, [workspaceId, selectedLocationId, canReadLocations, locationsLoaded, locations, setSelectedLocationId]);
 
-  const navItemClass = (path: string) => 
-    `flex items-center px-4 py-3 mb-1 rounded-lg transition-colors ${
-      pathname === path || (path !== '/' && pathname.startsWith(`${path}/`))
-        ? 'bg-blue-50 text-blue-700 font-medium' 
-        : 'text-gray-600 hover:bg-gray-50'
-    }`;
+  const isActive = (path: string) => pathname === path || (path !== '/' && pathname.startsWith(`${path}/`));
+  const navItemClass = () => 'nf-nav-link';
 
   const activeModules = Object.keys(MODULE_REGISTRY)
     .filter(code => can(code, 'READ'))
     .map((code: string) => ({ code, ...MODULE_REGISTRY[code] }));
 
-  const SidebarContent = () => (
-    <>
-      <div className="h-16 flex items-center px-6 border-b border-gray-200 shrink-0">
-        <span className="font-bold text-xl text-blue-600 tracking-tight">NexFlow</span>
-      </div>
-      
-      <div className="p-4 border-b border-gray-100 bg-gray-50/50 shrink-0">
-        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Sede Activa</label>
+  const sidebarContent = (locationSelectorId: string) => (
+    <div className="flex flex-col h-full min-h-0">
+      <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className="hidden lg:flex h-20 items-center gap-3 px-6 shrink-0 text-white">
+        <span className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center"><Layers aria-hidden="true" className="w-5 h-5" /></span>
+        <span className="font-semibold text-xl tracking-tight">NexFlow<span className="text-accent">.</span></span>
+      </Link>
+      <div className="px-5 py-5 border-y border-white/10 shrink-0">
+        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-[.15em] mb-1">Workspace</p>
+        <p className="text-sm font-semibold text-white break-words mb-4">{isSuperAdmin ? 'Administración Global' : (me?.workspace?.name || 'Configurando...')}</p>
+        <label htmlFor={locationSelectorId} className="text-xs text-slate-400 mb-2 block">Sede activa</label>
         <div className="relative">
-          <MapPin className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-          <select
-            value={selectedLocationId}
-            onChange={(e) => setSelectedLocationId(e.target.value)}
-            className="w-full pl-9 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm text-gray-700 font-medium"
-          >
+          <MapPin aria-hidden="true" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <select id={locationSelectorId} value={selectedLocationId} onChange={e => setSelectedLocationId(e.target.value)}
+            className="nf-control bg-sidebar-hover text-slate-100 border-white/10 pl-9">
             <option value="all">Todas las sedes</option>
-            {locations.map((loc) => (
-              <option key={loc.id} value={loc.id}>{loc.name}</option>
-            ))}
+            {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
           </select>
         </div>
       </div>
-
-      <nav className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-        {can('CONVERSATIONS', 'READ') && <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className={navItemClass('/')}>
-          <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
+      <nav aria-label="Navegación principal" className="flex-1 p-3 space-y-1 overflow-y-auto min-h-0">
+        <p className="px-4 pt-3 pb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-[.15em]">Operación</p>
+        {can('CONVERSATIONS', 'READ') && <Link to="/" aria-current={isActive('/') ? 'page' : undefined} onClick={() => setIsMobileMenuOpen(false)} className={navItemClass()}>
+          <LayoutDashboard aria-hidden="true" className="w-5 h-5" /> Dashboard
         </Link>}
-
-        {activeModules.map(({ code, route, label, icon: Icon }: { code: string, route: string, label: string, icon: React.ElementType }) => (
-          <Link key={code} to={route} onClick={() => setIsMobileMenuOpen(false)} className={navItemClass(route)}>
-            <Icon className="w-5 h-5 mr-3" /> {label}
+        {activeModules.map(({ code, route, label, icon: Icon }) => (
+          <Link key={code} to={route} aria-current={isActive(route) ? 'page' : undefined} onClick={() => setIsMobileMenuOpen(false)} className={navItemClass()}>
+            <Icon aria-hidden="true" className="w-5 h-5 shrink-0" /> {label}
           </Link>
         ))}
-        
-        <div className="mt-8 mb-2 px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Administración
-        </div>
-        
-        {canReadSettings && <Link to="/settings" onClick={() => setIsMobileMenuOpen(false)} className={navItemClass('/settings')}>
-          <Settings className="w-5 h-5 mr-3" /> Negocio
+        <p className="px-4 pt-6 pb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-[.15em]">Administración</p>
+        {canReadSettings && <Link to="/settings" aria-current={isActive('/settings') ? 'page' : undefined} onClick={() => setIsMobileMenuOpen(false)} className={navItemClass()}>
+          <Settings aria-hidden="true" className="w-5 h-5" /> Negocio
+        </Link>}
+        {isSuperAdmin && <Link to="/superadmin" aria-current={isActive('/superadmin') ? 'page' : undefined} onClick={() => setIsMobileMenuOpen(false)} className="nf-nav-link text-violet-300">
+          <ShieldAlert aria-hidden="true" className="w-5 h-5" /> Consola SuperAdmin
         </Link>}
       </nav>
-
-      <div className="p-4 border-t border-gray-200 bg-gray-50 shrink-0">
-        <div className="mb-3 px-2">
-          <p className="text-sm font-semibold text-gray-800 truncate">
-            {isSuperAdmin ? 'Administración Global' : (me?.workspace?.name || 'Configurando...')}
-          </p>
-          <p className="text-xs text-gray-500 truncate">{me?.user?.email}</p>
+      <div className="p-4 border-t border-white/10 shrink-0">
+        <div className="flex items-center gap-3 mb-3 px-2">
+          <span className="h-9 w-9 shrink-0 rounded-full bg-sidebar-hover flex items-center justify-center text-sm font-semibold text-indigo-200" aria-hidden="true">{(me?.user?.firstName || me?.user?.email || 'N').slice(0,1).toUpperCase()}</span>
+          <div className="min-w-0"><p className="text-sm font-medium text-slate-100 truncate">{me?.user?.firstName || 'Mi cuenta'}</p><p className="text-xs text-slate-400 truncate">{me?.user?.email}</p></div>
         </div>
-        
-        {isSuperAdmin && (
-          <Link 
-            to="/superadmin" 
-            onClick={() => setIsMobileMenuOpen(false)}
-            className={`w-full flex items-center px-4 py-2 mb-2 text-sm font-medium rounded-lg transition-colors ${
-              pathname.startsWith('/superadmin') 
-                ? 'bg-purple-600 text-white shadow-sm' 
-                : 'text-purple-700 bg-purple-50 hover:bg-purple-100'
-            }`}
-          >
-            <ShieldAlert className="w-4 h-4 mr-2" /> Consola SuperAdmin
-          </Link>
-        )}
-
-        <button 
-          onClick={logout} 
-          className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-        >
-          <LogOut className="w-4 h-4 mr-2" /> Cerrar Sesión
-        </button>
+        <Button variant="ghost" onClick={logout} className="w-full justify-start text-slate-300 hover:text-white hover:bg-sidebar-hover">
+          <LogOut aria-hidden="true" className="w-4 h-4" /> Cerrar sesión
+        </Button>
       </div>
-    </>
+    </div>
   );
 
   return (
-    <div className="flex h-[100dvh] bg-gray-50 overflow-hidden">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col z-20 shrink-0 h-full">
-        <SidebarContent />
-      </aside>
-
-      {/* Mobile Drawer */}
-      {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex">
-          <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
-          <aside className="relative flex w-4/5 max-w-sm flex-col bg-white h-full animate-in slide-in-from-left">
-            <button onClick={() => setIsMobileMenuOpen(false)} className="absolute right-4 top-4 p-2 text-gray-500 hover:bg-gray-100 rounded-full">
-              <X className="w-6 h-6" />
-            </button>
-            <SidebarContent />
-          </aside>
-        </div>
-      )}
-
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 shadow-sm shrink-0 z-10">
-          <div className="flex items-center md:hidden">
-            <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-              <Menu className="w-6 h-6" />
-            </button>
-            <span className="font-bold text-lg text-blue-600 ml-2">NexFlow</span>
+    <div className="flex h-dvh bg-background overflow-hidden">
+      <a href="#workspace-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:bg-surface focus:p-3 focus:rounded-lg">Ir al contenido</a>
+      <aside className="hidden lg:flex w-64 xl:w-72 bg-sidebar flex-col shrink-0 h-full">{sidebarContent('workspace-location-desktop')}</aside>
+      <Modal isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} title="NexFlow" placement="drawer">
+        {sidebarContent('workspace-location-mobile')}
+      </Modal>
+      <main className="flex-1 min-w-0 flex flex-col h-full relative">
+        <header className="h-18 bg-surface border-b border-line flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 shrink-0">
+          <div className="flex items-center min-w-0 gap-3">
+            <IconButton label="Abrir menú" aria-expanded={isMobileMenuOpen} onClick={() => setIsMobileMenuOpen(true)} className="lg:hidden"><Menu aria-hidden="true" className="w-5 h-5" /></IconButton>
+            <span className="font-semibold text-lg lg:hidden">NexFlow<span className="text-primary">.</span></span>
+            <div className="hidden lg:flex items-center gap-2 text-sm min-w-0"><span className="text-muted truncate max-w-56">{me?.workspace?.name || 'Administración'}</span><ChevronRight aria-hidden="true" className="h-4 w-4 text-muted shrink-0" /><span className="font-medium truncate">{activeModules.find(module => pathname.startsWith(module.route))?.label || (pathname === '/settings' ? 'Negocio' : pathname.startsWith('/superadmin') ? 'SuperAdmin' : 'Dashboard')}</span></div>
           </div>
-          <div className="flex-1 flex justify-end">
-             <NotificationBell />
-          </div>
+          <div className="flex items-center gap-3 shrink-0"><NotificationBell /><span className="hidden sm:flex h-9 w-9 rounded-full bg-indigo-50 text-primary items-center justify-center text-sm font-semibold" aria-label={me?.user?.firstName || 'Mi cuenta'}>{(me?.user?.firstName || me?.user?.email || 'N').slice(0,1).toUpperCase()}</span></div>
         </header>
-
-        <div className="flex-1 overflow-y-auto p-4 md:p-8">
-          <Outlet />
-        </div>
+        <div id="workspace-content" tabIndex={-1} className="flex-1 min-h-0 min-w-0 overflow-y-auto p-4 sm:p-6 lg:p-8"><Outlet /></div>
       </main>
     </div>
   );

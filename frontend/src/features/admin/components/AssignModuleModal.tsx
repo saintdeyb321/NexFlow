@@ -56,7 +56,7 @@ export const AssignModuleModal = ({ workspace, onClose }: AssignModuleModalProps
           <Select
             value={effectiveModuleId}
             onChange={(e) => setSelectedModuleId(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500"
+            className="w-full border focus:ring-purple-500"
             required
           >
             {modules.map(m => (
@@ -67,11 +67,11 @@ export const AssignModuleModal = ({ workspace, onClose }: AssignModuleModalProps
 
         {modulesError && <Alert tone="error">{getApiErrorPresentation(modulesError)}</Alert>}
         <div className="pt-4 flex justify-end gap-3">
-          <Button variant="secondary" type="button" disabled={assignMutation.isPending} onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">
+          <Button variant="secondary" type="button" disabled={assignMutation.isPending} onClick={onClose} className="text-sm font-medium transition-colors">
             Cancelar
           </Button>
-          <Button variant="primary" isLoading={assignMutation.isPending} type="submit" disabled={assignMutation.isPending || !effectiveModuleId} className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm">
-            {!assignMutation.isPending && <PackagePlus className="w-4 h-4 mr-2" />}
+          <Button variant="primary" isLoading={assignMutation.isPending} type="submit" disabled={assignMutation.isPending || !effectiveModuleId} className="flex items-center text-sm font-medium disabled:opacity-50 transition-colors">
+            {!assignMutation.isPending && <PackagePlus aria-hidden="true" className="w-4 h-4 mr-2" />}
             Asignar Módulo
           </Button>
         </div>

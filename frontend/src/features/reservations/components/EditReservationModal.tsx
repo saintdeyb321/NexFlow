@@ -45,7 +45,7 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Reagendar Cita" size="lg" closeDisabled={isSaving}>
-        <p className="text-sm text-gray-500 mb-5">
+        <p className="text-sm text-muted mb-5">
           Cliente: <span className="font-semibold text-gray-700">{reservation.customerName}</span>
         </p>
 
@@ -55,7 +55,7 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
               type="date"
               value={editDate}
               onChange={(e) => setEditDate(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full border text-sm focus:ring-primary"
             />
           </FormField>
           <FormField label="Nueva Hora (HH:mm)">
@@ -63,16 +63,16 @@ export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, 
               type="time"
               value={editTime}
               onChange={(e) => setEditTime(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full border text-sm focus:ring-primary"
             />
           </FormField>
         </div>
 
         <div className="mt-8 flex justify-end gap-3">
-          <Button variant="secondary"  disabled={isSaving} onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+          <Button variant="secondary"  disabled={isSaving} onClick={onClose} className="text-sm font-medium transition-colors">
             Cancelar
           </Button>
-          <Button variant="primary" isLoading={isSaving} onClick={handleSaveEdit} disabled={isSaving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+          <Button variant="primary" isLoading={isSaving} onClick={handleSaveEdit} disabled={isSaving} className="text-sm font-medium transition-colors disabled:opacity-50">
             {isSaving ? 'Guardando...' : 'Confirmar Cambio'}
           </Button>
         </div>

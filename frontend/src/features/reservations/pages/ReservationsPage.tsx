@@ -1,3 +1,4 @@
+import { PageHeader } from '../../../components/ui/Layout';
 import { Button } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, EmptyState, ErrorState, Alert } from '../../../components/ui/Feedback';
@@ -103,25 +104,17 @@ export const ReservationsPage = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto animate-in fade-in">
+    <div className="nf-page">
 
       <ConfirmDialog isOpen={confirmDialog !== null} title={confirmDialog?.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'} description={confirmDialog?.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'} destructive={confirmDialog?.action === 'cancel'} confirmLabel={confirmDialog?.action === 'cancel' ? 'Sí, cancelar' : 'Sí, completar'} cancelLabel="No, volver" isLoading={cancelMutation.isPending || completeMutation.isPending} confirmDisabled={!can('RESERVATIONS', confirmDialog?.action === 'cancel' ? 'CANCEL' : 'COMPLETE')} onClose={() => setConfirmDialog(null)} onConfirm={executeAction} />
 
-      <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <CalendarIcon className="w-6 h-6 mr-3 text-blue-600" /> Gestión de Reservas
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">Administra, reagenda y cancela citas manualmente.</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm">
-            <input
+      <PageHeader title="Reservas" description="Administra las citas de cada sede, sus horarios y su estado." icon={<CalendarIcon aria-hidden="true" className="w-5 h-5" />} actions={<><div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center bg-surface border border-line rounded-lg px-3 py-2 shadow-sm">
+            <input aria-label="Fecha de la agenda"
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-sm outline-none text-gray-700"
+              className="nf-control"
               disabled={!isValidLocationSelected}
             />
           </div>
@@ -130,23 +123,22 @@ export const ReservationsPage = () => {
             <Button variant="primary"
               onClick={() => setIsCreateModalOpen(true)}
               disabled={!isValidLocationSelected || !can('RESERVATIONS', 'CREATE') || !timeZone}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 flex items-center transition-colors shadow-sm"
+              className="text-sm font-medium disabled:opacity-50 flex items-center transition-colors"
             >
               Nueva Reserva
             </Button>
             {!isValidLocationSelected && (
-              <div className="absolute top-full mt-2 right-0 w-64 bg-gray-900 text-white text-xs rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none flex items-start">
-                <AlertCircle className="w-4 h-4 mr-2 shrink-0 text-yellow-400" />
+              <div className="mt-2 max-w-64 text-muted text-xs flex items-start">
+                <AlertCircle aria-hidden="true" className="w-4 h-4 mr-2 shrink-0 text-yellow-400" />
                 Debes seleccionar una sede específica en el panel lateral para poder crear o ver reservas.
               </div>
             )}
           </div>
-        </div>
-      </div>
+        </div></>} />
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-surface border border-line rounded-xl shadow-sm overflow-hidden">
         {!isValidLocationSelected ? (
-          <EmptyState className="h-64 bg-gray-50" icon={<MapPin className="w-12 h-12 text-blue-300" />} title="Selecciona una Sede" description="Para gestionar las citas, elige una ubicación específica en el selector superior." />
+          <EmptyState className="h-64 bg-surface-soft" icon={<MapPin aria-hidden="true" className="w-12 h-12 text-blue-300" />} title="Selecciona una Sede" description="Para gestionar las citas, elige una ubicación específica en el selector superior." />
         ) : isLoading ? (
           <LoadingState className="h-64" title="Cargando agenda..." />
         ) : isError ? (

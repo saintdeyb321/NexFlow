@@ -91,18 +91,18 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
       <form onSubmit={handleSubmit} className="space-y-4">
 
         <FormField label="Correo del Dueño (Google Auth)">
-          <Input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" placeholder="cliente@gmail.com" />
+          <Input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full border focus:ring-purple-500 transition-all" placeholder="cliente@gmail.com" />
         </FormField>
 
-        <div role="group" aria-label="Modalidad de Licencia" className="pt-4 border-t border-gray-100">
-          <p className="block text-sm font-bold mb-3 text-gray-800">Modalidad de Licencia</p>
+        <div role="group" aria-label="Modalidad de Licencia" className="pt-4 border-t border-line">
+          <p className="block text-sm font-bold mb-3 text-foreground">Modalidad de Licencia</p>
           <div className="flex gap-4 mb-4">
             <label className="flex items-center cursor-pointer text-sm font-medium text-gray-700">
-              <Input type="radio" name="mode" checked={provisionMode === 'template'} onChange={() => setProvisionMode('template')} className="mr-2 w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300" />
+              <Input type="radio" name="mode" checked={provisionMode === 'template'} onChange={() => setProvisionMode('template')} className="mr-2 w-4 h-4 focus:ring-purple-500" />
               Por Plantilla
             </label>
             <label className="flex items-center cursor-pointer text-sm font-medium text-gray-700">
-              <Input type="radio" name="mode" checked={provisionMode === 'custom'} onChange={() => setProvisionMode('custom')} className="mr-2 w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300" />
+              <Input type="radio" name="mode" checked={provisionMode === 'custom'} onChange={() => setProvisionMode('custom')} className="mr-2 w-4 h-4 focus:ring-purple-500" />
               A la carta
             </label>
           </div>
@@ -112,7 +112,7 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
               <Select aria-label="Plantilla de licencia"
                 value={templateCode}
                 onChange={e => setFormData({...formData, templateCode: e.target.value})}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all cursor-pointer"
+                className="w-full border focus:ring-purple-500 transition-all cursor-pointer"
               >
                 {dbTemplates.map(t => (
                   <option key={t.code} value={t.code}>{t.name} ({t.code})</option>
@@ -120,16 +120,16 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
               </Select>
             </div>
           ) : (
-            <div role="group" aria-label="Módulos Disponibles" className="animate-in fade-in slide-in-from-top-1 bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <p className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Módulos Disponibles</p>
-              <div className="grid grid-cols-2 gap-3">
+            <div role="group" aria-label="Módulos Disponibles" className="animate-in fade-in slide-in-from-top-1 bg-surface-soft p-4 rounded-xl border border-line">
+              <p className="block text-xs font-semibold text-muted uppercase tracking-wider mb-3">Módulos Disponibles</p>
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                 {dbModules.map(m => (
                   <label key={m.code} className="flex items-center text-sm text-gray-700 cursor-pointer">
                     <Input
                       type="checkbox"
                       checked={selectedCustomModules.includes(m.code)}
                       onChange={() => handleModuleToggle(m.code)}
-                      className="mr-2 rounded text-purple-600 focus:ring-purple-500"
+                      className="mr-2 focus:ring-purple-500"
                     />
                     {m.name}
                   </label>
@@ -139,22 +139,22 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4 border-t border-gray-100 pt-4 mt-2">
+        <div className="grid gap-4 border-t border-line pt-4 mt-2 grid-cols-1 sm:grid-cols-2">
           <FormField label="Límite de Sedes">
-            <Input type="number" min="1" max="50" required value={formData.maxLocations} onChange={e => setFormData({...formData, maxLocations: parseInt(e.target.value)})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
+            <Input type="number" min="1" max="50" required value={formData.maxLocations} onChange={e => setFormData({...formData, maxLocations: parseInt(e.target.value)})} className="w-full border focus:ring-purple-500 transition-all" />
           </FormField>
           <FormField label="Vencimiento">
-            <Input type="date" required value={formData.expiresAt} onChange={e => setFormData({...formData, expiresAt: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
+            <Input type="date" required value={formData.expiresAt} onChange={e => setFormData({...formData, expiresAt: e.target.value})} className="w-full border focus:ring-purple-500 transition-all" />
           </FormField>
         </div>
 
         {(errorMessage || templatesError || modulesError) && <Alert tone="error">{errorMessage || getApiErrorPresentation(templatesError || modulesError)}</Alert>}
-        <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
-          <Button variant="secondary" type="button" disabled={isProvisioning} onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+        <div className="pt-6 border-t border-line flex justify-end gap-3">
+          <Button variant="secondary" type="button" disabled={isProvisioning} onClick={onClose} className="text-sm font-medium transition-colors">
             Cancelar
           </Button>
-          <Button variant="primary" isLoading={isProvisioning} type="submit" disabled={isProvisioning || (provisionMode === 'template' && !templateCode)} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors disabled:opacity-50 shadow-sm">
-            <Save className="w-4 h-4 mr-2" />
+          <Button variant="primary" isLoading={isProvisioning} type="submit" disabled={isProvisioning || (provisionMode === 'template' && !templateCode)} className="flex items-center text-sm font-medium transition-colors disabled:opacity-50">
+            <Save aria-hidden="true" className="w-4 h-4 mr-2" />
             {isProvisioning ? 'Procesando...' : 'Aprovisionar Cliente'}
           </Button>
         </div>

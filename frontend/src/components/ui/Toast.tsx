@@ -35,10 +35,10 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   }), [show]);
   return <ToastContext.Provider value={api}>
     {children}
-    <div aria-live="polite" aria-relevant="additions" className="fixed bottom-4 right-4 z-[100] w-[calc(100%-2rem)] max-w-sm space-y-2">
-      {entries.map(entry => <Alert key={entry.id} tone={entry.tone} className="shadow-lg flex items-start justify-between gap-3">
-        <div><p>{entry.message}</p>{entry.correlationId && <p className="mt-1 text-xs opacity-70">Seguimiento: {entry.correlationId}</p>}</div>
-        <IconButton label="Cerrar notificación" size="sm" onClick={() => dismiss(entry.id)}><X className="w-4 h-4" /></IconButton>
+    <div aria-live="polite" aria-relevant="additions" className="fixed bottom-4 right-4 z-[100] w-[calc(100%-2rem)] max-w-sm space-y-2 break-words">
+      {entries.map(entry => <Alert key={entry.id} tone={entry.tone} className="shadow-[0_8px_30px_-12px_#0f172a40] flex items-start justify-between gap-3">
+        <div><p>{entry.message}</p>{entry.correlationId && <p className="mt-1 text-xs opacity-80 break-all">Seguimiento: {entry.correlationId}</p>}</div>
+        <IconButton label="Cerrar notificación" size="sm" onClick={() => dismiss(entry.id)}><X aria-hidden="true" className="w-4 h-4" /></IconButton>
       </Alert>)}
     </div>
   </ToastContext.Provider>;

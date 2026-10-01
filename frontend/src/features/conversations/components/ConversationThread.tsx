@@ -1,3 +1,5 @@
+import { Input } from '../../../components/ui/Form';
+import { Badge } from '../../../components/ui/Feedback';
 import { Button, IconButton } from '../../../components/ui/Button';
 import { useToast } from '../../../components/ui/Toast';
 import { EmptyState } from '../../../components/ui/Feedback';
@@ -37,7 +39,7 @@ export const ConversationThread = ({
   }, [messages, leaseObservation]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
   }, [messages]);
   const handleSend = async () => {
     if (!newMessage.trim()) return;
@@ -52,23 +54,23 @@ export const ConversationThread = ({
   };
 
   return (
-    <div className="w-full flex flex-col h-full bg-gray-50/50 relative">
-      <div className="p-4 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
+    <div className="w-full min-w-0 flex flex-col flex-1 min-h-0 bg-background relative">
+      <div className="p-3 sm:p-4 border-b border-line bg-surface flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div>
-          <h3 className="font-bold text-gray-900 text-lg">{chat.consumerPhone}</h3>
-          <p className="text-xs text-gray-500 flex items-center mt-0.5">
-            <Clock className="w-3 h-3 mr-1" /> Inicio: {new Date(chat.startedAt).toLocaleDateString()}
+          <h3 className="font-semibold text-foreground text-base break-all">{chat.consumerPhone}</h3>
+          <p className="text-xs text-muted flex items-center mt-0.5">
+            <Clock aria-hidden="true" className="w-3 h-3 mr-1" /> Inicio: {new Date(chat.startedAt).toLocaleDateString()}
           </p>
         </div>
         <div>
           {chat.mode === 'Automatic' ? (
-            <Button variant="ghost" isLoading={isChangingMode} onClick={onTakeOver} disabled={isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
-              {!isChangingMode && <User className="w-4 h-4 mr-2" />}
+            <Button variant="secondary" isLoading={isChangingMode} onClick={onTakeOver} disabled={isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="shrink-0">
+              {!isChangingMode && <User aria-hidden="true" className="w-4 h-4 mr-2" />}
               {isChangingMode ? 'Procesando...' : 'Asumir Control'}
             </Button>
           ) : (
-            <Button variant="ghost" isLoading={isChangingMode} onClick={onRelease} disabled={isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
-              {!isChangingMode && <Bot className="w-4 h-4 mr-2" />}
+            <Button variant="secondary" isLoading={isChangingMode} onClick={onRelease} disabled={isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="shrink-0">
+              {!isChangingMode && <Bot aria-hidden="true" className="w-4 h-4 mr-2" />}
               {isChangingMode ? 'Procesando...' : 'Reactivar IA'}
             </Button>
           )}
@@ -76,67 +78,60 @@ export const ConversationThread = ({
       </div>
 
       {chat.mode === 'Automatic' ? (
-        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2.5 flex items-center justify-center text-blue-700 text-sm font-medium">
-          <Bot className="w-4 h-4 mr-2 animate-pulse" />
+        <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 flex items-center text-indigo-700 text-xs leading-relaxed shrink-0">
+          <Bot aria-hidden="true" className="w-4 h-4 mr-2 animate-pulse" />
           IA en Piloto Automático. El asistente virtual está gestionando al cliente.
         </div>
       ) : (
-        <div className={`border-b px-4 py-2.5 flex items-center justify-center text-sm font-medium ${
+        <div className={`border-b px-4 py-2.5 flex items-center text-xs leading-relaxed shrink-0 ${
           chat.handoffReason === 'AiEscalation' || chat.handoffReason === 'SystemError'
             ? 'bg-red-50 border-red-200 text-red-700'
             : 'bg-orange-50 border-orange-200 text-orange-700'
         }`}>
           {chat.handoffReason === 'SystemError' ? (
              <>
-               <AlertOctagon className="w-4 h-4 mr-2" />
+               <AlertOctagon aria-hidden="true" className="w-4 h-4 mr-2" />
                Error del Sistema: La IA falló o se desconectó. Asume el control para continuar.
              </>
           ) : chat.handoffReason === 'AiEscalation' ? (
             <>
-              <AlertOctagon className="w-4 h-4 mr-2" />
+              <AlertOctagon aria-hidden="true" className="w-4 h-4 mr-2" />
               Alerta de la IA: El bot necesita tu asistencia para resolver esta solicitud.
             </>
           ) : (
             <>
-              <AlertTriangle className="w-4 h-4 mr-2" />
+              <AlertTriangle aria-hidden="true" className="w-4 h-4 mr-2" />
               Modo Manual Activo. Estás chateando directamente; la IA está en pausa.
             </>
           )}
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 space-y-4">
         {messages.length === 0 ? (
           <EmptyState title="Sin mensajes en el historial." />
         ) : (
           messages.map(msg => (
             <div key={msg.id} className={`flex ${msg.direction === 'inbound' ? 'justify-start' : 'justify-end'}`}>
-              <div className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                msg.direction === 'inbound'
-                  ? 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm'
-                  : msg.sender === 'AI'
-                    ? 'bg-blue-100 text-blue-900 border border-blue-200 rounded-tr-sm shadow-sm'
-                    : 'bg-green-500 text-white rounded-tr-sm shadow-sm'
-              }`}>
-                <p className="text-sm whitespace-pre-wrap break-words">
+              <div className={`nf-message ${msg.direction === 'inbound' ? 'nf-message-consumer' : msg.sender === 'AI' ? 'nf-message-ai' : 'nf-message-human'}`}>
+                <p className="text-[10px] font-semibold mb-1 opacity-70">{msg.direction === 'inbound' ? 'Cliente' : msg.sender === 'AI' ? 'Asistente IA' : 'Equipo'}</p>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                   {msg.content ? msg.content : (
                     <span className="italic flex items-center opacity-80">
-                      <ImageIcon className="w-4 h-4 mr-1" /> [Contenido Multimedia]
+                      <ImageIcon aria-hidden="true" className="w-4 h-4 mr-1" /> [Contenido Multimedia]
                     </span>
                   )}
                 </p>
-                <div className={`text-[10px] mt-1 flex items-center justify-end ${
-                  msg.direction === 'inbound' ? 'text-gray-400' : (msg.sender === 'AI' ? 'text-blue-500' : 'text-green-100')
-                }`}>
-                  {msg.sender === 'AI' && <Bot className="w-3 h-3 mr-1" />}
+                <div className="text-[10px] mt-2 flex flex-wrap gap-y-1 items-center justify-end text-muted">
+                  {msg.sender === 'AI' && <Bot aria-hidden="true" className="w-3 h-3 mr-1" />}
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
 
-                  {msg.status === 'Failed' && <span className="ml-2 text-red-500 font-bold">Error de envío</span>}
-                  {msg.direction === 'outbound' && msg.status !== 'Failed' && <span className="ml-2">{
+                  {msg.status === 'Failed' && <Badge tone="error" className="ml-2 text-[10px]">Error de envío</Badge>}
+                  {msg.direction === 'outbound' && msg.status !== 'Failed' && <Badge tone={msg.status === 'Sent' ? 'success' : 'warning'} className="ml-2 text-[10px]">{
                     msg.status === 'Attempting' && (!msg.transportLeaseUntil || !Number.isFinite(Date.parse(msg.transportLeaseUntil)) || Date.parse(msg.transportLeaseUntil) <= Date.now())
                       ? 'Entrega sin confirmar'
                       : { Pending: 'Pendiente', Attempting: 'Enviando', Sent: 'Enviado', UnknownDelivery: 'Entrega sin confirmar' }[msg.status]
-                  }</span>}
+                  }</Badge>}
                 </div>
               </div>
             </div>
@@ -145,23 +140,23 @@ export const ConversationThread = ({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 bg-white border-t border-gray-200">
-        <div className="flex items-center">
-          <input aria-label="Mensaje al cliente"
+      <div className="p-3 sm:p-4 bg-surface border-t border-line shrink-0">
+        <div className="flex items-center gap-2">
+          <Input aria-label="Mensaje al cliente"
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder={chat.mode === 'Automatic' ? 'Bloqueado. Asume el control manual para enviar un mensaje...' : 'Escribe un mensaje al cliente...'}
             disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !can('CONVERSATIONS', 'SEND_MESSAGE')}
-            className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+            className="flex-1 min-w-0"
           />
           <IconButton variant="primary" label="Enviar mensaje"
             isLoading={isSending} onClick={handleSend}
             disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim() || !can('CONVERSATIONS', 'SEND_MESSAGE')}
-            className="ml-3 p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            className="shrink-0"
           >
-            <Send className="w-5 h-5" />
+            <Send aria-hidden="true" className="w-5 h-5" />
           </IconButton>
         </div>
       </div>

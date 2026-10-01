@@ -63,7 +63,7 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
           <Select
             value={formData.category || ''}
             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
+            className="w-full border focus:ring-primary transition-all cursor-pointer"
           >
             <option value="General">General</option>
             <option value="Pagos">Pagos</option>
@@ -75,14 +75,14 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
         <FormField required label="Pregunta (Lo que diría el usuario)">
           {control => (<div className="relative">
             <div className="absolute top-3 left-3 text-gray-400">
-              <HelpCircle className="w-5 h-5" />
+              <HelpCircle aria-hidden="true" className="w-5 h-5" />
             </div>
             <Textarea {...control}
               rows={2}
               value={formData.question}
               onChange={(e) => setFormData({ ...formData, question: e.target.value })}
               placeholder="Ej: ¿Tienen estacionamiento disponible?"
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              className="w-full pl-10 pr-4 border focus:ring-primary transition-all"
               required
             />
           </div>)}
@@ -94,17 +94,17 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
             value={formData.answer}
             onChange={(e) => setFormData({ ...formData, answer: e.target.value })}
             placeholder="Ej: Sí, contamos con estacionamiento gratuito para clientes en el sótano del edificio."
-            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            className="w-full border focus:ring-primary transition-all"
             required
           />
         </FormField>
 
-        <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
-          <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+        <div className="pt-6 border-t border-line flex justify-end gap-3">
+          <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="text-sm font-medium transition-colors">
             Cancelar
           </Button>
-          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-50">
-            <Save className="w-4 h-4 mr-2" />
+          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving} className="flex items-center text-sm font-medium transition-colors disabled:opacity-50">
+            <Save aria-hidden="true" className="w-4 h-4 mr-2" />
             {isSaving ? 'Guardando...' : 'Guardar'}
           </Button>
         </div>

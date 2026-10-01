@@ -25,15 +25,15 @@ export const ReservationList = ({ canEdit, canCancel, canComplete, reservations,
     switch (status) {
       case 'CONFIRMED': return <StatusBadge label="Confirmada" tone="success" />;
       case 'PENDING': return <StatusBadge label="Pendiente" tone="warning" />;
-      case 'COMPLETED': return <StatusBadge label="Completada" tone="info" />;
-      case 'CANCELLED': return <StatusBadge label="Cancelada" tone="error" />;
+      case 'COMPLETED': return <StatusBadge label="Completada" tone="success" />;
+      case 'CANCELLED': return <StatusBadge label="Cancelada" tone="neutral" />;
       default: return <StatusBadge label={status} />;
     }
   };
 
   if (!reservations || reservations.length === 0) {
     return (
-      <EmptyState icon={<Search className="w-10 h-10 text-gray-300" />} title="No hay reservas agendadas para esta fecha." />
+      <EmptyState icon={<Search aria-hidden="true" className="w-10 h-10 text-gray-300" />} title="No hay reservas agendadas para esta fecha." />
     );
   }
   const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
@@ -44,12 +44,12 @@ export const ReservationList = ({ canEdit, canCancel, canComplete, reservations,
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left border-collapse">
+      <table className="nf-table nf-responsive-table">
         <thead>
-          <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <tr className="bg-surface-soft border-b border-line text-xs font-semibold text-muted uppercase tracking-wider">
             <th className="px-6 py-4">Hora</th>
             <th className="px-6 py-4">Cliente</th>
-            <th className="px-6 py-4 hidden md:table-cell">Contacto</th>
+            <th className="px-6 py-4">Contacto</th>
             <th className="px-6 py-4">Estado</th>
             <th className="px-6 py-4 text-right">Acciones</th>
           </tr>
@@ -63,34 +63,34 @@ export const ReservationList = ({ canEdit, canCancel, canComplete, reservations,
 
             return (
               <tr key={res.id} className={`hover:bg-gray-50 transition-colors ${isCancelled ? 'opacity-60 bg-gray-50/50' : ''}`}>
-                <td className="px-6 py-4">
-                  <span className="font-semibold text-gray-900">
+                <td data-label="Hora" className="px-6 py-4">
+                  <span className="font-semibold text-foreground">
                     {localTime.toLocaleTimeString('es-PE', { timeZone, hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </td>
-                <td className="px-6 py-4">
-                  <div className="font-medium text-gray-900">{res.customerName}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
+                <td data-label="Cliente / Servicio" className="px-6 py-4">
+                  <div><div className="font-medium text-foreground">{res.customerName}</div>
+                  <div className="text-xs text-muted mt-0.5">
                     {services.find(s => s.id === res.serviceId)?.name || 'Servicio General'}
-                  </div>
+                  </div></div>
                 </td>
-                <td className="px-6 py-4 hidden md:table-cell text-sm text-gray-600">
+                <td data-label="Contacto" className="px-6 py-4 text-sm text-muted">
                   {res.customerIdentifier}
                 </td>
-                <td className="px-6 py-4">
+                <td data-label="Estado" className="px-6 py-4">
                   {getStatusBadge(res.status)}
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td data-label="Acciones" className="px-6 py-4 text-right">
                   {normalizedStatus === 'PENDING' || normalizedStatus === 'CONFIRMED' ? (
                     <div className="flex justify-end gap-2">
-                      <IconButton variant="ghost" label="Finalizar Reserva" disabled={!canComplete || res.status !== 'Confirmed'} onClick={() => onComplete(res.id!)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
+                      <IconButton variant="ghost" label="Finalizar Reserva" disabled={!canComplete || res.status !== 'Confirmed'} onClick={() => onComplete(res.id!)} className="" title="Finalizar Reserva">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                       </IconButton>
-                      <IconButton variant="ghost" label="Reagendar" disabled={!canEdit || res.status !== 'Confirmed'} onClick={() => onEdit(res)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Reagendar">
-                        <Pencil className="w-4 h-4" />
+                      <IconButton variant="ghost" label="Reagendar" disabled={!canEdit || res.status !== 'Confirmed'} onClick={() => onEdit(res)} className="" title="Reagendar">
+                        <Pencil aria-hidden="true" className="w-4 h-4" />
                       </IconButton>
-                      <IconButton variant="ghost" label="Cancelar" disabled={!canCancel} onClick={() => onCancel(res.id!)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
-                        <XCircle className="w-4 h-4" />
+                      <IconButton variant="ghost" label="Cancelar" disabled={!canCancel} onClick={() => onCancel(res.id!)} className="text-danger" title="Cancelar">
+                        <XCircle aria-hidden="true" className="w-4 h-4" />
                       </IconButton>
                     </div>
                   ) : (

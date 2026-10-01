@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom';
 import { IconButton, Button } from '../../../components/ui/Button';
 import { useState, useEffect } from 'react';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
@@ -6,10 +7,13 @@ import { ConversationSidebar } from '../components/ConversationSidebar';
 import { ConversationThread } from '../components/ConversationThread';
 import { useConversations } from '../hooks/useConversations';
 import { usePermissions } from '../../../core/auth/permissions';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Trash2, MessageSquare } from 'lucide-react';
 
 export const InboxPage = () => {
   const { can } = usePermissions();
+  const { search } = useLocation();
+  // View state only: the stable hook keeps conversation selection and URL ownership.
+  const [showMobileList, setShowMobileList] = useState(() => !new URLSearchParams(search).has('conversation'));
   const {
     conversations,
     selectedChat,
@@ -32,18 +36,18 @@ export const InboxPage = () => {
 
   if (isError) {
     return (
-      <ErrorState className="h-[calc(100vh-8rem)] bg-white border border-gray-200 rounded-xl mx-4 md:mx-0" title="Pérdida de Conexión" description="No se pudo conectar con el servidor de NexFlow. Revisa tu conexión e intenta nuevamente." onRetry={retry} />
+      <ErrorState className="nf-panel h-[calc(100dvh-10rem)]" title="Pérdida de Conexión" description="No se pudo conectar con el servidor de NexFlow. Revisa tu conexión e intenta nuevamente." onRetry={retry} />
     );
   }
 
   if (isLoading) {
     return (
-      <div className="flex h-[calc(100vh-8rem)] bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm animate-pulse mx-4 md:mx-0">
-        <div className="hidden md:flex w-1/3 border-r border-gray-200 flex-col bg-gray-50">
-          <div className="p-4 border-b border-gray-200 bg-white"><Skeleton className="h-6 bg-gray-200 rounded w-1/2" /></div>
+      <div className="nf-panel flex h-[calc(100dvh-10rem)] overflow-hidden">
+        <div className="hidden md:flex w-[320px] shrink-0 border-r border-line flex-col bg-surface-soft">
+          <div className="p-4 border-b border-line bg-surface"><Skeleton className="h-6 bg-gray-200 rounded w-1/2" /></div>
           <div className="p-4"><Skeleton className="h-16 bg-gray-200 rounded-lg mb-2" /><Skeleton className="h-16 bg-gray-200 rounded-lg mb-2" /></div>
         </div>
-        <div className="w-full md:w-2/3 flex flex-col p-6 justify-end">
+        <div className="w-full min-w-0 md:flex-1 flex flex-col p-6 justify-end">
           <Skeleton className="h-12 bg-gray-100 rounded-lg w-1/2 mb-4 self-start" />
           <Skeleton className="h-12 bg-gray-200 rounded-lg w-1/2 mb-4 self-end" />
           <Skeleton className="h-12 bg-gray-100 rounded-lg w-full mt-4" />
@@ -55,41 +59,27 @@ export const InboxPage = () => {
   return (
     <>
     <ConfirmDialog isOpen={deleteTarget !== null && deleteTarget === selectedChat?.id} title="Eliminar conversación" description="¿Eliminar permanentemente esta conversación y su historial?" destructive confirmLabel="Eliminar" isLoading={isDeleting} confirmDisabled={!can('CONVERSATIONS', 'DELETE')} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} />
-    <div className="flex h-[calc(100dvh-5rem)] md:h-[calc(100vh-8rem)] bg-white md:border md:border-gray-200 md:rounded-xl overflow-hidden shadow-sm -mx-4 md:mx-0">
+    <div className="nf-panel flex h-[calc(100dvh-6.5rem)] sm:h-[calc(100dvh-8.5rem)] min-h-80 overflow-hidden">
 
-      <div className={`w-full md:w-1/3 ${selectedChat ? 'hidden md:block' : 'block'} border-r border-gray-200 h-full`}>
+      <div className={`w-full md:w-[320px] xl:w-[350px] md:shrink-0 ${selectedChat && !showMobileList ? 'hidden md:block' : 'block'} border-r border-line h-full`}>
         <ConversationSidebar
           conversations={conversations}
           selectedChat={selectedChat}
-          onSelectChat={setSelectedChat}
+          onSelectChat={chat => { setSelectedChat(chat); setShowMobileList(false); }}
         />
       </div>
 
-      <div className={`w-full md:w-2/3 flex flex-col relative h-full ${!selectedChat ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full min-w-0 md:flex-1 flex flex-col relative h-full ${!selectedChat || showMobileList ? 'hidden md:flex' : 'flex'}`}>
 
         {selectedChat ? (
           <>
-            {/* Botón Volver para Móviles */}
-            <div className="md:hidden absolute top-4 left-4 z-20">
-              <IconButton variant="ghost" label="Volver a conversaciones"
-                 onClick={() => setSelectedChat(null)}
-                className="p-1 bg-white border border-gray-200 text-gray-600 rounded-full shadow-sm hover:bg-gray-50 flex items-center"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </IconButton>
-            </div>
-
-            <div className="absolute top-20 md:top-4 right-4 z-10">
-              <Button variant="ghost"
-                onClick={() => setDeleteTarget(selectedChat.id)}
-                disabled={isDeleting || !can('CONVERSATIONS', 'DELETE')}
-                className="px-3 py-1 bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 transition-colors text-sm font-medium disabled:opacity-50"
-                title="Eliminar permanentemente"
-              >
-                {isDeleting ? 'Eliminando...' : '🗑️ Eliminar Chat'}
+            <div className="flex items-center justify-between px-3 py-1 border-b border-line bg-surface-soft">
+              <IconButton label="Volver a conversaciones" onClick={() => setShowMobileList(true)} className="md:hidden"><ChevronLeft aria-hidden="true" className="w-5 h-5" /></IconButton>
+              <span className="hidden md:block text-xs text-muted px-2">Conversación</span>
+              <Button variant="ghost" onClick={() => setDeleteTarget(selectedChat.id)} disabled={isDeleting || !can('CONVERSATIONS', 'DELETE')} className="text-danger" title="Eliminar permanentemente">
+                <Trash2 aria-hidden="true" className="w-4 h-4" /> {isDeleting ? 'Eliminando...' : 'Eliminar'}
               </Button>
             </div>
-
             <ConversationThread
               chat={selectedChat}
               messages={messages}
@@ -101,11 +91,11 @@ export const InboxPage = () => {
             />
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-gray-50/50">
+          <div className="flex-1 flex flex-col items-center justify-center text-muted bg-surface-soft/50">
             {conversations.length === 0 ? (
               <EmptyState icon={<span className="text-2xl">📭</span>} title="Bandeja Vacía" description="No hay conversaciones activas en este momento." />
             ) : (
-              <EmptyState title="Selecciona una conversación" description="Elige un chat del panel lateral para ver el historial." />
+              <EmptyState icon={<MessageSquare aria-hidden="true" className="w-6 h-6" />} title="Selecciona una conversación" description="Elige un chat del panel lateral para ver el historial." />
             )}
           </div>
         )}

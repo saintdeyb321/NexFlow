@@ -113,12 +113,12 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Nombre del Servicio">
-          <Input type="text" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
+          <Input type="text" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full border focus:ring-primary" required />
         </FormField>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Categoría">
-            <Select value={formData.categoryId || ''} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required>
+            <Select value={formData.categoryId || ''} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full border focus:ring-primary" required>
               <option value="" disabled>Selecciona una categoría...</option>
               {categories.map((c: ServiceCategoryDto) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
@@ -129,41 +129,41 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
         </div>
 
         <FormField label="Descripción para la IA">
-          <Textarea rows={2} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" />
+          <Textarea rows={2} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full border focus:ring-primary" />
         </FormField>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <FormField label="Duración (Min)">
-            <Input type="number" min="5" step="5" value={formData.durationInMinutes || 30} onChange={e => setFormData({ ...formData, durationInMinutes: parseInt(e.target.value) })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
+            <Input type="number" min="5" step="5" value={formData.durationInMinutes || 30} onChange={e => setFormData({ ...formData, durationInMinutes: parseInt(e.target.value) })} className="w-full border focus:ring-primary" required />
           </FormField>
           <FormField label="Precio">
             {control => (<div className="flex">
-              <span className="px-3 py-2 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-gray-500">S/</span>
-              <Input {...control} type="number" min="0" step="0.10" value={(formData.priceMinorUnits || 0) / 100} onChange={e => setFormData({ ...formData, priceMinorUnits: Math.round(parseFloat(e.target.value || '0') * 100) })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-r-xl outline-none focus:ring-2 focus:ring-blue-500" />
+              <span className="px-3 py-2 bg-gray-100 border border-r-0 border-line rounded-l-xl text-muted">S/</span>
+              <Input {...control} type="number" min="0" step="0.10" value={(formData.priceMinorUnits || 0) / 100} onChange={e => setFormData({ ...formData, priceMinorUnits: Math.round(parseFloat(e.target.value || '0') * 100) })} className="w-full border rounded-r-xl focus:ring-primary" />
             </div>)}
           </FormField>
         </div>
 
-        <fieldset className="p-4 bg-gray-50 rounded-xl border border-gray-200">
+        <fieldset className="p-4 bg-surface-soft rounded-xl border border-line">
           <legend className="text-sm font-medium text-gray-700 flex items-center">
-            <MapPin className="w-4 h-4 mr-2 text-gray-500" /> Disponibilidad en Sedes
+            <MapPin aria-hidden="true" className="w-4 h-4 mr-2 text-muted" /> Disponibilidad en Sedes
           </legend>
           <div className="flex gap-4 mb-3">
             <label className="flex items-center text-sm cursor-pointer">
-              <Input type="radio" name="locScope" checked={formData.locationScope === 'ALL'} onChange={() => setFormData({ ...formData, locationScope: 'ALL' })} className="mr-2 text-blue-600 focus:ring-blue-500" />
+              <Input type="radio" name="locScope" checked={formData.locationScope === 'ALL'} onChange={() => setFormData({ ...formData, locationScope: 'ALL' })} className="mr-2 focus:ring-primary" />
               Todas las Sedes
             </label>
             <label className="flex items-center text-sm cursor-pointer">
-              <Input type="radio" name="locScope" checked={formData.locationScope === 'SPECIFIC'} onChange={() => setFormData({ ...formData, locationScope: 'SPECIFIC' })} className="mr-2 text-blue-600 focus:ring-blue-500" />
+              <Input type="radio" name="locScope" checked={formData.locationScope === 'SPECIFIC'} onChange={() => setFormData({ ...formData, locationScope: 'SPECIFIC' })} className="mr-2 focus:ring-primary" />
               Sedes Específicas
             </label>
           </div>
 
           {formData.locationScope === 'SPECIFIC' && (
-            <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-gray-200">
+            <div className="grid gap-2 mt-2 pt-2 border-t border-line grid-cols-1 sm:grid-cols-2">
               {locations.map(loc => (
                 <label key={loc.id} className="flex items-center text-sm cursor-pointer">
-                  <Input type="checkbox" checked={(formData.locationIds || []).includes(loc.id!)} onChange={() => toggleLocation(loc.id!)} className="mr-2 rounded text-blue-600 focus:ring-blue-500" />
+                  <Input type="checkbox" checked={(formData.locationIds || []).includes(loc.id!)} onChange={() => toggleLocation(loc.id!)} className="mr-2 focus:ring-primary" />
                   {loc.name}
                 </label>
               ))}
@@ -173,17 +173,17 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
         <div className="flex items-center justify-between pt-2">
           <label className="flex items-center text-sm cursor-pointer text-gray-700">
-            <Input type="checkbox" checked={formData.requiresReservation || false} onChange={e => setFormData({ ...formData, requiresReservation: e.target.checked })} className="mr-2 rounded text-blue-600 focus:ring-blue-500" /> Requiere Cita
+            <Input type="checkbox" checked={formData.requiresReservation || false} onChange={e => setFormData({ ...formData, requiresReservation: e.target.checked })} className="mr-2 focus:ring-primary" /> Requiere Cita
           </label>
           <label className="flex items-center text-sm cursor-pointer text-gray-700">
-            <Input type="checkbox" checked={formData.isActive ?? true} onChange={e => setFormData({ ...formData, isActive: e.target.checked })} className="mr-2 rounded text-green-600 focus:ring-green-500" /> Activo
+            <Input type="checkbox" checked={formData.isActive ?? true} onChange={e => setFormData({ ...formData, isActive: e.target.checked })} className="mr-2 focus:ring-green-500" /> Activo
           </label>
         </div>
 
-        <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
-          <Button variant="secondary" type="button" disabled={isSaving || isUploadingImage} onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl">Cancelar</Button>
-          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || isUploadingImage || categories.length === 0} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl disabled:opacity-50 transition-colors">
-            <Save className="w-4 h-4 mr-2" />
+        <div className="pt-6 border-t border-line flex justify-end gap-3">
+          <Button variant="secondary" type="button" disabled={isSaving || isUploadingImage} onClick={onClose} className="text-sm font-medium">Cancelar</Button>
+          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || isUploadingImage || categories.length === 0} className="flex items-center text-sm font-medium disabled:opacity-50 transition-colors">
+            <Save aria-hidden="true" className="w-4 h-4 mr-2" />
             {isSaving ? 'Guardando...' : 'Guardar'}
           </Button>
         </div>

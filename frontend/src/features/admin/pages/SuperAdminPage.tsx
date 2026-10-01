@@ -1,3 +1,4 @@
+import { PageHeader } from '../../../components/ui/Layout';
 import { Button } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { FormField, Input } from '../../../components/ui/Form';
@@ -41,9 +42,9 @@ export const SuperAdminPage = () => {
   if (!isSuperAdmin) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-red-500 animate-in fade-in">
-        <ShieldAlert className="w-16 h-16 mb-4" />
+        <ShieldAlert aria-hidden="true" className="w-16 h-16 mb-4" />
         <h2 className="text-xl font-bold">Acceso Denegado</h2>
-        <p className="text-gray-500 mt-2">No tienes privilegios de Super Administrador.</p>
+        <p className="text-muted mt-2">No tienes privilegios de Super Administrador.</p>
       </div>
     );
   }
@@ -51,37 +52,29 @@ export const SuperAdminPage = () => {
   if (isLoading) return <LoadingState title="Cargando inquilinos..." />;
 
   return (
-    <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2">
+    <div className="nf-page">
       {errorMessage && <Alert tone="error" className="mb-4">{errorMessage}</Alert>}
       <ConfirmDialog isOpen={Boolean(pendingAction)} onClose={() => { setPendingAction(null); setConfirmation(''); }} title="Confirmar operación" description={pendingAction?.workspace.name} destructive={pendingAction?.kind === 'delete'} isLoading={isActing} confirmDisabled={workspaces.find(item => item.id === pendingAction?.workspace.id)?.status === 5 || (pendingAction?.kind === 'delete' && confirmation !== 'ELIMINAR')} onConfirm={executeAction}>
         {pendingAction?.kind === 'delete' ? <FormField label="Confirmación" helperText="La eliminación es irreversible. Escribe ELIMINAR para solicitarla."><Input value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={isActing} /></FormField> : <p>¿Confirmas el cambio de estado?</p>}
       </ConfirmDialog>
 
       {/* Cabecera */}
-      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <Server className="w-6 h-6 mr-3 text-purple-600" /> Consola SuperAdmin
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">Gestión centralizada de inquilinos y licencias operativas.</p>
-        </div>
-        <Button variant="primary"
+      <PageHeader title="Consola SuperAdmin" description="Gestiona workspaces, licencias y módulos desde un solo lugar." icon={<Server aria-hidden="true" className="w-5 h-5" />} actions={<><Button variant="primary"
           onClick={() => setShowProvisionModal(true)}
-          className="flex items-center px-5 py-2.5 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+          className="flex items-center font-medium transition-colors"
         >
-          <Plus className="w-4 h-4 mr-2" /> Aprovisionar Cliente
-        </Button>
-      </div>
+          <Plus aria-hidden="true" className="w-4 h-4 mr-2" /> Aprovisionar Cliente
+        </Button></>} />
 
       {/* Listado */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
+      <div className="bg-surface rounded-xl shadow-sm border border-line p-6">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-line pb-2">
           Negocios Registrados ({workspaces.length})
         </h3>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {workspaces.length === 0 ? (
-            <EmptyState title="No hay negocios registrados en el sistema." />
+            <EmptyState className="col-span-full" title="No hay negocios registrados en el sistema." />
           ) : (
             workspaces.map(ws => (
               <WorkspaceCard
