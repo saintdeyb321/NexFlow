@@ -11,11 +11,9 @@ export const DashboardPage = () => {
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
   const { can } = usePermissions();
-  
-  // 🔥 SPRINT 09: Extracción de nombre segura sin any (usando la interfaz correcta)
   const adminName = me?.user?.firstName || me?.user?.email?.split('@')[0] || 'Administrador';
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     ...queryPolicies.dynamic,
     queryKey: queryKeys.dashboard.summary(workspaceId),
     queryFn: ({ signal }) => getDashboardSummary(signal),
@@ -41,7 +39,7 @@ export const DashboardPage = () => {
     return (
       <div className="p-8 text-center bg-red-50 border border-red-100 rounded-xl mx-4 md:mx-0">
         <p className="text-red-600 font-medium">Error al cargar el panel de control. Revisa tu conexión.</p>
-        <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">Reintentar</button>
+        <button onClick={() => void refetch()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">Reintentar</button>
       </div>
     );
   }

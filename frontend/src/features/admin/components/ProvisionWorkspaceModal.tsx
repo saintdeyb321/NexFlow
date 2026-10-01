@@ -1,3 +1,6 @@
+import { Button } from '../../../components/ui/Button';
+import { Input, Select, FormField } from '../../../components/ui/Form';
+import { Alert } from '../../../components/ui/Feedback';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -18,7 +21,7 @@ interface ProvisionModalProps {
 
 export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvisioning }: ProvisionModalProps) => {
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
-  
+
   const me = useAuthStore(state => state.me);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { data: dbTemplates = [], error: templatesError } = useQuery({
@@ -37,7 +40,7 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
 
   const [formData, setFormData] = useState({
     email: '',
-    templateCode: '', 
+    templateCode: '',
     expiresAt: '',
     maxLocations: 1
   });
@@ -54,15 +57,13 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
   const templateCode = formData.templateCode || dbTemplates[0]?.code || '';
 
   const handleModuleToggle = (code: string) => {
-    setSelectedCustomModules(prev => 
+    setSelectedCustomModules(prev =>
       prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
     );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // 🔥 SPRINT 1 (Auditoría #38): Limpiamos la inyección forzada de Nombres y Apellidos
     const payload: ProvisionWorkspaceRequest = {
       email: formData.email,
       workspaceName: "Negocio por Configurar",
@@ -71,12 +72,12 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
     };
 
     if (provisionMode === 'template') {
-      payload.templateCode = templateCode; 
+      payload.templateCode = templateCode;
     } else {
       if (selectedCustomModules.length === 0) { setErrorMessage('Selecciona al menos 1 módulo custom'); return; }
       payload.customModules = selectedCustomModules;
     }
-    
+
     await onProvision(payload, () => {
       setFormData({ email: '', templateCode: dbTemplates[0]?.code || '', expiresAt: '', maxLocations: 1 });
       setProvisionMode('template');
@@ -86,47 +87,46 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Nuevo Inquilino (Tenant)" maxWidth="max-w-lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Nuevo Inquilino (Tenant)" closeDisabled={isProvisioning} maxWidth="max-w-lg">
       <form onSubmit={handleSubmit} className="space-y-4">
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Correo del Dueño (Google Auth)</label>
-          <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" placeholder="cliente@gmail.com" />
-        </div>
 
-        <div className="pt-4 border-t border-gray-100">
-          <label className="block text-sm font-bold mb-3 text-gray-800">Modalidad de Licencia</label>
+        <FormField label="Correo del Dueño (Google Auth)">
+          <Input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" placeholder="cliente@gmail.com" />
+        </FormField>
+
+        <div role="group" aria-label="Modalidad de Licencia" className="pt-4 border-t border-gray-100">
+          <p className="block text-sm font-bold mb-3 text-gray-800">Modalidad de Licencia</p>
           <div className="flex gap-4 mb-4">
             <label className="flex items-center cursor-pointer text-sm font-medium text-gray-700">
-              <input type="radio" name="mode" checked={provisionMode === 'template'} onChange={() => setProvisionMode('template')} className="mr-2 w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300" />
+              <Input type="radio" name="mode" checked={provisionMode === 'template'} onChange={() => setProvisionMode('template')} className="mr-2 w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300" />
               Por Plantilla
             </label>
             <label className="flex items-center cursor-pointer text-sm font-medium text-gray-700">
-              <input type="radio" name="mode" checked={provisionMode === 'custom'} onChange={() => setProvisionMode('custom')} className="mr-2 w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300" />
+              <Input type="radio" name="mode" checked={provisionMode === 'custom'} onChange={() => setProvisionMode('custom')} className="mr-2 w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300" />
               A la carta
             </label>
           </div>
 
           {provisionMode === 'template' ? (
             <div className="animate-in fade-in slide-in-from-top-1">
-              <select 
-                value={templateCode} 
-                onChange={e => setFormData({...formData, templateCode: e.target.value})} 
+              <Select aria-label="Plantilla de licencia"
+                value={templateCode}
+                onChange={e => setFormData({...formData, templateCode: e.target.value})}
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all cursor-pointer"
               >
                 {dbTemplates.map(t => (
                   <option key={t.code} value={t.code}>{t.name} ({t.code})</option>
                 ))}
-              </select>
+              </Select>
             </div>
           ) : (
-            <div className="animate-in fade-in slide-in-from-top-1 bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Módulos Disponibles</label>
+            <div role="group" aria-label="Módulos Disponibles" className="animate-in fade-in slide-in-from-top-1 bg-gray-50 p-4 rounded-xl border border-gray-200">
+              <p className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Módulos Disponibles</p>
               <div className="grid grid-cols-2 gap-3">
                 {dbModules.map(m => (
                   <label key={m.code} className="flex items-center text-sm text-gray-700 cursor-pointer">
-                    <input 
-                      type="checkbox" 
+                    <Input
+                      type="checkbox"
                       checked={selectedCustomModules.includes(m.code)}
                       onChange={() => handleModuleToggle(m.code)}
                       className="mr-2 rounded text-purple-600 focus:ring-purple-500"
@@ -140,25 +140,23 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
         </div>
 
         <div className="grid grid-cols-2 gap-4 border-t border-gray-100 pt-4 mt-2">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Límite de Sedes</label>
-            <input type="number" min="1" max="50" required value={formData.maxLocations} onChange={e => setFormData({...formData, maxLocations: parseInt(e.target.value)})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Vencimiento</label>
-            <input type="date" required value={formData.expiresAt} onChange={e => setFormData({...formData, expiresAt: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
-          </div>
+          <FormField label="Límite de Sedes">
+            <Input type="number" min="1" max="50" required value={formData.maxLocations} onChange={e => setFormData({...formData, maxLocations: parseInt(e.target.value)})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
+          </FormField>
+          <FormField label="Vencimiento">
+            <Input type="date" required value={formData.expiresAt} onChange={e => setFormData({...formData, expiresAt: e.target.value})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all" />
+          </FormField>
         </div>
 
-        {(errorMessage || templatesError || modulesError) && <p role="alert">{errorMessage || getApiErrorPresentation(templatesError || modulesError)}</p>}
+        {(errorMessage || templatesError || modulesError) && <Alert tone="error">{errorMessage || getApiErrorPresentation(templatesError || modulesError)}</Alert>}
         <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+          <Button variant="secondary" type="button" disabled={isProvisioning} onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
             Cancelar
-          </button>
-          <button type="submit" disabled={isProvisioning || (provisionMode === 'template' && !templateCode)} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors disabled:opacity-50 shadow-sm">
+          </Button>
+          <Button variant="primary" isLoading={isProvisioning} type="submit" disabled={isProvisioning || (provisionMode === 'template' && !templateCode)} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors disabled:opacity-50 shadow-sm">
             <Save className="w-4 h-4 mr-2" />
             {isProvisioning ? 'Procesando...' : 'Aprovisionar Cliente'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

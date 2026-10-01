@@ -1,8 +1,12 @@
+import { Button, IconButton } from '../../../components/ui/Button';
+import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
+import { useToast } from '../../../components/ui/Toast';
+import { PageHeader } from '../../../components/ui/Layout';
+import { LoadingState, EmptyState, StatusBadge, Badge, ErrorState } from '../../../components/ui/Feedback';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { CategoryManager } from '../../catalog/components/CategoryManager';
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,6 +19,7 @@ import type { ProductDto } from '../types/catalog.types';
 
 export const CatalogPage = () => {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const selectedLocationId = useAuthStore((state) => state.selectedLocationId);
@@ -22,22 +27,21 @@ export const CatalogPage = () => {
   // Estados visuales controlados
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<ProductDto | null>(null);
-  
-  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showCategoryPrompt, setShowCategoryPrompt] = useState(false);
-  
-  const { data: products = [], isLoading } = useQuery({ 
+
+  const { data: products = [], isLoading, isError, refetch } = useQuery({
     ...queryPolicies.stable,
-    queryKey: queryKeys.catalog.products(workspaceId, selectedLocationId), 
-    queryFn: ({ signal }) => getProducts(selectedLocationId, signal), 
+    queryKey: queryKeys.catalog.products(workspaceId, selectedLocationId),
+    queryFn: ({ signal }) => getProducts(selectedLocationId, signal),
     enabled: !!workspaceId && can('CATALOG', 'READ')
   });
-  
-  const { data: categories = [] } = useQuery({ 
+
+  const { data: categories = [] } = useQuery({
     ...queryPolicies.stable,
-    queryKey: queryKeys.catalog.categories(workspaceId, 'PRODUCT'), 
-    queryFn: ({ signal }) => getCategories('PRODUCT', signal), 
+    queryKey: queryKeys.catalog.categories(workspaceId, 'PRODUCT'),
+    queryFn: ({ signal }) => getCategories('PRODUCT', signal),
     enabled: !!workspaceId && can('CATALOG', 'READ')
   });
 
@@ -48,9 +52,9 @@ export const CatalogPage = () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, 'PRODUCT') });
       setIsModalOpen(false);
       setProductToEdit(null);
-      setNotification({ msg: 'Producto guardado exitosamente.', type: 'success' });
+      toast.success('Producto guardado exitosamente.');
     },
-    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
+    onError: (error: unknown) => toast.toastApiError(error)
   });
 
   const deleteMutation = useSessionMutation({
@@ -59,12 +63,10 @@ export const CatalogPage = () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.catalog.allProducts(workspaceId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, 'PRODUCT') });
       setDeleteConfirmId(null);
-      setNotification({ msg: 'Producto eliminado exitosamente.', type: 'success' });
+      toast.success('Producto eliminado exitosamente.');
     },
-    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
+    onError: (error: unknown) => toast.toastApiError(error)
   });
-
-
 
   const handleCreateNew = () => {
     setProductToEdit(null);
@@ -76,47 +78,31 @@ export const CatalogPage = () => {
     setIsModalOpen(true);
   };
 
-  if (isLoading) return <div className="p-8 text-center text-gray-500 animate-pulse">Cargando catálogo...</div>;
+  if (isLoading) return <LoadingState title="Cargando catálogo..." />;
+
+  if (isError) return <ErrorState onRetry={() => void refetch()} />;
 
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in">
-      
-      {notification && (
-        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
-          <span>{notification.msg}</span>
-          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
-        </div>
-      )}
 
       {showCategoryPrompt && <CategoryManager scope="PRODUCT" onClose={() => setShowCategoryPrompt(false)} />}
 
-      <div className="mb-6 flex justify-between items-end">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <Package className="w-6 h-6 mr-3 text-blue-600" /> Catálogo de Productos
-          </h1>
-          {/* 🔥 SPRINT 03: Eliminado el concepto obsoleto de "inventario" */}
-          <p className="text-sm text-gray-500 mt-1">Administra los productos que tu asistente puede mostrar a los clientes.</p>
-        </div>
+      <PageHeader title="Catálogo de Productos" description="Administra los productos que tu asistente puede mostrar a los clientes." icon={<Package className="w-6 h-6 text-blue-600" />} actions={
         <div className="flex gap-2">
-          <button disabled={!can('CATALOG', 'READ')} onClick={() => setShowCategoryPrompt(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
+          <Button variant="secondary" disabled={!can('CATALOG', 'READ')} onClick={() => setShowCategoryPrompt(true)} className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
             <FolderPlus className="w-4 h-4 mr-2" /> Categoría
-          </button>
-          <button disabled={!can('CATALOG', 'CREATE')} onClick={handleCreateNew} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+          </Button>
+          <Button variant="primary" disabled={!can('CATALOG', 'CREATE')} onClick={handleCreateNew} className="flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
             <Plus className="w-4 h-4 mr-2" /> Producto
-          </button>
+          </Button>
         </div>
-      </div>
-      
+      } />
+
       {can('CATALOG', 'GENERATE') && <ArtifactGenerator scope="PRODUCT" title="Folleto de Productos (PDF)" />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.length === 0 ? (
-          <div className="col-span-full p-12 text-center text-gray-500 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <Package className="w-10 h-10 mx-auto text-gray-300 mb-3" />
-            <p className="font-medium text-gray-600">No hay productos registrados</p>
-            <p className="text-sm mt-1">Agrega tu primer producto para que la IA pueda ofrecerlo.</p>
-          </div>
+          <EmptyState className="col-span-full bg-white border border-gray-200 rounded-xl" icon={<Package className="w-10 h-10" />} title="No hay productos registrados" description="Agrega tu primer producto para que la IA pueda ofrecerlo." />
         ) : (
           products.map((prod) => {
             const catName = categories.find(c => c.id === prod.categoryId)?.name || 'Sin Categoría';
@@ -125,7 +111,7 @@ export const CatalogPage = () => {
                 <div className="flex justify-between items-start mb-2">
                   <div>
                     <h3 className={`font-bold text-lg leading-tight ${prod.isActive ? 'text-gray-900' : 'text-gray-500 line-through'}`}>{prod.name}</h3>
-                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full mt-1 inline-block">{catName}</span>
+                    <Badge className="mt-1">{catName}</Badge>
                   </div>
                   <span className={`text-xs font-bold px-2 py-1 rounded-lg shrink-0 ${prod.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
                     {prod.currency} {((prod.priceMinorUnits || 0) / 100).toFixed(2)}
@@ -133,37 +119,26 @@ export const CatalogPage = () => {
                 </div>
                 <p className="text-sm text-gray-600 mb-4 h-10 overflow-hidden line-clamp-2 mt-2">{prod.description}</p>
                 <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-                  <span className={`text-xs font-medium ${prod.isActive ? 'text-green-600' : 'text-red-500'}`}>
-                    {prod.isActive ? 'Disponible' : 'Inactivo / Oculto'}
-                  </span>
-                  
+                  <StatusBadge label={prod.isActive ? 'Disponible' : 'Inactivo / Oculto'} tone={prod.isActive ? 'success' : 'error'} />
+
                   {/* Controles integrados CRUD */}
                   <div className="flex gap-1 relative">
-                    <button 
+                    <IconButton variant="ghost" label="Editar"
                       disabled={!can('CATALOG', 'UPDATE')} onClick={() => handleEdit(prod)}
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:opacity-100 focus:opacity-100 group-focus-within:opacity-100"
                       title="Editar"
                     >
                       <Edit2 className="w-4 h-4" />
-                    </button>
-                    
-                    <button 
+                    </IconButton>
+
+                    <IconButton variant="ghost" label="Eliminar"
                       disabled={!can('CATALOG', 'DELETE')} onClick={() => setDeleteConfirmId(prod.id!)}
-                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:opacity-100 focus:opacity-100 group-focus-within:opacity-100"
                       title="Eliminar"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </IconButton>
 
-                    {deleteConfirmId === prod.id && (
-                      <div className="absolute right-0 bottom-full mb-2 bg-white border border-red-200 shadow-xl p-3 rounded-lg z-10 w-48">
-                        <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar producto?</p>
-                        <div className="flex justify-between gap-2">
-                          <button onClick={() => setDeleteConfirmId(null)} className="flex-1 text-xs bg-gray-100 py-1 rounded">No</button>
-                          <button onClick={() => deleteMutation.mutate(prod.id!)} disabled={deleteMutation.isPending || !can('CATALOG', 'DELETE')} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí</button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -172,6 +147,7 @@ export const CatalogPage = () => {
         )}
       </div>
 
+      <ConfirmDialog isOpen={deleteConfirmId !== null} title="Eliminar producto" description="¿Eliminar este producto?" destructive confirmLabel="Eliminar" isLoading={deleteMutation.isPending} confirmDisabled={!can('CATALOG', 'DELETE')} onClose={() => setDeleteConfirmId(null)} onConfirm={() => { if (deleteConfirmId && can('CATALOG', 'DELETE')) deleteMutation.mutate(deleteConfirmId); }} />
       <ProductModal
         isOpen={isModalOpen && can('CATALOG', productToEdit ? 'UPDATE' : 'CREATE')}
         onClose={() => { setIsModalOpen(false); setProductToEdit(null); }}

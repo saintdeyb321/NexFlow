@@ -1,3 +1,5 @@
+import { Button } from '../../../components/ui/Button';
+import { Select, Textarea, FormField } from '../../../components/ui/Form';
 import { useState, useEffect } from 'react';
 import { Save, HelpCircle } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
@@ -16,7 +18,7 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
     question: '',
     answer: '',
     category: 'General',
-    isActive: true 
+    isActive: true
   });
 
   useEffect(() => {
@@ -34,32 +36,31 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
     setIsSaving(true);
     try {
       const faqToSave: FaqDto = {
-        ...(formData.id ? { id: formData.id } : {}), // 🔥 SPRINT 06: Dejamos que el backend genere el ID si es creación
+        ...(formData.id ? { id: formData.id } : {}),
         question: formData.question,
         answer: formData.answer,
         category: formData.category || 'General',
-        isActive: formData.isActive ?? true 
+        isActive: formData.isActive ?? true
       };
-      
+
       await onSave(faqToSave);
       onClose();
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // The save mutation owner reports API failures through Toast.
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <Modal 
-      isOpen={isOpen} 
-      onClose={onClose} 
-      title={initialData ? 'Editar Pregunta' : 'Nueva Pregunta'}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={initialData ? 'Editar Pregunta' : 'Nueva Pregunta'} closeDisabled={isSaving}
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
-          <select 
+        <FormField label="Categoría">
+          <Select
             value={formData.category || ''}
             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
             className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
@@ -68,16 +69,15 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
             <option value="Pagos">Pagos</option>
             <option value="Cómo llegar">Indicaciones / Cómo llegar</option>
             <option value="Políticas">Políticas</option>
-          </select>
-        </div>
+          </Select>
+        </FormField>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Pregunta (Lo que diría el usuario) *</label>
-          <div className="relative">
+        <FormField required label="Pregunta (Lo que diría el usuario)">
+          {control => (<div className="relative">
             <div className="absolute top-3 left-3 text-gray-400">
               <HelpCircle className="w-5 h-5" />
             </div>
-            <textarea
+            <Textarea {...control}
               rows={2}
               value={formData.question}
               onChange={(e) => setFormData({ ...formData, question: e.target.value })}
@@ -85,12 +85,11 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               required
             />
-          </div>
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Respuesta (Lo que dirá la IA) *</label>
-          <textarea
+          </div>)}
+        </FormField>
+
+        <FormField label="Respuesta (Lo que dirá la IA)">
+          <Textarea
             rows={4}
             value={formData.answer}
             onChange={(e) => setFormData({ ...formData, answer: e.target.value })}
@@ -98,16 +97,16 @@ export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps
             className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
             required
           />
-        </div>
+        </FormField>
 
         <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+          <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
             Cancelar
-          </button>
-          <button type="submit" disabled={isSaving} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-50">
+          </Button>
+          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-50">
             <Save className="w-4 h-4 mr-2" />
             {isSaving ? 'Guardando...' : 'Guardar'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

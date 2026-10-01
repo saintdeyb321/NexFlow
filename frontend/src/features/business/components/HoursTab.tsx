@@ -1,8 +1,11 @@
+import { Button } from '../../../components/ui/Button';
+import { useToast } from '../../../components/ui/Toast';
+import { LoadingState, ErrorState } from '../../../components/ui/Feedback';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getBusinessHours, saveBusinessHours } from '../services/business.service';
@@ -15,14 +18,15 @@ const DAYS_OF_WEEK = [
   { id: 4, name: 'Jueves' }, { id: 5, name: 'Viernes' }, { id: 6, name: 'Sábado' }, { id: 0, name: 'Domingo' }
 ];
 
-export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'success' | 'error') => void }) => {
+export const HoursTab = () => {
+  const toast = useToast();
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
-  const workspaceId = useAuthStore(state => state.me?.workspace?.id); // 🔥 SPRINT 9
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const [draft, setDraft] = useState<{ locationId: string; hours: BusinessHoursDto[] } | null>(null);
 
-  const { data: fetchedHours, isLoading } = useQuery({
+  const { data: fetchedHours, isLoading, isError, refetch } = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.hours.byLocation(workspaceId, selectedLocationId),
     queryFn: ({ signal }) => getBusinessHours(selectedLocationId, signal),
@@ -38,10 +42,10 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
       queryClient.invalidateQueries({ queryKey: queryKeys.hours.byLocation(workspaceId, variables.locationId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, variables.locationId) });
       if (variables.locationId === selectedLocationId) setDraft(null);
-      showMessage('Horarios actualizados correctamente', 'success');
+      toast.success('Horarios actualizados correctamente');
     },
     onError: (error: unknown) => {
-      showMessage(getApiErrorPresentation(error), 'error');
+      toast.toastApiError(error);
     }
   });
 
@@ -54,12 +58,12 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
       if (!h.isClosed) {
         if (!h.openTime || !h.closeTime) {
           const dayName = DAYS_OF_WEEK.find(d => d.id === h.dayOfWeek)?.name;
-          showMessage(`Completa la hora de apertura y cierre para el día ${dayName}.`, 'error');
+          toast.warning(`Completa la hora de apertura y cierre para el día ${dayName}.`);
           return;
         }
         if (h.openTime >= h.closeTime) {
           const dayName = DAYS_OF_WEEK.find(d => d.id === h.dayOfWeek)?.name;
-          showMessage(`En el día ${dayName}, la hora de apertura (${h.openTime}) debe ser menor al cierre (${h.closeTime}).`, 'error');
+          toast.warning(`En el día ${dayName}, la hora de apertura (${h.openTime}) debe ser menor al cierre (${h.closeTime}).`);
           return;
         }
       }
@@ -67,7 +71,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
     if (can('BUSINESS_HOURS', 'UPDATE')) saveMutation.mutate({ locationId: selectedLocationId, hours });
   };
 
-  // 🔥 Bloqueo Estricto si está en "Todas las sedes"
+  if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (selectedLocationId === 'all') {
     return (
       <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-12 text-center animate-in fade-in">
@@ -82,7 +86,7 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
     );
   }
 
-  if (isLoading) return <div className="p-6 text-center text-gray-500">Cargando horarios de la sede...</div>;
+  if (isLoading) return <LoadingState title="Cargando horarios de la sede..." />;
 
   return (
     <div className="bg-white shadow-sm border border-gray-200 rounded-xl p-6 animate-in fade-in">
@@ -97,18 +101,18 @@ export const HoursTab = ({ showMessage }: { showMessage: (msg: string, type: 'su
                   <input type="checkbox" disabled={!can('BUSINESS_HOURS', 'UPDATE')} checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-blue-600" />
                   Cerrado
                 </label>
-                <input type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
+                <input aria-label={`Apertura ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
                 <span className="text-gray-400">-</span>
-                <input type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
+                <input aria-label={`Cierre ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="border rounded px-2 py-1 text-sm disabled:opacity-50" />
               </div>
             </div>
           )
         })}
       </div>
       <div className="flex justify-end mt-6">
-        <button onClick={handleSave} disabled={saveMutation.isPending || !can('BUSINESS_HOURS', 'UPDATE')} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+        <Button variant="primary" isLoading={saveMutation.isPending} onClick={handleSave} disabled={saveMutation.isPending || !can('BUSINESS_HOURS', 'UPDATE')} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
           {saveMutation.isPending ? 'Guardando...' : 'Guardar Horarios'}
-        </button>
+        </Button>
       </div>
     </div>
   );

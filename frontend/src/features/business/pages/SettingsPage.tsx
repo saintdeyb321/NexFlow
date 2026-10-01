@@ -1,3 +1,4 @@
+import { Button } from '../../../components/ui/Button';
 import { useState, useEffect } from 'react';
 import { Building2, MapPin, Clock, MessageCircle } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -11,18 +12,15 @@ export const SettingsPage = () => {
   const { me } = useAuthStore();
   const workspaceId = me?.workspace?.id;
   const { hasModule, can } = usePermissions();
-
-  // 🔥 SPRINT 08: Verificamos qué pestañas puede ver el usuario según la licencia
   const hasLocations = can('LOCATIONS', 'READ');
   const hasHours = can('BUSINESS_HOURS', 'READ');
   const hasProfile = can('BUSINESS_PROFILE', 'READ');
   const hasWhatsApp = hasModule('CONVERSATIONS') && can('CONVERSATIONS', 'READ');
-  
+
   // Determinamos la pestaña por defecto
   const defaultTab = hasProfile ? 'profile' : hasLocations ? 'locations' : hasHours ? 'hours' : 'whatsapp';
-  
+
   const [activeTab, setActiveTab] = useState<'profile' | 'locations' | 'hours' | 'whatsapp'>(defaultTab);
-  const [message, setMessage] = useState({ text: '', type: '' });
 
   useEffect(() => {
     // Si la pestaña actual deja de ser válida por un cambio de sesión, saltar a la por defecto
@@ -31,11 +29,6 @@ export const SettingsPage = () => {
     if (activeTab === 'profile' && !hasProfile) setActiveTab(defaultTab);
     if (activeTab === 'whatsapp' && !hasWhatsApp) setActiveTab(defaultTab);
   }, [activeTab, defaultTab, hasLocations, hasHours, hasProfile, hasWhatsApp]);
-
-  const showMessage = (text: string, type: 'success' | 'error') => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage({ text: '', type: '' }), 4000);
-  };
 
   if (!workspaceId) return <div className="text-center p-8 text-gray-500">Sin negocio asignado</div>;
 
@@ -48,39 +41,33 @@ export const SettingsPage = () => {
 
       <div className="flex border-b border-gray-200 mb-6 overflow-x-auto custom-scrollbar">
         {hasProfile && (
-          <button onClick={() => setActiveTab('profile')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'profile' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          <Button variant="ghost" onClick={() => setActiveTab('profile')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'profile' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             <div className="flex items-center"><Building2 className="w-4 h-4 mr-2"/> Perfil</div>
-          </button>
+          </Button>
         )}
-        
+
         {hasLocations && (
-          <button onClick={() => setActiveTab('locations')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'locations' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          <Button variant="ghost" onClick={() => setActiveTab('locations')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'locations' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             <div className="flex items-center"><MapPin className="w-4 h-4 mr-2"/> Sedes</div>
-          </button>
+          </Button>
         )}
 
         {hasHours && (
-          <button onClick={() => setActiveTab('hours')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'hours' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          <Button variant="ghost" onClick={() => setActiveTab('hours')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'hours' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             <div className="flex items-center"><Clock className="w-4 h-4 mr-2"/> Horarios</div>
-          </button>
+          </Button>
         )}
 
-        {hasWhatsApp && <button onClick={() => setActiveTab('whatsapp')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'whatsapp' ? 'border-green-600 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+        {hasWhatsApp && <Button variant="ghost" onClick={() => setActiveTab('whatsapp')} className={`whitespace-nowrap px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'whatsapp' ? 'border-green-600 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           <div className="flex items-center"><MessageCircle className="w-4 h-4 mr-2"/> WhatsApp</div>
-        </button>}
+        </Button>}
       </div>
 
-      {message.text && (
-        <div className={`mb-6 p-4 rounded-lg text-sm font-medium animate-in fade-in slide-in-from-top-2 ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-          {message.text}
-        </div>
-      )}
-
       <div className="mt-2 pb-12">
-        {activeTab === 'profile' && hasProfile && <ProfileTab showMessage={showMessage} />}
-        {activeTab === 'locations' && hasLocations && <LocationsTab showMessage={showMessage} />}
-        {activeTab === 'hours' && hasHours && <HoursTab showMessage={showMessage} />}
-        {activeTab === 'whatsapp' && hasWhatsApp && <WhatsAppTab showMessage={showMessage} />}
+        {activeTab === 'profile' && hasProfile && <ProfileTab />}
+        {activeTab === 'locations' && hasLocations && <LocationsTab />}
+        {activeTab === 'hours' && hasHours && <HoursTab />}
+        {activeTab === 'whatsapp' && hasWhatsApp && <WhatsAppTab />}
       </div>
     </div>
   );

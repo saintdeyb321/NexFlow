@@ -1,21 +1,25 @@
+import { Button } from '../../../components/ui/Button';
+import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
+import { FormField, Input } from '../../../components/ui/Form';
+import { Alert, LoadingState, EmptyState } from '../../../components/ui/Feedback';
 import { useState } from 'react';
-import { Modal } from '../../../components/ui/Modal';
+
 import { ShieldAlert, Plus, Server } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { useSuperAdmin } from '../hooks/useSuperAdmin';
 import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ProvisionWorkspaceModal } from '../components/ProvisionWorkspaceModal';
-import { RenewLicenseModal } from '../components/RenewLicenseModal'; // 🔥 Import
-import { AssignModuleModal } from '../components/AssignModuleModal'; // 🔥 Import
+import { RenewLicenseModal } from '../components/RenewLicenseModal';
+import { AssignModuleModal } from '../components/AssignModuleModal';
 import type { WorkspaceSummaryDto } from '../types/admin.types';
 
 export const SuperAdminPage = () => {
   const { me } = useAuthStore();
   const isSuperAdmin = me?.user?.isSuperAdmin === true;
-  
+
   const [showProvisionModal, setShowProvisionModal] = useState(false);
-  const [workspaceToRenew, setWorkspaceToRenew] = useState<WorkspaceSummaryDto | null>(null); // 🔥 Estado Renovación
-  const [workspaceToModule, setWorkspaceToModule] = useState<WorkspaceSummaryDto | null>(null); // 🔥 Estado Módulo
+  const [workspaceToRenew, setWorkspaceToRenew] = useState<WorkspaceSummaryDto | null>(null);
+  const [workspaceToModule, setWorkspaceToModule] = useState<WorkspaceSummaryDto | null>(null);
 
   const { workspaces, isLoading, isProvisioning, errorMessage, handleProvision, handleToggleStatus, handleDelete } = useSuperAdmin();
   const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'status'; workspace: WorkspaceSummaryDto } | null>(null);
@@ -44,20 +48,15 @@ export const SuperAdminPage = () => {
     );
   }
 
-  if (isLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando inquilinos...</div>;
+  if (isLoading) return <LoadingState title="Cargando inquilinos..." />;
 
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2">
-      {errorMessage && <p role="alert" className="mb-4 text-red-600">{errorMessage}</p>}
-      <Modal isOpen={Boolean(pendingAction)} onClose={() => { if (!isActing) { setPendingAction(null); setConfirmation(''); } }} title="Confirmar operación">
-        <p>{pendingAction?.workspace.name}</p>
-        {pendingAction?.kind === 'delete' ? <>
-          <p>La eliminación es irreversible. Escribe ELIMINAR para solicitarla.</p>
-          <input value={confirmation} onChange={event => setConfirmation(event.target.value)} className="border rounded-lg p-2 w-full" />
-        </> : <p>¿Confirmas el cambio de estado?</p>}
-        <button disabled={isActing || workspaces.find(item => item.id === pendingAction?.workspace.id)?.status === 5 || (pendingAction?.kind === 'delete' && confirmation !== 'ELIMINAR')} onClick={executeAction}>Confirmar</button>
-      </Modal>
-      
+      {errorMessage && <Alert tone="error" className="mb-4">{errorMessage}</Alert>}
+      <ConfirmDialog isOpen={Boolean(pendingAction)} onClose={() => { setPendingAction(null); setConfirmation(''); }} title="Confirmar operación" description={pendingAction?.workspace.name} destructive={pendingAction?.kind === 'delete'} isLoading={isActing} confirmDisabled={workspaces.find(item => item.id === pendingAction?.workspace.id)?.status === 5 || (pendingAction?.kind === 'delete' && confirmation !== 'ELIMINAR')} onConfirm={executeAction}>
+        {pendingAction?.kind === 'delete' ? <FormField label="Confirmación" helperText="La eliminación es irreversible. Escribe ELIMINAR para solicitarla."><Input value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={isActing} /></FormField> : <p>¿Confirmas el cambio de estado?</p>}
+      </ConfirmDialog>
+
       {/* Cabecera */}
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -66,12 +65,12 @@ export const SuperAdminPage = () => {
           </h1>
           <p className="text-gray-500 text-sm mt-1">Gestión centralizada de inquilinos y licencias operativas.</p>
         </div>
-        <button 
-          onClick={() => setShowProvisionModal(true)} 
+        <Button variant="primary"
+          onClick={() => setShowProvisionModal(true)}
           className="flex items-center px-5 py-2.5 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4 mr-2" /> Aprovisionar Cliente
-        </button>
+        </Button>
       </div>
 
       {/* Listado */}
@@ -79,42 +78,42 @@ export const SuperAdminPage = () => {
         <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
           Negocios Registrados ({workspaces.length})
         </h3>
-        
+
         <div className="space-y-3">
           {workspaces.length === 0 ? (
-            <div className="text-center py-10 text-gray-500">No hay negocios registrados en el sistema.</div>
+            <EmptyState title="No hay negocios registrados en el sistema." />
           ) : (
             workspaces.map(ws => (
               <WorkspaceCard
-                  key={ws.id} 
-                  workspace={ws} 
+                  key={ws.id}
+                  workspace={ws}
                   onToggleStatus={workspace => setPendingAction({ kind: 'status', workspace })}
                   onDelete={workspace => { setConfirmation(''); setPendingAction({ kind: 'delete', workspace }); }}
-                  onRenew={(w) => setWorkspaceToRenew(w)} // 🔥 Abre modal
-                  onAssignModule={(w) => setWorkspaceToModule(w)} // 🔥 Abre modal
+                  onRenew={(w) => setWorkspaceToRenew(w)}
+                  onAssignModule={(w) => setWorkspaceToModule(w)}
               />
             ))
           )}
         </div>
       </div>
 
-      <ProvisionWorkspaceModal 
+      <ProvisionWorkspaceModal
         isOpen={showProvisionModal}
-        onClose={() => setShowProvisionModal(false)} 
-        onProvision={handleProvision} 
-        isProvisioning={isProvisioning} 
+        onClose={() => setShowProvisionModal(false)}
+        onProvision={handleProvision}
+        isProvisioning={isProvisioning}
       />
 
-      <RenewLicenseModal 
+      <RenewLicenseModal
         workspace={workspaces.find(workspace => workspace.id === workspaceToRenew?.id && workspace.status !== 5) ?? null}
         onClose={() => setWorkspaceToRenew(null)}
       />
 
-      <AssignModuleModal 
+      <AssignModuleModal
         workspace={workspaces.find(workspace => workspace.id === workspaceToModule?.id && workspace.status !== 5) ?? null}
         onClose={() => setWorkspaceToModule(null)}
       />
-      
+
     </div>
   );
 };

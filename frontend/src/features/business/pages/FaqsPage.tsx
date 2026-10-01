@@ -1,8 +1,12 @@
+import { Button, IconButton } from '../../../components/ui/Button';
+import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
+import { LoadingState, EmptyState, ErrorState } from '../../../components/ui/Feedback';
+import { useToast } from '../../../components/ui/Toast';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Plus, Trash2, Pencil, MessageSquare } from 'lucide-react';
@@ -13,17 +17,15 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 
 export const FaqsPage = () => {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [faqToEdit, setFaqToEdit] = useState<FaqDto | null>(null);
-  
-  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  // 🔥 SPRINT 06: La IA usa la base de conocimiento de manera global. No se filtra por sede.
-  const { data: faqs = [], isLoading: isFaqsLoading } = useQuery({
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const { data: faqs = [], isLoading: isFaqsLoading, isError, refetch } = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.faqs.all(workspaceId),
     queryFn: ({ signal }) => faqService.getFaqs('global', signal), // Reemplazamos la ubicación dinámica
@@ -36,9 +38,9 @@ export const FaqsPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.faqs.all(workspaceId) });
       setIsModalOpen(false);
-      setNotification({ msg: 'Pregunta guardada correctamente.', type: 'success' });
+      toast.success('Pregunta guardada correctamente.');
     },
-    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
+    onError: (error: unknown) => toast.toastApiError(error)
   });
 
   const deleteMutation = useSessionMutation({
@@ -46,9 +48,9 @@ export const FaqsPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.faqs.all(workspaceId) });
       setDeleteConfirmId(null);
-      setNotification({ msg: 'Pregunta eliminada exitosamente.', type: 'success' });
+      toast.success('Pregunta eliminada exitosamente.');
     },
-    onError: (error: unknown) => setNotification({ msg: getApiErrorPresentation(error), type: 'error' })
+    onError: (error: unknown) => toast.toastApiError(error)
   });
 
   const handleOpenNew = () => {
@@ -70,17 +72,11 @@ export const FaqsPage = () => {
     }
   };
 
-  if (isFaqsLoading) return <div className="animate-pulse flex h-64 items-center justify-center text-gray-500">Cargando base de conocimiento...</div>;
+  if (isFaqsLoading) return <LoadingState title="Cargando base de conocimiento..." />;
+  if (isError) return <ErrorState onRetry={() => void refetch()} />;
 
   return (
     <div className="max-w-5xl mx-auto animate-in fade-in">
-      
-      {notification && (
-        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
-          <span>{notification.msg}</span>
-          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
-        </div>
-      )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center">
@@ -92,15 +88,15 @@ export const FaqsPage = () => {
             <p className="text-sm text-gray-500 mt-0.5">Entrena al asistente virtual con preguntas frecuentes de tu negocio.</p>
           </div>
         </div>
-        
-        <button 
+
+        <Button variant="ghost"
           onClick={handleOpenNew}
           disabled={faqs.length >= 20 || !can('FAQ', 'CREATE')}
           className="flex items-center px-5 py-2.5 bg-purple-700 text-white text-sm font-medium rounded-lg hover:bg-purple-800 transition-colors shadow-sm disabled:opacity-50 disabled:bg-gray-400"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nueva Pregunta
-        </button>
+        </Button>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -109,18 +105,14 @@ export const FaqsPage = () => {
             Preguntas Activas Globales ({faqs.length}/20)
           </h3>
         </div>
-        
+
         <div className="space-y-3">
           {faqs.length === 0 ? (
-            <div className="text-center py-10 text-gray-500 flex flex-col items-center">
-              <MessageSquare className="w-12 h-12 text-gray-200 mb-3" />
-              <p>Tu asistente aún no tiene información pre-programada.</p>
-              <p className="text-sm mt-1">Haz clic en "Nueva Pregunta" para entrenarlo.</p>
-            </div>
+            <EmptyState icon={<MessageSquare className="w-12 h-12" />} title="Tu asistente aún no tiene información pre-programada." description={'Haz clic en "Nueva Pregunta" para entrenarlo.'} />
           ) : (
             faqs.map((faq) => (
-              <div 
-                key={faq.id} 
+              <div
+                key={faq.id}
                 className="flex flex-col md:flex-row md:items-start justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all gap-4"
               >
                 <div className="flex-1">
@@ -138,22 +130,13 @@ export const FaqsPage = () => {
                 </div>
 
                 <div className="flex items-center space-x-2 md:self-start relative">
-                  <button disabled={!can('FAQ', 'UPDATE')} onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
+                  <IconButton variant="ghost" label="Editar" disabled={!can('FAQ', 'UPDATE')} onClick={() => handleOpenEdit(faq)} className="p-2 text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-full transition-colors" title="Editar">
                     <Pencil className="w-4 h-4" />
-                  </button>
-                  <button disabled={!can('FAQ', 'DELETE')} onClick={() => setDeleteConfirmId(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
+                  </IconButton>
+                  <IconButton variant="ghost" label="Eliminar" disabled={!can('FAQ', 'DELETE')} onClick={() => setDeleteConfirmId(faq.id!)} className="p-2 text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Eliminar">
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </IconButton>
 
-                  {deleteConfirmId === faq.id && (
-                    <div className="absolute right-0 top-12 bg-white border border-red-200 shadow-xl p-3 rounded-lg z-10 w-48">
-                      <p className="text-xs text-red-600 font-medium mb-2">¿Eliminar pregunta?</p>
-                      <div className="flex justify-between gap-2">
-                        <button onClick={() => setDeleteConfirmId(null)} className="flex-1 text-xs bg-gray-100 py-1 rounded">No</button>
-                        <button onClick={() => deleteMutation.mutate(faq.id!)} disabled={deleteMutation.isPending || !can('FAQ', 'DELETE')} className="flex-1 text-xs bg-red-600 text-white py-1 rounded">Sí, borrar</button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             ))
@@ -161,7 +144,8 @@ export const FaqsPage = () => {
         </div>
       </div>
 
-      <FaqModal 
+      <ConfirmDialog isOpen={deleteConfirmId !== null} title="Eliminar pregunta" description="¿Eliminar esta pregunta?" destructive confirmLabel="Eliminar" isLoading={deleteMutation.isPending} confirmDisabled={!can('FAQ', 'DELETE')} onClose={() => setDeleteConfirmId(null)} onConfirm={() => { if (deleteConfirmId && can('FAQ', 'DELETE')) deleteMutation.mutate(deleteConfirmId); }} />
+      <FaqModal
         isOpen={isModalOpen && can('FAQ', faqToEdit ? 'UPDATE' : 'CREATE')}
         onClose={() => setIsModalOpen(false)}
         onSave={async (faq) => { await saveMutation.mutateAsync(faq); }}

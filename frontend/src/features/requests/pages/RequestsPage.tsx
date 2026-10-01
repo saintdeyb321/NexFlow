@@ -1,3 +1,6 @@
+import { Button } from '../../../components/ui/Button';
+import { LoadingState, EmptyState, ErrorState, Badge } from '../../../components/ui/Feedback';
+import { useToast } from '../../../components/ui/Toast';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -17,22 +20,18 @@ import { CreateRequestModal } from '../components/CreateRequestModal';
 export const RequestsPage = () => {
   const isPageVisible = usePageVisible();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { can } = usePermissions();
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  
-  // 🔥 SPRINT 07: Nombre real usando el DTO correcto, no "any".
   const me = useAuthStore((state) => state.me);
-  
+
   const [filterStatus, setFilterStatus] = useState<RequestStatus | 'ALL'>('ALL');
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false); 
-  const [limit, setLimit] = useState(50); 
-  
-  // 🔥 SPRINT 07: Estado para notificaciones de error
-  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [limit, setLimit] = useState(50);
 
-  const { data: requests = [], isLoading, isError } = useQuery({
+  const { data: requests = [], isLoading, isError, refetch } = useQuery({
     ...queryPolicies.dynamic,
     queryKey: queryKeys.requests.list(workspaceId, limit, filterStatus),
     queryFn: ({ signal }) => getRequests(limit, filterStatus === 'ALL' ? undefined : filterStatus, signal),
@@ -55,10 +54,10 @@ export const RequestsPage = () => {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.requests.lists(workspaceId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.requests.detail(workspaceId, variables.id) });
-      setNotification({ msg: 'Estado actualizado correctamente.', type: 'success' });
+      toast.success('Estado actualizado correctamente.');
     },
     onError: (error: unknown) => {
-      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
+      toast.toastApiError(error);
     }
   });
 
@@ -67,46 +66,40 @@ export const RequestsPage = () => {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.requests.lists(workspaceId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.requests.detail(workspaceId, variables.id) });
-      setNotification({ msg: 'Solicitud asignada correctamente.', type: 'success' });
+      toast.success('Solicitud asignada correctamente.');
     },
     onError: (error: unknown) => {
-      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
+      toast.toastApiError(error);
     }
   });
 
   const getStatusBadge = (status: RequestStatus) => {
     switch (status) {
-      case 'Pending': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Pendiente</span>;
-      case 'InReview': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><PlayCircle className="w-3 h-3 mr-1" /> En Revisión</span>;
-      case 'Approved': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Aprobada</span>;
-      case 'Completed': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Completada</span>;
-      case 'Rejected': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Rechazada</span>;
-      case 'Cancelled': return <span className="flex items-center px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Cancelada</span>;
-      default: return <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full w-fit">{status}</span>;
+      case 'Pending': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Pendiente</Badge>;
+      case 'InReview': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><PlayCircle className="w-3 h-3 mr-1" /> En Revisión</Badge>;
+      case 'Approved': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Aprobada</Badge>;
+      case 'Completed': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Completada</Badge>;
+      case 'Rejected': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Rechazada</Badge>;
+      case 'Cancelled': return <Badge className="flex items-center px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Cancelada</Badge>;
+      default: return <Badge className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full w-fit">{status}</Badge>;
     }
   };
 
   const getTypeBadge = (type: RequestType) => {
     switch (type) {
-      case 'Tramite': return <span className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-md">Trámite</span>;
-      case 'CommercialInquiry': return <span className="px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 rounded-md">Comercial</span>;
-      case 'Support': return <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-md">Soporte</span>;
-      case 'HumanHandoff': return <span className="px-2 py-1 text-xs font-medium bg-pink-100 text-pink-800 rounded-md">Asesor Humano</span>;
-      default: return <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-md">General</span>;
+      case 'Tramite': return <Badge className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-md">Trámite</Badge>;
+      case 'CommercialInquiry': return <Badge className="px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 rounded-md">Comercial</Badge>;
+      case 'Support': return <Badge className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-md">Soporte</Badge>;
+      case 'HumanHandoff': return <Badge className="px-2 py-1 text-xs font-medium bg-pink-100 text-pink-800 rounded-md">Asesor Humano</Badge>;
+      default: return <Badge className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-md">General</Badge>;
     }
   };
 
-  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar las solicitudes.</div>;
-  if (isLoading) return <div className="p-8 text-center text-gray-500 animate-pulse">Cargando solicitudes...</div>;
+  if (isError) return <ErrorState title="Error al cargar las solicitudes." onRetry={() => void refetch()} />;
+  if (isLoading) return <LoadingState title="Cargando solicitudes..." />;
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in">
-      {notification && (
-        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
-          <span>{notification.msg}</span>
-          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
-        </div>
-      )}
 
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -117,10 +110,10 @@ export const RequestsPage = () => {
             Gestiona trámites, consultas comerciales y pedidos de soporte clasificados por la IA.
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
-          <select 
-            value={filterStatus} 
+          <select
+            value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as RequestStatus | 'ALL')}
             className="border border-gray-200 rounded-lg px-4 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
           >
@@ -129,22 +122,18 @@ export const RequestsPage = () => {
             <option value="InReview">En Revisión</option>
             <option value="Completed">Completadas</option>
           </select>
-          <button 
+          <Button variant="primary"
             disabled={!can('REQUESTS', 'CREATE')} onClick={() => setIsModalOpen(true)}
             className="flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4 mr-2" /> Nueva Solicitud
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-[400px]">
         {requests.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-            <FileText className="w-12 h-12 mb-4 text-gray-300" />
-            <p className="text-lg font-medium text-gray-600">No hay solicitudes</p>
-            <p className="text-sm">Las solicitudes creadas por tus clientes aparecerán aquí.</p>
-          </div>
+          <EmptyState className="py-20" icon={<FileText className="w-12 h-12 text-gray-300" />} title="No hay solicitudes" description="Las solicitudes creadas por tus clientes aparecerán aquí." />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -169,19 +158,19 @@ export const RequestsPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="font-medium text-gray-900 block">{req.consumerPhone}</span>
                       {req.conversationId && req.conversationId !== 'MANUAL_ENTRY' && (
-                        <button 
+                        <Button variant="ghost"
                           onClick={() => navigate(`/inbox?conversation=${req.conversationId}`)}
                           className="flex items-center text-xs text-blue-600 mt-1 hover:underline font-medium"
                         >
                           <MessageSquare className="w-3 h-3 mr-1" /> Abrir chat
-                        </button>
+                        </Button>
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getTypeBadge(req.type)}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      <button onClick={() => setDetailId(req.id)} className="font-semibold block text-gray-900 mb-1">{req.title}</button>
+                      <Button variant="ghost" onClick={() => setDetailId(req.id)} className="font-semibold block text-gray-900 mb-1">{req.title}</Button>
                       <p className="line-clamp-2" title={req.description}>{req.description}</p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -190,13 +179,13 @@ export const RequestsPage = () => {
                           <UserCircle className="w-4 h-4 mr-1.5 text-gray-400" /> {assigneeName(req.assignedTo)}
                         </span>
                       ) : (
-                        <button 
+                        <Button variant="ghost" isLoading={assignMutation.isPending}
                           onClick={() => { if (me && can('REQUESTS', 'ASSIGN')) assignMutation.mutate({ id: req.id, userId: me.user.id }); }}
                           disabled={assignMutation.isPending || !can('REQUESTS', 'ASSIGN') || !me?.user.id}
                           className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
                         >
                           Asignarme
-                        </button>
+                        </Button>
                       )}
                       {can('REQUESTS', 'ASSIGN') && <select aria-label="Responsable" value={req.assignedTo ?? ''}
                         disabled={assignMutation.isPending || Boolean(assigneesError)}
@@ -226,23 +215,23 @@ export const RequestsPage = () => {
           </div>
         )}
       </div>
-      
+
       {requests.length >= limit && (
         <div className="flex justify-center mt-6">
-          <button 
-            onClick={() => setLimit(l => l + 50)} 
+          <Button variant="ghost"
+            onClick={() => setLimit(l => l + 50)}
             className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors"
           >
             Cargar más antiguas
-          </button>
+          </Button>
         </div>
       )}
 
       {assigneesError && <p role="alert">{getApiErrorPresentation(assigneesError)}</p>}
       {detailId && <RequestDetailModal id={detailId} onClose={() => setDetailId(null)} />}
-      <CreateRequestModal 
+      <CreateRequestModal
         isOpen={isModalOpen && can('REQUESTS', 'CREATE')}
-        onClose={() => setIsModalOpen(false)} 
+        onClose={() => setIsModalOpen(false)}
       />
     </div>
   );

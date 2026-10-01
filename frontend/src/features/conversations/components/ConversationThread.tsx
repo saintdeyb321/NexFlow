@@ -1,8 +1,10 @@
+import { Button, IconButton } from '../../../components/ui/Button';
+import { useToast } from '../../../components/ui/Toast';
+import { EmptyState } from '../../../components/ui/Feedback';
 import { useState, useRef, useEffect } from 'react';
-import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Image as ImageIcon } from 'lucide-react';
 import type { Conversation, Message, ManualMessageResult } from '../types/conversation.types';
 import { usePermissions } from '../../../core/auth/permissions';
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 
 interface ConversationThreadProps {
   chat: Conversation;
@@ -18,25 +20,34 @@ export const ConversationThread = ({
   chat, messages, isChangingMode, isSending, onTakeOver, onRelease, onSendMessage
 }: ConversationThreadProps) => {
   const { can } = usePermissions();
+  const toast = useToast();
   const [newMessage, setNewMessage] = useState('');
-  const [sendError, setSendError] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null); 
+  const [leaseObservation, setLeaseObservation] = useState(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // A cached attempt can outlive its lease while the tab is inactive. Observe only
+  // the real lease deadline for presentation; never mutate its status or resend it.
+  useEffect(() => {
+    const now = Date.now();
+    const nextLease = Math.min(...messages.filter(message => message.status === 'Attempting')
+      .map(message => Date.parse(message.transportLeaseUntil ?? '')).filter(deadline => Number.isFinite(deadline) && deadline > now));
+    if (!Number.isFinite(nextLease)) return;
+    const timer = setTimeout(() => setLeaseObservation(value => value + 1), nextLease - now + 1);
+    return () => clearTimeout(timer);
+  }, [messages, leaseObservation]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  // 🔥 SPRINT 05: Solo limpiamos el input si el envío fue exitoso. Si falla, retenemos el texto.
   const handleSend = async () => {
     if (!newMessage.trim()) return;
-    setSendError(null);
     try {
       const result = await onSendMessage(newMessage.trim());
-      setNewMessage(''); 
-      if (result.message.status === 'UnknownDelivery') setSendError('Entrega sin confirmar. Revisa el estado antes de reenviar.');
-      else if (result.accepted) setSendError('Envío aceptado; la entrega aún no está confirmada.');
+      setNewMessage('');
+      if (result.message.status === 'UnknownDelivery') toast.warning('Entrega sin confirmar. Revisa el estado antes de reenviar.');
+      else if (result.accepted) toast.info('Envío aceptado; la entrega aún no está confirmada.');
     } catch (error: unknown) {
-      setSendError(getApiErrorPresentation(error));
+      toast.toastApiError(error);
     }
   };
 
@@ -51,15 +62,15 @@ export const ConversationThread = ({
         </div>
         <div>
           {chat.mode === 'Automatic' ? (
-            <button onClick={onTakeOver} disabled={isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
-              {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <User className="w-4 h-4 mr-2" />} 
+            <Button variant="ghost" isLoading={isChangingMode} onClick={onTakeOver} disabled={isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="flex items-center px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50">
+              {!isChangingMode && <User className="w-4 h-4 mr-2" />}
               {isChangingMode ? 'Procesando...' : 'Asumir Control'}
-            </button>
+            </Button>
           ) : (
-            <button onClick={onRelease} disabled={isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
-              {isChangingMode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bot className="w-4 h-4 mr-2" />} 
+            <Button variant="ghost" isLoading={isChangingMode} onClick={onRelease} disabled={isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="flex items-center px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors shadow-sm disabled:opacity-50">
+              {!isChangingMode && <Bot className="w-4 h-4 mr-2" />}
               {isChangingMode ? 'Procesando...' : 'Reactivar IA'}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -72,7 +83,7 @@ export const ConversationThread = ({
       ) : (
         <div className={`border-b px-4 py-2.5 flex items-center justify-center text-sm font-medium ${
           chat.handoffReason === 'AiEscalation' || chat.handoffReason === 'SystemError'
-            ? 'bg-red-50 border-red-200 text-red-700' 
+            ? 'bg-red-50 border-red-200 text-red-700'
             : 'bg-orange-50 border-orange-200 text-orange-700'
         }`}>
           {chat.handoffReason === 'SystemError' ? (
@@ -96,14 +107,14 @@ export const ConversationThread = ({
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.length === 0 ? (
-          <div className="text-center text-gray-500 text-sm mt-10">Sin mensajes en el historial.</div>
+          <EmptyState title="Sin mensajes en el historial." />
         ) : (
           messages.map(msg => (
             <div key={msg.id} className={`flex ${msg.direction === 'inbound' ? 'justify-start' : 'justify-end'}`}>
               <div className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                msg.direction === 'inbound' 
-                  ? 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm' 
-                  : msg.sender === 'AI' 
+                msg.direction === 'inbound'
+                  ? 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm'
+                  : msg.sender === 'AI'
                     ? 'bg-blue-100 text-blue-900 border border-blue-200 rounded-tr-sm shadow-sm'
                     : 'bg-green-500 text-white rounded-tr-sm shadow-sm'
               }`}>
@@ -119,9 +130,13 @@ export const ConversationThread = ({
                 }`}>
                   {msg.sender === 'AI' && <Bot className="w-3 h-3 mr-1" />}
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  {/* 🔥 SPRINT 05: Mostramos si falló la entrega */}
+
                   {msg.status === 'Failed' && <span className="ml-2 text-red-500 font-bold">Error de envío</span>}
-                  {msg.direction === 'outbound' && msg.status !== 'Failed' && <span className="ml-2">{{ Pending: 'Pendiente', Attempting: 'Enviando', Sent: 'Enviado', UnknownDelivery: 'Entrega sin confirmar' }[msg.status]}</span>}
+                  {msg.direction === 'outbound' && msg.status !== 'Failed' && <span className="ml-2">{
+                    msg.status === 'Attempting' && (!msg.transportLeaseUntil || !Number.isFinite(Date.parse(msg.transportLeaseUntil)) || Date.parse(msg.transportLeaseUntil) <= Date.now())
+                      ? 'Entrega sin confirmar'
+                      : { Pending: 'Pendiente', Attempting: 'Enviando', Sent: 'Enviado', UnknownDelivery: 'Entrega sin confirmar' }[msg.status]
+                  }</span>}
                 </div>
               </div>
             </div>
@@ -131,9 +146,8 @@ export const ConversationThread = ({
       </div>
 
       <div className="p-4 bg-white border-t border-gray-200">
-        {sendError && <div className="text-red-500 text-xs font-medium mb-2">{sendError}</div>}
         <div className="flex items-center">
-          <input
+          <input aria-label="Mensaje al cliente"
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
@@ -142,13 +156,13 @@ export const ConversationThread = ({
             disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !can('CONVERSATIONS', 'SEND_MESSAGE')}
             className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
           />
-          <button 
-            onClick={handleSend}
+          <IconButton variant="primary" label="Enviar mensaje"
+            isLoading={isSending} onClick={handleSend}
             disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim() || !can('CONVERSATIONS', 'SEND_MESSAGE')}
             className="ml-3 p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
+            <Send className="w-5 h-5" />
+          </IconButton>
         </div>
       </div>
     </div>

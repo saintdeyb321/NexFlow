@@ -1,44 +1,41 @@
+import { IconButton } from '../../../components/ui/Button';
+import { EmptyState, StatusBadge } from '../../../components/ui/Feedback';
 import { Search, Pencil, XCircle } from 'lucide-react';
 import type { ReservationDto } from '../types/reservation.types';
-import type { ServiceDto } from '../../services/types/services.types'; 
+import type { ServiceDto } from '../../services/types/services.types';
 
 interface ReservationListProps {
   canEdit: boolean;
   canCancel: boolean;
   canComplete: boolean;
   reservations: ReservationDto[];
-  services: ServiceDto[]; 
-  timeZone: string; 
+  services: ServiceDto[];
+  timeZone: string;
   onEdit: (res: ReservationDto) => void;
   onCancel: (id: string) => void;
   onComplete: (id: string) => void;
 }
 
 export const ReservationList = ({ canEdit, canCancel, canComplete, reservations, services, timeZone, onEdit, onCancel, onComplete }: ReservationListProps) => {
-  
+
   const normalizeStatus = (status: ReservationDto['status']) => status.toUpperCase();
 
   const getStatusBadge = (rawStatus: ReservationDto['status']) => {
     const status = normalizeStatus(rawStatus);
     switch (status) {
-      case 'CONFIRMED': return <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">Confirmada</span>;
-      case 'PENDING': return <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700">Pendiente</span>;
-      case 'COMPLETED': return <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">Completada</span>;
-      case 'CANCELLED': return <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">Cancelada</span>;
-      default: return <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">{status}</span>;
+      case 'CONFIRMED': return <StatusBadge label="Confirmada" tone="success" />;
+      case 'PENDING': return <StatusBadge label="Pendiente" tone="warning" />;
+      case 'COMPLETED': return <StatusBadge label="Completada" tone="info" />;
+      case 'CANCELLED': return <StatusBadge label="Cancelada" tone="error" />;
+      default: return <StatusBadge label={status} />;
     }
   };
 
   if (!reservations || reservations.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-        <Search className="w-10 h-10 text-gray-300 mb-3" />
-        <p>No hay reservas agendadas para esta fecha.</p>
-      </div>
+      <EmptyState icon={<Search className="w-10 h-10 text-gray-300" />} title="No hay reservas agendadas para esta fecha." />
     );
   }
-
-  // 🔥 SPRINT 11: Se eliminaron los "as any"
   const sortedReservations = [...reservations].filter(r => r != null).sort((a, b) => {
     const dateA = new Date(a.dateTime).getTime();
     const dateB = new Date(b.dateTime).getTime();
@@ -59,9 +56,8 @@ export const ReservationList = ({ canEdit, canCancel, canComplete, reservations,
         </thead>
         <tbody className="divide-y divide-gray-100">
           {sortedReservations.map((res) => {
-            // 🔥 SPRINT 11: Se eliminaron los "as any"
             const localTime = new Date(res.dateTime);
-            
+
             const normalizedStatus = normalizeStatus(res.status);
             const isCancelled = normalizedStatus === 'CANCELLED';
 
@@ -87,15 +83,15 @@ export const ReservationList = ({ canEdit, canCancel, canComplete, reservations,
                 <td className="px-6 py-4 text-right">
                   {normalizedStatus === 'PENDING' || normalizedStatus === 'CONFIRMED' ? (
                     <div className="flex justify-end gap-2">
-                      <button disabled={!canComplete || res.status !== 'Confirmed'} onClick={() => onComplete(res.id!)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
+                      <IconButton variant="ghost" label="Finalizar Reserva" disabled={!canComplete || res.status !== 'Confirmed'} onClick={() => onComplete(res.id!)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Finalizar Reserva">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                      </button>
-                      <button disabled={!canEdit || res.status !== 'Confirmed'} onClick={() => onEdit(res)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Reagendar">
+                      </IconButton>
+                      <IconButton variant="ghost" label="Reagendar" disabled={!canEdit || res.status !== 'Confirmed'} onClick={() => onEdit(res)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Reagendar">
                         <Pencil className="w-4 h-4" />
-                      </button>
-                      <button disabled={!canCancel} onClick={() => onCancel(res.id!)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
+                      </IconButton>
+                      <IconButton variant="ghost" label="Cancelar" disabled={!canCancel} onClick={() => onCancel(res.id!)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg" title="Cancelar">
                         <XCircle className="w-4 h-4" />
-                      </button>
+                      </IconButton>
                     </div>
                   ) : (
                     <span className="text-gray-400 text-sm italic">Sin acciones</span>

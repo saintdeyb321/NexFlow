@@ -1,7 +1,10 @@
 import { usePermissions } from '../../core/auth/permissions';
-import { useState, useRef } from 'react';
-import { UploadCloud, Loader2, X, AlertCircle } from 'lucide-react';
-import { getApiErrorPresentation, axiosClient } from '../../core/api/axiosClient';
+import { useId, useState, useRef } from 'react';
+import { UploadCloud, Loader2, X } from 'lucide-react';
+import { axiosClient } from '../../core/api/axiosClient';
+import { Button, IconButton } from './Button';
+import { Alert } from './Feedback';
+import { useToast } from './Toast';
 
 interface ImageUploaderProps {
   value?: string | null;
@@ -14,6 +17,8 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Imagen" }: ImageUploaderProps) => {
   const { can } = usePermissions();
+  const toast = useToast();
+  const inputId = useId();
   const canUpload = can('CATALOG', 'CREATE') || can('CATALOG', 'UPDATE') || can('SERVICES', 'CREATE') || can('SERVICES', 'UPDATE');
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -25,7 +30,6 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
 
     setErrorMsg(null);
 
-    // 🔥 SPRINT 08: Validación estricta sin alert()
     if (file.size > 5 * 1024 * 1024) {
       setErrorMsg("La imagen supera los 5MB permitidos.");
       return;
@@ -47,7 +51,7 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
       });
       onChange(data.secureUrl);
     } catch (error: unknown) {
-      setErrorMsg(getApiErrorPresentation(error));
+      toast.toastApiError(error);
     } finally {
       setIsUploading(false);
       if (onUploadingContext) onUploadingContext(false);
@@ -57,30 +61,28 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
 
   return (
     <div className="w-full">
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-      
+      <label htmlFor={inputId} className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+
       {errorMsg && (
-        <div className="mb-2 text-xs font-medium text-red-600 flex items-center bg-red-50 p-2 rounded-lg border border-red-100">
-          <AlertCircle className="w-3 h-3 mr-1" /> {errorMsg}
-        </div>
+        <Alert tone="error" className="mb-2">{errorMsg}</Alert>
       )}
 
       {value ? (
         <div className="relative w-full h-40 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden group">
           <img src={value} alt="Preview" className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <button 
-              type="button" 
+          <div className="absolute inset-0 bg-black/40 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center">
+            <IconButton label="Eliminar imagen" variant="danger"
+              type="button"
               disabled={!canUpload} onClick={() => { onChange(null); setErrorMsg(null); }}
               className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg transform transition-transform hover:scale-110"
               title="Eliminar imagen"
             >
               <X className="w-5 h-5" />
-            </button>
+            </IconButton>
           </div>
         </div>
       ) : (
-        <button
+        <Button variant="ghost"
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={isUploading || !canUpload}
@@ -98,15 +100,17 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
               <span className="text-xs text-gray-500 mt-1">PNG, JPG, WebP hasta 5MB</span>
             </>
           )}
-        </button>
+        </Button>
       )}
 
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept={ALLOWED_TYPES.join(',')} 
-        className="hidden" 
+      <input
+        id={inputId}
+        disabled={isUploading || !canUpload}
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept={ALLOWED_TYPES.join(',')}
+        className="hidden"
       />
     </div>
   );

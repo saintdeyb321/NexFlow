@@ -435,7 +435,7 @@ public class FirestoreConversationRepository : IConversationRepository
         query = query.Limit(limit);
         var snapshot = await query.GetSnapshotAsync(cancellationToken);
 
-        var messages = snapshot.Documents.Select(MapMessage);
+        var messages = snapshot.Documents.Select(NormalizeAttempt);
         return after.HasValue ? messages : messages.Reverse();
     }
 
@@ -445,7 +445,7 @@ public class FirestoreConversationRepository : IConversationRepository
         if (ids.Count is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(ids));
         var collection = GetCollection(workspaceId).Document(conversationId).Collection("messages");
         var documents = await _db.GetAllSnapshotsAsync(ids.Select(collection.Document), cancellationToken);
-        return documents.Where(document => document.Exists).Select(MapMessage)
+        return documents.Where(document => document.Exists).Select(NormalizeAttempt)
             .Where(message => message.Direction == "outbound")
             .OrderBy(message => message.Timestamp).ThenBy(message => message.Id, StringComparer.Ordinal);
     }

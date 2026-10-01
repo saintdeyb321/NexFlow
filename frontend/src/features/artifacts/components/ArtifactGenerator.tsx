@@ -1,11 +1,14 @@
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { Button } from '../../../components/ui/Button';
+import { useToast } from '../../../components/ui/Toast';
+import { Skeleton, ErrorState } from '../../../components/ui/Feedback';
+
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
-import { useState } from 'react';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, RefreshCw, Download, Loader2 } from 'lucide-react';
-import { getArtifactStatus, generateArtifact } from '../services/artifact.service'; // 🔥 Invocamos el servicio real
+import { getArtifactStatus, generateArtifact } from '../services/artifact.service';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 
 interface ArtifactGeneratorProps {
@@ -16,34 +19,31 @@ interface ArtifactGeneratorProps {
 export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
   const isPageVisible = usePageVisible();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  
-  // 🔥 SPRINT 11: Estado local para manejar el error sin usar alert()
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const { data: artifact, isLoading } = useQuery({
+  const { data: artifact, isLoading, isError, refetch } = useQuery({
     ...queryPolicies.dynamic,
     queryKey: queryKeys.artifacts.byScope(workspaceId, scope),
     queryFn: ({ signal }) => getArtifactStatus(scope, signal),
     enabled: !!workspaceId,
-    // 🔥 SPRINT 11: Refetch seguro comprobando en MAYÚSCULAS
     refetchInterval: (query) => (isPageVisible && query.state.data?.status === 'GENERATING' ? 5000 : false),
   });
 
   const generateMutation = useSessionMutation({
     mutationFn: () => generateArtifact(scope),
     onSuccess: () => {
-      setErrorMessage(null);
+      toast.info('Generación solicitada.');
       queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.byScope(workspaceId, scope) });
     },
     onError: (error: unknown) => {
-      setErrorMessage(getApiErrorPresentation(error));
+      toast.toastApiError(error);
     }
   });
 
-  if (isLoading) return <div className="animate-pulse h-16 bg-gray-100 rounded-xl mb-6"></div>;
+  if (isLoading) return <Skeleton className="h-16 rounded-xl mb-6" />;
 
-  // 🔥 SPRINT 11: Validaciones estrictas unificadas
+  if (isError) return <ErrorState onRetry={() => void refetch()} />;
   const isStale = artifact?.status === 'STALE';
   const isGenerating = artifact?.status === 'GENERATING';
   const isCurrent = artifact?.status === 'CURRENT';
@@ -52,13 +52,6 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
 
   return (
     <div className="mb-8 p-5 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col items-start gap-4">
-      
-      {/* Mensaje de error no intrusivo */}
-      {errorMessage && (
-        <div className="w-full p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
-          {errorMessage}
-        </div>
-      )}
 
       <div className="w-full flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
@@ -79,9 +72,9 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
 
         <div className="flex items-center gap-3 w-full md:w-auto">
           {artifact?.pdfUrl && (
-            <a 
-              href={artifact.pdfUrl} 
-              target="_blank" 
+            <a
+              href={artifact.pdfUrl}
+              target="_blank"
               rel="noreferrer"
               className="flex-1 md:flex-none flex items-center justify-center px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors"
             >
@@ -89,7 +82,7 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
             </a>
           )}
 
-          <button
+          <Button variant="primary"
             onClick={() => generateMutation.mutate()}
             disabled={isGenerating || (isCurrent && !isStale)}
             className={`flex-1 md:flex-none flex items-center justify-center px-4 py-2 font-medium rounded-lg transition-colors ${
@@ -101,10 +94,9 @@ export const ArtifactGenerator = ({ scope, title }: ArtifactGeneratorProps) => {
             {isGenerating ? (
               <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Procesando...</>
             ) : (
-              // 🔥 SPRINT 11: Si no está generado, dice "Generar", de lo contrario "Actualizar"
               <><RefreshCw className="w-4 h-4 mr-2" /> {isNotGenerated ? 'Generar PDF' : 'Actualizar PDF'}</>
             )}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

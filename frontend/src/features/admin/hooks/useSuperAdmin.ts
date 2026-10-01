@@ -1,3 +1,4 @@
+import { useToast } from '../../../components/ui/Toast';
 import { getQuerySession, isCurrentQuerySession } from '../../../core/query/queryPersistence';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -10,11 +11,11 @@ import type { WorkspaceSummaryDto, ProvisionWorkspaceRequest } from '../types/ad
 
 export const useSuperAdmin = () => {
   const isPageVisible = usePageVisible();
+  const toast = useToast();
   const me = useAuthStore(state => state.me);
   const queryClient = useQueryClient();
   const queryKey = queryKeys.system.workspaces(me?.user.id);
   const [isProvisioning, setIsProvisioning] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { data: workspaces = [], isLoading, error } = useQuery({
     ...queryPolicies.dynamic,
     queryKey, queryFn: ({ signal }) => getSystemWorkspaces(signal), enabled: me?.user.isSuperAdmin === true,
@@ -27,14 +28,13 @@ export const useSuperAdmin = () => {
   const handleProvision = async (payload: ProvisionWorkspaceRequest, onSuccess: () => void) => {
     const session = getQuerySession();
     setIsProvisioning(true);
-    setErrorMessage(null);
     try {
       await provisionNewWorkspace(payload);
       if (!isCurrentQuerySession(session)) return;
       await loadWorkspaces();
-      if (isCurrentQuerySession(session)) onSuccess();
+      if (isCurrentQuerySession(session)) { toast.success('Negocio aprovisionado.'); onSuccess(); }
     } catch (error: unknown) {
-      if (isCurrentQuerySession(session)) setErrorMessage(getApiErrorPresentation(error));
+      if (isCurrentQuerySession(session)) toast.toastApiError(error);
     } finally {
       if (isCurrentQuerySession(session)) setIsProvisioning(false);
     }
@@ -43,21 +43,20 @@ export const useSuperAdmin = () => {
   const handleToggleStatus = async (workspace: WorkspaceSummaryDto) => {
     if (workspace.status === 5) return;
     const session = getQuerySession();
-    setErrorMessage(null);
     try {
       if (workspace.status === 2) await reactivateWorkspace(workspace.id);
       else await suspendWorkspace(workspace.id);
       if (!isCurrentQuerySession(session)) return;
       await loadWorkspaces();
+      if (isCurrentQuerySession(session)) toast.success(workspace.status === 2 ? 'Negocio reactivado.' : 'Negocio suspendido.');
     } catch (error: unknown) {
-      if (isCurrentQuerySession(session)) setErrorMessage(getApiErrorPresentation(error));
+      if (isCurrentQuerySession(session)) toast.toastApiError(error);
     }
   };
 
   const handleDelete = async (workspace: WorkspaceSummaryDto) => {
     if (workspace.status === 5) return;
     const session = getQuerySession();
-    setErrorMessage(null);
     try {
       await deleteWorkspace(workspace.id);
       if (!isCurrentQuerySession(session)) return;
@@ -65,11 +64,12 @@ export const useSuperAdmin = () => {
         previous?.map(item => item.id === workspace.id ? { ...item, status: 5 } : item));
       if (!isCurrentQuerySession(session)) return;
       await loadWorkspaces();
+      if (isCurrentQuerySession(session)) toast.info('Eliminación del negocio en progreso.');
     } catch (error: unknown) {
-      if (isCurrentQuerySession(session)) setErrorMessage(getApiErrorPresentation(error));
+      if (isCurrentQuerySession(session)) toast.toastApiError(error);
     }
   };
 
   return { workspaces, isLoading, isProvisioning, loadWorkspaces, handleProvision, handleToggleStatus, handleDelete,
-    errorMessage: errorMessage || (error ? getApiErrorPresentation(error) : null) };
+    errorMessage: error ? getApiErrorPresentation(error) : null };
 };

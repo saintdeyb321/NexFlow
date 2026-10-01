@@ -1,3 +1,4 @@
+import { useToast } from '../../../components/ui/Toast';
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
@@ -9,22 +10,22 @@ import { getConversations, getMessages, getMessagesByIds, MESSAGE_STATUS_BATCH_L
 import type { Conversation, Message } from '../types/conversation.types';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions } from '../../../core/auth/permissions';
-import { ApiError, getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { ApiError } from '../../../core/api/axiosClient';
+
+// Backend echoes can reconcile for 10 minutes; allow 2 minutes for transport and observation delay.
+const RECONCILIATION_WINDOW_MS = 12 * 60 * 1000;
 
 export const useConversations = () => {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const { can } = usePermissions();
   const visible = usePageVisible();
   const requireCapability = (capability: string) => {
     if (!can('CONVERSATIONS', capability)) throw new ApiError(403, 'Security.CapabilityDenied', 'No tienes permiso para esta operación.');
   };
-  
-  // 🔥 SPRINT 05: Deep Links (Leemos el ID desde la URL)
   const [searchParams, setSearchParams] = useSearchParams();
   const urlConversationId = searchParams.get('conversation');
-
-  // 🔥 SPRINT 05: Guardamos solo el ID, no el objeto entero, para evitar el "Stale State"
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(urlConversationId);
   const conversationsKey = queryKeys.conversations.list(workspaceId);
   const messagesKey = queryKeys.messages.list(workspaceId, selectedConversationId);
@@ -32,7 +33,7 @@ export const useConversations = () => {
   const compareConversations = (a: Conversation, b: Conversation) => compareTimestamps(b.lastMessageAt, a.lastMessageAt) || a.id.localeCompare(b.id);
   const compareMessages = (a: Message, b: Message) => compareTimestamps(a.timestamp, b.timestamp) || a.id.localeCompare(b.id);
 
-  const { data: conversations = [], isLoading: isLoadingConversations, isError: isErrorConversations } = useQuery({
+  const { data: conversations = [], isLoading: isLoadingConversations, isError: isErrorConversations, refetch: refetchConversations } = useQuery({
     ...queryPolicies.inbox,
     queryKey: conversationsKey,
     queryFn: async ({ signal }) => {
@@ -48,7 +49,7 @@ export const useConversations = () => {
   // Derivamos el objeto seleccionado en tiempo real desde el array que se actualiza cada 15s
   const selectedChat = conversations.find(c => c.id === selectedConversationId) || null;
 
-  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
+  const { data: messages = [], isLoading: isLoadingMessages, isError: isErrorMessages, refetch: refetchMessages } = useQuery({
     ...queryPolicies.inbox,
     queryKey: messagesKey,
     queryFn: async ({ signal }) => {
@@ -62,8 +63,12 @@ export const useConversations = () => {
       // Status writes already replace the mirrored message. Read at most 20 old unresolved IDs per poll,
       // rotating through them; timeline reads always advance from the newest timestamp.
       const fetchedIds = new Set(delta.map(message => message.id));
+      const now = Date.now();
       const unresolvedIds = merged.filter(message => message.direction === 'outbound'
-        && ['Pending', 'Attempting', 'UnknownDelivery'].includes(message.status) && !fetchedIds.has(message.id))
+        && ['Pending', 'Attempting', 'UnknownDelivery'].includes(message.status) && !fetchedIds.has(message.id)
+        && Number.isFinite(Date.parse(message.transportStartedAt ?? message.timestamp))
+        && now - Date.parse(message.transportStartedAt ?? message.timestamp) <= RECONCILIATION_WINDOW_MS
+        && Date.parse(message.transportStartedAt ?? message.timestamp) <= now + 60 * 1000)
         .map(message => message.id).sort();
       if (unresolvedIds.length === 0) return merged;
       const lastId = reconciliationCursor.current.conversationId === selectedConversationId ? reconciliationCursor.current.lastId : undefined;
@@ -103,7 +108,9 @@ export const useConversations = () => {
     },
     onSuccess: (result, target) => {
       changeMode(target, result.mode, 'ManualIntervention');
-    }
+      toast.success('Control manual activado.');
+    },
+    onError: error => toast.toastApiError(error)
   });
 
   const releaseMutation = useSessionMutation({
@@ -113,7 +120,9 @@ export const useConversations = () => {
     },
     onSuccess: (result, target) => {
       changeMode(target, result.mode, 'None');
-    }
+      toast.success('Atención automática activada.');
+    },
+    onError: error => toast.toastApiError(error)
   });
 
   const sendMessageMutation = useSessionMutation({
@@ -148,7 +157,9 @@ export const useConversations = () => {
       queryClient.setQueriesData<Conversation[]>({ queryKey: queryKeys.conversations.lists(target.workspaceId) }, current =>
         current?.filter(conversation => conversation.id !== target.conversationId));
       queryClient.removeQueries({ queryKey: queryKeys.messages.conversation(target.workspaceId, target.conversationId) });
-    }
+      toast.success('Conversación eliminada.');
+    },
+    onError: error => toast.toastApiError(error)
   });
 
   return {
@@ -156,9 +167,8 @@ export const useConversations = () => {
     selectedChat,
     messages,
     isLoading: isLoadingConversations || isLoadingMessages,
-    isError: isErrorConversations,
-    actionError: takeOverMutation.error || releaseMutation.error || deleteMutation.error
-      ? getApiErrorPresentation(takeOverMutation.error || releaseMutation.error || deleteMutation.error) : null,
+    isError: isErrorConversations || isErrorMessages,
+    retry: () => { void refetchConversations(); if (selectedConversationId) void refetchMessages(); },
     isChangingMode: takeOverMutation.isPending || releaseMutation.isPending,
     isSending: sendMessageMutation.isPending,
     isDeleting: deleteMutation.isPending,

@@ -1,5 +1,7 @@
+import { Button } from '../../../components/ui/Button';
+import { Modal } from '../../../components/ui/Modal';
 import { useNavigate } from 'react-router-dom';
-import { X, ShoppingCart, MessageSquare, User, Calendar } from 'lucide-react';
+import { ShoppingCart, MessageSquare, User, Calendar } from 'lucide-react';
 import type { OrderRecord } from '../types/orders.types';
 
 interface OrderDetailModalProps {
@@ -8,26 +10,14 @@ interface OrderDetailModalProps {
 }
 
 export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
-  const navigate = useNavigate(); 
-  
+  const navigate = useNavigate();
+
   const formatCurrency = (minorUnits: number | null, currency: string | null) =>
     minorUnits === null || currency === null ? '—' : `${currency} ${(minorUnits / 100).toFixed(2)}`;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-      <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-        
-        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gray-50">
-          <h2 className="text-xl font-bold text-gray-900 flex items-center">
-            <ShoppingCart className="w-5 h-5 mr-2 text-blue-600" />
-            Detalle de la Cotización
-          </h2>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6">
+    <Modal isOpen onClose={onClose} size="xl" title={<span className="flex items-center"><ShoppingCart className="w-5 h-5 mr-2 text-blue-600" />Detalle de la Cotización</span>}>
+        <div>
           <div className="grid grid-cols-2 gap-6 mb-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1 flex items-center">
@@ -86,10 +76,10 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
                 </>
               )}
             </div>
-            
+
             <div className="text-right flex flex-col items-end">
               <p className="text-sm text-gray-500 mb-1">Total de Cotización</p>
-              
+
               <p className="text-2xl font-bold text-blue-600">{formatCurrency(order.totalAmountMinorUnits, order.currency)}</p>
             </div>
           </div>
@@ -97,20 +87,19 @@ export const OrderDetailModal = ({ order, onClose }: OrderDetailModalProps) => {
 
         <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
           {order.conversationId && order.conversationId !== 'MANUAL_ENTRY' ? (
-            <button 
-              onClick={() => { onClose(); navigate(`/inbox?conversation=${order.conversationId}`); }} 
+            <Button variant="ghost"
+              onClick={() => { onClose(); navigate(`/inbox?conversation=${order.conversationId}`); }}
               className="flex items-center text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors"
             >
               <MessageSquare className="w-4 h-4 mr-2" /> Ir a la conversación
-            </button>
+            </Button>
           ) : <div></div>}
-          
-          <button onClick={onClose} className="px-5 py-2 bg-gray-800 text-white font-medium rounded-lg hover:bg-gray-900 transition-colors">
+
+          <Button variant="primary" onClick={onClose} className="px-5 py-2 bg-gray-800 text-white font-medium rounded-lg hover:bg-gray-900 transition-colors">
             Cerrar
-          </button>
+          </Button>
         </div>
 
-      </div>
-    </div>
+    </Modal>
   );
 };

@@ -1,9 +1,12 @@
+import { IconButton } from '../../../components/ui/Button';
+import { LoadingState, EmptyState, ErrorState, Badge } from '../../../components/ui/Feedback';
+import { useToast } from '../../../components/ui/Toast';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { orderTransitions } from '../types/orders.types';
 import { usePermissions } from '../../../core/auth/permissions';
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShoppingBag, Clock, CheckCircle, Package, XCircle, Eye, ShoppingCart } from 'lucide-react';
@@ -15,16 +18,14 @@ import { useAuthStore } from '../../../core/store/useAuthStore';
 export const OrdersPage = () => {
   const isPageVisible = usePageVisible();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { can } = usePermissions();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
-  
+
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [selectedOrderId, setSelectedOrder] = useState<string | null>(null);
-  
-  // 🔥 SPRINT 07: Notificaciones de error/éxito al cambiar estado
-  const [notification, setNotification] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
-  const { data: orders = [], isLoading, isError } = useQuery({
+  const { data: orders = [], isLoading, isError, refetch } = useQuery({
     ...queryPolicies.dynamic,
     queryKey: queryKeys.orders.list(workspaceId, filterStatus),
     queryFn: ({ signal }) => getOrders(filterStatus, signal),
@@ -38,22 +39,22 @@ export const OrdersPage = () => {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.lists(workspaceId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(workspaceId, variables.id) });
-      setNotification({ msg: 'Estado de la cotización actualizado.', type: 'success' });
+      toast.success('Estado de la cotización actualizado.');
     },
     onError: (error: unknown) => {
-      setNotification({ msg: getApiErrorPresentation(error), type: 'error' });
+      toast.toastApiError(error);
     }
   });
 
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
-      case 'PendingReview': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Por Confirmar</span>;
-      case 'Approved': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Aprobado</span>;
-      case 'Processing': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-full w-fit"><Package className="w-3 h-3 mr-1" /> En Revisión</span>;
-      case 'Completed': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Resuelto</span>;
-      case 'Rejected': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Rechazado</span>;
-      case 'Cancelled': return <span className="flex items-center px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Cancelado</span>;
-      default: return <span className="bg-gray-100 text-gray-800 text-xs px-2.5 py-1 rounded-full w-fit">{status}</span>;
+      case 'PendingReview': return <Badge className="flex items-center px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full w-fit"><Clock className="w-3 h-3 mr-1" /> Por Confirmar</Badge>;
+      case 'Approved': return <Badge className="flex items-center px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Aprobado</Badge>;
+      case 'Processing': return <Badge className="flex items-center px-2.5 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-full w-fit"><Package className="w-3 h-3 mr-1" /> En Revisión</Badge>;
+      case 'Completed': return <Badge className="flex items-center px-2.5 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full w-fit"><CheckCircle className="w-3 h-3 mr-1" /> Resuelto</Badge>;
+      case 'Rejected': return <Badge className="flex items-center px-2.5 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Rechazado</Badge>;
+      case 'Cancelled': return <Badge className="flex items-center px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1" /> Cancelado</Badge>;
+      default: return <Badge className="bg-gray-100 text-gray-800 text-xs px-2.5 py-1 rounded-full w-fit">{status}</Badge>;
     }
   };
 
@@ -61,17 +62,10 @@ export const OrdersPage = () => {
     updateMutation.mutate({ id, status: newStatus });
   };
 
-  if (isError) return <div className="p-8 text-center text-red-500">Error al cargar las cotizaciones.</div>;
+  if (isError) return <ErrorState title="Error al cargar las cotizaciones." onRetry={() => void refetch()} />;
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in">
-      
-      {notification && (
-        <div className={`mb-4 p-4 rounded-lg flex justify-between items-center ${notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
-          <span>{notification.msg}</span>
-          <button onClick={() => setNotification(null)} className="text-sm font-bold opacity-70 hover:opacity-100">X</button>
-        </div>
-      )}
 
       <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -82,9 +76,9 @@ export const OrdersPage = () => {
             Revisa las listas de compra o consultas que la IA capturó y envía los precios a tus clientes.
           </p>
         </div>
-        
-        <select 
-          value={filterStatus} 
+
+        <select
+          value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value as OrderStatus | 'ALL')}
           className="border border-gray-200 rounded-lg px-4 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
         >
@@ -98,13 +92,9 @@ export const OrdersPage = () => {
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-[400px]">
         {isLoading ? (
-          <div className="flex items-center justify-center h-64 text-gray-400 animate-pulse">Cargando cotizaciones...</div>
+          <LoadingState className="h-64" title="Cargando cotizaciones..." />
         ) : orders.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-            <ShoppingCart className="w-16 h-16 mb-4 text-gray-200" />
-            <p className="text-lg font-medium text-gray-600">No hay solicitudes pendientes</p>
-            <p className="text-sm">Las listas capturadas por el asistente aparecerán aquí.</p>
-          </div>
+          <EmptyState className="py-20" icon={<ShoppingCart className="w-16 h-16 text-gray-200" />} title="No hay solicitudes pendientes" description="Las listas capturadas por el asistente aparecerán aquí." />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -146,14 +136,14 @@ export const OrdersPage = () => {
                       {getStatusBadge(order.status)}
                     </td>
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
-                      <button 
+                      <IconButton variant="ghost" label="Ver Detalles"
                         onClick={() => setSelectedOrder(order.id)}
                         className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center"
                         title="Ver Detalles"
                       >
                         <Eye className="w-4 h-4" />
-                      </button>
-                      
+                      </IconButton>
+
                       <select
                         disabled={updateMutation.isPending || !can('ORDERS', 'UPDATE_STATUS') || orderTransitions[order.status].length === 0}
                         value={order.status}
@@ -173,9 +163,9 @@ export const OrdersPage = () => {
       </div>
 
       {selectedOrder && (
-        <OrderDetailModal 
-          order={selectedOrder} 
-          onClose={() => setSelectedOrder(null)} 
+        <OrderDetailModal
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
         />
       )}
     </div>
