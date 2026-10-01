@@ -1,6 +1,6 @@
 import { getStatusTone } from '../../../components/ui/statusPresentation';
 import { Button } from '../../../components/ui/Button';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, ErrorState, StatusBadge } from '../../../components/ui/Feedback';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -22,8 +22,8 @@ export const WhatsAppTab = () => {
   const queryClient = useQueryClient();
   const isPageVisible = usePageVisible();
   const queryKey = queryKeys.business.whatsapp(workspaceId);
-  const [qrExpired, setQrExpired] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
+  const qrExpired = timeLeft === 0;
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const { data, isLoading, error, refetch } = useQuery({
     ...queryPolicies.dynamic,
@@ -41,7 +41,7 @@ export const WhatsAppTab = () => {
       return response;
     },
     onSuccess: response => {
-      setQrExpired(false);
+      setTimeLeft(30);
       if ('qrBase64' in response && response.qrBase64) {
         queryClient.setQueryData<WhatsAppStatusResponse>(queryKey, { status: 'QR_AVAILABLE' });
         toast.success('Código QR generado. Tienes 30 segundos para escanearlo.');
@@ -57,7 +57,7 @@ export const WhatsAppTab = () => {
     onSuccess: () => {
       queryClient.setQueryData<WhatsAppStatusResponse>(queryKey, { status: 'DISCONNECTED' });
       connectMutation.reset();
-      setQrExpired(false);
+      setTimeLeft(30);
       toast.success('WhatsApp desconectado exitosamente.');
       setShowDisconnectConfirm(false);
     },
@@ -74,20 +74,15 @@ export const WhatsAppTab = () => {
 
   useEffect(() => {
     if (status !== 'QR_AVAILABLE' || !qrCode) return;
-    setTimeLeft(30);
     const timer = setInterval(() => {
       setTimeLeft(previous => Math.max(0, previous - 1));
     }, 1000);
     return () => clearInterval(timer);
   }, [status, qrCode]);
 
-  useEffect(() => {
-    if (timeLeft === 0 && status === 'QR_AVAILABLE') setQrExpired(true);
-  }, [timeLeft, status]);
-
   const handleConnect = () => {
     if (!can('CONVERSATIONS', 'CONFIGURE')) return;
-    setQrExpired(false);
+    setTimeLeft(30);
     connectMutation.mutate();
   };
 

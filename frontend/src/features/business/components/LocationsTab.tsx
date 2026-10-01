@@ -1,7 +1,7 @@
 import { Button, IconButton } from '../../../components/ui/Button';
 import { Input, FormField } from '../../../components/ui/Form';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';

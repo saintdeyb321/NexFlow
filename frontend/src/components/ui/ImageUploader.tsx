@@ -4,7 +4,7 @@ import { UploadCloud, Loader2, X } from 'lucide-react';
 import { axiosClient } from '../../core/api/axiosClient';
 import { Button, IconButton } from './Button';
 import { Alert } from './Feedback';
-import { useToast } from './Toast';
+import { useToast } from './useToast';
 
 interface ImageUploaderProps {
   value?: string | null;

@@ -1,7 +1,7 @@
 import { Button } from '../../../components/ui/Button';
 import { Select, Input, Textarea, FormField } from '../../../components/ui/Form';
 import { Modal } from '../../../components/ui/Modal';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { useAuthStore } from '../../../core/store/useAuthStore';

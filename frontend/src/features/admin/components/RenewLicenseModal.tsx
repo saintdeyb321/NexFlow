@@ -1,6 +1,6 @@
 import { Button } from '../../../components/ui/Button';
 import { Select, FormField } from '../../../components/ui/Form';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';

@@ -1,6 +1,6 @@
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea, FormField } from '../../../components/ui/Form';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { LoadingState, ErrorState } from '../../../components/ui/Feedback';
 
 import { useAuthStore } from '../../../core/store/useAuthStore';

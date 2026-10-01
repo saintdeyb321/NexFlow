@@ -2,7 +2,7 @@ import { getStatusTone, getStatusLabel } from '../../../components/ui/statusPres
 import { PageHeader } from '../../../components/ui/Layout';
 import { IconButton } from '../../../components/ui/Button';
 import { LoadingState, EmptyState, ErrorState, StatusBadge } from '../../../components/ui/Feedback';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';

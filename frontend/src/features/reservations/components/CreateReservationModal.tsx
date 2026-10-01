@@ -2,14 +2,14 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Select, FormField } from '../../../components/ui/Form';
 import { Alert, LoadingState, EmptyState, ErrorState } from '../../../components/ui/Feedback';
 import { Modal } from '../../../components/ui/Modal';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import type { ReservationDto } from '../types/reservation.types';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Clock, Calendar as CalendarIcon } from 'lucide-react';
 import { createReservation, getAvailability } from '../services/reservation.service';
@@ -27,7 +27,13 @@ interface CreateReservationModalProps {
   timeZone: string;
 }
 
-export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
+export const CreateReservationModal = (props: CreateReservationModalProps) => {
+  const locationId = useAuthStore(state => state.selectedLocationId);
+  if (!props.isOpen) return null;
+  return <CreateReservationForm key={`${locationId}:${props.timeZone}:${props.services.map(service => service.id).join(',')}`} {...props} />;
+};
+
+const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
   const toast = useToast();
   const globalLocationId = useAuthStore(state => state.selectedLocationId);
   const { can } = usePermissions();
@@ -35,25 +41,13 @@ export const CreateReservationModal = ({ isOpen, onClose, onSuccess, locations, 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
-    serviceId: '',
+    serviceId: services[0]?.id || '',
     customerName: '',
     customerIdentifier: '',
-    date: '',
+    date: getBusinessToday(timeZone),
     timeSlot: '' // Ahora guardamos el ISO string exacto devuelto por la disponibilidad
   });
 
-  useEffect(() => {
-    if (isOpen) {
-      setErrorMessage(null);
-      setFormData({
-        serviceId: services.length > 0 ? (services[0].id || '') : '',
-        customerName: '',
-        customerIdentifier: '',
-        date: getBusinessToday(timeZone),
-        timeSlot: ''
-      });
-    }
-  }, [isOpen, services, timeZone]);
   const { data: slots = [], isLoading: isLoadingSlots, error: slotsError, refetch: refetchSlots } = useQuery({
     ...queryPolicies.dynamic,
     queryKey: queryKeys.reservations.slots(workspaceId, globalLocationId, formData.serviceId, formData.date),

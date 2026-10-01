@@ -2,7 +2,7 @@ import { PageHeader } from '../../../components/ui/Layout';
 import { Button } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, EmptyState, ErrorState, Alert } from '../../../components/ui/Feedback';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -169,7 +169,7 @@ export const ReservationsPage = () => {
           toast.success('Reserva creada exitosamente.');
         }}
         locations={locations}
-        services={services}
+        services={services.filter(service => service.isActive && service.requiresReservation && (service.durationInMinutes ?? 0) >= 5)}
         timeZone={timeZone}
       />}
 

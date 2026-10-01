@@ -121,7 +121,7 @@ public class ReservationEngine : IReservationEngine
             bool isOccupied = existingReservations.Any(r => r.Status != Domain.Enums.ReservationStatus.Cancelled && r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
             bool isPast = currentSlotStartLocal <= localNow;
 
-            if (!isOccupied && !isPast) availableSlots.Add(new TimeSlotDto(currentSlotStartLocal, currentSlotEndLocal, true));
+            if (!isOccupied && !isPast) availableSlots.Add(new TimeSlotDto(utcSlotStart, utcSlotEnd, true));
             currentSlotStartLocal = currentSlotEndLocal;
         }
 
@@ -187,7 +187,7 @@ public class ReservationEngine : IReservationEngine
                 created = reservation;
                 _reservationRepository.Add(reservation);
 
-                var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
+                var dto = ToDto(reservation);
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CREATED", Guid.NewGuid().ToString(), $"res_{reservation.Id}", DateTime.UtcNow, dto);
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CREATED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
 
@@ -260,7 +260,7 @@ public class ReservationEngine : IReservationEngine
                 try { reservation.Reschedule(newStartTimeUtc, newEndTimeUtc); }
                 catch (DomainException ex) { return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", ex.Message)); }
 
-                var dto = new ReservationDto(reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId, reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
+                var dto = ToDto(reservation);
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_RESCHEDULED", Guid.NewGuid().ToString(), $"res_upd_{reservation.Id}", DateTime.UtcNow, dto);
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_RESCHEDULED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
 
@@ -371,7 +371,7 @@ public class ReservationEngine : IReservationEngine
     }
     private static ReservationDto ToDto(Domain.Entities.Reservation reservation) => new(
         reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
-        reservation.CustomerIdentifier, reservation.CustomerName, reservation.StartTime, reservation.Status.ToString());
+        reservation.CustomerName, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString());
 
     private static bool IsConcurrencyConflict(Exception exception)
     {

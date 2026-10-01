@@ -1,9 +1,9 @@
-import { Alert } from '../../../components/ui/Feedback';
+import { Alert, ErrorState, LoadingState } from '../../../components/ui/Feedback';
 import { Button } from '../../../components/ui/Button';
 import { Input, Select, Textarea, FormField } from '../../../components/ui/Form';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { queryKeys } from '../../../core/query/queryKeys';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Save, MapPin } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
@@ -21,45 +21,36 @@ interface ServiceModalProps {
   initialData?: ServiceDto | null;
 }
 
-export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceModalProps) => {
+export const ServiceModal = (props: ServiceModalProps) => props.isOpen
+  ? <ServiceModalForm key={props.initialData?.id ?? 'new'} {...props} /> : null;
+
+const ServiceModalForm = ({ isOpen, onClose, onSave, initialData }: ServiceModalProps) => {
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
   const { can } = usePermissions();
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { data: categories = [] } = useQuery({
+  const { data: categories = [], isLoading: categoriesLoading, isError: categoriesError, refetch: refetchCategories } = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.catalog.categories(workspaceId, 'SERVICE'),
     queryFn: ({ signal }) => getServiceCategories(signal),
     enabled: !!workspaceId && isOpen && can('SERVICES', 'READ'),
   });
 
-  const { data: locations = [] } = useQuery({
+  const { data: locations = [], isLoading: locationsLoading, isError: locationsError, refetch: refetchLocations } = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.locations.all(workspaceId),
     queryFn: ({ signal }) => getLocations(signal),
     enabled: !!workspaceId && isOpen && can('LOCATIONS', 'READ'),
   });
 
-  const [formData, setFormData] = useState<Partial<ServiceDto>>({
-    name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: '', type: 'SERVICE', imageUrl: null,
+  const [formData, setFormData] = useState<Partial<ServiceDto>>(() => initialData ?? {
+    name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: categories[0]?.id || '', type: 'SERVICE', imageUrl: null,
     locationScope: 'ALL', locationIds: []
   });
 
-  useEffect(() => {
-    setFormError(null);
-    if (isOpen) {
-      if (initialData) {
-        setFormData(initialData);
-      } else {
-        setFormData({
-          name: '', description: '', durationInMinutes: 30, priceMinorUnits: 0, currency: 'PEN', requiresReservation: true, isActive: true, categoryId: categories[0]?.id || '', type: 'SERVICE', imageUrl: null,
-          locationScope: 'ALL', locationIds: []
-        });
-      }
-    }
-  }, [isOpen, initialData, categories]);
+  const categoryId = formData.categoryId || (!initialData ? categories[0]?.id || '' : '');
 
   const toggleLocation = (locId: string) => {
     const current = formData.locationIds || [];
@@ -70,7 +61,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (!formData.name || !formData.durationInMinutes || !formData.categoryId) {
+    if (!formData.name || !categoryId || (formData.requiresReservation && (!formData.durationInMinutes || formData.durationInMinutes < 5))) {
       setFormError("Completa el nombre, duración y categoría.");
       return;
     }
@@ -86,7 +77,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
         ...formData,
         ...(formData.id ? { id: formData.id } : {}), // Dejamos que el Backend genere el ID
         type: 'SERVICE',
-        categoryId: formData.categoryId,
+        categoryId,
         name: formData.name!,
         priceMinorUnits: formData.priceMinorUnits || 0,
         currency: formData.currency || 'PEN',
@@ -110,6 +101,8 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
     <Modal isOpen={isOpen} onClose={onClose} title={initialData ? 'Editar Servicio' : 'Nuevo Servicio'} closeDisabled={isSaving || isUploadingImage}>
 
       {formError && <Alert tone="error" className="mb-4">{formError}</Alert>}
+      {categoriesError && <ErrorState title="No pudimos cargar las categorías" onRetry={() => void refetchCategories()} />}
+      {categoriesLoading && <LoadingState title="Cargando categorías..." />}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Nombre del Servicio">
@@ -118,7 +111,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Categoría">
-            <Select value={formData.categoryId || ''} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full border focus:ring-primary" required>
+            <Select value={categoryId} onChange={e => setFormData({ ...formData, categoryId: e.target.value })} className="w-full border focus:ring-primary" required>
               <option value="" disabled>Selecciona una categoría...</option>
               {categories.map((c: ServiceCategoryDto) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
@@ -134,11 +127,11 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           <FormField label="Duración (Min)">
-            <Input type="number" min="5" step="5" value={formData.durationInMinutes || 30} onChange={e => setFormData({ ...formData, durationInMinutes: parseInt(e.target.value) })} className="w-full border focus:ring-primary" required />
+            <Input type="number" min="5" step="5" value={formData.durationInMinutes ?? ''} onChange={e => setFormData({ ...formData, durationInMinutes: e.target.value ? parseInt(e.target.value) : null })} className="w-full border focus:ring-primary" required={formData.requiresReservation === true} disabled={!formData.requiresReservation} />
           </FormField>
           <FormField label="Precio">
             {control => (<div className="flex">
-              <span className="px-3 py-2 bg-gray-100 border border-r-0 border-line rounded-l-xl text-muted">S/</span>
+              <span className="px-3 py-2 bg-gray-100 border border-r-0 border-line rounded-l-xl text-muted">{formData.currency || 'PEN'}</span>
               <Input {...control} type="number" min="0" step="0.10" value={(formData.priceMinorUnits || 0) / 100} onChange={e => setFormData({ ...formData, priceMinorUnits: Math.round(parseFloat(e.target.value || '0') * 100) })} className="w-full border rounded-r-xl focus:ring-primary" />
             </div>)}
           </FormField>
@@ -161,7 +154,10 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
           {formData.locationScope === 'SPECIFIC' && (
             <div className="grid gap-2 mt-2 pt-2 border-t border-line grid-cols-1 sm:grid-cols-2">
-              {locations.map(loc => (
+              {locationsError ? <ErrorState title="No pudimos cargar las sedes" onRetry={() => void refetchLocations()} />
+                : locationsLoading ? <LoadingState title="Cargando sedes..." />
+                : !can('LOCATIONS', 'READ') ? <p className="text-sm text-muted">No tienes permiso para consultar las sedes.</p>
+                : locations.map(loc => (
                 <label key={loc.id} className="flex items-center text-sm cursor-pointer">
                   <Input type="checkbox" checked={(formData.locationIds || []).includes(loc.id!)} onChange={() => toggleLocation(loc.id!)} className="mr-2 focus:ring-primary" />
                   {loc.name}
@@ -182,7 +178,7 @@ export const ServiceModal = ({ isOpen, onClose, onSave, initialData }: ServiceMo
 
         <div className="pt-6 border-t border-line flex justify-end gap-3">
           <Button variant="secondary" type="button" disabled={isSaving || isUploadingImage} onClick={onClose} className="text-sm font-medium">Cancelar</Button>
-          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || isUploadingImage || categories.length === 0} className="flex items-center text-sm font-medium disabled:opacity-50 transition-colors">
+          <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || isUploadingImage || categoriesLoading || categoriesError || categories.length === 0} className="flex items-center text-sm font-medium disabled:opacity-50 transition-colors">
             <Save aria-hidden="true" className="w-4 h-4 mr-2" />
             {isSaving ? 'Guardando...' : 'Guardar'}
           </Button>

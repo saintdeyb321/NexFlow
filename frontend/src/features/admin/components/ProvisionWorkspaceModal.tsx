@@ -1,7 +1,7 @@
 import { Button } from '../../../components/ui/Button';
 import { Input, Select, FormField } from '../../../components/ui/Form';
 import { Alert } from '../../../components/ui/Feedback';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -19,7 +19,10 @@ interface ProvisionModalProps {
   isProvisioning: boolean;
 }
 
-export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvisioning }: ProvisionModalProps) => {
+export const ProvisionWorkspaceModal = (props: ProvisionModalProps) => props.isOpen
+  ? <ProvisionWorkspaceForm {...props} /> : null;
+
+const ProvisionWorkspaceForm = ({ isOpen, onClose, onProvision, isProvisioning }: ProvisionModalProps) => {
   const [provisionMode, setProvisionMode] = useState<'template' | 'custom'>('template');
 
   const me = useAuthStore(state => state.me);
@@ -38,21 +41,16 @@ export const ProvisionWorkspaceModal = ({ isOpen, onClose, onProvision, isProvis
   });
   const [selectedCustomModules, setSelectedCustomModules] = useState<string[]>([]);
 
-  const [formData, setFormData] = useState({
-    email: '',
-    templateCode: '',
-    expiresAt: '',
-    maxLocations: 1
+  const [formData, setFormData] = useState(() => {
+    const defaultDate = new Date();
+    defaultDate.setFullYear(defaultDate.getFullYear() + 1);
+    return {
+      email: '',
+      templateCode: '',
+      expiresAt: defaultDate.toISOString().split('T')[0],
+      maxLocations: 1
+    };
   });
-
-  useEffect(() => {
-    if (isOpen) {
-      setErrorMessage(null);
-      const defaultDate = new Date();
-      defaultDate.setFullYear(defaultDate.getFullYear() + 1);
-      setFormData(prev => ({ ...prev, expiresAt: defaultDate.toISOString().split('T')[0] }));
-    }
-  }, [isOpen]);
 
   const templateCode = formData.templateCode || dbTemplates[0]?.code || '';
 

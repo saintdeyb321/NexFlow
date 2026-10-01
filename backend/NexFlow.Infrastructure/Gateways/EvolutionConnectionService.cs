@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
+using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
@@ -59,21 +60,25 @@ public class EvolutionConnectionService : IEvolutionConnectionService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, cancellationToken);
-            if (!response.IsSuccessStatusCode) return "DISCONNECTED";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound) return "DISCONNECTED";
+            response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-            if (json.TryGetProperty("instance", out var instanceNode) && instanceNode.TryGetProperty("state", out var stateNode))
+            if (json.ValueKind == JsonValueKind.Object && json.TryGetProperty("instance", out var instanceNode)
+                && instanceNode.ValueKind == JsonValueKind.Object && instanceNode.TryGetProperty("state", out var stateNode)
+                && stateNode.ValueKind == JsonValueKind.String)
             {
                 var state = stateNode.GetString()?.ToUpperInvariant();
                 if (state == "OPEN") return "CONNECTED";
                 if (state == "CONNECTING") return "QR_AVAILABLE";
+                return "DISCONNECTED";
             }
-            return "DISCONNECTED";
+            throw new HttpRequestException("Evolution devolvió una respuesta de estado inválida.");
         }
-        catch (Exception)
+        catch (JsonException ex)
         {
-            return "ERROR";
+            throw new HttpRequestException("Evolution devolvió una respuesta de estado inválida.", ex);
         }
     }
 
@@ -98,7 +103,9 @@ public class EvolutionConnectionService : IEvolutionConnectionService
         {
             // 1. Intentamos conectar si la instancia ya existe (Devuelve el QR si está desconectada)
             var connectUrl = $"{_baseUrl}/instance/connect/{instanceName}";
-            var connectResponse = await _httpClient.GetAsync(connectUrl, cancellationToken);
+            using var connectResponse = await _httpClient.GetAsync(connectUrl, cancellationToken);
+            if (!connectResponse.IsSuccessStatusCode && connectResponse.StatusCode != HttpStatusCode.NotFound)
+                connectResponse.EnsureSuccessStatusCode();
 
             if (connectResponse.IsSuccessStatusCode)
             {
@@ -110,6 +117,7 @@ public class EvolutionConnectionService : IEvolutionConnectionService
                     await SetWebhookSafeAsync(instanceName, cancellationToken);
                     return base64;
                 }
+                throw new HttpRequestException("Evolution no devolvió un código QR válido.");
             }
 
             // 2. Si no existe, CREAMOS la instancia con un payload súper limpio
@@ -121,26 +129,27 @@ public class EvolutionConnectionService : IEvolutionConnectionService
                 token = Guid.NewGuid().ToString("N")
             };
 
-            var createResponse = await _httpClient.PostAsJsonAsync(createUrl, createPayload, cancellationToken);
-
-            if (!createResponse.IsSuccessStatusCode)
-            {
-                var err = await createResponse.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogError("Evolution devolvió error al crear la instancia {Instance}. StatusCode: {Code}, Detalle: {Error}", instanceName, createResponse.StatusCode, err);
-                return null;
-            }
+            using var createResponse = await _httpClient.PostAsJsonAsync(createUrl, createPayload, cancellationToken);
+            createResponse.EnsureSuccessStatusCode();
 
             // 3. SETEAMOS EL WEBHOOK en un paso separado
             await SetWebhookSafeAsync(instanceName, cancellationToken);
 
             // 4. Retornamos el QR
             var createJson = await createResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-            return ExtractBase64(createJson);
+            var createdQr = ExtractBase64(createJson);
+            if (string.IsNullOrWhiteSpace(createdQr))
+                throw new HttpRequestException("Evolution no devolvió un código QR válido.");
+            return createdQr;
+        }
+        catch (JsonException ex)
+        {
+            throw new HttpRequestException("Evolution devolvió una respuesta de conexión inválida.", ex);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fallo crítico de red hacia Evolution API para la instancia {InstanceName}", instanceName);
-            return null;
+            throw;
         }
     }
 
@@ -163,16 +172,13 @@ public class EvolutionConnectionService : IEvolutionConnectionService
                 }
             };
 
-            var response = await _httpClient.PostAsJsonAsync(webhookUrlEndpoint, webhookPayload, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                var err = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("No se pudo configurar el webhook para {Instance}. Status: {Status}. Detalle: {Error}", instanceName, response.StatusCode, err);
-            }
+            using var response = await _httpClient.PostAsJsonAsync(webhookUrlEndpoint, webhookPayload, cancellationToken);
+            response.EnsureSuccessStatusCode();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Excepción al intentar configurar el webhook para {Instance}", instanceName);
+            throw;
         }
     }
 
@@ -184,20 +190,16 @@ public class EvolutionConnectionService : IEvolutionConnectionService
 
         // Logout cierra la sesión de WhatsApp pero no borra la instancia
         var url = $"{_baseUrl}/instance/logout/{instanceName}";
-        try
-        {
-            await _httpClient.DeleteAsync(url, cancellationToken);
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+        using var response = await _httpClient.DeleteAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return true;
     }
 
     // Extractor Universal para soportar formatos Base64 de v1 y v2 de Evolution
     private string? ExtractBase64(JsonElement json)
     {
+        if (json.ValueKind != JsonValueKind.Object)
+            throw new HttpRequestException("Evolution devolvió una respuesta de conexión inválida.");
         if (json.TryGetProperty("base64", out var b1)) return b1.GetString();
 
         if (json.TryGetProperty("qrcode", out var q2))

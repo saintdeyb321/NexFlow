@@ -45,7 +45,7 @@ public class ServicesController : ControllerBase
         if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
 
         var allItems = await _catalogRepository.GetItemsByTypeAsync(WorkspaceId, "SERVICE", cancellationToken);
-        var services = allItems.Where(i => i.Type == "SERVICE");
+        var services = allItems.Where(i => i.Type == "SERVICE").OfType<ServiceDto>();
 
         if (!string.IsNullOrWhiteSpace(locationId))
         {

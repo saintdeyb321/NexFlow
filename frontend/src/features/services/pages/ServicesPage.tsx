@@ -3,7 +3,7 @@ import { OfferingImage } from '../../../components/ui/OfferingImage';
 import { Card, PageHeader } from '../../../components/ui/Layout';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, EmptyState, ErrorState, StatusBadge } from '../../../components/ui/Feedback';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';

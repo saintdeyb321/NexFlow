@@ -1,10 +1,11 @@
 import { Button } from '../../../components/ui/Button';
 import { Input, Select, Textarea, FormField } from '../../../components/ui/Form';
 import { Modal } from '../../../components/ui/Modal';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
+import { ErrorState, LoadingState } from '../../../components/ui/Feedback';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { queryKeys } from '../../../core/query/queryKeys';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getLocations } from '../../business/services/business.service';
 import { ImageUploader } from '../../../components/ui/ImageUploader';
@@ -21,23 +22,26 @@ interface ProductModalProps {
   productToEdit?: ProductDto | null;
 }
 
-export const ProductModal = ({ isOpen, onClose, onSave, isSaving, categories, productToEdit }: ProductModalProps) => {
+export const ProductModal = (props: ProductModalProps) => props.isOpen
+  ? <ProductModalForm key={props.productToEdit?.id ?? 'new'} {...props} /> : null;
+
+const ProductModalForm = ({ isOpen, onClose, onSave, isSaving, categories, productToEdit }: ProductModalProps) => {
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const { can } = usePermissions();
   const toast = useToast();
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
-  const { data: locations = [] } = useQuery({
+  const { data: locations = [], isLoading: locationsLoading, isError: locationsError, refetch: refetchLocations } = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.locations.all(workspaceId),
     queryFn: ({ signal }) => getLocations(signal),
     enabled: !!workspaceId && isOpen && can('LOCATIONS', 'READ')
   });
 
-  const [formData, setFormData] = useState<Partial<ProductDto>>({
+  const [formData, setFormData] = useState<Partial<ProductDto>>(() => productToEdit ?? {
     name: '',
     description: '',
-    categoryId: '',
+    categoryId: categories[0]?.id || '',
     priceMinorUnits: 0,
     currency: 'PEN',
     isActive: true,
@@ -45,31 +49,18 @@ export const ProductModal = ({ isOpen, onClose, onSave, isSaving, categories, pr
     locationScope: 'ALL',
     locationIds: []
   });
-  useEffect(() => {
-    if (isOpen) {
-      if (productToEdit) {
-        setFormData(productToEdit);
-      } else {
-        setFormData({
-          name: '', description: '', categoryId: categories[0]?.id || '',
-          priceMinorUnits: 0, currency: 'PEN', isActive: true,
-          type: 'PRODUCT', locationScope: 'ALL', locationIds: []
-        });
-      }
-    }
-  }, [isOpen, productToEdit, categories]);
-
-  if (!isOpen) return null;
+  const categoryId = formData.categoryId || (!productToEdit ? categories[0]?.id || '' : '');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.categoryId) {
+    if (!categoryId) {
       toast.warning("Debes seleccionar una categoría");
       return;
     }
 
     const payload: ProductDto = {
       ...(formData as ProductDto),
+      categoryId,
       locationScope: formData.locationScope || 'ALL',
       locationIds: formData.locationScope === 'ALL' ? [] : (formData.locationIds || [])
     };
@@ -96,7 +87,7 @@ export const ProductModal = ({ isOpen, onClose, onSave, isSaving, categories, pr
           <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
             {/* Categoría */}
             <FormField label="Categoría">
-              <Select value={formData.categoryId || ''} onChange={e => setFormData({...formData, categoryId: e.target.value})} className="w-full border focus:ring-primary" required>
+              <Select value={categoryId} onChange={e => setFormData({...formData, categoryId: e.target.value})} className="w-full border focus:ring-primary" required>
                 <option value="" disabled>Selecciona...</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
@@ -154,13 +145,16 @@ export const ProductModal = ({ isOpen, onClose, onSave, isSaving, categories, pr
 
               {formData.locationScope === 'SPECIFIC' && (
                 <div className="ml-6 mt-2 grid gap-2 grid-cols-1 sm:grid-cols-2">
-                  {locations.map(loc => (
+                  {locationsError ? <ErrorState title="No pudimos cargar las sedes" onRetry={() => void refetchLocations()} />
+                    : locationsLoading ? <LoadingState title="Cargando sedes..." />
+                    : !can('LOCATIONS', 'READ') ? <p className="text-sm text-muted">No tienes permiso para consultar las sedes.</p>
+                    : locations.map(loc => (
                     <label key={loc.id} className="flex items-center">
                       <Input type="checkbox" checked={(formData.locationIds || []).includes(loc.id!)} onChange={() => toggleLocation(loc.id!)} className="w-4 h-4" />
                       <span className="ml-2 text-sm text-muted">{loc.name}</span>
                     </label>
                   ))}
-                  {locations.length === 0 && <span className="text-xs text-red-500">No hay sedes registradas.</span>}
+                  {!locationsError && !locationsLoading && can('LOCATIONS', 'READ') && locations.length === 0 && <span className="text-xs text-red-500">No hay sedes registradas.</span>}
                 </div>
               )}
             </div>

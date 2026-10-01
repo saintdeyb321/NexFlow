@@ -1,7 +1,7 @@
 import { Input } from '../../../components/ui/Form';
 import { Badge } from '../../../components/ui/Feedback';
 import { Button, IconButton } from '../../../components/ui/Button';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { EmptyState } from '../../../components/ui/Feedback';
 import { useState, useRef, useEffect } from 'react';
 import { Bot, User, Send, Clock, AlertTriangle, AlertOctagon, Image as ImageIcon } from 'lucide-react';
@@ -24,7 +24,7 @@ export const ConversationThread = ({
   const { can } = usePermissions();
   const toast = useToast();
   const [newMessage, setNewMessage] = useState('');
-  const [leaseObservation, setLeaseObservation] = useState(0);
+  const [leaseObservation, setLeaseObservation] = useState(() => Date.now());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // A cached attempt can outlive its lease while the tab is inactive. Observe only
@@ -32,9 +32,9 @@ export const ConversationThread = ({
   useEffect(() => {
     const now = Date.now();
     const nextLease = Math.min(...messages.filter(message => message.status === 'Attempting')
-      .map(message => Date.parse(message.transportLeaseUntil ?? '')).filter(deadline => Number.isFinite(deadline) && deadline > now));
+      .map(message => Date.parse(message.transportLeaseUntil ?? '')).filter(deadline => Number.isFinite(deadline) && deadline > leaseObservation));
     if (!Number.isFinite(nextLease)) return;
-    const timer = setTimeout(() => setLeaseObservation(value => value + 1), nextLease - now + 1);
+    const timer = setTimeout(() => setLeaseObservation(Date.now()), Math.max(0, nextLease - now + 1));
     return () => clearTimeout(timer);
   }, [messages, leaseObservation]);
 
@@ -128,7 +128,7 @@ export const ConversationThread = ({
 
                   {msg.status === 'Failed' && <Badge tone="error" className="ml-2 text-[10px]">Error de envío</Badge>}
                   {msg.direction === 'outbound' && msg.status !== 'Failed' && <Badge tone={msg.status === 'Sent' ? 'success' : 'warning'} className="ml-2 text-[10px]">{
-                    msg.status === 'Attempting' && (!msg.transportLeaseUntil || !Number.isFinite(Date.parse(msg.transportLeaseUntil)) || Date.parse(msg.transportLeaseUntil) <= Date.now())
+                    msg.status === 'Attempting' && (!msg.transportLeaseUntil || !Number.isFinite(Date.parse(msg.transportLeaseUntil)) || Date.parse(msg.transportLeaseUntil) <= leaseObservation)
                       ? 'Entrega sin confirmar'
                       : { Pending: 'Pendiente', Attempting: 'Enviando', Sent: 'Enviado', UnknownDelivery: 'Entrega sin confirmar' }[msg.status]
                   }</Badge>}

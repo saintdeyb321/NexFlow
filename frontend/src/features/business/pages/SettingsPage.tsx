@@ -1,7 +1,7 @@
 import { PageHeader } from '../../../components/ui/Layout';
 import { EmptyState } from '../../../components/ui/Feedback';
 import { Button } from '../../../components/ui/Button';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Building2, MapPin, Clock, MessageCircle } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { ProfileTab } from '../components/ProfileTab';
@@ -22,15 +22,9 @@ export const SettingsPage = () => {
   // Determinamos la pestaña por defecto
   const defaultTab = hasProfile ? 'profile' : hasLocations ? 'locations' : hasHours ? 'hours' : 'whatsapp';
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'locations' | 'hours' | 'whatsapp'>(defaultTab);
-
-  useEffect(() => {
-    // Si la pestaña actual deja de ser válida por un cambio de sesión, saltar a la por defecto
-    if (activeTab === 'locations' && !hasLocations) setActiveTab(defaultTab);
-    if (activeTab === 'hours' && !hasHours) setActiveTab(defaultTab);
-    if (activeTab === 'profile' && !hasProfile) setActiveTab(defaultTab);
-    if (activeTab === 'whatsapp' && !hasWhatsApp) setActiveTab(defaultTab);
-  }, [activeTab, defaultTab, hasLocations, hasHours, hasProfile, hasWhatsApp]);
+  const [selectedTab, setActiveTab] = useState<'profile' | 'locations' | 'hours' | 'whatsapp'>(defaultTab);
+  const availableTabs = { profile: hasProfile, locations: hasLocations, hours: hasHours, whatsapp: hasWhatsApp };
+  const activeTab = availableTabs[selectedTab] ? selectedTab : defaultTab;
 
   if (!workspaceId) return <EmptyState title="Sin negocio asignado" description="Tu cuenta aún no tiene un workspace disponible." />;
   if (!hasProfile && !hasLocations && !hasHours && !hasWhatsApp) return <EmptyState title="Sin acceso a configuración" description="Tu cuenta no tiene permisos de lectura para las secciones de este workspace." />;

@@ -1,6 +1,6 @@
 import { Button } from '../../../components/ui/Button';
 import { Select, Textarea, FormField } from '../../../components/ui/Form';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Save, HelpCircle } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import type { FaqDto } from '../types/business.types';
@@ -12,22 +12,17 @@ interface FaqModalProps {
   initialData?: FaqDto | null;
 }
 
-export const FaqModal = ({ isOpen, onClose, onSave, initialData }: FaqModalProps) => {
+export const FaqModal = (props: FaqModalProps) => props.isOpen
+  ? <FaqModalForm key={props.initialData?.id ?? 'new'} {...props} /> : null;
+
+const FaqModalForm = ({ isOpen, onClose, onSave, initialData }: FaqModalProps) => {
   const [isSaving, setIsSaving] = useState(false);
-  const [formData, setFormData] = useState<Partial<FaqDto>>({
+  const [formData, setFormData] = useState<Partial<FaqDto>>(() => initialData ?? {
     question: '',
     answer: '',
     category: 'General',
     isActive: true
   });
-
-  useEffect(() => {
-    if (initialData) {
-      setFormData(initialData);
-    } else {
-      setFormData({ question: '', answer: '', category: 'General', isActive: true });
-    }
-  }, [initialData, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

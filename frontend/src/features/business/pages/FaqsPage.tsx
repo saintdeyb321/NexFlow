@@ -2,7 +2,7 @@ import { PageHeader } from '../../../components/ui/Layout';
 import { Button, IconButton } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { LoadingState, EmptyState, ErrorState } from '../../../components/ui/Feedback';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';

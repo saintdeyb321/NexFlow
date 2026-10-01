@@ -1,5 +1,5 @@
 import { Button } from '../../../components/ui/Button';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
@@ -33,8 +33,9 @@ export const HoursTab = () => {
     enabled: selectedLocationId !== 'all' && !!workspaceId && can('BUSINESS_HOURS', 'READ'),
   });
 
-  const hours = draft?.locationId === selectedLocationId ? draft.hours : fetchedHours?.length ? fetchedHours
-    : DAYS_OF_WEEK.map(d => ({ dayOfWeek: d.id, openTime: '08:00', closeTime: '18:00', isClosed: d.id === 0 }));
+  const hours = draft?.locationId === selectedLocationId ? draft.hours
+    : DAYS_OF_WEEK.map(day => fetchedHours?.find(hour => hour.dayOfWeek === day.id)
+      ?? { dayOfWeek: day.id, openTime: '', closeTime: '', isClosed: true });
 
   const saveMutation = useSessionMutation({
     mutationFn: ({ locationId, hours }: { locationId: string; hours: BusinessHoursDto[] }) => saveBusinessHours(locationId, hours),

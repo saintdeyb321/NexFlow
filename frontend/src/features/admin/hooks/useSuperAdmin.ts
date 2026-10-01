@@ -1,4 +1,4 @@
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { getQuerySession, isCurrentQuerySession } from '../../../core/query/queryPersistence';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { queryKeys } from '../../../core/query/queryKeys';

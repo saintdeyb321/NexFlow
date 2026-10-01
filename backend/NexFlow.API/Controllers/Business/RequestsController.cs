@@ -63,7 +63,7 @@ public class RequestsController : ControllerBase
         var activeModules = await _entitlementService.GetAvailableModuleCodesAsync(WorkspaceId, cancellationToken);
         if (!activeModules.Contains("REQUESTS")) return StatusCode(403, "Módulo REQUESTS no contratado.");
 
-        if (!Enum.TryParse<RequestType>(payload.Type, true, out var parsedType))
+        if (!Enum.TryParse<RequestType>(payload.Type, true, out var parsedType) || !Enum.IsDefined(parsedType))
             return BadRequest(new { code = "Request.InvalidType", message = $"El tipo '{payload.Type}' no es válido." });
 
         var requestId = await _requestService.CreateRequestAsync(

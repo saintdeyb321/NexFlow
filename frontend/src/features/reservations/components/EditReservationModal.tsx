@@ -1,10 +1,10 @@
 import { Button } from '../../../components/ui/Button';
 import { Input, FormField } from '../../../components/ui/Form';
 import { Modal } from '../../../components/ui/Modal';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { toBusinessLocalInput } from '../../../core/utils/dateTime';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { editReservation } from '../services/reservation.service';
 import type { ReservationDto } from '../types/reservation.types';
 
@@ -16,18 +16,16 @@ interface EditReservationModalProps {
   timeZone: string;
 }
 
-export const EditReservationModal = ({ isOpen, onClose, onSuccess, reservation, timeZone }: EditReservationModalProps) => {
-  const toast = useToast();
-  const [editDate, setEditDate] = useState('');
-  const [editTime, setEditTime] = useState('');
+export const EditReservationModal = (props: EditReservationModalProps) => {
+  if (!props.isOpen || !props.reservation) return null;
+  return <EditReservationForm key={`${props.reservation.id}:${props.reservation.dateTime}:${props.timeZone}`} {...props} reservation={props.reservation} />;
+};
 
-  useEffect(() => {
-    if (reservation) {
-      const local = toBusinessLocalInput(reservation.dateTime, timeZone);
-      setEditDate(local.split('T')[0] || '');
-      setEditTime(local.split('T')[1] || '');
-    }
-  }, [reservation, timeZone]);
+const EditReservationForm = ({ isOpen, onClose, onSuccess, reservation, timeZone }: EditReservationModalProps & { reservation: ReservationDto }) => {
+  const toast = useToast();
+  const local = toBusinessLocalInput(reservation.dateTime, timeZone);
+  const [editDate, setEditDate] = useState(local.split('T')[0] || '');
+  const [editTime, setEditTime] = useState(local.split('T')[1] || '');
 
   const saveMutation = useSessionMutation({
     mutationFn: ({ id, dateTime }: { id: string; dateTime: string }) => editReservation(id, dateTime),

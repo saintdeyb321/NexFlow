@@ -76,8 +76,11 @@ export const NotificationBell = () => {
     setIsOpen(false);
 
     // 🔥 SPRINT 08: Prevención de redirecciones maliciosas y SPA router.
-    if (n.actionUrl && n.actionUrl.startsWith('/')) {
-       navigate(n.actionUrl);
+    if (n.actionUrl?.startsWith('/') && !n.actionUrl.startsWith('//') && !n.actionUrl.includes('\\')) {
+      const destination = new URL(n.actionUrl, window.location.origin);
+      if (destination.origin === window.location.origin) {
+        navigate(`${destination.pathname}${destination.search}${destination.hash}`);
+      }
     }
   };
 

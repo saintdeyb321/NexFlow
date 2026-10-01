@@ -1,20 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { ApiError, getApiErrorPresentation } from '../../core/api/axiosClient';
 import { Alert } from './Feedback';
 import { IconButton } from './Button';
+import { ToastContext } from './useToast';
+import type { ToastApi } from './useToast';
 
 type ToastTone = 'success' | 'error' | 'warning' | 'info';
 type ToastEntry = { id: string; message: string; tone: ToastTone; expiresAt: number; correlationId?: string };
-interface ToastApi {
-  success: (message: string) => void;
-  error: (message: string) => void;
-  warning: (message: string) => void;
-  info: (message: string) => void;
-  toastApiError: (error: unknown) => void;
-}
-const ToastContext = createContext<ToastApi | null>(null);
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [entries, setEntries] = useState<ToastEntry[]>([]);
   const prefix = useId();
@@ -42,9 +36,4 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       </Alert>)}
     </div>
   </ToastContext.Provider>;
-};
-export const useToast = () => {
-  const api = useContext(ToastContext);
-  if (!api) throw new Error('useToast requiere ToastProvider.');
-  return api;
 };

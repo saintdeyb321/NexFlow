@@ -1,5 +1,5 @@
-import { useToast } from '../../../components/ui/Toast';
-import { useState, useEffect, useRef } from 'react';
+import { useToast } from '../../../components/ui/useToast';
+import { useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -26,9 +26,7 @@ export const useConversations = () => {
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const urlConversationId = searchParams.get('conversation');
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(urlConversationId);
   const conversationsKey = queryKeys.conversations.list(workspaceId);
-  const messagesKey = queryKeys.messages.list(workspaceId, selectedConversationId);
   const reconciliationCursor = useRef<{ conversationId: string | null; lastId?: string }>({ conversationId: null });
   const compareConversations = (a: Conversation, b: Conversation) => compareTimestamps(b.lastMessageAt, a.lastMessageAt) || a.id.localeCompare(b.id);
   const compareMessages = (a: Message, b: Message) => compareTimestamps(a.timestamp, b.timestamp) || a.id.localeCompare(b.id);
@@ -46,7 +44,9 @@ export const useConversations = () => {
     refetchInterval: visible ? 15000 : false,
   });
 
-  // Derivamos el objeto seleccionado en tiempo real desde el array que se actualiza cada 15s
+  // URL owns explicit selection, including browser history and external navigation.
+  const selectedConversationId = urlConversationId || conversations[0]?.id || null;
+  const messagesKey = queryKeys.messages.list(workspaceId, selectedConversationId);
   const selectedChat = conversations.find(c => c.id === selectedConversationId) || null;
 
   const { data: messages = [], isLoading: isLoadingMessages, isError: isErrorMessages, refetch: refetchMessages } = useQuery({
@@ -83,17 +83,12 @@ export const useConversations = () => {
     refetchInterval: visible ? 15000 : false,
   });
 
-  useEffect(() => {
-    // Si hay conversaciones y no hay ninguna seleccionada, seleccionamos la primera por defecto
-    if (conversations.length > 0 && !selectedConversationId) {
-      handleSelectChat(conversations[0].id);
-    }
-  }, [conversations, selectedConversationId]);
-
-  const handleSelectChat = (id: string) => {
-    setSelectedConversationId(id);
-    setSearchParams({ conversation: id });
-  };
+  const handleSelectChat = (id: string | null) => setSearchParams(previous => {
+    const next = new URLSearchParams(previous);
+    if (id) next.set('conversation', id);
+    else next.delete('conversation');
+    return next;
+  });
 
   type ConversationTarget = { workspaceId: string; conversationId: string };
   const changeMode = (target: ConversationTarget, mode: Conversation['mode'], handoffReason: Conversation['handoffReason']) => {
@@ -153,7 +148,7 @@ export const useConversations = () => {
     },
     onSuccess: (_, target) => {
       void queryClient.cancelQueries({ queryKey: queryKeys.conversations.lists(target.workspaceId) });
-      if (selectedConversationId === target.conversationId) { setSelectedConversationId(null); setSearchParams({}); }
+      if (selectedConversationId === target.conversationId) handleSelectChat(null);
       queryClient.setQueriesData<Conversation[]>({ queryKey: queryKeys.conversations.lists(target.workspaceId) }, current =>
         current?.filter(conversation => conversation.id !== target.conversationId));
       queryClient.removeQueries({ queryKey: queryKeys.messages.conversation(target.workspaceId, target.conversationId) });
@@ -172,10 +167,7 @@ export const useConversations = () => {
     isChangingMode: takeOverMutation.isPending || releaseMutation.isPending,
     isSending: sendMessageMutation.isPending,
     isDeleting: deleteMutation.isPending,
-    setSelectedChat: (chat: Conversation | null) => {
-      if (chat) handleSelectChat(chat.id);
-      else { setSelectedConversationId(null); setSearchParams({}); }
-    },
+    setSelectedChat: (chat: Conversation | null) => handleSelectChat(chat?.id ?? null),
     handleTakeOver: () => { if (workspaceId && selectedConversationId) takeOverMutation.mutate({ workspaceId, conversationId: selectedConversationId }); },
     handleRelease: () => { if (workspaceId && selectedConversationId) releaseMutation.mutate({ workspaceId, conversationId: selectedConversationId }); },
     handleSendMessage: (content: string) => {

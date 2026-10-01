@@ -1,6 +1,6 @@
 import { Button, IconButton } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { OfferingImage } from '../../../components/ui/OfferingImage';
 import { PageHeader } from '../../../components/ui/Layout';
 import { LoadingState, EmptyState, StatusBadge, Badge, ErrorState } from '../../../components/ui/Feedback';
@@ -39,7 +39,7 @@ export const CatalogPage = () => {
     enabled: !!workspaceId && can('CATALOG', 'READ')
   });
 
-  const { data: categories = [] } = useQuery({
+  const { data: categories = [], isLoading: categoriesLoading, isError: categoriesError, refetch: refetchCategories } = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.catalog.categories(workspaceId, 'PRODUCT'),
     queryFn: ({ signal }) => getCategories('PRODUCT', signal),
@@ -79,9 +79,10 @@ export const CatalogPage = () => {
     setIsModalOpen(true);
   };
 
-  if (isLoading) return <LoadingState title="Cargando catálogo..." />;
+  if (isLoading || categoriesLoading) return <LoadingState title="Cargando catálogo..." />;
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
+  if (categoriesError) return <ErrorState title="No pudimos cargar las categorías" onRetry={() => void refetchCategories()} />;
 
   return (
     <div className="nf-page">

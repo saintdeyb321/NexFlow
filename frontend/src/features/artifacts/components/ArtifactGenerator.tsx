@@ -1,5 +1,5 @@
 import { Button } from '../../../components/ui/Button';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { Skeleton, ErrorState } from '../../../components/ui/Feedback';
 
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';

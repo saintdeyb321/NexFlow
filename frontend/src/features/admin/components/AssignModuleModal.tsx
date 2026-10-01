@@ -1,6 +1,6 @@
 import { Button } from '../../../components/ui/Button';
 import { Select, FormField } from '../../../components/ui/Form';
-import { useToast } from '../../../components/ui/Toast';
+import { useToast } from '../../../components/ui/useToast';
 import { Alert } from '../../../components/ui/Feedback';
 import { useState } from 'react';
 import { useAuthStore } from '../../../core/store/useAuthStore';

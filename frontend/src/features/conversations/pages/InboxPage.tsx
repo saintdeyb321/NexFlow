@@ -1,6 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { IconButton, Button } from '../../../components/ui/Button';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { ErrorState, EmptyState, Skeleton } from '../../../components/ui/Feedback';
 import { ConversationSidebar } from '../components/ConversationSidebar';
@@ -12,8 +12,7 @@ import { ChevronLeft, Trash2, MessageSquare } from 'lucide-react';
 export const InboxPage = () => {
   const { can } = usePermissions();
   const { search } = useLocation();
-  // View state only: the stable hook keeps conversation selection and URL ownership.
-  const [showMobileList, setShowMobileList] = useState(() => !new URLSearchParams(search).has('conversation'));
+  const showMobileList = !new URLSearchParams(search).get('conversation');
   const {
     conversations,
     selectedChat,
@@ -32,7 +31,11 @@ export const InboxPage = () => {
   } = useConversations();
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  useEffect(() => { setDeleteTarget(null); }, [selectedChat?.id]);
+  const [lastChatId, setLastChatId] = useState(selectedChat?.id);
+  if (lastChatId !== selectedChat?.id) {
+    setLastChatId(selectedChat?.id);
+    setDeleteTarget(null);
+  }
 
   if (isError) {
     return (
@@ -65,7 +68,7 @@ export const InboxPage = () => {
         <ConversationSidebar
           conversations={conversations}
           selectedChat={selectedChat}
-          onSelectChat={chat => { setSelectedChat(chat); setShowMobileList(false); }}
+          onSelectChat={setSelectedChat}
         />
       </div>
 
@@ -74,13 +77,14 @@ export const InboxPage = () => {
         {selectedChat ? (
           <>
             <div className="flex items-center justify-between px-3 py-1 border-b border-line bg-surface-soft">
-              <IconButton label="Volver a conversaciones" onClick={() => setShowMobileList(true)} className="md:hidden"><ChevronLeft aria-hidden="true" className="w-5 h-5" /></IconButton>
+              <IconButton label="Volver a conversaciones" onClick={() => setSelectedChat(null)} className="md:hidden"><ChevronLeft aria-hidden="true" className="w-5 h-5" /></IconButton>
               <span className="hidden md:block text-xs text-muted px-2">Conversación</span>
               <Button variant="ghost" onClick={() => setDeleteTarget(selectedChat.id)} disabled={isDeleting || !can('CONVERSATIONS', 'DELETE')} className="text-danger" title="Eliminar permanentemente">
                 <Trash2 aria-hidden="true" className="w-4 h-4" /> {isDeleting ? 'Eliminando...' : 'Eliminar'}
               </Button>
             </div>
             <ConversationThread
+              key={selectedChat.id}
               chat={selectedChat}
               messages={messages}
               isChangingMode={isChangingMode}
