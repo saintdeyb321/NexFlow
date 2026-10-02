@@ -72,7 +72,7 @@ public class FirestoreConversationRepository : IConversationRepository
                     existing.GetValue<string>("idempotencyKey") != message.IdempotencyKey)
                     throw new InvalidOperationException("Outbound idempotency key conflict.");
                 var persisted = NormalizeAttempt(existing);
-                if (persisted.Sender != message.Sender ||
+                if (persisted.Sender != message.Sender || persisted.Kind != message.Kind ||
                     (message.Sender == SenderType.BusinessUser && persisted.Content != message.Content))
                     throw new InvalidOperationException("Outbound idempotency key reused for different content.");
                 if (persisted.Status != MapMessage(existing).Status)
@@ -274,8 +274,11 @@ public class FirestoreConversationRepository : IConversationRepository
         var data = new Dictionary<string, object>
         {
             ["id"] = message.Id, ["direction"] = message.Direction, ["sender"] = message.Sender.ToString(),
-            ["content"] = message.Content, ["status"] = message.Status.ToString(), ["timestamp"] = message.Timestamp
+            ["content"] = message.Content, ["kind"] = message.Kind.ToString(),
+            ["status"] = message.Status.ToString(), ["timestamp"] = message.Timestamp
         };
+        if (message.MediaUrl != null) data["mediaUrl"] = message.MediaUrl;
+        if (message.FileName != null) data["fileName"] = message.FileName;
         if (message.ExternalMessageId != null) data["externalMessageId"] = message.ExternalMessageId;
         if (message.ProviderConfirmationId != null) data["providerConfirmationId"] = message.ProviderConfirmationId;
         if (message.IdempotencyKey != null) data["idempotencyKey"] = message.IdempotencyKey;
@@ -292,6 +295,9 @@ public class FirestoreConversationRepository : IConversationRepository
         Direction = doc.GetValue<string>("direction"),
         Sender = Enum.Parse<SenderType>(doc.GetValue<string>("sender")),
         Content = doc.GetValue<string>("content"),
+        Kind = doc.TryGetValue("kind", out string kind) ? Enum.Parse<MessageKind>(kind) : MessageKind.Text,
+        MediaUrl = doc.TryGetValue("mediaUrl", out string mediaUrl) ? mediaUrl : null,
+        FileName = doc.TryGetValue("fileName", out string fileName) ? fileName : null,
         Status = doc.TryGetValue("status", out string statusText) && Enum.TryParse<MessageStatus>(statusText, out var status) ? status : MessageStatus.UnknownDelivery,
         ExternalMessageId = doc.TryGetValue("externalMessageId", out string externalId) ? externalId : null,
         ProviderConfirmationId = doc.TryGetValue("providerConfirmationId", out string confirmationId) ? confirmationId : null,
@@ -394,10 +400,12 @@ public class FirestoreConversationRepository : IConversationRepository
         var data = new Dictionary<string, object>
         {
             { "id", message.Id }, { "direction", message.Direction }, { "sender", message.Sender.ToString() },
-            { "content", message.Content }, { "status", message.Status.ToString() },
+            { "content", message.Content }, { "kind", message.Kind.ToString() }, { "status", message.Status.ToString() },
             { "timestamp", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) }, { "expiresAt", expiresAt }
         };
         if (message.Origin.HasValue) data["origin"] = message.Origin.Value.ToString();
+        if (message.MediaUrl != null) data["mediaUrl"] = message.MediaUrl;
+        if (message.FileName != null) data["fileName"] = message.FileName;
         if (message.IdempotencyKey != null) data["idempotencyKey"] = message.IdempotencyKey;
         if (message.LastError != null) data["lastError"] = message.LastError;
         if (!string.IsNullOrEmpty(message.ExternalMessageId)) data["externalMessageId"] = message.ExternalMessageId;

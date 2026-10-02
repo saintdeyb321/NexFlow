@@ -51,7 +51,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     replay, SenderType.AI, request.MessageId, cancellationToken);
         }
 
-        var interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", activeModules, cancellationToken);
+        var interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", context.CurrentStep, activeModules, cancellationToken);
 
         string finalResponse;
 
@@ -73,6 +73,16 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (deniedResponse != null)
             {
                 finalResponse = deniedResponse;
+            }
+            else if ((context.CurrentGoal == "ORDER" && (interpretation.Intent is ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq))
+                || ((context.CurrentGoal is "BOOKING" or "RESERVATION") && interpretation.Directive == ConversationDirective.None
+                    && (interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)))
+            {
+                var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, context.SelectedLocationId, cancellationToken);
+                var continuation = context.CurrentGoal == "ORDER" ? context.LastQuestion
+                    : await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
+                if (!string.IsNullOrWhiteSpace(continuation)) answer = answer with { Text = answer.Text + "\n\n" + continuation };
+                return await SendChatResponseAsync(workspaceId, normalizedPhone, request.MessageId, conversation.Id, answer, cancellationToken);
             }
             else if ((context.CurrentGoal == "BOOKING" || context.CurrentGoal == "RESERVATION" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Reservation)) && activeModules.Contains("RESERVATIONS"))
             {
@@ -99,10 +109,17 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             }
             else
             {
-                finalResponse = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, cancellationToken);
+                var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, null, cancellationToken);
+                return await SendChatResponseAsync(workspaceId, normalizedPhone, request.MessageId, conversation.Id, answer, cancellationToken);
             }
         }
 
         return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, SenderType.AI, request.MessageId, cancellationToken);
     }
+
+    private Task<MessageRecord> SendChatResponseAsync(Guid workspaceId, string phone, string sourceMessageId, string conversationId, ChatResponse response, CancellationToken ct)
+        => response.MediaUrl != null
+            ? _outboundMessageService.SendDocumentAsync(workspaceId, conversationId, phone, response.Text, response.MediaUrl,
+                response.FileName!, response.CatalogScope!, sourceMessageId, ct)
+            : _outboundMessageService.SendMessageAsync(workspaceId, conversationId, phone, response.Text, SenderType.AI, sourceMessageId, ct);
 }

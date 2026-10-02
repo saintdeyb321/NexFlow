@@ -28,12 +28,17 @@ public record ConversationRecord
     public DateTime ExpiresAt { get; init; }
 }
 
+public enum MessageKind { Text, Document }
+
 public record MessageRecord
 {
     public string Id { get; init; } = string.Empty;
     public string Direction { get; init; } = string.Empty;
     public SenderType Sender { get; init; }
     public string Content { get; init; } = string.Empty;
+    public MessageKind Kind { get; init; } = MessageKind.Text;
+    public string? MediaUrl { get; init; }
+    public string? FileName { get; init; }
     public string? ExternalMessageId { get; init; }
     public string? ProviderConfirmationId { get; init; }
     public string? IdempotencyKey { get; init; }

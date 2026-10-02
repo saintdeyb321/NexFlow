@@ -13,6 +13,7 @@ public interface IOutboundMessageService
 {
     Task<bool> TryResumeResponseAsync(Guid workspaceId, string sourceInboundMessageId, CancellationToken ct);
     Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content, SenderType sender, string sourceInboundMessageId, CancellationToken ct);
+    Task<MessageRecord> SendDocumentAsync(Guid workspaceId, string conversationId, string phone, string caption, string mediaUrl, string fileName, string scope, string sourceInboundMessageId, CancellationToken ct);
 }
 
 public class OutboundMessageService : IOutboundMessageService
@@ -32,24 +33,30 @@ public class OutboundMessageService : IOutboundMessageService
     }
 
     private static string GetKey(Guid workspaceId, SenderType sender, string source) => $"{workspaceId:N}:{sender}:{source}:response:1";
+    private static string GetDocumentKey(Guid workspaceId, string source, string scope) => $"{workspaceId:N}:{SenderType.AI}:{source}:response:document:{scope}:1";
     private static string GetId(string key) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
 
     public async Task<bool> TryResumeResponseAsync(Guid workspaceId, string sourceInboundMessageId, CancellationToken ct)
     {
-        var existing = await _conversationRepo.GetOutboundAsync(workspaceId,
-            GetId(GetKey(workspaceId, SenderType.AI, sourceInboundMessageId)), ct);
-        if (!existing.HasValue) return false;
-        if (existing.Value.Message.Status is MessageStatus.Sent or MessageStatus.Failed) return true;
-        if (existing.Value.Message.Status is MessageStatus.UnknownDelivery or MessageStatus.Attempting)
+        var keys = new[] { GetKey(workspaceId, SenderType.AI, sourceInboundMessageId),
+            GetDocumentKey(workspaceId, sourceInboundMessageId, "PRODUCT"),
+            GetDocumentKey(workspaceId, sourceInboundMessageId, "SERVICE") };
+        foreach (var key in keys)
         {
-            await FinalizeUnconfirmedAsync(workspaceId, existing.Value.Message);
+            var existing = await _conversationRepo.GetOutboundAsync(workspaceId, GetId(key), ct);
+            if (!existing.HasValue) continue;
+            if (existing.Value.Message.Status is MessageStatus.Sent or MessageStatus.Failed) return true;
+            if (existing.Value.Message.Status is MessageStatus.UnknownDelivery or MessageStatus.Attempting)
+            {
+                await FinalizeUnconfirmedAsync(workspaceId, existing.Value.Message);
+                return true;
+            }
+            // Resume the persisted response, including media, without querying
+            // artifacts or executing the business workflow again.
+            await SendPreparedAsync(workspaceId, existing.Value.Phone, existing.Value.Message, ct);
             return true;
         }
-        // Only prepared, never-attempted messages can retry transport. Every
-        // persisted response resumes without re-running a business workflow.
-        await SendMessageAsync(workspaceId, existing.Value.ConversationId, existing.Value.Phone,
-            existing.Value.Message.Content, SenderType.AI, sourceInboundMessageId, ct);
-        return true;
+        return false;
     }
 
     public async Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content,
@@ -67,23 +74,58 @@ public class OutboundMessageService : IOutboundMessageService
             Direction = "outbound", Sender = sender, Content = content,
             Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
         }, ct);
-        if (!prepared.SendRequired)
+        return await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
+    }
+
+    public async Task<MessageRecord> SendDocumentAsync(Guid workspaceId, string conversationId, string phone,
+        string caption, string mediaUrl, string fileName, string scope, string sourceInboundMessageId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceInboundMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(caption);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        if (scope is not ("PRODUCT" or "SERVICE")) throw new ArgumentException("Invalid catalog scope.", nameof(scope));
+        if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http"))
+            throw new ArgumentException("A valid document URL is required.", nameof(mediaUrl));
+        var key = GetDocumentKey(workspaceId, sourceInboundMessageId, scope);
+        var prepared = await _conversationRepo.PrepareOutboundAsync(workspaceId, conversationId, phone, new MessageRecord
         {
-            if (prepared.Message.Status is MessageStatus.Sent or MessageStatus.Failed or MessageStatus.Attempting) return prepared.Message;
-            return await FinalizeUnconfirmedAsync(workspaceId, prepared.Message);
+            Id = GetId(key), IdempotencyKey = key, Origin = MessageOrigin.NexFlowAI,
+            Direction = "outbound", Sender = SenderType.AI, Content = caption,
+            Kind = MessageKind.Document, MediaUrl = mediaUrl, FileName = fileName,
+            Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
+        }, ct);
+        return await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
+    }
+
+    private async Task<MessageRecord> SendPreparedAsync(Guid workspaceId, string phone, MessageRecord message, CancellationToken ct)
+    {
+        var id = message.Id;
+        var key = message.IdempotencyKey ?? throw new InvalidOperationException("Outbound idempotency key is required.");
+        if (message.Status != MessageStatus.Pending)
+        {
+            if (message.Status is MessageStatus.Sent or MessageStatus.Failed or MessageStatus.Attempting) return message;
+            return await FinalizeUnconfirmedAsync(workspaceId, message);
         }
 
         var transportStarted = false;
         string? externalId = null;
         try
         {
-            externalId = await _messageGateway.SendTextAsync(workspaceId, phone, prepared.Message.Content, key,
-                async token =>
-                {
-                    if (!await _conversationRepo.StartOutboundAsync(workspaceId, id, token))
-                        throw new TransportAlreadyClaimedException();
-                    transportStarted = true;
-                }, ct);
+            async Task TransportStarting(CancellationToken token)
+            {
+                if (!await _conversationRepo.StartOutboundAsync(workspaceId, id, token))
+                    throw new TransportAlreadyClaimedException();
+                transportStarted = true;
+            }
+            externalId = message.Kind switch
+            {
+                MessageKind.Text => await _messageGateway.SendTextAsync(workspaceId, phone, message.Content, key, TransportStarting, ct),
+                MessageKind.Document => await _messageGateway.SendDocumentAsync(workspaceId, phone,
+                    message.MediaUrl ?? throw new InvalidOperationException("Missing persisted media URL."),
+                    message.FileName ?? throw new InvalidOperationException("Missing persisted file name."),
+                    message.Content, key, TransportStarting, ct),
+                _ => throw new InvalidOperationException("Unsupported outbound kind.")
+            };
             if (string.IsNullOrWhiteSpace(externalId))
                 throw new InvalidOperationException("Evolution did not return a provider message ID.");
             using var confirmationTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));

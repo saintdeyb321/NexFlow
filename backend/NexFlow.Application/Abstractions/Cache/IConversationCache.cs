@@ -15,6 +15,7 @@ public class ConversationContextDto
     // 2. Entidades Recolectadas (Memoria)
     public string? SelectedServiceId { get; set; }
     public string? SelectedLocationId { get; set; }
+    public int ReservationServiceOffset { get; set; }
     public string? TargetDate { get; set; }
     public string? TargetTime { get; set; }
     public string? RealCustomerName { get; set; }

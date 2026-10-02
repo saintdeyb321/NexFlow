@@ -3,6 +3,8 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
+using System.Globalization;
+using System.Text;
 
 namespace NexFlow.Application.Features.Business.Offerings;
 
@@ -104,20 +106,63 @@ public static class OfferingServiceReservationExtensions
         if (string.IsNullOrWhiteSpace(serviceName))
             return (null, "¿Qué servicio deseas reservar en esa sede?");
 
-        var services = await offerings.GetServicesAsync(workspaceId, locationId, null, ct);
-        var matches = services
-            .Where(s => s.Type == "SERVICE" && s.IsActive && s.RequiresReservation)
+        var services = (await offerings.GetServicesAsync(workspaceId, locationId, null, ct))
+            .Where(s => s.Type == "SERVICE" && s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5)
             .Where(s => string.Equals(s.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
                 || (string.Equals(s.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && s.LocationIds != null && s.LocationIds.Contains(locationId)))
-            .Where(s => string.Equals(s.Name.Trim(), serviceName.Trim(), StringComparison.OrdinalIgnoreCase))
-            .Take(2)
+            .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal)
             .ToList();
+        var term = NormalizeServiceName(serviceName, stripPrefixes: true);
+        var matches = services.Where(s => NormalizeServiceName(s.Name) == term).ToList();
+        if (matches.Count == 0 && term.Length > 0)
+            matches = services.Where(s => NormalizeServiceName(s.Name).Contains(term, StringComparison.Ordinal)
+                || term.Contains(NormalizeServiceName(s.Name), StringComparison.Ordinal)).ToList();
 
         return matches.Count switch
         {
             1 => (matches[0], null),
-            0 => (null, "No encontré un servicio reservable con ese nombre en la sede seleccionada. ¿Podrías indicar el nombre exacto del servicio?"),
-            _ => (null, "Hay varios servicios con ese nombre en la sede seleccionada. ¿Podrías precisar cuál necesitas o elegir otra sede?")
+            0 => (null, "No encontré ese servicio reservable en esta sede.\n\n" + FormatReservationOptions(services)),
+            _ => (null, "Hay varios servicios que coinciden con lo indicado:\n" +
+                string.Join("\n", matches.Take(5).Select(s => $"• {s.Name}")) +
+                (matches.Count > 5 ? "\nHay más coincidencias; indica el nombre completo." : "") +
+                "\n\n¿Cuál de estos servicios deseas reservar?")
         };
+    }
+
+    internal static string NormalizeServiceName(string value, bool stripPrefixes = false)
+    {
+        var characters = value.Normalize(NormalizationForm.FormD)
+            .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            .Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray();
+        var normalized = string.Join(" ", new string(characters).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        if (!stripPrefixes) return normalized;
+        string[] prefixes = ["vale", "ok", "bueno", "quiero reservar", "quiero el", "quiero", "el servicio de",
+            "el servicio", "servicio de", "reservar el", "reservar", "el de", "el"];
+        bool removed;
+        do
+        {
+            removed = false;
+            foreach (var prefix in prefixes)
+                if (normalized.StartsWith(prefix + " ", StringComparison.Ordinal))
+                {
+                    normalized = normalized[(prefix.Length + 1)..];
+                    removed = true;
+                    break;
+                }
+        } while (removed);
+        return normalized;
+    }
+
+    internal static string FormatReservationOptions(IReadOnlyList<ServiceDto> services, int offset = 0)
+    {
+        if (offset < 0 || offset >= services.Count) offset = 0;
+        if (services.Count == 0)
+            return "En esta sede no hay servicios reservables disponibles. ¿Deseas cambiar de sede?";
+        if (services.Count == 1)
+            return $"En esta sede, actualmente el único servicio reservable disponible es {services[0].Name}.\nPuedes elegirlo o cambiar de sede. ¿Qué opción prefieres?";
+        return "Servicios reservables disponibles en esta sede:\n" +
+            string.Join("\n", services.Skip(offset).Take(5).Select(s => $"• {s.Name}")) +
+            (services.Count > 5 ? "\nHay más opciones; puedes pedir ver más o el catálogo." : "") +
+            "\n\n¿Cuál servicio deseas reservar?";
     }
 }

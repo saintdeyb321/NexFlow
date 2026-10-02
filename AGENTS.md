@@ -65,6 +65,18 @@ For every task:
 - Do not update package versions unless explicitly required.
 - Do not advance to another phase.
 
+## Conversation UX invariants
+
+- Conversations must guide the consumer with real deterministic options instead of requiring them to guess valid answers.
+- An active transactional goal must not suppress read-only factual questions. Answer safe informational interruptions and then resume the existing draft without losing context.
+- Never confuse a closed day, out-of-hours request, occupied slot and unavailable service. Preserve their real domain meaning.
+- When asking the consumer to choose, show only valid options from real business data and ask one concrete next question.
+- Broad product/service queries prefer a current generated artifact. If unavailable, show at most 5 real offerings and notify the business without notification spam.
+- Specific product/service questions should answer the requested fact instead of sending an unnecessary full catalog.
+- LLMs extract intent, entities and conversational directives. Deterministic software decides business facts, options, transitions and availability.
+- Documents/media must use the same durable and idempotent outbound lifecycle as text messages. Flows must never call the provider directly.
+- Informational interruptions must not silently clear reservation/order drafts.
+
 ## Build rules
 
 Run builds only for projects touched by the task.

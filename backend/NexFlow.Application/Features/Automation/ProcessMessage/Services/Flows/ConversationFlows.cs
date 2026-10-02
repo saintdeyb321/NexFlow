@@ -17,13 +17,16 @@ using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Notifications;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
-public interface IBookingFlow { Task<string?> TryResumeAsync(Guid workspaceId, string phone, string sourceMessageId, ConversationContextDto context, CancellationToken ct); Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct); }
+public interface IBookingFlow { Task<string?> TryResumeAsync(Guid workspaceId, string phone, string sourceMessageId, ConversationContextDto context, CancellationToken ct); Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct); Task<string> GetContinuationAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct, bool concise = false); }
 public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, string sourceMessageId, CancellationToken ct); }
 public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, string conversationId, CancellationToken ct); }
-public interface IChatFlow { Task<string> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, CancellationToken ct); }
+public record ChatResponse(string Text, string? MediaUrl = null, string? FileName = null, string? CatalogScope = null);
+public interface IChatFlow { Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct); }
 
 public class BookingFlow : IBookingFlow
 {
@@ -34,20 +37,21 @@ public class BookingFlow : IBookingFlow
     private readonly IReservationRepository _reservationRepository;
     private readonly ILocationRepository _locationRepo;
     private readonly IBusinessHoursRepository _hoursRepo;
-    private readonly IMessageGateway _messageGateway;
+    private readonly IBusinessProfileRepository _profileRepo;
+    private readonly IKnowledgeService _knowledgeService;
     private readonly IContextRecoveryService _contextStore;
 
     public BookingFlow(
         IOfferingService offeringService, ILocationResolverService locationResolver,
         IReservationEngine reservationEngine, ILocationRepository locationRepo,
-        IBusinessHoursRepository hoursRepo, IMessageGateway messageGateway, IEntitlementService entitlementService,
-        IContextRecoveryService contextStore, IReservationRepository reservationRepository)
+        IBusinessHoursRepository hoursRepo, IEntitlementService entitlementService,
+        IContextRecoveryService contextStore, IReservationRepository reservationRepository,
+        IBusinessProfileRepository profileRepo, IKnowledgeService knowledgeService)
     {
         _offeringService = offeringService; _locationResolver = locationResolver;
         _reservationEngine = reservationEngine; _locationRepo = locationRepo;
-        _hoursRepo = hoursRepo; _messageGateway = messageGateway;
-        _contextStore = contextStore;
-        _reservationRepository = reservationRepository;
+        _hoursRepo = hoursRepo; _profileRepo = profileRepo; _knowledgeService = knowledgeService;
+        _contextStore = contextStore; _reservationRepository = reservationRepository;
         _entitlementService = entitlementService;
     }
 
@@ -66,14 +70,23 @@ public class BookingFlow : IBookingFlow
 
     private static void ClearDraft(ConversationContextDto context)
     {
-        context.CurrentGoal = null;
-        context.CurrentStep = null;
-        context.SelectedLocationId = null;
-        context.SelectedServiceId = null;
-        context.TargetDate = null;
-        context.TargetTime = null;
+        context.CurrentGoal = null; context.CurrentStep = null;
+        context.SelectedLocationId = null; context.SelectedServiceId = null;
+        context.ReservationServiceOffset = 0;
+        context.TargetDate = null; context.TargetTime = null;
+        context.MissingFields.Clear(); context.LastQuestion = null;
+    }
+
+    private static void UpdateStep(ConversationContextDto context)
+    {
         context.MissingFields.Clear();
-        context.LastQuestion = null;
+        if (string.IsNullOrWhiteSpace(context.RealCustomerName)) context.MissingFields.Add("CustomerName");
+        if (string.IsNullOrWhiteSpace(context.SelectedLocationId)) context.MissingFields.Add("Location");
+        if (string.IsNullOrWhiteSpace(context.SelectedServiceId)) context.MissingFields.Add("Service");
+        if (string.IsNullOrWhiteSpace(context.TargetDate)) context.MissingFields.Add("Date");
+        if (string.IsNullOrWhiteSpace(context.TargetTime)) context.MissingFields.Add("Time");
+        context.CurrentStep = context.MissingFields.Count == 0 ? "CONFIRM"
+            : $"COLLECT_{context.MissingFields[0].ToUpperInvariant()}";
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct)
@@ -81,146 +94,297 @@ public class BookingFlow : IBookingFlow
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
         var replay = await TryResumeAsync(workspaceId, phone, sourceMessageId, context, ct);
         if (replay != null) return replay;
-        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, context, interpretation, fallbackName, sourceMessageId, ct);
+        var response = await ProcessTurnAsync(workspaceId, phone, context, interpretation, sourceMessageId, ct);
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         return response;
     }
 
-    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct)
+    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, ConversationContextDto context, AiInterpretation interpretation, string sourceMessageId, CancellationToken ct)
     {
-        var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!activeModules.Contains("SERVICES")) return AiIntentAccess.ServicesUnavailable;
-        if (!activeModules.Contains("RESERVATIONS")) return "No hay información de reservas disponible en este momento.";
+        var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!modules.Contains("SERVICES")) return AiIntentAccess.ServicesUnavailable;
+        if (!modules.Contains("RESERVATIONS")) return "No hay información de reservas disponible en este momento.";
+
+        // Informational turns are handled before applying extracted entities.
+        // Neither a question's location nor its date/time can overwrite the draft.
+        if (context.CurrentGoal is "BOOKING" or "RESERVATION")
+        {
+            if (interpretation.Directive == ConversationDirective.CancelCurrentFlow)
+            {
+                ClearDraft(context);
+                return "He cancelado el borrador de tu reserva. ¿En qué más puedo ayudarte?";
+            }
+            if (interpretation.Directive == ConversationDirective.ChangeLocation)
+            {
+                context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
+                context.ReservationServiceOffset = 0;
+                UpdateStep(context);
+                context.CurrentStep = "COLLECT_LOCATION";
+                return await LocationOptionsAsync(workspaceId, "¿A cuál sede deseas cambiar?", ct);
+            }
+            if (interpretation.Directive == ConversationDirective.ChangeService)
+            {
+                context.SelectedServiceId = null; context.TargetTime = null;
+                UpdateStep(context);
+                if (string.IsNullOrWhiteSpace(interpretation.Service))
+                    return await GetContinuationAsync(workspaceId, context, ct);
+            }
+            else if (interpretation.Directive == ConversationDirective.ShowOptions
+                || (interpretation.Intent == ConversationIntent.ServiceQuery && interpretation.QueryKind == OfferingQueryKind.Broad))
+            {
+                if (string.IsNullOrWhiteSpace(context.SelectedLocationId))
+                    return await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas consultar los servicios reservables?", ct);
+                var services = await ReservableServicesAsync(workspaceId, context.SelectedLocationId, ct);
+                var nextOffset = context.ReservationServiceOffset + 5;
+                context.ReservationServiceOffset = services.Count > nextOffset ? nextOffset : 0;
+                var options = OfferingServiceReservationExtensions.FormatReservationOptions(services, context.ReservationServiceOffset);
+                if (context.CurrentStep == "COLLECT_SERVICE") return options;
+                // Keep the current step and every collected entity.
+                return RemoveFinalQuestion(options) + "\n\n" + await GetContinuationAsync(workspaceId, context, ct);
+            }
+            else if (interpretation.Intent is ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq)
+            {
+                string answer;
+                if (interpretation.Intent == ConversationIntent.BusinessHours)
+                {
+                    if (string.IsNullOrWhiteSpace(context.SelectedLocationId))
+                    {
+                        var locations = await _locationRepo.GetLocationsAsync(workspaceId, ct);
+                        answer = "Los horarios dependen de la sede. Primero debes elegir una de estas sedes:\n" +
+                            string.Join("\n", locations.Select(l => $"• {l.Name}"));
+                    }
+                    else answer = await WeeklyHoursAsync(workspaceId, context.SelectedLocationId, ct);
+                }
+                else
+                {
+                    var factualLocationId = context.SelectedLocationId;
+                    if (interpretation.Intent == ConversationIntent.Location && !string.IsNullOrWhiteSpace(interpretation.Location))
+                        factualLocationId = await _locationResolver.ResolveLocationIdAsync(workspaceId, interpretation.Location, ct);
+                    var knowledgeResult = await _knowledgeService.QueryAsync(workspaceId, new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId },
+                        new KnowledgeQuery { Topic = interpretation.Intent == ConversationIntent.Location ? KnowledgeTopic.Locations : KnowledgeTopic.Faqs,
+                            LocationId = interpretation.Intent == ConversationIntent.Location ? factualLocationId : null,
+                            SearchTerm = interpretation.SearchTerm }, ct);
+                    answer = knowledgeResult.Status == KnowledgeStatus.NotFound ? "No tengo esa información registrada." : knowledgeResult.ToResponse();
+                }
+                return answer + "\n\nPara continuar con tu reserva:\n" + await GetContinuationAsync(workspaceId, context, ct);
+            }
+        }
 
         context.CurrentGoal = "RESERVATION";
         context.LastIntent = interpretation.Intent.ToString();
-
-        bool requiresTimeReset = false;
-
         if (!string.IsNullOrWhiteSpace(interpretation.CustomerName)) context.RealCustomerName = interpretation.CustomerName;
         if (!string.IsNullOrWhiteSpace(interpretation.Location))
         {
-            var realLocationId = await _locationResolver.ResolveLocationIdAsync(workspaceId, interpretation.Location, ct);
-            if (realLocationId == null)
+            var locationId = await _locationResolver.ResolveLocationIdAsync(workspaceId, interpretation.Location, ct);
+            if (locationId == null)
             {
-                context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
-                context.MissingFields.Clear(); context.MissingFields.Add("Location");
-                context.CurrentStep = "COLLECT_LOCATION";
-                context.LastQuestion = "No pude identificar la sede. ¿Podrías indicar su nombre exacto y el servicio que deseas reservar?";
-                return context.LastQuestion;
+                // An unrecognized answer does not discard an existing valid selection.
+                UpdateStep(context);
+                return "No pude identificar esa sede.\n\n" + await LocationOptionsAsync(workspaceId, "¿Cuál sede deseas elegir?", ct);
             }
-            if (context.SelectedLocationId != realLocationId)
+            if (context.SelectedLocationId != locationId)
             {
-                context.SelectedLocationId = realLocationId; requiresTimeReset = true;
+                context.SelectedLocationId = locationId; context.SelectedServiceId = null; context.TargetTime = null;
+                context.ReservationServiceOffset = 0;
             }
         }
-
         if (!string.IsNullOrWhiteSpace(interpretation.Date) && context.TargetDate != interpretation.Date)
         {
-            context.TargetDate = interpretation.Date; requiresTimeReset = true;
+            context.TargetDate = interpretation.Date; context.TargetTime = null;
         }
-
-        if (requiresTimeReset && string.IsNullOrWhiteSpace(interpretation.Time)) context.TargetTime = null;
         if (!string.IsNullOrWhiteSpace(interpretation.Time)) context.TargetTime = interpretation.Time;
 
-        string? serviceClarification = null;
         if (!string.IsNullOrWhiteSpace(context.SelectedLocationId))
         {
-            var workspaceLocations = await _locationRepo.GetLocationsAsync(workspaceId, ct);
-            if (!workspaceLocations.Any(l => l.Id == context.SelectedLocationId))
+            var locations = await _locationRepo.GetLocationsAsync(workspaceId, ct);
+            if (!locations.Any(l => l.Id == context.SelectedLocationId))
             {
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
             }
             else if (!string.IsNullOrWhiteSpace(interpretation.Service))
             {
                 var resolution = await _offeringService.ResolveReservationServiceAsync(workspaceId, context.SelectedLocationId, interpretation.Service, ct);
-                if (context.SelectedServiceId != resolution.Service?.Id && string.IsNullOrWhiteSpace(interpretation.Time))
+                if (resolution.Service == null)
+                {
+                    UpdateStep(context);
+                    return resolution.Clarification!;
+                }
+                if (context.SelectedServiceId != resolution.Service.Id && string.IsNullOrWhiteSpace(interpretation.Time))
                     context.TargetTime = null;
-                context.SelectedServiceId = resolution.Service?.Id;
-                serviceClarification = resolution.Clarification;
+                context.SelectedServiceId = resolution.Service.Id;
             }
-            else if (!string.IsNullOrWhiteSpace(context.SelectedServiceId))
+            else if (!string.IsNullOrWhiteSpace(context.SelectedServiceId) && !await IsSelectedServiceValidAsync(workspaceId, context, ct))
             {
-                var selectedService = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId, ct);
-                if (selectedService == null || !selectedService.RequiresReservation || !await _offeringService.IsServiceAvailableAtLocationAsync(workspaceId, context.SelectedServiceId, context.SelectedLocationId, ct))
-                {
-                    context.SelectedServiceId = null; context.TargetTime = null;
-                    serviceClarification = "El servicio seleccionado ya no está disponible para reservar en esta sede. ¿Qué servicio deseas reservar?";
-                }
+                context.SelectedServiceId = null; context.TargetTime = null;
+                UpdateStep(context);
+                return "El servicio seleccionado ya no está disponible para reservar en esta sede.\n\n" +
+                    await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct);
             }
         }
+        UpdateStep(context);
+        if (context.CurrentStep != "CONFIRM") return await PromptAsync(workspaceId, context, false, ct);
 
-        context.MissingFields.Clear();
-        if (string.IsNullOrWhiteSpace(context.RealCustomerName)) context.MissingFields.Add("CustomerName");
-        if (string.IsNullOrWhiteSpace(context.SelectedLocationId)) context.MissingFields.Add("Location");
-        if (string.IsNullOrWhiteSpace(context.SelectedServiceId)) context.MissingFields.Add("Service");
-        if (string.IsNullOrWhiteSpace(context.TargetDate)) context.MissingFields.Add("Date");
-        if (string.IsNullOrWhiteSpace(context.TargetTime)) context.MissingFields.Add("Time");
-
-        if (!context.MissingFields.Any()) context.CurrentStep = "CONFIRM";
-        else context.CurrentStep = $"COLLECT_{context.MissingFields.First().ToUpper()}";
-
-        if (serviceClarification != null)
+        var service = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
+        if (service == null || !await IsSelectedServiceValidAsync(workspaceId, context, ct))
         {
-            context.CurrentStep = "COLLECT_SERVICE";
-            context.LastQuestion = serviceClarification;
-            return serviceClarification;
+            context.SelectedServiceId = null; context.TargetTime = null;
+            UpdateStep(context);
+            return "El servicio ya no está disponible en esta sede.\n\n" + await ServiceOptionsAsync(workspaceId, context.SelectedLocationId!, ct);
         }
-
-        switch (context.CurrentStep)
+        if (!DateTime.TryParseExact($"{context.TargetDate} {context.TargetTime}", "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var selectedTime))
         {
-            case "COLLECT_CUSTOMERNAME":
-                context.LastQuestion = "¿me podrías indicar tu *nombre y apellido*?";
-                return $"¡Excelente! Te ayudaré a agendar tu cita. 📅\n\nPara poder registrarte correctamente, {context.LastQuestion}";
-            case "COLLECT_SERVICE":
-                var availableServices = (await _offeringService.GetServicesAsync(workspaceId, context.SelectedLocationId, null, ct)).Where(s => s.RequiresReservation).ToList();
-                if (!availableServices.Any()) return "Actualmente no contamos con servicios habilitados para reservas.";
-                var serviceList = string.Join("\n", availableServices.Take(5).Select(s => $"- {s.Name}"));
-                context.LastQuestion = "¿qué servicio deseas reservar?";
-                return $"¡Gracias, {context.RealCustomerName}! \n\nAquí tienes algunos servicios solicitados:\n{serviceList}\n\n👉 *Por favor, {context.LastQuestion}*";
-            case "COLLECT_LOCATION":
-                var locations = await _locationRepo.GetLocationsAsync(workspaceId, ct);
-                if (!string.IsNullOrWhiteSpace(context.SelectedServiceId))
-                {
-                    var selectedService = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId, ct);
-                    if (selectedService == null || !selectedService.RequiresReservation) return "El servicio seleccionado no está disponible para reservar.";
-                    locations = locations.Where(l => string.Equals(selectedService.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase) || (l.Id != null && selectedService.LocationIds?.Contains(l.Id) == true)).ToList();
-                }
-                if (!locations.Any()) return "No hay sedes disponibles para el servicio seleccionado.";
-                var locationList = string.Join("\n", locations.Select(l => $"- {l.Name}"));
-                context.LastQuestion = "¿En cuál de nuestras sedes te gustaría atenderte y qué servicio deseas reservar?";
-                return $"{context.LastQuestion}\n{locationList}";
-            case "COLLECT_DATE":
-                context.LastQuestion = "¿Para qué fecha te gustaría programar tu cita?";
-                return $"¡Excelente! 🏥\n\n{context.LastQuestion}\n👉 *(Ej: 'mañana', o 'el 25 de octubre').*";
-            case "COLLECT_TIME":
-                if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)) { context.TargetDate = null; return "No logré entender la fecha. ¿Podrías decírmela en formato YYYY-MM-DD o 'mañana'?"; }
-                var slots = await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId!, context.SelectedServiceId!, parsedDate, ct);
-                if (!slots.Any()) { context.TargetDate = null; return $"Lo lamento mucho, tenemos la agenda llena el {parsedDate:dd/MM/yyyy}. ¿Intentamos otro día?"; }
-                context.LastQuestion = "¿A qué hora prefieres que te agendemos?";
-                return $"Tenemos turnos disponibles, {context.LastQuestion} (Ej: 'a las 10:00 am')";
-            case "CONFIRM":
-                var finalSrv = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
-                if (finalSrv == null || !finalSrv.RequiresReservation || !await _offeringService.IsServiceAvailableAtLocationAsync(workspaceId, finalSrv.Id, context.SelectedLocationId!, ct))
-                {
-                    context.SelectedServiceId = null; context.TargetTime = null; context.MissingFields.Add("Service");
-                    context.CurrentStep = "COLLECT_SERVICE"; context.LastQuestion = "El servicio ya no está disponible en esta sede. ¿Qué otro servicio deseas reservar?";
-                    return context.LastQuestion;
-                }
-                var rawDateTime = $"{context.TargetDate} {context.TargetTime}";
-                if (DateTime.TryParseExact(rawDateTime, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var exactDateTime))
-                {
-                    var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, finalSrv!.Id, phone, context.RealCustomerName!, DateTime.SpecifyKind(exactDateTime, DateTimeKind.Unspecified), ct, sourceMessageId);
-                    if (result.IsSuccess)
-                    {
-                        ClearDraft(context);
-                        return $"✅ *¡Todo listo, {context.RealCustomerName}!*\n\nTu cita ha sido confirmada exitosamente:\n🦷 Servicio: *{finalSrv.Name}*\n📅 Fecha: *{exactDateTime:dd/MM/yyyy}*\n⏰ Hora: *{exactDateTime:HH:mm}*\n\n¡Te esperamos!";
-                    }
-                    context.TargetTime = null; return $"Inconveniente: {result.Error.Description}. Indícame otro horario.";
-                }
-                context.TargetTime = null; return "Hubo un error al procesar el horario. ¿Podrías indicarme la hora nuevamente?";
-            default: return "Estoy procesando tu solicitud...";
+            context.TargetTime = null;
+            if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+                context.TargetDate = null;
+            UpdateStep(context);
+            return "No pude interpretar la fecha u hora indicada.\n\n" + await PromptAsync(workspaceId, context, false, ct);
         }
+        var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, service.Id,
+            phone, context.RealCustomerName!, DateTime.SpecifyKind(selectedTime, DateTimeKind.Unspecified), ct, sourceMessageId);
+        if (result.IsSuccess)
+        {
+            var name = context.RealCustomerName;
+            ClearDraft(context);
+            return $"✅ ¡Todo listo, {name}! Tu reserva está confirmada:\n• Servicio: {service.Name}\n• Fecha: {selectedTime:dd/MM/yyyy}\n• Hora: {selectedTime:HH:mm}\n\n¡Te esperamos!";
+        }
+        context.TargetTime = null;
+        if (result.Error.Code is "Reservation.Closed" or "Reservation.OutOfHours")
+        {
+            var reason = result.Error.Code == "Reservation.Closed" ? "Esta sede no atiende ese día." : "La hora indicada está fuera del horario de atención.";
+            if (result.Error.Code == "Reservation.Closed") context.TargetDate = null;
+            UpdateStep(context);
+            return reason + "\n\n" + await WeeklyHoursAsync(workspaceId, context.SelectedLocationId!, ct) +
+                "\n\nDime otra combinación de día y hora para verificar su disponibilidad.";
+        }
+        if (result.Error.Code is "Reservation.Conflict" or "Reservation.ConcurrencyConflict")
+        {
+            UpdateStep(context);
+            return "Ese horario acaba de ser ocupado.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct);
+        }
+        if (result.Error.Code.StartsWith("Service.", StringComparison.Ordinal))
+        {
+            context.SelectedServiceId = null;
+            UpdateStep(context);
+            return "Ese servicio ya no está disponible para reservar en esta sede.\n\n" +
+                await ServiceOptionsAsync(workspaceId, context.SelectedLocationId!, ct);
+        }
+        if (result.Error.Code == "Location.NotFound")
+        {
+            context.SelectedLocationId = null; context.SelectedServiceId = null;
+            UpdateStep(context);
+            return "La sede ya no está disponible.\n\n" + await LocationOptionsAsync(workspaceId, "¿Cuál sede deseas elegir?", ct);
+        }
+        UpdateStep(context);
+        return result.Error.Description + "\n\n" + await PromptAsync(workspaceId, context, false, ct);
+    }
+
+    public Task<string> GetContinuationAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct, bool concise = false)
+    {
+        // A catalog document/factual answer already supplied offerings. Resume
+        // with one question without appending a second catalog to that answer.
+        if (concise && context.CurrentStep == "COLLECT_SERVICE")
+            return Task.FromResult("¿Qué servicio deseas reservar en la sede seleccionada?");
+        if (concise && context.CurrentStep == "COLLECT_LOCATION")
+            return Task.FromResult("¿En cuál sede deseas continuar con tu reserva?");
+        return PromptAsync(workspaceId, context, true, ct);
+    }
+
+    private async Task<string> PromptAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct)
+    {
+        if (!preserveDraft && context.CurrentStep == "COLLECT_SERVICE") context.ReservationServiceOffset = 0;
+        var question = context.CurrentStep switch
+        {
+            "COLLECT_CUSTOMERNAME" => "Para registrar tu reserva, ¿cuál es tu nombre y apellido?",
+            "COLLECT_LOCATION" => await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas atenderte?", ct),
+            "COLLECT_SERVICE" when !string.IsNullOrWhiteSpace(context.SelectedLocationId)
+                => OfferingServiceReservationExtensions.FormatReservationOptions(
+                    await ReservableServicesAsync(workspaceId, context.SelectedLocationId, ct), context.ReservationServiceOffset),
+            "COLLECT_DATE" => "¿Para qué fecha deseas reservar? Puedes indicar el día o escribir 'mañana'.",
+            "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct),
+            "CONFIRM" => $"Conservé tu reserva para el {context.TargetDate} a las {context.TargetTime}. ¿Deseas continuar con esos datos?",
+            _ => "Para continuar con tu reserva, ¿cuál es tu nombre y apellido?"
+        };
+        if (!preserveDraft) context.LastQuestion = question;
+        return question;
+    }
+
+    private async Task<string> LocationOptionsAsync(Guid workspaceId, string question, CancellationToken ct)
+    {
+        var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+        if (locations.Count == 0) return "No hay sedes registradas disponibles para reservar.";
+        return "Sedes disponibles:\n" + string.Join("\n", locations.Select(l => $"• {l.Name}")) + "\n\n" + question;
+    }
+
+    private async Task<string> ServiceOptionsAsync(Guid workspaceId, string locationId, CancellationToken ct)
+        => OfferingServiceReservationExtensions.FormatReservationOptions(await ReservableServicesAsync(workspaceId, locationId, ct));
+
+    private async Task<List<ServiceDto>> ReservableServicesAsync(Guid workspaceId, string locationId, CancellationToken ct)
+    {
+        return (await _offeringService.GetServicesAsync(workspaceId, locationId, null, ct))
+            .Where(s => s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5)
+            .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal).ToList();
+    }
+
+    private async Task<bool> IsSelectedServiceValidAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct)
+    {
+        var service = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
+        return service is { RequiresReservation: true, DurationInMinutes: >= 5 } &&
+            await _offeringService.IsServiceAvailableAtLocationAsync(workspaceId, service.Id, context.SelectedLocationId!, ct);
+    }
+
+    private async Task<string> WeeklyHoursAsync(Guid workspaceId, string locationId, CancellationToken ct)
+    {
+        var locations = await _locationRepo.GetLocationsAsync(workspaceId, ct);
+        var location = locations.FirstOrDefault(l => l.Id == locationId);
+        if (location == null) return "La sede seleccionada ya no está disponible.";
+        var hours = await _hoursRepo.GetBusinessHoursAsync(workspaceId, locationId, ct);
+        return $"Horario de atención de {location.Name}:\n" + BusinessHoursFormatter.Format(hours);
+    }
+
+    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct)
+    {
+        if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            if (!preserveDraft) { context.TargetDate = null; UpdateStep(context); }
+            return "¿Para qué fecha deseas reservar? Indica un día válido.";
+        }
+        if (string.IsNullOrWhiteSpace(context.SelectedLocationId) || string.IsNullOrWhiteSpace(context.SelectedServiceId))
+            return "Indica primero la sede y el servicio que deseas reservar.";
+        if (!await IsSelectedServiceValidAsync(workspaceId, context, ct))
+        {
+            if (!preserveDraft) { context.SelectedServiceId = null; context.TargetTime = null; UpdateStep(context); }
+            return "Ese servicio ya no está disponible para reservar.\n\n" + await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct);
+        }
+        var hours = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, context.SelectedLocationId, ct)).ToList();
+        var dayHours = hours.FirstOrDefault(h => h.DayOfWeek == (int)date.DayOfWeek);
+        if (!BusinessHoursFormatter.IsOpen(dayHours))
+        {
+            if (!preserveDraft) { context.TargetDate = null; context.TargetTime = null; UpdateStep(context); }
+            return "Esta sede no atiende ese día.\n\n" + BusinessHoursFormatter.Format(hours) +
+                "\n\nDime otra combinación de día y hora para verificar su disponibilidad.";
+        }
+        var slots = (await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId, context.SelectedServiceId, date, ct))
+            .Where(s => s.IsAvailable).OrderBy(s => s.StartTime).ToList();
+        if (slots.Count == 0)
+        {
+            if (!preserveDraft) { context.TargetDate = null; context.TargetTime = null; UpdateStep(context); }
+            return $"El negocio atiende el {date:dd/MM/yyyy}, pero ya no quedan horarios disponibles. ¿Qué otro día prefieres?";
+        }
+        var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
+        TimeZoneInfo zone;
+        try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone); }
+        catch (TimeZoneNotFoundException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        catch (InvalidTimeZoneException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
+            string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
+            (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +
+            "\n\n¿Cuál horario prefieres?";
+    }
+
+    private static string RemoveFinalQuestion(string options)
+    {
+        var index = options.LastIndexOf('¿');
+        return index < 0 ? options : options[..index].TrimEnd();
     }
 }
 
@@ -272,21 +436,26 @@ public class ChatFlow : IChatFlow
     private readonly ILocationResolverService _locationResolver;
     private readonly ILogger<ChatFlow> _logger;
     private readonly IEntitlementService _entitlementService;
+    private readonly ICatalogGenerationService _catalogGeneration;
+    private readonly INotificationService _notifications;
 
     public ChatFlow(IKnowledgeService knowledgeService, IEntitlementService entitlementService,
-        ILocationResolverService locationResolver, ILogger<ChatFlow> logger)
+        ILocationResolverService locationResolver, ILogger<ChatFlow> logger,
+        ICatalogGenerationService catalogGeneration, INotificationService notifications)
     {
         _knowledgeService = knowledgeService;
         _locationResolver = locationResolver;
         _logger = logger;
         _entitlementService = entitlementService;
+        _catalogGeneration = catalogGeneration;
+        _notifications = notifications;
     }
 
-    public async Task<string> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, CancellationToken ct)
+    public async Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct)
     {
         var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var denied = interpretation.DeniedResponse ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
-        if (denied != null) return denied;
+        if (denied != null) return new ChatResponse(denied);
 
         KnowledgeTopic? topic = interpretation.Intent switch
         {
@@ -298,25 +467,51 @@ public class ChatFlow : IChatFlow
             ConversationIntent.General => KnowledgeTopic.Faqs,
             _ => null
         };
-        if (!topic.HasValue) return "No puedo resolver esa consulta con la información disponible.";
+        if (!topic.HasValue) return new ChatResponse("No puedo resolver esa consulta con la información disponible.");
 
-        string? locationId = null;
+        string? locationId = factualLocationId;
         if (topic != KnowledgeTopic.Faqs && !string.IsNullOrWhiteSpace(interpretation.Location))
         {
             try
             {
                 locationId = await _locationResolver.ResolveLocationIdAsync(workspaceId, interpretation.Location, ct);
                 if (string.IsNullOrWhiteSpace(locationId))
-                    return new KnowledgeResult { Status = KnowledgeStatus.NotFound, Source = topic.Value }.ToResponse();
+                    return new ChatResponse(new KnowledgeResult { Status = KnowledgeStatus.NotFound, Source = topic.Value }.ToResponse());
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Knowledge location resolution failed for workspace {WorkspaceId}.", workspaceId);
-                return new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value }.ToResponse();
+                return new ChatResponse(new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value }.ToResponse());
             }
         }
 
+        string? fallbackIntroduction = null;
+        var broad = (interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)
+            && interpretation.QueryKind == OfferingQueryKind.Broad && string.IsNullOrWhiteSpace(interpretation.SearchTerm);
+        if (broad)
+        {
+            var scope = interpretation.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE";
+            var artifact = await _catalogGeneration.GetArtifactAsync(workspaceId, scope, ct);
+            if (artifact != null && (artifact.WorkspaceId != workspaceId || artifact.Scope != scope))
+                throw new InvalidOperationException("Catalog artifact workspace/scope mismatch.");
+            if (artifact?.Status == CatalogArtifactStatus.Current && Uri.TryCreate(artifact.PdfUrl, UriKind.Absolute, out var pdfUri)
+                && pdfUri.Scheme is "https" or "http")
+            {
+                var caption = scope == "PRODUCT"
+                    ? "Te comparto nuestro catálogo actualizado de productos 😊. También puedo ayudarte con ubicaciones, horarios o una consulta sobre algún producto específico."
+                    : "Te comparto nuestro catálogo actualizado de servicios 😊. " +
+                        (modules.Contains("RESERVATIONS") ? "Si deseas reservar, también puedo ayudarte paso a paso." : "También puedo ayudarte con información sobre un servicio específico.");
+                return new ChatResponse(caption, artifact.PdfUrl, scope == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf", scope);
+            }
+            if (artifact?.Status == CatalogArtifactStatus.Generating)
+                fallbackIntroduction = "Nuestro catálogo se está actualizando. Mientras tanto, estas son algunas opciones disponibles:";
+            else
+            {
+                await _notifications.NotifyCatalogUnavailableAsync(workspaceId, scope, ct);
+                fallbackIntroduction = "Nuestro catálogo completo todavía no está disponible en PDF. Mientras tanto, te comparto algunas opciones:";
+            }
+        }
         var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
         var result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery
         {
@@ -329,12 +524,20 @@ public class ChatFlow : IChatFlow
         if (interpretation.Intent == ConversationIntent.General && result.Status == KnowledgeStatus.NotFound)
         {
             result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery { Topic = KnowledgeTopic.Profile }, ct);
-            if (result.Found) return $"Esta es la información registrada del negocio:\n{result.Facts}\nSi necesitas otro dato, indícame cuál.";
+            if (result.Found) return new ChatResponse($"Esta es la información registrada del negocio:\n{result.Facts}\nSi necesitas otro dato, indícame cuál.");
         }
 
         // Business facts are returned verbatim from the factual query, never
         // expanded by an unconstrained generation step.
-        return result.ToResponse();
+        if (fallbackIntroduction != null)
+        {
+            var facts = result.Found ? result.Facts : result.Status == KnowledgeStatus.Unavailable
+                ? result.ToResponse() : "No hay opciones registradas disponibles para esta consulta.";
+            var next = interpretation.Intent == ConversationIntent.ServiceQuery && modules.Contains("RESERVATIONS")
+                ? "Si deseas reservar, dime qué servicio te interesa." : "También puedo ayudarte con ubicaciones, horarios o información específica. ¿Qué dato necesitas?";
+            return new ChatResponse($"{fallbackIntroduction}\n\n{facts}\n\n{next}");
+        }
+        return new ChatResponse(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());
     }
 }
 

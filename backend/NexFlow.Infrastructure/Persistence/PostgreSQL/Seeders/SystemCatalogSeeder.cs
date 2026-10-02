@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using NexFlow.Domain.Entities;
-using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 
 namespace NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders;
@@ -9,171 +8,579 @@ public static class SystemCatalogSeeder
 {
     public static async Task SeedCatalogAsync(NexFlowDbContext context)
     {
-        // 1. Módulos Core con sus Capacidades Granulares
+        // ============================================================
+        // 1. MÓDULOS CORE
+        // ============================================================
+
         var coreModules = new[]
         {
-            new { Code = "BUSINESS_PROFILE", Name = "Perfil del Negocio", Desc = "Configuración general.", Caps = new[] { new { Code = "READ", Desc = "Leer perfil" }, new { Code = "UPDATE", Desc = "UPDATE" } } },
-            new { Code = "LOCATIONS", Name = "Gestión de Sedes", Desc = "Administración de locales.", Caps = new[] { new { Code = "READ", Desc = "Leer sedes" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" } } },
-            new { Code = "BUSINESS_HOURS", Name = "Horarios de Atención", Desc = "Control de disponibilidad.", Caps = new[] { new { Code = "READ", Desc = "Leer horarios" }, new { Code = "UPDATE", Desc = "UPDATE" } } },
-            new { Code = "FAQ", Name = "Base de Conocimiento", Desc = "Preguntas frecuentes para la IA.", Caps = new[] { new { Code = "READ", Desc = "Consultar FAQs" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" } } },
+            new
+            {
+                Code = "BUSINESS_PROFILE",
+                Name = "Perfil del Negocio",
+                Desc = "Configuración general.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Leer perfil" },
+                    new { Code = "UPDATE", Desc = "Actualizar perfil" }
+                }
+            },
 
-            new { Code = "SERVICES", Name = "Catálogo de Servicios", Desc = "Servicios que ofrece el negocio.", Caps = new[] { new { Code = "READ", Desc = "Consultar servicios" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" }, new { Code = "GENERATE", Desc = "GENERATE" } } },
-            new { Code = "CATALOG", Name = "Catálogo de Productos", Desc = "Productos físicos o consumibles.", Caps = new[] { new { Code = "READ", Desc = "Consultar productos" }, new { Code = "CREATE", Desc = "CREATE" }, new { Code = "UPDATE", Desc = "UPDATE" }, new { Code = "DELETE", Desc = "DELETE" }, new { Code = "GENERATE", Desc = "GENERATE" } } },
+            new
+            {
+                Code = "LOCATIONS",
+                Name = "Gestión de Sedes",
+                Desc = "Administración de locales.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Leer sedes" },
+                    new { Code = "CREATE", Desc = "Crear sede" },
+                    new { Code = "UPDATE", Desc = "Actualizar sede" },
+                    new { Code = "DELETE", Desc = "Eliminar sede" }
+                }
+            },
 
-            new { Code = "ORDERS", Name = "Gestión de Pedidos", Desc = "Coordinación y revisión de listas de compra.", Caps = new[] {
-                new { Code = "READ", Desc = "Consultar pedidos" },
-                new { Code = "CREATE", Desc = "Crear pedido" },
-                new { Code = "UPDATE", Desc = "Actualizar pedido" },
-                new { Code = "UPDATE_STATUS", Desc = "Aprobar o rechazar pedidos" }
-            } },
+            new
+            {
+                Code = "BUSINESS_HOURS",
+                Name = "Horarios de Atención",
+                Desc = "Control de disponibilidad.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Leer horarios" },
+                    new { Code = "UPDATE", Desc = "Actualizar horarios" }
+                }
+            },
 
-            new { Code = "RESERVATIONS", Name = "Motor de Reservas", Desc = "Gestión de citas.", Caps = new[] {
-                new { Code = "READ", Desc = "Leer reservas" },
-                new { Code = "UPDATE", Desc = "Editar reservas" },
-                new { Code = "COMPLETE", Desc = "Completar reservas" },
-                new { Code = "CHECK_AVAILABILITY", Desc = "Consultar horarios libres" },
-                new { Code = "CREATE", Desc = "Crear nueva reserva" },
-                new { Code = "CANCEL", Desc = "Cancelar reserva" }
-            } },
+            new
+            {
+                Code = "FAQ",
+                Name = "Base de Conocimiento",
+                Desc = "Preguntas frecuentes para la IA.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Consultar FAQs" },
+                    new { Code = "CREATE", Desc = "Crear FAQ" },
+                    new { Code = "UPDATE", Desc = "Actualizar FAQ" },
+                    new { Code = "DELETE", Desc = "Eliminar FAQ" }
+                }
+            },
 
-            new { Code = "REQUESTS", Name = "Solicitudes", Desc = "Gestión de trámites y afiliaciones.", Caps = new[] {
-                new { Code = "READ", Desc = "Leer solicitudes" },
-                new { Code = "ASSIGN", Desc = "Asignar solicitudes" },
-                new { Code = "CREATE", Desc = "Crear solicitud" },
-                new { Code = "UPDATE_STATUS", Desc = "Actualizar estado" }
-            } },
+            new
+            {
+                Code = "SERVICES",
+                Name = "Catálogo de Servicios",
+                Desc = "Servicios que ofrece el negocio.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Consultar servicios" },
+                    new { Code = "CREATE", Desc = "Crear servicio" },
+                    new { Code = "UPDATE", Desc = "Actualizar servicio" },
+                    new { Code = "DELETE", Desc = "Eliminar servicio" },
+                    new { Code = "GENERATE", Desc = "Generar artefacto de servicios" }
+                }
+            },
 
-            new { Code = "CONVERSATIONS", Name = "Bandeja de Entrada", Desc = "Inbox y control de chats.", Caps = new[] {
-                new { Code = "READ", Desc = "Leer chats" },
-                new { Code = "SEND_MESSAGE", Desc = "Enviar mensaje manual" },
-                new { Code = "TAKEOVER", Desc = "Asumir control humano" },
-                new { Code = "RELEASE", Desc = "Liberar chat" },
-                new { Code = "DELETE", Desc = "Eliminar chat" },
-                new { Code = "CONFIGURE", Desc = "Configurar conexión" }
-            } }
+            new
+            {
+                Code = "CATALOG",
+                Name = "Catálogo de Productos",
+                Desc = "Productos físicos o consumibles.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Consultar productos" },
+                    new { Code = "CREATE", Desc = "Crear producto" },
+                    new { Code = "UPDATE", Desc = "Actualizar producto" },
+                    new { Code = "DELETE", Desc = "Eliminar producto" },
+                    new { Code = "GENERATE", Desc = "Generar artefacto de productos" }
+                }
+            },
+
+            new
+            {
+                Code = "ORDERS",
+                Name = "Gestión de Pedidos",
+                Desc = "Coordinación y revisión de listas de compra.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Consultar pedidos" },
+                    new { Code = "CREATE", Desc = "Crear pedido" },
+                    new { Code = "UPDATE", Desc = "Actualizar pedido" },
+                    new { Code = "UPDATE_STATUS", Desc = "Actualizar estado del pedido" }
+                }
+            },
+
+            new
+            {
+                Code = "RESERVATIONS",
+                Name = "Motor de Reservas",
+                Desc = "Gestión de citas.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Leer reservas" },
+                    new { Code = "UPDATE", Desc = "Editar reservas" },
+                    new { Code = "COMPLETE", Desc = "Completar reservas" },
+                    new { Code = "CHECK_AVAILABILITY", Desc = "Consultar horarios libres" },
+                    new { Code = "CREATE", Desc = "Crear nueva reserva" },
+                    new { Code = "CANCEL", Desc = "Cancelar reserva" }
+                }
+            },
+
+            new
+            {
+                Code = "REQUESTS",
+                Name = "Solicitudes",
+                Desc = "Gestión de trámites y afiliaciones.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Leer solicitudes" },
+                    new { Code = "ASSIGN", Desc = "Asignar solicitudes" },
+                    new { Code = "CREATE", Desc = "Crear solicitud" },
+                    new { Code = "UPDATE_STATUS", Desc = "Actualizar estado" }
+                }
+            },
+
+            new
+            {
+                Code = "CONVERSATIONS",
+                Name = "Bandeja de Entrada",
+                Desc = "Inbox y control de chats.",
+                Caps = new[]
+                {
+                    new { Code = "READ", Desc = "Leer chats" },
+                    new { Code = "SEND_MESSAGE", Desc = "Enviar mensaje manual" },
+                    new { Code = "TAKEOVER", Desc = "Asumir control humano" },
+                    new { Code = "RELEASE", Desc = "Liberar chat" },
+                    new { Code = "DELETE", Desc = "Eliminar chat" },
+                    new { Code = "CONFIGURE", Desc = "Configurar conexión" }
+                }
+            }
         };
 
-        var existingModules = await context.Modules.Include(m => m.Capabilities).ToListAsync();
+        // ============================================================
+        // 2. CREAR ÚNICAMENTE LOS MÓDULOS QUE NO EXISTEN
+        // ============================================================
 
-        foreach (var m in coreModules)
+        var existingModuleList = await context.Modules
+            .AsNoTracking()
+            .ToListAsync();
+
+        var existingModuleCodes = existingModuleList
+            .Select(m => m.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var modulesAdded = false;
+
+        foreach (var definition in coreModules)
         {
-            var module = existingModules.FirstOrDefault(x => x.Code == m.Code);
+            if (existingModuleCodes.Contains(definition.Code))
+                continue;
 
-            if (module == null)
+            // Importante:
+            // aquí creamos solamente el Module.
+            // Las capabilities se reconciliarán después de tener
+            // definitivamente todos los ModuleId persistidos.
+            var module = Module.Create(
+                definition.Code,
+                definition.Name,
+                definition.Desc);
+
+            context.Modules.Add(module);
+            modulesAdded = true;
+        }
+
+        if (modulesAdded)
+        {
+            await context.SaveChangesAsync();
+        }
+
+        // Evita conservar tracking innecesario entre las etapas del seeder.
+        context.ChangeTracker.Clear();
+
+        // ============================================================
+        // 3. RECONCILIAR CAPABILITIES
+        // ============================================================
+
+        var persistedModules = await context.Modules
+            .AsNoTracking()
+            .ToListAsync();
+
+        var modulesByCode = persistedModules
+            .ToDictionary(
+                m => m.Code,
+                StringComparer.OrdinalIgnoreCase);
+
+        var persistedCapabilities = await context.ModuleCapabilities
+            .AsNoTracking()
+            .Select(c => new
             {
-                module = Module.Create(m.Code, m.Name, m.Desc);
-                foreach (var cap in m.Caps)
-                {
-                    module.AddCapability(cap.Code, cap.Desc);
-                }
-                context.Modules.Add(module);
+                c.ModuleId,
+                c.Code
+            })
+            .ToListAsync();
+
+        var capabilityKeys = persistedCapabilities
+            .Select(c => (
+                c.ModuleId,
+                Code: c.Code.ToUpperInvariant()))
+            .ToHashSet();
+
+        var capabilitiesAdded = false;
+
+        foreach (var definition in coreModules)
+        {
+            if (!modulesByCode.TryGetValue(definition.Code, out var module))
+            {
+                throw new InvalidOperationException(
+                    $"No se pudo encontrar el módulo persistido '{definition.Code}'.");
             }
-            else
+
+            foreach (var capabilityDefinition in definition.Caps)
             {
-                foreach (var cap in m.Caps)
-                {
-                    if (!module.Capabilities.Any(c => c.Code == cap.Code))
-                    {
-                        module.AddCapability(cap.Code, cap.Desc);
-                    }
-                }
+                var normalizedCode =
+                    capabilityDefinition.Code.ToUpperInvariant();
+
+                var key = (module.Id, normalizedCode);
+
+                if (!capabilityKeys.Add(key))
+                    continue;
+
+                /*
+                 * IMPORTANTE:
+                 *
+                 * No usamos:
+                 *
+                 * module.AddCapability(...)
+                 *
+                 * sobre un Module existente y tracked.
+                 *
+                 * ModuleCapability tiene un Guid generado desde dominio,
+                 * mientras EF lo considera ValueGeneratedOnAdd.
+                 *
+                 * Añadiéndolo explícitamente al DbSet garantizamos que
+                 * EF lo marque como EntityState.Added y ejecute INSERT.
+                 */
+                var capability = new ModuleCapability(
+                    module.Id,
+                    normalizedCode,
+                    capabilityDefinition.Desc);
+
+                context.ModuleCapabilities.Add(capability);
+
+                capabilitiesAdded = true;
             }
         }
-        await context.SaveChangesAsync();
 
-        // 2. Las Plantillas Estratégicas
+        if (capabilitiesAdded)
+        {
+            await context.SaveChangesAsync();
+        }
+
+        context.ChangeTracker.Clear();
+
+        // ============================================================
+        // 4. PLANTILLAS
+        // ============================================================
+
         var templates = new[]
         {
-            new { Code = "SUPPORT", Name = "Atención Básica", Desc = "Respuestas automáticas e información general." },
-            new { Code = "BOOKING", Name = "Asistente de Reservas", Desc = "Ideal para consultorios, spas y salones." },
-            new { Code = "COMMERCIAL", Name = "Asistente Comercial", Desc = "Ideal para pastelerías, tiendas y retail." },
-            new { Code = "REQUESTS", Name = "Asistente de Trámites", Desc = "Gestión de afiliaciones, soporte o solicitudes." },
-            new { Code = "FULL", Name = "Operaciones Completas", Desc = "Todas las capacidades operativas del sistema." }
-        };
-
-        var existingTemplates = await context.Templates.ToListAsync();
-        foreach (var t in templates)
-        {
-            if (!existingTemplates.Any(x => x.Code == t.Code))
+            new
             {
-                context.Templates.Add(Template.Create(t.Code, t.Name, t.Desc));
+                Code = "SUPPORT",
+                Name = "Atención Básica",
+                Desc = "Respuestas automáticas e información general."
+            },
+            new
+            {
+                Code = "BOOKING",
+                Name = "Asistente de Reservas",
+                Desc = "Ideal para consultorios, spas y salones."
+            },
+            new
+            {
+                Code = "COMMERCIAL",
+                Name = "Asistente Comercial",
+                Desc = "Ideal para pastelerías, tiendas y retail."
+            },
+            new
+            {
+                Code = "REQUESTS",
+                Name = "Asistente de Trámites",
+                Desc = "Gestión de afiliaciones, soporte o solicitudes."
+            },
+            new
+            {
+                Code = "FULL",
+                Name = "Operaciones Completas",
+                Desc = "Todas las capacidades operativas del sistema."
             }
-        }
-        await context.SaveChangesAsync();
-
-        existingModules = await context.Modules.ToListAsync();
-        existingTemplates = await context.Templates.ToListAsync();
-        var existingTemplateModules = await context.TemplateModules.ToListAsync();
-
-        var templateConfig = new Dictionary<string, string[]>
-        {
-            { "SUPPORT", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CONVERSATIONS" } },
-            { "BOOKING", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "RESERVATIONS", "CONVERSATIONS" } },
-
-            // 🔥 El plan Comercial ahora incluye Catálogo y la Gestión de Pedidos
-            { "COMMERCIAL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "CATALOG", "ORDERS", "CONVERSATIONS" } },
-
-            { "REQUESTS", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "REQUESTS", "CONVERSATIONS" } },
-
-            // 🔥 El plan Full lo tiene absolutamente todo
-            { "FULL", new[] { "BUSINESS_PROFILE", "LOCATIONS", "BUSINESS_HOURS", "FAQ", "SERVICES", "CATALOG", "ORDERS", "RESERVATIONS", "REQUESTS", "CONVERSATIONS" } }
         };
+
+        var existingTemplateList = await context.Templates
+            .AsNoTracking()
+            .ToListAsync();
+
+        var existingTemplateCodes = existingTemplateList
+            .Select(t => t.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var templatesAdded = false;
+
+        foreach (var definition in templates)
+        {
+            if (existingTemplateCodes.Contains(definition.Code))
+                continue;
+
+            context.Templates.Add(
+                Template.Create(
+                    definition.Code,
+                    definition.Name,
+                    definition.Desc));
+
+            templatesAdded = true;
+        }
+
+        if (templatesAdded)
+        {
+            await context.SaveChangesAsync();
+        }
+
+        context.ChangeTracker.Clear();
+
+        // ============================================================
+        // 5. RECONCILIAR TEMPLATE -> MODULE
+        // ============================================================
+
+        persistedModules = await context.Modules
+            .AsNoTracking()
+            .ToListAsync();
+
+        var persistedTemplates = await context.Templates
+            .AsNoTracking()
+            .ToListAsync();
+
+        modulesByCode = persistedModules
+            .ToDictionary(
+                m => m.Code,
+                StringComparer.OrdinalIgnoreCase);
+
+        var templatesByCode = persistedTemplates
+            .ToDictionary(
+                t => t.Code,
+                StringComparer.OrdinalIgnoreCase);
+
+        var existingTemplateModules = await context.TemplateModules
+            .AsNoTracking()
+            .Select(tm => new
+            {
+                tm.TemplateId,
+                tm.ModuleId
+            })
+            .ToListAsync();
+
+        var templateModuleKeys = existingTemplateModules
+            .Select(tm => (tm.TemplateId, tm.ModuleId))
+            .ToHashSet();
+
+        var templateConfig = new Dictionary<string, string[]>(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            ["SUPPORT"] =
+            [
+                "BUSINESS_PROFILE",
+                "LOCATIONS",
+                "BUSINESS_HOURS",
+                "FAQ",
+                "CONVERSATIONS"
+            ],
+
+            ["BOOKING"] =
+            [
+                "BUSINESS_PROFILE",
+                "LOCATIONS",
+                "BUSINESS_HOURS",
+                "FAQ",
+                "SERVICES",
+                "RESERVATIONS",
+                "CONVERSATIONS"
+            ],
+
+            ["COMMERCIAL"] =
+            [
+                "BUSINESS_PROFILE",
+                "LOCATIONS",
+                "BUSINESS_HOURS",
+                "FAQ",
+                "CATALOG",
+                "ORDERS",
+                "CONVERSATIONS"
+            ],
+
+            ["REQUESTS"] =
+            [
+                "BUSINESS_PROFILE",
+                "LOCATIONS",
+                "BUSINESS_HOURS",
+                "FAQ",
+                "REQUESTS",
+                "CONVERSATIONS"
+            ],
+
+            ["FULL"] =
+            [
+                "BUSINESS_PROFILE",
+                "LOCATIONS",
+                "BUSINESS_HOURS",
+                "FAQ",
+                "SERVICES",
+                "CATALOG",
+                "ORDERS",
+                "RESERVATIONS",
+                "REQUESTS",
+                "CONVERSATIONS"
+            ]
+        };
+
+        var templateModulesAdded = false;
 
         foreach (var config in templateConfig)
         {
-            var template = existingTemplates.FirstOrDefault(t => t.Code == config.Key);
-            if (template == null) continue;
-
-            foreach (var modCode in config.Value)
+            if (!templatesByCode.TryGetValue(
+                    config.Key,
+                    out var template))
             {
-                var mod = existingModules.FirstOrDefault(m => m.Code == modCode);
-                if (mod != null && !existingTemplateModules.Any(tm => tm.TemplateId == template.Id && tm.ModuleId == mod.Id))
+                continue;
+            }
+
+            foreach (var moduleCode in config.Value)
+            {
+                if (!modulesByCode.TryGetValue(
+                        moduleCode,
+                        out var module))
                 {
-                    context.TemplateModules.Add(new TemplateModule(template.Id, mod.Id));
+                    continue;
                 }
+
+                var key = (template.Id, module.Id);
+
+                if (!templateModuleKeys.Add(key))
+                    continue;
+
+                context.TemplateModules.Add(
+                    new TemplateModule(
+                        template.Id,
+                        module.Id));
+
+                templateModulesAdded = true;
             }
         }
-        await context.SaveChangesAsync();
 
-        var internalWorkspace = await context.Workspaces.FirstOrDefaultAsync(w => w.Name == "NexFlow Internal");
+        if (templateModulesAdded)
+        {
+            await context.SaveChangesAsync();
+        }
+
+        context.ChangeTracker.Clear();
+
+        // ============================================================
+        // 6. WORKSPACE INTERNO NEXFLOW
+        // ============================================================
+
+        var internalWorkspace = await context.Workspaces
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                w => w.Name == "NexFlow Internal");
+
+        Guid internalWorkspaceId;
+
         if (internalWorkspace == null)
         {
-            internalWorkspace = Workspace.Create("NexFlow Internal");
-            internalWorkspace.Activate();
-            context.Workspaces.Add(internalWorkspace);
+            var newInternalWorkspace =
+                Workspace.Create("NexFlow Internal");
+
+            newInternalWorkspace.Activate();
+
+            context.Workspaces.Add(newInternalWorkspace);
+
             await context.SaveChangesAsync();
 
-            var license = License.CreateCustomLicense(
-                internalWorkspace.Id,
-                DateTime.UtcNow,
-                null, // SuperAdmin no expira
-                999
-            );
+            internalWorkspaceId = newInternalWorkspace.Id;
 
-            foreach (var mod in existingModules)
-            {
-                license.AddCustomModule(mod.Id);
-            }
-
-            context.Licenses.Add(license);
-            await context.SaveChangesAsync();
+            context.ChangeTracker.Clear();
         }
         else
         {
-            // Reconciliación: Asegurar que la licencia interna siempre tiene TODOS los módulos vigentes (incluyendo el nuevo ORDERS)
-            var license = await context.Licenses.Include(l => l.LicenseModules).FirstOrDefaultAsync(l => l.WorkspaceId == internalWorkspace.Id);
-            if (license != null)
-            {
-                foreach (var mod in existingModules)
-                {
-                    if (!license.LicenseModules.Any(lm => lm.ModuleId == mod.Id))
-                    {
-                        license.AddCustomModule(mod.Id);
-                    }
-                }
-                await context.SaveChangesAsync();
-            }
+            internalWorkspaceId = internalWorkspace.Id;
         }
 
+        // ============================================================
+        // 7. LICENCIA INTERNA
+        // ============================================================
+
+        var internalLicense = await context.Licenses
+            .IgnoreQueryFilters()
+            .Include(l => l.LicenseModules)
+            .FirstOrDefaultAsync(
+                l => l.WorkspaceId == internalWorkspaceId);
+
+        persistedModules = await context.Modules
+            .AsNoTracking()
+            .ToListAsync();
+
+        if (internalLicense == null)
+        {
+            internalLicense = License.CreateCustomLicense(
+                internalWorkspaceId,
+                DateTime.UtcNow,
+                null,
+                999);
+
+            foreach (var module in persistedModules)
+            {
+                internalLicense.AddCustomModule(module.Id);
+            }
+
+            context.Licenses.Add(internalLicense);
+
+            await context.SaveChangesAsync();
+
+            context.ChangeTracker.Clear();
+        }
+        else
+        {
+            var licenseModulesAdded = false;
+
+            foreach (var module in persistedModules)
+            {
+                if (internalLicense.LicenseModules.Any(
+                        lm => lm.ModuleId == module.Id))
+                {
+                    continue;
+                }
+
+                internalLicense.AddCustomModule(module.Id);
+
+                /*
+                 * LicenseModule utiliza PK compuesta.
+                 * Normalmente EF ya lo detectará como Added,
+                 * pero lo marcamos explícitamente para que el Seeder
+                 * sea determinista y no dependa del tracking del graph.
+                 */
+                var addedLicenseModule = internalLicense.LicenseModules
+                    .Single(lm => lm.ModuleId == module.Id);
+
+                context.Entry(addedLicenseModule).State =
+                    EntityState.Added;
+
+                licenseModulesAdded = true;
+            }
+
+            if (licenseModulesAdded)
+            {
+                await context.SaveChangesAsync();
+            }
+
+            context.ChangeTracker.Clear();
+        }
     }
 }

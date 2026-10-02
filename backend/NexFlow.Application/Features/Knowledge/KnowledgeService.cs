@@ -122,10 +122,10 @@ public sealed class KnowledgeService : IKnowledgeService
     {
         var products = await _offeringService.GetProductsAsync(workspaceId, locationId, searchTerm, ct);
         var sb = new StringBuilder();
-        foreach (var item in products.Take(10))
+        foreach (var item in products.Take(5))
         {
             sb.AppendLine($"- Producto: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
-            if (!string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
+            if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
         }
         return sb.ToString().Trim();
     }
@@ -134,26 +134,16 @@ public sealed class KnowledgeService : IKnowledgeService
     {
         var services = await _offeringService.GetServicesAsync(workspaceId, locationId, searchTerm, ct);
         var sb = new StringBuilder();
-        foreach (var item in services.Take(10))
+        foreach (var item in services.Take(5))
         {
             sb.AppendLine($"- Servicio: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
             if (item.DurationInMinutes.HasValue) sb.AppendLine($"  Duración: {item.DurationInMinutes} min");
-            if (!string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
+            if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
         }
         return sb.ToString().Trim();
     }
 
-    private static string QueryHours(IEnumerable<BusinessHoursDto> hours)
-    {
-        string[] days = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-        var sb = new StringBuilder();
-        foreach (var hour in hours.OrderBy(h => (h.DayOfWeek + 6) % 7))
-        {
-            if (hour.DayOfWeek is < 0 or > 6) throw new InvalidOperationException("Invalid stored day of week.");
-            sb.AppendLine(hour.IsClosed ? $"- {days[hour.DayOfWeek]}: Cerrado" : $"- {days[hour.DayOfWeek]}: {hour.OpenTime} a {hour.CloseTime}");
-        }
-        return sb.ToString().Trim();
-    }
+    private static string QueryHours(IEnumerable<BusinessHoursDto> hours) => BusinessHoursFormatter.Format(hours);
 
     private static string QueryFaqs(IEnumerable<FaqDto> faqs, string? searchTerm)
     {

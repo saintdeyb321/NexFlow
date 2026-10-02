@@ -50,14 +50,14 @@ public class EvolutionMessageGateway : IMessageGateway
         return await ExecutePostAsync(url, payload, cancellationToken, transportStarting);
     }
 
-    public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, string messageId, CancellationToken cancellationToken)
+    public async Task<string> SendDocumentAsync(Guid workspaceId, string customerIdentifier, string documentUrl, string fileName, string caption, string messageId, Func<CancellationToken, Task> transportStarting, CancellationToken cancellationToken)
     {
         var instanceName = await _instanceResolver.GetInstanceNameAsync(workspaceId, cancellationToken);
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
 
         var url = $"{_baseUrl}/message/sendMedia/{instanceName}";
         var payload = new { number = customerIdentifier, options = new { delay = 2000, presence = "composing" }, mediaMessage = new { mediatype = "document", fileName = fileName, caption = caption, media = documentUrl } };
-        return await ExecutePostAsync(url, payload, cancellationToken);
+        return await ExecutePostAsync(url, payload, cancellationToken, transportStarting);
     }
 
     public async Task<string> SendImageAsync(Guid workspaceId, string customerIdentifier, string imageUrl, string caption, string messageId, CancellationToken cancellationToken)
