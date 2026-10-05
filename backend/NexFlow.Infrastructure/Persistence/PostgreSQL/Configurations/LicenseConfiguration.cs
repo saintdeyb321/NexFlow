@@ -20,7 +20,7 @@ public class LicenseConfiguration : IEntityTypeConfiguration<License>
         builder.OwnsOne(l => l.ValidityPeriod, vp =>
         {
             vp.Property(d => d.Start).HasColumnName("ValidFrom").IsRequired();
-            vp.Property(d => d.End).HasColumnName("ValidTo").IsRequired();
+            vp.Property(d => d.End).HasColumnName("ValidTo").IsRequired(false);
         });
 
         // Configurar la lista privada _licenseModules
