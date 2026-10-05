@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using NexFlow.API.Middleware;
+using NexFlow.API.Configuration;
 using NexFlow.API.Security;
 using NexFlow.API.Services;
 using NexFlow.API.Services.BackgroundServices;
@@ -18,6 +20,23 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Validate before registering infrastructure, creating SDK clients or workers.
+if (builder.Environment.IsProduction()) RuntimeConfiguration.ValidateProduction(builder.Configuration);
+var allowedOrigins = RuntimeConfiguration.GetAllowedOrigins(builder.Configuration, builder.Environment.IsProduction());
+var knownNetworks = RuntimeConfiguration.GetKnownNetworks(builder.Configuration, builder.Environment.IsProduction());
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+    if (knownNetworks.Length > 0)
+    {
+        options.KnownProxies.Clear();
+        options.KnownIPNetworks.Clear();
+        foreach (var network in knownNetworks) options.KnownIPNetworks.Add(network);
+    }
+});
+builder.Services.AddHttpsRedirection(options => options.HttpsPort = 443);
 
 // 1. Ensamblar Clean Architecture
 builder.Services.AddApplication();
@@ -100,7 +119,6 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // 7. CORS
-var allowedOrigins = builder.Configuration["Cors:AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:5173" };
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -133,6 +151,8 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
+
 // --- ADVERTENCIAS DE INICIO (STARTUP WARNINGS) ---
 if (string.IsNullOrWhiteSpace(app.Configuration["Firebase:ProjectId"]))
 {
@@ -156,12 +176,6 @@ if (app.Environment.IsDevelopment())
     using var scope = app.Services.CreateScope();
     var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
     await context.Database.MigrateAsync();
-    await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
-}
-else
-{
-    using var scope = app.Services.CreateScope();
-    var context = scope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
     await NexFlow.Infrastructure.Persistence.PostgreSQL.Seeders.SystemCatalogSeeder.SeedCatalogAsync(context);
 }
 

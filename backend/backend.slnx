@@ -3,4 +3,5 @@
   <Project Path="NexFlow.Application/NexFlow.Application.csproj" />
   <Project Path="NexFlow.Domain/NexFlow.Domain.csproj" />
   <Project Path="NexFlow.Infrastructure/NexFlow.Infrastructure.csproj" />
+  <Project Path="NexFlow.Migrator/NexFlow.Migrator.csproj" />
 </Solution>

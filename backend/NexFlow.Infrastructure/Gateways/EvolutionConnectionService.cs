@@ -34,6 +34,9 @@ public class EvolutionConnectionService : IEvolutionConnectionService
         _webhookUrl = configuration["Evolution:WebhookUrl"] ?? string.Empty;
         _webhookKey = configuration["Evolution:WebhookKey"] ?? string.Empty;
 
+        var timeout = int.TryParse(configuration["Evolution:TimeoutSeconds"], out var seconds) ? seconds : 8;
+        _httpClient.Timeout = TimeSpan.FromSeconds(timeout);
+
         // 🔥 SPRINT 20: CORRECCIÓN DE HEADERS. 
         // Solo inyectamos "apikey" una vez. .NET concatena si lo agregas dos veces, arruinando la clave.
         if (!string.IsNullOrEmpty(_apiKey))

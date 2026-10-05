@@ -6,10 +6,11 @@ using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 
 namespace NexFlow.Infrastructure.Workers;
 
-public class OutboxProcessorWorker(IServiceScopeFactory scopes, ILogger<OutboxProcessorWorker> logger) : BackgroundService
+public class OutboxProcessorWorker(IServiceScopeFactory scopes, ILogger<OutboxProcessorWorker> logger, IConfiguration configuration) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -34,7 +35,9 @@ public class OutboxProcessorWorker(IServiceScopeFactory scopes, ILogger<OutboxPr
                     await TenantLifecycleLock.AcquireAsync(db, message.WorkspaceId, false, timeout.Token);
                     if (!await db.Workspaces.AnyAsync(w => w.Id == message.WorkspaceId && w.Status != NexFlow.Domain.Enums.WorkspaceStatus.Deleting, timeout.Token))
                         throw new JsonException("Workspace is not available.");
-                    await scope.ServiceProvider.GetRequiredService<IWorkflowGateway>().TriggerWorkflowAsync("nexflow-events", payload, timeout.Token);
+                    var webhookId = configuration["N8n:EventsWebhookId"];
+                    if (string.IsNullOrWhiteSpace(webhookId)) throw new InvalidOperationException("Missing configuration: N8n:EventsWebhookId.");
+                    await scope.ServiceProvider.GetRequiredService<IWorkflowGateway>().TriggerWorkflowAsync(webhookId, payload, timeout.Token);
                     await repo.FinishAsync(message, true, null, false, timeout.Token);
                     await lifecycle.CommitAsync(timeout.Token);
                 }

@@ -81,7 +81,7 @@ public static class DependencyInjection
 
         // 6. Gateways Externos
         services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();
-        services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>();
+        services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>().RedactLoggedHeaders(static _ => true);
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
         services.AddScoped<IFileStorage, CloudinaryFileStorage>();
         services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>();
