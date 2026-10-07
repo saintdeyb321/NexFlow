@@ -5,6 +5,7 @@ using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities.Catalog;
 using NexFlow.Domain.Exceptions;
+using NexFlow.Domain.ValueObjects;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -37,7 +38,10 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
             data.PdfUrl,
             Enum.Parse<CatalogArtifactStatus>(data.Status),
             data.LastGeneratedAt,
-            data.GenerationId, data.GenerationStartedAt, data.PersistenceVersion
+            data.GenerationId, data.GenerationStartedAt, data.PersistenceVersion,
+            ParseOptional<CatalogArtifactOrigin>(data.Origin) ?? CatalogArtifactOrigin.Generated,
+            ParseOptional<ArtifactVisualStyle>(data.VisualStyle), ParseOptional<ArtifactPalette>(data.Palette),
+            ParseOptional<ArtifactCreativity>(data.Creativity)
         );
     }
 
@@ -56,7 +60,9 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
             PdfUrl = artifact.PdfUrl,
             Status = artifact.Status.ToString(),
             LastGeneratedAt = artifact.LastGeneratedAt,
-            GenerationId = artifact.GenerationId, GenerationStartedAt = artifact.GenerationStartedAt, PersistenceVersion = Guid.NewGuid().ToString("N")
+            GenerationId = artifact.GenerationId, GenerationStartedAt = artifact.GenerationStartedAt, PersistenceVersion = Guid.NewGuid().ToString("N"),
+            Origin = artifact.Origin.ToString().ToUpperInvariant(),
+            VisualStyle = artifact.VisualStyle?.ToString(), Palette = artifact.Palette?.ToString(), Creativity = artifact.Creativity?.ToString()
         };
 
         await _firestoreDb.RunTransactionAsync(async tx =>
@@ -107,6 +113,9 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
         }, cancellationToken: cancellationToken);
     }
 
+    private static T? ParseOptional<T>(string? value) where T : struct, Enum
+        => Enum.TryParse<T>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed) ? parsed : null;
+
     [FirestoreData]
     private class FirestoreArtifact
     {
@@ -119,5 +128,9 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
         [FirestoreProperty] public string? GenerationId { get; set; }
         [FirestoreProperty] public DateTime? GenerationStartedAt { get; set; }
         [FirestoreProperty] public string? PersistenceVersion { get; set; }
+        [FirestoreProperty] public string? Origin { get; set; }
+        [FirestoreProperty] public string? VisualStyle { get; set; }
+        [FirestoreProperty] public string? Palette { get; set; }
+        [FirestoreProperty] public string? Creativity { get; set; }
     }
 }

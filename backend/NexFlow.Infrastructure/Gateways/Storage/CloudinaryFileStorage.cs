@@ -38,4 +38,19 @@ public class CloudinaryFileStorage : IFileStorage
 
         return uploadResult.SecureUrl.ToString();
     }
+
+    public async Task<string> UploadPdfAsync(Stream fileStream, string fileName, string folderPath, CancellationToken cancellationToken)
+    {
+        var uploadParams = new RawUploadParams
+        {
+            File = new FileDescription(fileName, fileStream),
+            Folder = folderPath,
+            PublicId = fileName,
+            Overwrite = false
+        };
+        var uploadResult = await _cloudinary.UploadAsync(uploadParams, "raw", cancellationToken);
+        if (uploadResult.Error != null || uploadResult.SecureUrl == null)
+            throw new InvalidOperationException("No se pudo almacenar el PDF en Cloudinary.");
+        return uploadResult.SecureUrl.ToString();
+    }
 }

@@ -8,6 +8,7 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Exceptions;
 using NexFlow.Domain.Entities.Catalog;
 using NexFlow.API.Services.BackgroundServices;
+using System.ComponentModel.DataAnnotations;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -229,14 +230,7 @@ public class CatalogController : ControllerBase
 
         var artifact = await generationService.GetArtifactAsync(WorkspaceId, targetScope, cancellationToken);
 
-        if (artifact == null)
-            return Ok(new { status = "NOT_GENERATED", pdfUrl = (string?)null });
-        return Ok(new
-        {
-            status = artifact.Status.ToString().ToUpperInvariant(),
-            pdfUrl = artifact.Status == CatalogArtifactStatus.Current ? artifact.PdfUrl : null,
-            lastGeneratedAt = artifact.LastGeneratedAt
-        });
+        return Ok(ArtifactStatusDto.From(artifact));
     }
 
     [HttpPost("artifact/generate")]
@@ -245,7 +239,7 @@ public class CatalogController : ControllerBase
         [FromServices] ICatalogGenerationService generationService,
         CancellationToken cancellationToken)
     {
-        var targetScope = string.IsNullOrWhiteSpace(request.Scope) ? "PRODUCT" : request.Scope.Trim().ToUpperInvariant();
+        var targetScope = request.Scope;
         if (targetScope != "PRODUCT" && targetScope != "SERVICE")
             return BadRequest(new { message = "Scope inválido. Usa PRODUCT o SERVICE." });
         var requiredModule = targetScope == "SERVICE" ? "SERVICES" : "CATALOG";
@@ -255,10 +249,10 @@ public class CatalogController : ControllerBase
 
         try
         {
-            var result = await generationService.RequestGenerationAsync(WorkspaceId, targetScope, cancellationToken);
+            var result = await generationService.RequestGenerationAsync(WorkspaceId, targetScope, request.Design.ToDesign(), request.ReplaceCurrent, cancellationToken);
             return Ok(new
             {
-                status = result.Status.ToString(),
+                status = result.Status.ToString().ToUpperInvariant(),
                 message = "Generación de documento solicitada exitosamente.",
                 sourceHash = result.SourceHash
             });
@@ -267,6 +261,24 @@ public class CatalogController : ControllerBase
         {
             return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
         }
+    }
+
+    [HttpPost("artifact/upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(CatalogGenerationService.MaxPdfBytes + 64 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = CatalogGenerationService.MaxPdfBytes)]
+    public async Task<IActionResult> UploadArtifact(
+        [FromForm] UploadArtifactRequest request,
+        [FromServices] ICatalogGenerationService generationService,
+        CancellationToken cancellationToken)
+    {
+        var requiredModule = request.Scope == "SERVICE" ? "SERVICES" : "CATALOG";
+        if (!await HasAccessTo(requiredModule, cancellationToken))
+            return StatusCode(403, $"Módulo {requiredModule} no contratado.");
+        await using var stream = request.File.OpenReadStream();
+        var artifact = await generationService.UploadPdfAsync(WorkspaceId, request.Scope, stream, request.File.FileName,
+            request.File.ContentType, request.File.Length, request.ReplaceCurrent, cancellationToken);
+        return Ok(ArtifactStatusDto.From(artifact));
     }
 
     private void QueueArtifactInvalidation(Guid workspaceId)
@@ -287,5 +299,18 @@ public class CatalogController : ControllerBase
 
 public class GenerateArtifactRequest
 {
+    [Required, AllowedValues("PRODUCT", "SERVICE")]
     public string Scope { get; set; } = string.Empty;
+    [Required]
+    public ArtifactDesignDto Design { get; set; } = null!;
+    public bool ReplaceCurrent { get; set; }
+}
+
+public sealed class UploadArtifactRequest
+{
+    [Required, AllowedValues("PRODUCT", "SERVICE")]
+    public string Scope { get; set; } = string.Empty;
+    public bool ReplaceCurrent { get; set; }
+    [Required]
+    public IFormFile File { get; set; } = null!;
 }

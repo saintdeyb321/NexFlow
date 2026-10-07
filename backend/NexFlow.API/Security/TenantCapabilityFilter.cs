@@ -58,9 +58,11 @@ public sealed class TenantCapabilityFilter(IEntitlementService entitlements, IWo
         if (module == null) { await next(); return; }
         if (action.ControllerName == "Catalog")
         {
-            var scope = context.HttpContext.Request.Query["scope"].FirstOrDefault()
-                ?? context.ActionArguments.Values.OfType<NexFlow.Application.Features.Shared.DTOs.BusinessCategoryDto>().FirstOrDefault()?.Scope
-                ?? context.ActionArguments.Values.OfType<Controllers.Business.GenerateArtifactRequest>().FirstOrDefault()?.Scope;
+            // Artifact authorization follows the bound payload, never a competing query parameter.
+            var scope = context.ActionArguments.Values.OfType<Controllers.Business.GenerateArtifactRequest>().FirstOrDefault()?.Scope
+                ?? context.ActionArguments.Values.OfType<Controllers.Business.UploadArtifactRequest>().FirstOrDefault()?.Scope
+                ?? context.HttpContext.Request.Query["scope"].FirstOrDefault()
+                ?? context.ActionArguments.Values.OfType<NexFlow.Application.Features.Shared.DTOs.BusinessCategoryDto>().FirstOrDefault()?.Scope;
             if (name == "DeleteCategory" && context.ActionArguments.TryGetValue("categoryId", out var categoryId))
                 scope = (await context.HttpContext.RequestServices.GetRequiredService<ICatalogRepository>().GetCategoryByIdAsync(workspace.CurrentWorkspaceId, (string)categoryId!, context.HttpContext.RequestAborted))?.Scope;
             scope = scope?.Trim().ToUpperInvariant();
@@ -91,7 +93,7 @@ public sealed class TenantCapabilityFilter(IEntitlementService entitlements, IWo
             "GetAvailability" => "CHECK_AVAILABILITY", "UpdateReservationStatus" => "COMPLETE", "CancelReservation" => "CANCEL",
             "AssignRequest" or "GetMembers" => "ASSIGN", "UpdateStatus" => "UPDATE_STATUS", "SendManualMessage" => "SEND_MESSAGE",
             "TakeOverConversation" => "TAKEOVER", "ReleaseConversation" => "RELEASE",
-            "GenerateArtifact" => "GENERATE", "ConnectWhatsApp" or "DisconnectWhatsApp" => "CONFIGURE",
+            "GenerateArtifact" or "UploadArtifact" => "GENERATE", "ConnectWhatsApp" or "DisconnectWhatsApp" => "CONFIGURE",
             _ => read ? "READ" : HttpMethods.IsDelete(context.HttpContext.Request.Method) ? "DELETE"
                 : HttpMethods.IsPost(context.HttpContext.Request.Method) ? "CREATE" : "UPDATE"
         };
