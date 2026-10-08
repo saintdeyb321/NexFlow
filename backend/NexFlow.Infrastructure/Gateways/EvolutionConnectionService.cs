@@ -189,14 +189,29 @@ public sealed class EvolutionConnectionService : IEvolutionConnectionService
     private async Task<RemoteInstance> FetchAsync(string name, CancellationToken ct)
     {
         using var response = await _http.GetAsync($"{_baseUrl}/instance/fetchInstances?instanceName={Uri.EscapeDataString(name)}", ct);
-        var json = await ReadSuccessAsync(response, ct);
+        JsonElement json;
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            // Evolution 2.3.7 can reject the filtered lookup even when the general listing succeeds.
+            using var listing = await _http.GetAsync($"{_baseUrl}/instance/fetchInstances", ct);
+            json = await ReadSuccessAsync(listing, ct);
+        }
+        else json = await ReadSuccessAsync(response, ct);
         if (json.ValueKind != JsonValueKind.Array) throw new HttpRequestException("Evolution devolvió datos de instancia inválidos.");
         JsonElement? found = null;
         foreach (var item in json.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object) throw new HttpRequestException("Evolution devolvió datos de instancia inválidos.");
             var instance = item.TryGetProperty("instance", out var nested) && nested.ValueKind == JsonValueKind.Object ? nested : item;
-            var returnedName = String(instance, "name") ?? String(instance, "instanceName");
+            foreach (var field in new[] { "name", "instanceName" })
+                if (instance.TryGetProperty(field, out var identity) && identity.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+                    throw new HttpRequestException("Evolution devolvió datos de instancia inválidos.");
+            var currentName = String(instance, "name");
+            var legacyName = String(instance, "instanceName");
+            if (currentName != null && legacyName != null && currentName != legacyName)
+                throw new HttpRequestException("Evolution devolvió una identidad ambigua.");
+            var returnedName = currentName ?? legacyName;
+            if (string.IsNullOrWhiteSpace(returnedName)) throw new HttpRequestException("Evolution devolvió datos de instancia inválidos.");
             if (returnedName != name) continue;
             if (found != null) throw new HttpRequestException("Evolution devolvió una identidad ambigua.");
             found = instance;

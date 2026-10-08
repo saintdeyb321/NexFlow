@@ -71,6 +71,13 @@ public sealed class EvolutionFixture : IAsyncDisposable
         public string? Owner { get; set; }
         public bool IncludeOwner { get; set; } = true;
         public bool LegacyFormat { get; set; }
+        public HttpStatusCode FilteredFetchStatus { get; set; } = HttpStatusCode.OK;
+        public HttpStatusCode GeneralFetchStatus { get; set; } = HttpStatusCode.OK;
+        public string? GeneralFetchJson { get; set; }
+        public bool FailGeneralFetch { get; set; }
+        public bool PauseGeneralFetch { get; set; }
+        public List<object> OtherInstances { get; } = new();
+        public List<string> FetchQueries { get; } = new();
         public bool LoseCreateAcknowledgement { get; set; }
         public bool FailLogout { get; set; }
         public bool FailRequests { get; set; }
@@ -97,13 +104,24 @@ public sealed class EvolutionFixture : IAsyncDisposable
             object response;
             if (path == "/instance/fetchInstances")
             {
-                if (!_paused && FirstFetchEntered != null)
+                var filtered = request.RequestUri.Query.Length != 0;
+                lock (FetchQueries) FetchQueries.Add(request.RequestUri.Query);
+                if (!_paused && FirstFetchEntered != null && (!PauseGeneralFetch || !filtered))
                 { _paused = true; FirstFetchEntered.SetResult(); await ContinueFirstFetch!.Task.WaitAsync(ct); }
-                var requested = Uri.UnescapeDataString(request.RequestUri.Query["?instanceName=".Length..]);
+                var fetchStatus = filtered ? FilteredFetchStatus : GeneralFetchStatus;
+                if (fetchStatus != HttpStatusCode.OK)
+                    return new(fetchStatus) { Content = new StringContent("{\"error\":true}", Encoding.UTF8, "application/json") };
+                if (!filtered && FailGeneralFetch) throw new HttpRequestException("Simulated general listing outage");
+                if (!filtered && GeneralFetchJson != null)
+                    return new(HttpStatusCode.OK) { Content = new StringContent(GeneralFetchJson, Encoding.UTF8, "application/json") };
+                var requested = filtered ? Uri.UnescapeDataString(request.RequestUri.Query["?instanceName=".Length..]) : null;
                 var metadata = new Dictionary<string, object?> { [LegacyFormat ? "instanceName" : "name"] = Name, [LegacyFormat ? "status" : "connectionStatus"] = State };
                 if (IncludeOwner) metadata[LegacyFormat ? "owner" : "ownerJid"] = Owner;
                 if (DisconnectionReasonCode is { } reason) metadata["disconnectionReasonCode"] = reason;
-                response = Exists && requested == Name ? new object[] { LegacyFormat ? new { instance = metadata } : metadata } : Array.Empty<object>();
+                var instances = new List<object>();
+                if (!filtered) instances.AddRange(OtherInstances);
+                if (Exists && (!filtered || requested == Name)) instances.Add(LegacyFormat ? new { instance = metadata } : metadata);
+                response = instances;
             }
             else if (path == "/instance/create")
             {
