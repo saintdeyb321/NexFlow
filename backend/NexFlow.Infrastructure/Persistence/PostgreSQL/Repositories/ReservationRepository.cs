@@ -62,7 +62,7 @@ public class ReservationRepository : IReservationRepository
     public async Task<IEnumerable<Reservation>> GetReservationsForDateAsync(Guid workspaceId, string? locationId, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
     {
 
-        var query = _context.Reservations
+        var query = _context.Reservations.AsNoTracking()
             .Where(r => r.WorkspaceId == workspaceId
                      && r.StartTime >= startUtc
                      && r.StartTime < endUtc);
@@ -72,6 +72,7 @@ public class ReservationRepository : IReservationRepository
 
         return await query
             .OrderBy(r => r.StartTime)
+            .ThenBy(r => r.Id)
             .ToListAsync(cancellationToken);
     }
 
