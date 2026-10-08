@@ -92,7 +92,7 @@ export const CatalogPage = () => {
       <PageHeader title="Catálogo de Productos" description="Administra los productos que tu asistente puede mostrar a los clientes." icon={<Package aria-hidden="true" className="w-6 h-6 text-primary" />} actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" disabled={!can('CATALOG', 'READ')} onClick={() => setShowCategoryPrompt(true)} className="flex items-center font-medium transition-colors">
-            <FolderPlus aria-hidden="true" className="w-4 h-4 mr-2" /> Categoría
+            <FolderPlus aria-hidden="true" className="w-4 h-4 mr-2" /> Categorías
           </Button>
           <Button variant="primary" disabled={!can('CATALOG', 'CREATE')} onClick={handleCreateNew} className="flex items-center font-medium transition-colors">
             <Plus aria-hidden="true" className="w-4 h-4 mr-2" /> Producto
