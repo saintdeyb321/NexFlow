@@ -9,6 +9,10 @@ using System.Linq;
 using System.Text.Json;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities.System;
+using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Infrastructure.Gateways;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace NexFlow.API.Controllers.Webhooks;
 
@@ -29,7 +33,8 @@ public class EvolutionWebhookController : ControllerBase
         [FromBody] EvolutionWebhookPayload payload,
         [FromServices] IConfiguration configuration,
         [FromServices] IInboundMessageRepository inboundRepo,
-        [FromServices] IInstanceResolver instanceResolver)
+        [FromServices] IInstanceResolver instanceResolver,
+        [FromServices] IEvolutionConnectionService connections)
     {
         var expectedWebhookKey = configuration["Evolution:WebhookKey"]?.Trim();
 
@@ -41,10 +46,21 @@ public class EvolutionWebhookController : ControllerBase
 
         var providedWebhookKey = Request.Headers["X-NexFlow-Webhook-Key"].FirstOrDefault()?.Trim();
 
-        if (string.IsNullOrEmpty(providedWebhookKey) || !string.Equals(providedWebhookKey, expectedWebhookKey, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(payload?.Instance) || string.IsNullOrEmpty(providedWebhookKey)
+            || (!KeyEquals(providedWebhookKey, EvolutionConnectionService.InstanceWebhookKey(expectedWebhookKey, payload.Instance))
+                && !KeyEquals(providedWebhookKey, expectedWebhookKey)))
             return Unauthorized(new { Error = "Acceso denegado. Webhook Key inválida o ausente." });
 
-        var normalizedEvent = payload?.Event?.Trim().Replace(".", "_").ToUpperInvariant();
+        var normalizedEvent = payload.Event?.Trim().Replace(".", "_").ToUpperInvariant();
+        if (normalizedEvent == "CONNECTION_UPDATE")
+        {
+            if (!string.IsNullOrEmpty(payload.Data?.Instance) && payload.Data.Instance != payload.Instance)
+                return BadRequest(new { Error = "Instance mismatch." });
+            var owner = await instanceResolver.ResolveInstanceAsync(payload.Instance, HttpContext.RequestAborted);
+            if (owner is not { } id || id == Guid.Empty) return BadRequest(new { Error = "Unknown instance." });
+            await connections.ObserveConnectionAsync(id, payload.Data?.State?.ToLowerInvariant() ?? string.Empty, HttpContext.RequestAborted);
+            return Ok();
+        }
         if (normalizedEvent != "MESSAGES_UPSERT")
             return Ok();
 
@@ -108,6 +124,8 @@ public class EvolutionWebhookController : ControllerBase
     }
     public class EvolutionData
     {
+        [JsonPropertyName("state")] public string? State { get; set; }
+        [JsonPropertyName("instance")] public string? Instance { get; set; }
         [JsonPropertyName("key")] public EvolutionKey Key { get; set; } = new();
         [JsonPropertyName("message")] public EvolutionMessage Message { get; set; } = new();
         [JsonPropertyName("pushName")] public string? PushName { get; set; } = string.Empty;
@@ -140,4 +158,6 @@ public class EvolutionWebhookController : ControllerBase
     {
         [JsonPropertyName("text")] public string? Text { get; set; } = string.Empty;
     }
+
+    private static bool KeyEquals(string provided, string expected) => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(expected));
 }

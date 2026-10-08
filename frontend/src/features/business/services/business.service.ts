@@ -42,8 +42,8 @@ export const saveBusinessHours = async (locationId: string, hours: BusinessHours
 // --- WHATSAPP (Evolution API) ---
 import type { WhatsAppStatusResponse, WhatsAppConnectResponse } from '../types/business.types';
 
-export const getWhatsAppStatus = async (signal?: AbortSignal): Promise<WhatsAppStatusResponse> => {
-  const { data } = await axiosClient.get<WhatsAppStatusResponse>('/business/whatsapp/status', { signal });
+export const getWhatsAppStatus = async (signal?: AbortSignal, refresh = false): Promise<WhatsAppStatusResponse> => {
+  const { data } = await axiosClient.get<WhatsAppStatusResponse>('/business/whatsapp/status', { signal, params: { refresh } });
   return data;
 };
 
@@ -52,6 +52,7 @@ export const connectWhatsApp = async (): Promise<WhatsAppConnectResponse> => {
   return data;
 };
 
-export const disconnectWhatsApp = async (): Promise<void> => {
-  await axiosClient.post('/business/whatsapp/disconnect');
+export const disconnectWhatsApp = async (): Promise<WhatsAppStatusResponse> => {
+  const { data } = await axiosClient.post<WhatsAppStatusResponse>('/business/whatsapp/disconnect', { confirmed: true });
+  return data;
 };

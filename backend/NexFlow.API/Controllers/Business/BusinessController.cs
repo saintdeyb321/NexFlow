@@ -206,11 +206,15 @@ public class BusinessController : ControllerBase
     // =======================================================
     [HttpGet("whatsapp/status")]
     public async Task<IActionResult> GetWhatsAppStatus(
+        [FromQuery] bool refresh,
         [FromServices] IEvolutionConnectionService evolutionService,
         CancellationToken cancellationToken)
     {
-        var status = await evolutionService.GetConnectionStatusAsync(WorkspaceId, cancellationToken);
-        return Ok(new { status });
+        if (WorkspaceId == Guid.Empty || !await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CONVERSATIONS", "READ", cancellationToken)) return StatusCode(403);
+        var status = await evolutionService.GetStatusAsync(WorkspaceId, refresh, cancellationToken);
+        if (!await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CONVERSATIONS", "CONFIGURE", cancellationToken))
+            status = status with { QrBase64 = null, CanConnect = false };
+        return Ok(status);
     }
 
     [HttpPost("whatsapp/connect")]
@@ -218,26 +222,18 @@ public class BusinessController : ControllerBase
         [FromServices] IEvolutionConnectionService evolutionService,
         CancellationToken cancellationToken)
     {
-        var qrBase64 = await evolutionService.ConnectAndGetQrAsync(WorkspaceId, cancellationToken);
-
-        if (qrBase64 == "ALREADY_CONNECTED")
-            return Ok(new { status = "CONNECTED" });
-
-        if (string.IsNullOrEmpty(qrBase64))
-            return StatusCode(500, new { message = "No se pudo generar el código QR. Verifica la conexión con Evolution API." });
-
-        return Ok(new { qrBase64 });
+        if (WorkspaceId == Guid.Empty || !await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CONVERSATIONS", "CONFIGURE", cancellationToken)) return StatusCode(403);
+        return Ok(await evolutionService.ConnectAsync(WorkspaceId, cancellationToken));
     }
 
     [HttpPost("whatsapp/disconnect")]
     public async Task<IActionResult> DisconnectWhatsApp(
+        [FromBody] DisconnectWhatsAppRequest request,
         [FromServices] IEvolutionConnectionService evolutionService,
         CancellationToken cancellationToken)
     {
-        var success = await evolutionService.DisconnectAsync(WorkspaceId, cancellationToken);
-        if (!success) return StatusCode(500, new { message = "Fallo al desconectar la instancia." });
-
-        return Ok(new { message = "Instancia desconectada." });
+        if (WorkspaceId == Guid.Empty || !await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "CONVERSATIONS", "CONFIGURE", cancellationToken)) return StatusCode(403);
+        return Ok(await evolutionService.DisconnectAsync(WorkspaceId, request.Confirmed, cancellationToken));
     }
     private IActionResult LocationError(NexFlow.Application.Common.Error error) =>
         StatusCode(error.Code switch
@@ -248,4 +244,6 @@ public class BusinessController : ControllerBase
             _ => 400
         }, new { code = error.Code, message = error.Description });
 }
+
+public sealed record DisconnectWhatsAppRequest(bool Confirmed);
 

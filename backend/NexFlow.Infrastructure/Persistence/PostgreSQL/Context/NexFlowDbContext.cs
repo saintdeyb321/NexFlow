@@ -11,6 +11,7 @@ public class NexFlowDbContext : DbContext, IUnitOfWork
 
     public DbSet<User> Users => Set<User>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<WhatsAppConnection> WhatsAppConnections => Set<WhatsAppConnection>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<License> Licenses => Set<License>();
     public DbSet<LicenseModule> LicenseModules => Set<LicenseModule>();

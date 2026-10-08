@@ -32,12 +32,16 @@ export interface BusinessHoursDto {
 }
 
 // WHATSAPP (Evolution API)
-export type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_AVAILABLE' | 'CONNECTED' | 'ERROR';
+export type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_AVAILABLE' | 'QR_EXPIRED' | 'CONNECTED' | 'RECONNECTING' | 'UNAVAILABLE' | 'DISCONNECT_PENDING';
 
 export interface WhatsAppStatusResponse {
   status: ConnectionStatus;
+  isLinked: boolean;
+  canConnect: boolean;
+  requiresLogout: boolean;
+  qrBase64: string | null;
+  qrExpiresAt: string | null;
+  message: string | null;
 }
 
-export type WhatsAppConnectResponse =
-  | { qrBase64: string }
-  | { status: 'CONNECTED' };
+export type WhatsAppConnectResponse = WhatsAppStatusResponse;

@@ -82,11 +82,12 @@ public static class DependencyInjection
         services.AddHostedService<InboundMessageWorker>();
 
         // 6. Gateways Externos
-        services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>();
+        services.AddHttpClient<IMessageGateway, EvolutionMessageGateway>().RedactLoggedHeaders(static _ => true);
         services.AddHttpClient<IWorkflowGateway, N8nWorkflowGateway>().RedactLoggedHeaders(static _ => true);
         services.AddScoped<IInstanceResolver, DefaultInstanceResolver>();
         services.AddScoped<IFileStorage, CloudinaryFileStorage>();
-        services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>();
+        services.AddScoped<IWhatsAppConnectionRepository, WhatsAppConnectionRepository>();
+        services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>().RedactLoggedHeaders(static _ => true);
 
         //notificacion
         services.AddScoped<IOrderRepository, FirestoreOrderRepository>();

@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "autoflow-ai-6397d"
+  },
+  "targets": {
+    "autoflow-ai-6397d": {
+      "hosting": {
+        "nexflow": [
+          "nex-flow"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
