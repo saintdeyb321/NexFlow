@@ -1,111 +1,96 @@
-import { Button } from '../../../components/ui/Button';
-import { useToast } from '../../../components/ui/useToast';
-import { LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
+import { useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { MapPin } from 'lucide-react';
+import { Alert, LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
+import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { queryPolicies } from '../../../core/query/queryPolicies';
+import { getQuerySession } from '../../../core/query/queryPersistence';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
-import { usePermissions } from '../../../core/auth/permissions';
-
-import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePermissions, can as hasCapability } from '../../../core/auth/permissions';
+import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getBusinessHours, saveBusinessHours } from '../services/business.service';
 import type { BusinessHoursDto } from '../types/business.types';
-import { useAuthStore } from '../../../core/store/useAuthStore';
-import { MapPin } from 'lucide-react';
-
-const DAYS_OF_WEEK = [
-  { id: 1, name: 'Lunes' }, { id: 2, name: 'Martes' }, { id: 3, name: 'Miércoles' },
-  { id: 4, name: 'Jueves' }, { id: 5, name: 'Viernes' }, { id: 6, name: 'Sábado' }, { id: 0, name: 'Domingo' }
-];
+import { hoursPayload, hoursWeek, invalidateHoursViews, sameHours } from '../utils/businessHours';
+import { HoursWeekEditor } from './HoursWeekEditor';
 
 export const HoursTab = () => {
-  const toast = useToast();
-  const queryClient = useQueryClient();
   const { can } = usePermissions();
-  const selectedLocationId = useAuthStore(state => state.selectedLocationId);
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
-  const [draft, setDraft] = useState<{ locationId: string; hours: BusinessHoursDto[] } | null>(null);
+  const userId = useAuthStore(state => state.me?.user.id);
+  if (!workspaceId || !userId || !can('BUSINESS_HOURS', 'READ')) return <EmptyState className="nf-panel" title="Horarios no disponibles" description="No tienes permiso para consultar los horarios de este negocio." />;
+  return <WorkspaceHours key={JSON.stringify([workspaceId, userId, getQuerySession()])} workspaceId={workspaceId} userId={userId} />;
+};
 
-  const { data: fetchedHours, isLoading, isError, refetch } = useQuery({
-    ...queryPolicies.stable,
-    queryKey: queryKeys.hours.byLocation(workspaceId, selectedLocationId),
-    queryFn: ({ signal }) => getBusinessHours(selectedLocationId, signal),
-    enabled: selectedLocationId !== 'all' && !!workspaceId && can('BUSINESS_HOURS', 'READ'),
-  });
-
-  const hours = draft?.locationId === selectedLocationId ? draft.hours
-    : DAYS_OF_WEEK.map(day => fetchedHours?.find(hour => hour.dayOfWeek === day.id)
-      ?? { dayOfWeek: day.id, openTime: '', closeTime: '', isClosed: true });
-
-  const saveMutation = useSessionMutation({
-    mutationFn: ({ locationId, hours }: { locationId: string; hours: BusinessHoursDto[] }) => saveBusinessHours(locationId, hours),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.hours.byLocation(workspaceId, variables.locationId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, variables.locationId) });
-      if (variables.locationId === selectedLocationId) setDraft(null);
-      toast.success('Horarios actualizados correctamente');
+const WorkspaceHours = ({ workspaceId, userId }: { workspaceId: string; userId: string }) => {
+  const queryClient = useQueryClient();
+  const selectedLocationId = useAuthStore(state => state.selectedLocationId);
+  // Only edited UI drafts live here. Server schedules remain in TanStack Query.
+  const [drafts, setDrafts] = useState<Record<string, BusinessHoursDto[]>>({});
+  const [notices, setNotices] = useState<Record<string, { error?: string; success?: string }>>({});
+  const [savingLocation, setSavingLocation] = useState<string | null>(null);
+  const submitting = useRef(false);
+  const save = useSessionMutation({
+    mutationFn: ({ locationId, hours }: { locationId: string; hours: BusinessHoursDto[] }) => {
+      const me = useAuthStore.getState().me;
+      if (me?.workspace?.id !== workspaceId || me.user.id !== userId || !hasCapability(me, 'BUSINESS_HOURS', 'UPDATE') || !locationId || locationId === 'all')
+        return Promise.reject(new Error('No tienes permiso para guardar los horarios de esta sede.'));
+      return saveBusinessHours(locationId, hours);
     },
-    onError: (error: unknown) => {
-      toast.toastApiError(error);
-    }
+    onSuccess: (_, { locationId, hours }) => {
+      queryClient.setQueryData(queryKeys.hours.byLocation(workspaceId, locationId), hours);
+      setDrafts(previous => { const next = { ...previous }; delete next[locationId]; return next; });
+      setNotices(previous => ({ ...previous, [locationId]: { success: 'Horarios guardados correctamente.' } }));
+      return invalidateHoursViews(queryClient, workspaceId, locationId);
+    },
+    onError: (error, { locationId }) => setNotices(previous => ({ ...previous, [locationId]: { error: getApiErrorPresentation(error) } })),
+    onSettled: () => { submitting.current = false; setSavingLocation(null); },
   });
-
-  const updateHour = <K extends keyof BusinessHoursDto>(day: number, field: K, value: BusinessHoursDto[K]) => {
-    setDraft({ locationId: selectedLocationId, hours: hours.map(h => h.dayOfWeek === day ? { ...h, [field]: value } : h) });
+  const pendingElsewhere = Object.keys(drafts).filter(id => id !== selectedLocationId).length;
+  const saveHours = (hours: BusinessHoursDto[]) => {
+    const latest = useAuthStore.getState();
+    if (submitting.current || latest.selectedLocationId !== selectedLocationId || !selectedLocationId || selectedLocationId === 'all') return;
+    if (latest.me?.workspace?.id !== workspaceId || latest.me.user.id !== userId || !hasCapability(latest.me, 'BUSINESS_HOURS', 'UPDATE')) return;
+    let payload: BusinessHoursDto[];
+    try { payload = hoursPayload(hours); }
+    catch (error) { setNotices(previous => ({ ...previous, [selectedLocationId]: { error: error instanceof Error ? error.message : 'Revisa los horarios.' } })); return; }
+    submitting.current = true; setSavingLocation(selectedLocationId);
+    setNotices(previous => ({ ...previous, [selectedLocationId]: {} }));
+    save.mutate({ locationId: selectedLocationId, hours: payload });
   };
+  return <div className="space-y-4">
+    {pendingElsewhere > 0 && <Alert tone="warning">Tienes cambios sin guardar en {pendingElsewhere === 1 ? 'otra sede' : `${pendingElsewhere} sedes`}. Se conservan en esta sesión; vuelve a cada sede para guardarlos o descartarlos.</Alert>}
+    {savingLocation && savingLocation !== selectedLocationId && <Alert>Guardando los horarios de la sede anterior. Puedes revisar esta sede mientras termina.</Alert>}
+    {!selectedLocationId || selectedLocationId === 'all'
+      ? <EmptyState className="nf-panel" icon={<MapPin aria-hidden="true" className="w-6 h-6" />} title="Selecciona una sede" description="Los horarios se configuran por sede. Usa el selector del menú para continuar." />
+      : <LocationHours key={selectedLocationId} workspaceId={workspaceId} locationId={selectedLocationId} draft={drafts[selectedLocationId]} notice={notices[selectedLocationId]}
+        saving={savingLocation === selectedLocationId} saveBlocked={savingLocation !== null} onSave={saveHours}
+        onDraft={(hours, baseline) => {
+          setDrafts(previous => { const next = { ...previous }; if (sameHours(hours, baseline)) delete next[selectedLocationId]; else next[selectedLocationId] = hours; return next; });
+          setNotices(previous => ({ ...previous, [selectedLocationId]: {} }));
+        }}
+        onDiscard={() => {
+          setDrafts(previous => { const next = { ...previous }; delete next[selectedLocationId]; return next; });
+          setNotices(previous => ({ ...previous, [selectedLocationId]: {} }));
+        }} />}
+  </div>;
+};
 
-  const handleSave = async () => {
-    for (const h of hours) {
-      if (!h.isClosed) {
-        if (!h.openTime || !h.closeTime) {
-          const dayName = DAYS_OF_WEEK.find(d => d.id === h.dayOfWeek)?.name;
-          toast.warning(`Completa la hora de apertura y cierre para el día ${dayName}.`);
-          return;
-        }
-        if (h.openTime >= h.closeTime) {
-          const dayName = DAYS_OF_WEEK.find(d => d.id === h.dayOfWeek)?.name;
-          toast.warning(`En el día ${dayName}, la hora de apertura (${h.openTime}) debe ser menor al cierre (${h.closeTime}).`);
-          return;
-        }
-      }
-    }
-    if (can('BUSINESS_HOURS', 'UPDATE')) saveMutation.mutate({ locationId: selectedLocationId, hours });
-  };
-
-  if (isError) return <ErrorState onRetry={() => void refetch()} />;
-  if (selectedLocationId === 'all') {
-    return <EmptyState className="nf-panel" icon={<MapPin aria-hidden="true" className="w-6 h-6" />} title="Selecciona una sede" description="Los horarios se configuran por sede. Usa el selector del menú para continuar." />;
-  }
-
-  if (isLoading) return <LoadingState title="Cargando horarios de la sede..." />;
-
-  return (
-    <div className="bg-surface shadow-sm border border-line rounded-xl p-6 animate-in fade-in">
-      <h2 className="text-lg font-semibold mb-1">Horario semanal</h2><p className="text-sm text-muted mb-6">Define los días y las horas de atención de esta sede.</p>
-      <div className="space-y-4 pt-2">
-        {DAYS_OF_WEEK.map(day => {
-          const h = hours.find(x => x.dayOfWeek === day.id) || { openTime: '', closeTime: '', isClosed: true, dayOfWeek: day.id };
-          return (
-            <div key={day.id} className="grid grid-cols-1 sm:grid-cols-[8rem_1fr] items-center gap-3 border-b border-line pb-4">
-              <div className="w-32 font-medium text-gray-700">{day.name}</div>
-              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-3 min-w-0">
-                <label className="col-span-2 flex items-center text-sm text-muted cursor-pointer min-h-11">
-                  <input type="checkbox" disabled={!can('BUSINESS_HOURS', 'UPDATE')} checked={h.isClosed} onChange={(e) => updateHour(day.id, 'isClosed', e.target.checked)} className="mr-2 rounded text-primary" />
-                  Cerrado
-                </label>
-                <input aria-label={`Apertura ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.openTime} onChange={(e) => updateHour(day.id, 'openTime', e.target.value)} className="nf-control sm:w-36" />
-                <span aria-hidden="true" className="hidden sm:block text-muted">—</span>
-                <input aria-label={`Cierre ${day.name}`} type="time" disabled={h.isClosed || !can('BUSINESS_HOURS', 'UPDATE')} value={h.closeTime} onChange={(e) => updateHour(day.id, 'closeTime', e.target.value)} className="nf-control sm:w-36" />
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="flex justify-end mt-6">
-        <Button variant="primary" isLoading={saveMutation.isPending} onClick={handleSave} disabled={saveMutation.isPending || !can('BUSINESS_HOURS', 'UPDATE')} className="disabled:opacity-50">
-          {saveMutation.isPending ? 'Guardando...' : 'Guardar Horarios'}
-        </Button>
-      </div>
-    </div>
-  );
+interface LocationHoursProps {
+  workspaceId: string; locationId: string; draft?: BusinessHoursDto[]; notice?: { error?: string; success?: string };
+  saving: boolean; saveBlocked: boolean; onSave: (hours: BusinessHoursDto[]) => void;
+  onDraft: (hours: BusinessHoursDto[], baseline: BusinessHoursDto[]) => void; onDiscard: () => void;
+}
+const LocationHours = ({ workspaceId, locationId, draft, notice, saving, saveBlocked, onSave, onDraft, onDiscard }: LocationHoursProps) => {
+  const { can } = usePermissions();
+  const query = useQuery({
+    ...queryPolicies.stable, queryKey: queryKeys.hours.byLocation(workspaceId, locationId),
+    queryFn: async ({ signal }) => { const rows = await getBusinessHours(locationId, signal); hoursWeek(rows); return rows; },
+  });
+  if (query.isPending) return <LoadingState title="Cargando horarios de la sede..." />;
+  if (query.isError) return <ErrorState title="No se pudieron cargar los horarios" description={getApiErrorPresentation(query.error)} onRetry={() => void query.refetch()} />;
+  const baseline = hoursWeek(query.data);
+  return <HoursWeekEditor hours={draft ?? baseline} unconfigured={query.data.length === 0} partial={query.data.length > 0 && query.data.length < 7}
+    edited={!!draft} editable={can('BUSINESS_HOURS', 'UPDATE')} saving={saving} saveBlocked={saveBlocked} error={notice?.error} success={notice?.success}
+    onChange={hours => onDraft(hours, baseline)} onDiscard={onDiscard} onSave={onSave} />;
 };
