@@ -1,12 +1,21 @@
-export const getBusinessToday = (timeZone: string): string => {
-  const today = new Date();
+export const resolveBusinessTimeZone = (timeZone?: string | null): string => {
+  try {
+    return new Intl.DateTimeFormat('es-PE', { timeZone: timeZone || 'America/Lima' }).resolvedOptions().timeZone;
+  } catch {
+    return 'America/Lima';
+  }
+};
+
+export const getBusinessToday = (timeZone: string, today = new Date()): string => {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   });
-  return formatter.format(today); // Retorna 'YYYY-MM-DD'
+  const parts = formatter.formatToParts(today);
+  const part = (type: string) => parts.find(value => value.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
 };
 
 export const formatBusinessDateTime = (isoDate: string, timeZone: string): string => {

@@ -1,189 +1,183 @@
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Calendar, List, Search } from 'lucide-react';
 import { PageHeader } from '../../../components/ui/Layout';
 import { Button } from '../../../components/ui/Button';
+import { FormField, Input, Select } from '../../../components/ui/Form';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { LoadingState, EmptyState, ErrorState, Alert } from '../../../components/ui/Feedback';
+import { LoadingState, ErrorState, Alert } from '../../../components/ui/Feedback';
 import { useToast } from '../../../components/ui/useToast';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
-import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calendar as CalendarIcon, AlertCircle, MapPin } from 'lucide-react';
-import { getReservations, cancelReservation, completeReservation } from '../services/reservation.service';
+import { useAuthStore } from '../../../core/store/useAuthStore';
+import { getBusinessToday, resolveBusinessTimeZone } from '../../../core/utils/dateTime';
+import { getReservationsForWeek, cancelReservation, completeReservation } from '../services/reservation.service';
+import { invalidateReservationViews } from '../services/reservation.queries';
 import { getLocations, getBusinessProfile } from '../../business/services/business.service';
 import { getServices } from '../../services/services/services.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
 import { EditReservationModal } from '../components/EditReservationModal';
 import { ReservationList } from '../components/ReservationList';
-import { useAuthStore } from '../../../core/store/useAuthStore';
-import { getBusinessToday } from '../../../core/utils/dateTime';
+import { WeeklyAgenda } from '../components/WeeklyAgenda';
+import { WeekNavigation } from '../components/WeekNavigation';
+import { canRetainWeek, filterReservations, formatWeek, reservationStatusLabels, summarizeReservations, weekOf } from '../utils/weeklyAgenda';
+import type { StatusFilter } from '../utils/weeklyAgenda';
 import type { ReservationDto } from '../types/reservation.types';
-import type { ServiceDto } from '../../services/types/services.types';
-import type { LocationDto } from '../../business/types/business.types';
+
+const statusFilters: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'Todas' }, { value: 'Pending', label: 'Pendientes' },
+  { value: 'Confirmed', label: 'Confirmadas' }, { value: 'Completed', label: 'Completadas' }, { value: 'Cancelled', label: 'Canceladas' },
+];
 
 export const ReservationsPage = () => {
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  const { can } = usePermissions();
+  if (!workspaceId || !can('RESERVATIONS', 'READ')) return <Alert tone="warning">No tienes permiso para consultar reservas en este workspace.</Alert>;
+  // Reset local navigation/forms when tenant identity changes; server state remains in TanStack Query.
+  return <WorkspaceAgenda key={workspaceId} workspaceId={workspaceId} />;
+};
+
+const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { can } = usePermissions();
-  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
-
-  const { data: profile, error: profileError } = useQuery({
+  const canReadProfile = can('BUSINESS_PROFILE', 'READ');
+  const canReadServices = can('SERVICES', 'READ');
+  const canReadLocations = can('LOCATIONS', 'READ');
+  const profile = useQuery({
     ...queryPolicies.stable,
-    queryKey: queryKeys.business.profile(workspaceId), queryFn: ({ signal }) => getBusinessProfile(signal),
-    enabled: Boolean(workspaceId) && can('BUSINESS_PROFILE', 'READ'),
+    queryKey: queryKeys.business.profile(workspaceId),
+    queryFn: ({ signal }) => getBusinessProfile(signal),
+    enabled: canReadProfile,
   });
-  const timeZone = profile?.timeZone;
-
-  const [chosenDate, setSelectedDate] = useState('');
-  const selectedDate = chosenDate || (timeZone ? getBusinessToday(timeZone) : '');
-
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const timeZone = resolveBusinessTimeZone(profile.data?.timeZone);
+  // A failed/forbidden profile read is not evidence that the business uses the fallback zone.
+  const zoneReady = canReadProfile && (profile.isSuccess || Boolean(profile.data));
+  const today = getBusinessToday(timeZone);
+  const [chosenDate, setChosenDate] = useState('');
+  const [rangeError, setRangeError] = useState('');
+  const range = weekOf(chosenDate || today);
+  const [chosenDay, setChosenDay] = useState('');
+  const [viewMode, setViewMode] = useState<'week' | 'list'>('week');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [search, setSearch] = useState('');
+  const [createDate, setCreateDate] = useState<string | null>(null);
   const [editingRes, setEditingRes] = useState<ReservationDto | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ action: 'cancel' | 'complete'; reservation: ReservationDto } | null>(null);
 
-  const [confirmDialog, setConfirmDialog] = useState<{ action: 'cancel' | 'complete', id: string, locationId: string } | null>(null);
-
-  const isValidLocationSelected = Boolean(selectedLocationId && selectedLocationId !== 'all');
-
-  const { data: services = [] } = useQuery<ServiceDto[]>({
+  const servicesQuery = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.services.list(workspaceId, selectedLocationId),
     queryFn: ({ signal }) => getServices(selectedLocationId, signal),
-    enabled: Boolean(workspaceId) && isValidLocationSelected && can('SERVICES', 'READ'),
-
+    enabled: canReadServices,
   });
-
-  const { data: locations = [] } = useQuery<LocationDto[]>({
+  const locationsQuery = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.locations.all(workspaceId),
     queryFn: ({ signal }) => getLocations(signal),
-    enabled: Boolean(workspaceId) && can('LOCATIONS', 'READ'),
+    enabled: canReadLocations,
   });
-
-  const { data: reservations = [], isLoading, isError, refetch } = useQuery<ReservationDto[]>({
+  const weekKey = queryKeys.reservations.week(workspaceId, selectedLocationId, range.from, range.to, timeZone);
+  const reservationsQuery = useQuery({
     ...queryPolicies.dynamic,
-    queryKey: queryKeys.reservations.list(workspaceId, selectedLocationId, selectedDate),
-    queryFn: ({ signal }) => getReservations(selectedLocationId, selectedDate, signal),
-    enabled: Boolean(workspaceId && selectedDate) && isValidLocationSelected && can('RESERVATIONS', 'READ'),
+    queryKey: weekKey,
+    queryFn: async ({ signal }) => ({
+      reservations: await getReservationsForWeek(selectedLocationId, range.from, range.to, signal),
+      from: range.from, to: range.to,
+    }),
+    enabled: zoneReady && Boolean(selectedLocationId) && can('RESERVATIONS', 'READ'),
+    placeholderData: (previous, previousQuery) => canRetainWeek(previousQuery?.queryKey, weekKey) ? previous : undefined,
   });
+  const loadedRange = reservationsQuery.data ? weekOf(reservationsQuery.data.from) : range;
+  const reservations = reservationsQuery.data?.reservations;
+  const serviceNames = useMemo(() => new Map((canReadServices ? servicesQuery.data ?? [] : []).flatMap(service => service.id ? [[service.id, service.name] as const] : [])), [servicesQuery.data, canReadServices]);
+  const locationNames = useMemo(() => new Map((canReadLocations ? locationsQuery.data ?? [] : []).flatMap(location => location.id ? [[location.id, location.name] as const] : [])), [locationsQuery.data, canReadLocations]);
+  const visibleReservations = useMemo(() => filterReservations(reservations ?? [], status, search, serviceNames), [reservations, status, search, serviceNames]);
+  const summary = useMemo(() => summarizeReservations(reservations ?? []), [reservations]);
+  const selectedDay = loadedRange.days.includes(chosenDay) ? chosenDay : loadedRange.days.includes(today) ? today : loadedRange.from;
+  const showingPrevious = reservationsQuery.isPlaceholderData;
+  const canCreate = can('RESERVATIONS', 'CREATE') && zoneReady && !showingPrevious;
 
+  const refresh = (reservation: Pick<ReservationDto, 'locationId'>) => invalidateReservationViews(queryClient, workspaceId, reservation.locationId);
   const cancelMutation = useSessionMutation({
-    mutationFn: ({ id }: { id: string; locationId: string }) => cancelReservation(id),
-    onSuccess: (_data, target) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, target.locationId) });
-      toast.success('Reserva cancelada exitosamente.');
-      setConfirmDialog(null);
-    },
-    onError: (error: unknown) => {
-      toast.toastApiError(error);
-      setConfirmDialog(null);
-    }
+    mutationFn: (reservation: ReservationDto) => cancelReservation(reservation.id),
+    onSuccess: (_data, reservation) => { void refresh(reservation); toast.success('Reserva cancelada exitosamente.'); setConfirmDialog(null); },
+    onError: error => { toast.toastApiError(error); setConfirmDialog(null); },
   });
-
   const completeMutation = useSessionMutation({
-    mutationFn: ({ id }: { id: string; locationId: string }) => completeReservation(id),
-    onSuccess: (_data, target) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, target.locationId) });
-      toast.success('Reserva marcada como completada.');
-      setConfirmDialog(null);
-    },
-    onError: (error: unknown) => {
-      toast.toastApiError(error);
-      setConfirmDialog(null);
-    }
+    mutationFn: (reservation: ReservationDto) => completeReservation(reservation.id),
+    onSuccess: (_data, reservation) => { void refresh(reservation); toast.success('Reserva marcada como completada.'); setConfirmDialog(null); },
+    onError: error => { toast.toastApiError(error); setConfirmDialog(null); },
   });
-
+  const mutating = cancelMutation.isPending || completeMutation.isPending;
+  const view = {
+    timeZone, serviceNames, locationNames, showLocation: selectedLocationId === 'all',
+    canEdit: can('RESERVATIONS', 'UPDATE') && !showingPrevious && !mutating,
+    canCancel: can('RESERVATIONS', 'CANCEL') && !showingPrevious && !mutating,
+    canComplete: can('RESERVATIONS', 'COMPLETE') && !showingPrevious && !mutating,
+    onEdit: setEditingRes,
+    onCancel: (reservation: ReservationDto) => setConfirmDialog({ action: 'cancel', reservation }),
+    onComplete: (reservation: ReservationDto) => setConfirmDialog({ action: 'complete', reservation }),
+  };
+  const navigate = (date: string) => {
+    try { weekOf(date); setChosenDate(date); setChosenDay(''); setRangeError(''); }
+    catch { setRangeError('Selecciona una fecha válida cuya semana completa pueda consultarse.'); }
+  };
   const executeAction = () => {
-    if (confirmDialog?.action === 'cancel' && can('RESERVATIONS', 'CANCEL')) cancelMutation.mutate(confirmDialog);
-    if (confirmDialog?.action === 'complete' && can('RESERVATIONS', 'COMPLETE')) completeMutation.mutate(confirmDialog);
+    if (!confirmDialog || mutating) return;
+    if (confirmDialog.action === 'cancel' && can('RESERVATIONS', 'CANCEL')) cancelMutation.mutate(confirmDialog.reservation);
+    if (confirmDialog.action === 'complete' && can('RESERVATIONS', 'COMPLETE') && confirmDialog.reservation.status === 'Confirmed') completeMutation.mutate(confirmDialog.reservation);
   };
 
-  return (
-    <div className="nf-page">
-
-      <ConfirmDialog isOpen={confirmDialog !== null} title={confirmDialog?.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'} description={confirmDialog?.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'} destructive={confirmDialog?.action === 'cancel'} confirmLabel={confirmDialog?.action === 'cancel' ? 'Sí, cancelar' : 'Sí, completar'} cancelLabel="No, volver" isLoading={cancelMutation.isPending || completeMutation.isPending} confirmDisabled={!can('RESERVATIONS', confirmDialog?.action === 'cancel' ? 'CANCEL' : 'COMPLETE')} onClose={() => setConfirmDialog(null)} onConfirm={executeAction} />
-
-      <PageHeader title="Reservas" description="Administra las citas de cada sede, sus horarios y su estado." icon={<CalendarIcon aria-hidden="true" className="w-5 h-5" />} actions={<><div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center bg-surface border border-line rounded-lg px-3 py-2 shadow-sm">
-            <input aria-label="Fecha de la agenda"
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="nf-control"
-              disabled={!isValidLocationSelected}
-            />
+  return <div className="nf-page">
+    <PageHeader title="Reservas" description="Tu agenda de lunes a domingo. Consulta citas actuales e históricas por sede." icon={<Calendar className="w-5 h-5" />} actions={
+      <Button onClick={() => setCreateDate(getBusinessToday(timeZone))} disabled={!canCreate}>Nueva reserva</Button>
+    } />
+    {!canReadProfile ? <Alert tone="warning">Necesitas acceso de lectura al perfil del negocio para resolver su zona horaria.</Alert> : !zoneReady ? (
+      profile.isError ? <ErrorState description={getApiErrorPresentation(profile.error)} onRetry={() => void profile.refetch()} /> : <LoadingState title="Cargando zona horaria del negocio..." />
+    ) : <>
+      <WeekNavigation from={range.from} to={range.to} today={today} onChange={navigate} onCurrentWeek={() => navigate(getBusinessToday(timeZone))} />
+      {rangeError && <Alert tone="error" className="mb-4">{rangeError}</Alert>}
+      <p className="text-xs text-muted mb-4">Zona horaria: {timeZone} · {selectedLocationId === 'all' ? 'Todas las sedes' : locationNames.get(selectedLocationId) ?? 'Sede seleccionada'}</p>
+      {selectedLocationId === 'all' && can('RESERVATIONS', 'CREATE') && <p className="text-sm text-muted mb-4">Puedes consultar todas las sedes. Para crear una reserva, selecciona una sede dentro del formulario.</p>}
+      {reservationsQuery.isPending ? <LoadingState title="Cargando agenda semanal..." /> : reservationsQuery.isError && !reservationsQuery.data ? (
+        <ErrorState description={getApiErrorPresentation(reservationsQuery.error)} onRetry={() => void reservationsQuery.refetch()} />
+      ) : reservationsQuery.data ? <>
+        {reservationsQuery.isError && <ErrorState description={getApiErrorPresentation(reservationsQuery.error)} onRetry={() => void reservationsQuery.refetch()} />}
+        {reservationsQuery.isFetching && <Alert className="mb-4">{showingPrevious
+          ? `Cargando ${formatWeek(range.from, range.to)}. Se muestra todavía ${formatWeek(loadedRange.from, loadedRange.to)}; las acciones están deshabilitadas.`
+          : 'Actualizando las reservas de esta semana…'}</Alert>}
+        {(servicesQuery.isError || locationsQuery.isError) && <Alert tone="warning" className="mb-4">No se pudieron cargar todos los nombres de servicios o sedes. Las reservas siguen disponibles.
+          {servicesQuery.isError && <Button variant="ghost" onClick={() => void servicesQuery.refetch()}>Reintentar servicios</Button>}
+          {locationsQuery.isError && <Button variant="ghost" onClick={() => void locationsQuery.refetch()}>Reintentar sedes</Button>}
+        </Alert>}
+        <section aria-label="Resumen de la semana mostrada" className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
+          <div className="nf-panel p-4"><p className="text-xs text-muted">Total semanal</p><p className="text-2xl font-semibold">{reservations?.length ?? 0}</p></div>
+          {(Object.keys(reservationStatusLabels) as ReservationDto['status'][]).map(value => <div className="nf-panel p-4" key={value}><p className="text-xs text-muted">{reservationStatusLabels[value]}</p><p className="text-2xl font-semibold">{summary[value]}</p></div>)}
+        </section>
+        <section className="nf-panel overflow-hidden" aria-label="Reservas de la semana mostrada" aria-busy={reservationsQuery.isFetching}>
+          <div className="border-b border-line p-4 flex flex-wrap gap-4 items-end">
+            <div className="flex gap-1 rounded-xl bg-surface-soft p-1" role="group" aria-label="Vista de la agenda">
+              <Button variant={viewMode === 'week' ? 'primary' : 'ghost'} aria-pressed={viewMode === 'week'} onClick={() => setViewMode('week')}><Calendar aria-hidden="true" className="w-4 h-4" />Semana</Button>
+              <Button variant={viewMode === 'list' ? 'primary' : 'ghost'} aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')}><List aria-hidden="true" className="w-4 h-4" />Lista</Button>
+            </div>
+            <FormField label="Estado" className="w-full sm:w-44"><Select value={status} onChange={event => setStatus(event.target.value as StatusFilter)}>{statusFilters.map(filter => <option value={filter.value} key={filter.value}>{filter.label}</option>)}</Select></FormField>
+            <FormField label="Buscar en esta semana" helperText="Cliente o servicio; solo reservas de la semana mostrada." className="w-full sm:flex-1 sm:min-w-52">
+              {control => <div className="relative"><Search aria-hidden="true" className="absolute left-3 top-3 w-4 h-4 text-muted" /><Input {...control} type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Nombre del cliente o servicio" className="pl-9" /></div>}
+            </FormField>
+            <p className="text-xs text-muted" role="status">{visibleReservations.length} de {reservations?.length ?? 0} reservas</p>
           </div>
+          {viewMode === 'week' ? <WeeklyAgenda {...view} reservations={visibleReservations} days={loadedRange.days} selectedDay={selectedDay} today={today} canCreate={canCreate} onSelectDay={setChosenDay} onCreate={setCreateDate} /> : <ReservationList {...view} reservations={visibleReservations} />}
+        </section>
+      </> : null}
+    </>}
 
-          <div className="relative group">
-            <Button variant="primary"
-              onClick={() => setIsCreateModalOpen(true)}
-              disabled={!isValidLocationSelected || !can('RESERVATIONS', 'CREATE') || !timeZone}
-              className="text-sm font-medium disabled:opacity-50 flex items-center transition-colors"
-            >
-              Nueva Reserva
-            </Button>
-            {!isValidLocationSelected && (
-              <div className="mt-2 max-w-64 text-muted text-xs flex items-start">
-                <AlertCircle aria-hidden="true" className="w-4 h-4 mr-2 shrink-0 text-yellow-400" />
-                Debes seleccionar una sede específica en el panel lateral para poder crear o ver reservas.
-              </div>
-            )}
-          </div>
-        </div></>} />
-
-      <div className="bg-surface border border-line rounded-xl shadow-sm overflow-hidden">
-        {!isValidLocationSelected ? (
-          <EmptyState className="h-64 bg-surface-soft" icon={<MapPin aria-hidden="true" className="w-12 h-12 text-blue-300" />} title="Selecciona una Sede" description="Para gestionar las citas, elige una ubicación específica en el selector superior." />
-        ) : isLoading ? (
-          <LoadingState className="h-64" title="Cargando agenda..." />
-        ) : isError ? (
-          <ErrorState onRetry={() => void refetch()} />
-        ) : !timeZone ? (
-          <Alert tone={profileError ? 'error' : 'warning'} className="m-6">{profileError ? getApiErrorPresentation(profileError) : 'Configura la zona horaria del perfil del negocio para ver la agenda.'}</Alert>
-        ) : (
-          <ReservationList
-            canEdit={can('RESERVATIONS', 'UPDATE') && Boolean(timeZone)}
-            canCancel={can('RESERVATIONS', 'CANCEL')}
-            canComplete={can('RESERVATIONS', 'COMPLETE')}
-            reservations={reservations}
-            services={services}
-            timeZone={timeZone}
-            onEdit={(res) => { setEditingRes(res); setIsEditModalOpen(true); }}
-            onCancel={(id) => setConfirmDialog({ action: 'cancel', id, locationId: selectedLocationId })}
-            onComplete={(id) => setConfirmDialog({ action: 'complete', id, locationId: selectedLocationId })}
-          />
-        )}
-      </div>
-
-      {timeZone && <CreateReservationModal
-        isOpen={isCreateModalOpen && can('RESERVATIONS', 'CREATE') && Boolean(timeZone)}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSuccess={reservation => {
-          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
-          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, reservation.locationId) });
-          toast.success('Reserva creada exitosamente.');
-        }}
-        locations={locations}
-        services={services.filter(service => service.isActive && service.requiresReservation && (service.durationInMinutes ?? 0) >= 5)}
-        timeZone={timeZone}
-      />}
-
-      {timeZone && <EditReservationModal
-        isOpen={isEditModalOpen && can('RESERVATIONS', 'UPDATE') && Boolean(timeZone)}
-        onClose={() => { setIsEditModalOpen(false); setEditingRes(null); }}
-        onSuccess={reservation => {
-          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.lists(workspaceId) });
-          queryClient.invalidateQueries({ queryKey: queryKeys.reservations.availabilityByLocation(workspaceId, reservation.locationId) });
-          toast.success('Reserva reprogramada exitosamente.');
-        }}
-        reservation={editingRes}
-        timeZone={timeZone}
-      />}
-    </div>
-  );
+    <ConfirmDialog isOpen={confirmDialog !== null} title={confirmDialog?.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'} description={confirmDialog?.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'} destructive={confirmDialog?.action === 'cancel'} confirmLabel={confirmDialog?.action === 'cancel' ? 'Sí, cancelar' : 'Sí, completar'} cancelLabel="No, volver" isLoading={mutating} confirmDisabled={!can('RESERVATIONS', confirmDialog?.action === 'cancel' ? 'CANCEL' : 'COMPLETE')} onClose={() => { if (!mutating) setConfirmDialog(null); }} onConfirm={executeAction} />
+    <CreateReservationModal isOpen={createDate !== null && can('RESERVATIONS', 'CREATE') && zoneReady} initialDate={createDate ?? undefined} onClose={() => setCreateDate(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva creada exitosamente.'); }} locations={canReadLocations ? locationsQuery.data ?? [] : []} services={canReadServices ? servicesQuery.data ?? [] : []} timeZone={timeZone} />
+    <EditReservationModal isOpen={editingRes !== null && can('RESERVATIONS', 'UPDATE') && zoneReady} onClose={() => setEditingRes(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva reprogramada exitosamente.'); }} reservation={editingRes} timeZone={timeZone} />
+  </div>;
 };

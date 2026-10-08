@@ -15,6 +15,7 @@ import { Clock, Calendar as CalendarIcon } from 'lucide-react';
 import { createReservation, getAvailability } from '../services/reservation.service';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getBusinessToday } from '../../../core/utils/dateTime';
+import { isCivilDate, servicesForLocation } from '../utils/weeklyAgenda';
 import type { LocationDto } from '../../business/types/business.types';
 import type { ServiceDto } from '../../services/types/services.types';
 
@@ -25,34 +26,43 @@ interface CreateReservationModalProps {
   locations: LocationDto[];
   services: ServiceDto[];
   timeZone: string;
+  initialDate?: string;
 }
 
 export const CreateReservationModal = (props: CreateReservationModalProps) => {
   const locationId = useAuthStore(state => state.selectedLocationId);
+  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   if (!props.isOpen) return null;
-  return <CreateReservationForm key={`${locationId}:${props.timeZone}:${props.services.map(service => service.id).join(',')}`} {...props} />;
+  return <CreateReservationForm key={`${workspaceId}:${locationId}:${props.timeZone}:${props.initialDate ?? ''}`} {...props} />;
 };
 
-const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services, timeZone }: CreateReservationModalProps) => {
+const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services, timeZone, initialDate }: CreateReservationModalProps) => {
   const toast = useToast();
   const globalLocationId = useAuthStore(state => state.selectedLocationId);
   const { can } = usePermissions();
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [slotReviewTime, setSlotReviewTime] = useState(() => Date.now());
+  const [locationId, setLocationId] = useState(globalLocationId === 'all' ? '' : globalLocationId);
+  const eligibleServices = servicesForLocation(services, locationId);
+  const today = getBusinessToday(timeZone);
 
   const [formData, setFormData] = useState({
-    serviceId: services[0]?.id || '',
+    serviceId: eligibleServices[0]?.id || '',
     customerName: '',
     customerIdentifier: '',
-    date: getBusinessToday(timeZone),
+    date: initialDate || today,
     timeSlot: '' // Ahora guardamos el ISO string exacto devuelto por la disponibilidad
   });
+  const selectedService = eligibleServices.find(service => service.id === formData.serviceId);
+  const concreteLocation = locationId !== 'all' && locations.some(location => location.id === locationId);
+  const validDate = isCivilDate(formData.date) && formData.date >= today;
 
-  const { data: slots = [], isLoading: isLoadingSlots, error: slotsError, refetch: refetchSlots } = useQuery({
+  const { data: slots = [], isLoading: isLoadingSlots, isFetching: isFetchingSlots, error: slotsError, refetch: refetchSlots } = useQuery({
     ...queryPolicies.dynamic,
-    queryKey: queryKeys.reservations.slots(workspaceId, globalLocationId, formData.serviceId, formData.date),
-    queryFn: ({ signal }) => getAvailability(globalLocationId, formData.serviceId, formData.date, signal),
-    enabled: isOpen && !!workspaceId && !!globalLocationId && globalLocationId !== 'all' && !!formData.serviceId && !!formData.date && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
+    queryKey: queryKeys.reservations.slots(workspaceId, locationId, formData.serviceId, formData.date),
+    queryFn: ({ signal }) => getAvailability(locationId, formData.serviceId, formData.date, signal),
+    enabled: isOpen && !!workspaceId && concreteLocation && !!selectedService && validDate && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
   });
 
   const saveMutation = useSessionMutation({
@@ -66,21 +76,24 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!can('RESERVATIONS', 'CREATE')) return;
+    if (isSaving || !can('RESERVATIONS', 'CREATE') || !can('RESERVATIONS', 'CHECK_AVAILABILITY')) return;
     setErrorMessage(null);
 
-    if (!formData.timeSlot) {
-      setErrorMessage("Por favor, selecciona un horario disponible.");
+    if (!concreteLocation || !selectedService || !validDate || isFetchingSlots || slotsError
+      || !slots.some(slot => slot.startTime === formData.timeSlot && slot.isAvailable && Date.parse(slot.startTime) > Date.now())) {
+      setSlotReviewTime(Date.now());
+      setFormData({ ...formData, timeSlot: '' });
+      setErrorMessage("Selecciona una sede, un servicio y un horario vigente confirmado por la disponibilidad.");
       return;
     }
 
-    if (!globalLocationId || !formData.serviceId || !formData.customerIdentifier || !formData.customerName) {
+    if (!workspaceId || !formData.customerIdentifier.trim() || !formData.customerName.trim()) {
       setErrorMessage("Por favor, completa todos los datos del cliente.");
       return;
     }
 
     saveMutation.mutate({
-      locationId: globalLocationId,
+      locationId,
       serviceId: formData.serviceId,
       customerName: formData.customerName,
       customerIdentifier: formData.customerIdentifier,
@@ -94,22 +107,30 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
     }).format(new Date(isoString));
   };
 
-  const currentLocation = locations.find(l => l.id === globalLocationId);
+  const currentLocation = locations.find(l => l.id === locationId);
+  const availableSlots = slots.filter(slot => slot.isAvailable && Date.parse(slot.startTime) > slotReviewTime);
+  const selectedSlotIsAvailable = availableSlots.some(slot => slot.startTime === formData.timeSlot);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Nueva Reserva Manual" size="lg" closeDisabled={isSaving}>
       {errorMessage && <Alert tone="error" className="mb-4">{errorMessage}</Alert>}
         <form onSubmit={handleSubmit} className="space-y-5">
 
-          <FormField label="Sede (Seleccionada en panel)">
-            <Input type="text" value={currentLocation?.name || 'Sede desconocida'} disabled className="w-full border text-sm cursor-not-allowed" />
+          <FormField label="Sede" required>
+            {globalLocationId === 'all' ? <Select value={locationId} required onChange={event => { setLocationId(event.target.value); setFormData({ ...formData, serviceId: '', timeSlot: '' }); }}>
+              <option value="" disabled>Selecciona una sede...</option>
+              {locations.filter(location => location.id).map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
+            </Select> : <Input type="text" value={currentLocation?.name || 'Sede no disponible'} disabled />}
           </FormField>
+          {formData.date < today && <Alert tone="warning">La fecha elegida pertenece al historial. Selecciona hoy o una fecha futura para crear una reserva.</Alert>}
+          {!can('RESERVATIONS', 'CHECK_AVAILABILITY') && <Alert tone="warning">No tienes permiso para consultar horarios disponibles.</Alert>}
+          {locations.length === 0 && <Alert tone="warning">No hay sedes disponibles para crear una reserva. Comprueba tus permisos y vuelve a intentar la carga.</Alert>}
 
           <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
             <FormField label="Servicio">
-              <Select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value, timeSlot: ''})} className="w-full border focus:ring-primary text-sm" required>
+              <Select value={selectedService ? formData.serviceId : ''} disabled={!concreteLocation} onChange={e => setFormData({...formData, serviceId: e.target.value, timeSlot: ''})} className="w-full border focus:ring-primary text-sm" required>
                 <option value="" disabled>Selecciona un servicio...</option>
-                {services.map(srv => <option key={srv.id} value={srv.id}>{srv.name} ({srv.durationInMinutes} min)</option>)}
+                {eligibleServices.map(srv => <option key={srv.id} value={srv.id}>{srv.name} ({srv.durationInMinutes} min)</option>)}
               </Select>
             </FormField>
             <FormField required label="Fecha">
@@ -125,17 +146,21 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
               <Clock aria-hidden="true" className="w-4 h-4 mr-2" /> Horarios Disponibles
             </legend>
 
-            {isLoadingSlots ? (
+            {!can('RESERVATIONS', 'CHECK_AVAILABILITY') ? (
+              <EmptyState className="py-6" title="La consulta de horarios requiere permiso de disponibilidad." />
+            ) : !concreteLocation || !selectedService || !validDate ? (
+              <EmptyState className="py-6" title="Elige sede, servicio y una fecha vigente para consultar horarios." />
+            ) : isLoadingSlots || isFetchingSlots ? (
               <LoadingState className="py-6" title="Consultando horarios..." />
             ) : slotsError ? (
               <ErrorState description={getApiErrorPresentation(slotsError)} onRetry={() => void refetchSlots()} />
-            ) : slots.length === 0 ? (
+            ) : availableSlots.length === 0 ? (
               <EmptyState className="py-6 bg-surface rounded-lg" title="No hay turnos disponibles para esta fecha." />
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-                {slots.map((slot, idx) => (
+                {availableSlots.map((slot) => (
                   <Button variant="primary"
-                    key={idx}
+                    key={slot.startTime}
                     type="button"
                     aria-pressed={formData.timeSlot === slot.startTime}
                     onClick={() => setFormData({ ...formData, timeSlot: slot.startTime })}
@@ -163,7 +188,7 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
 
           <div className="pt-4 flex justify-end space-x-3">
             <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="text-sm font-medium transition-colors">Cancelar</Button>
-            <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || !formData.timeSlot || !can('RESERVATIONS', 'CREATE')} className="text-sm font-medium disabled:opacity-50 transition-colors">
+            <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || isFetchingSlots || !!slotsError || !selectedSlotIsAvailable || !validDate || !concreteLocation || !selectedService || !can('RESERVATIONS', 'CREATE') || !can('RESERVATIONS', 'CHECK_AVAILABILITY')} className="text-sm font-medium disabled:opacity-50 transition-colors">
               {isSaving ? 'Agendando...' : 'Confirmar Cita'}
             </Button>
           </div>
