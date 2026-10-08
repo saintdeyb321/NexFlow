@@ -63,6 +63,7 @@ public static class DependencyInjection
 
             services.AddScoped<ICatalogArtifactRepository, FirestoreCatalogArtifactRepository>();
             services.AddScoped<ICatalogGenerationUsageRepository, FirestoreCatalogArtifactRepository>();
+            services.AddScoped<ICatalogUploadRepository, FirestoreCatalogUploadRepository>();
         }
 
         // 5. Utilidades y Motores de IA
@@ -73,6 +74,7 @@ public static class DependencyInjection
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();
+        services.AddHostedService<CatalogUploadCleanupWorker>();
         services.AddScoped<ITenantDeletionScheduler, TenantDeletionScheduler>();
         services.AddHostedService<TenantDeletionWorker>();
 

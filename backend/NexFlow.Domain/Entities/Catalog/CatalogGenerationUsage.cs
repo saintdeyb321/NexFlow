@@ -40,7 +40,7 @@ public class CatalogGenerationUsage : Entity
     {
         if (GenerationCount >= MaxGenerationsPerDay)
         {
-            throw new DomainException($"Has alcanzado el límite máximo de {MaxGenerationsPerDay} generaciones de catálogo por día.");
+            throw new CatalogQuotaExceededException($"Has alcanzado el límite máximo de {MaxGenerationsPerDay} generaciones de catálogo por día.");
         }
         GenerationCount++;
     }

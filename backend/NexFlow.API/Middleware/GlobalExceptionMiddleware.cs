@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using NexFlow.Domain.Exceptions;
+using NexFlow.Application.Common;
 
 namespace NexFlow.API.Middleware;
 
@@ -35,6 +36,8 @@ public class GlobalExceptionMiddleware
 
         var statusCode = exception switch
         {
+            CatalogQuotaExceededException => 429,
+            ArtifactDependencyException => 503,
             DomainException or ArgumentException => 400,
             UnauthorizedAccessException => context.User.Identity?.IsAuthenticated == true ? 403 : 401,
             KeyNotFoundException => 404,
@@ -50,9 +53,10 @@ public class GlobalExceptionMiddleware
             _ => 500
         };
         context.Response.StatusCode = statusCode;
-        var code = statusCode switch { 400 => "Validation.Invalid", 401 => "Security.Unauthorized", 403 => "Security.Forbidden", 404 => "Resource.NotFound", 409 => "Resource.Conflict", 503 => "Dependency.Unavailable", _ => "System.InternalError" };
+        var code = statusCode switch { 400 => "Validation.Invalid", 401 => "Security.Unauthorized", 403 => "Security.Forbidden", 404 => "Resource.NotFound", 409 => "Resource.Conflict", 429 => "RateLimit.Exceeded", 503 => "Dependency.Unavailable", _ => "System.InternalError" };
         var message = statusCode switch
         {
+            429 => exception.Message,
             400 when exception is DomainException => exception.Message,
             400 => "La entrada no es válida.", 401 => "Autenticación requerida.", 403 => "Acceso denegado.",
             404 => "Recurso no encontrado.", 409 => "El recurso cambió o la operación entra en conflicto.",

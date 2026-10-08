@@ -247,20 +247,13 @@ public class CatalogController : ControllerBase
         if (!await HasAccessTo(requiredModule, cancellationToken))
             return StatusCode(403, $"Módulo {requiredModule} no contratado.");
 
-        try
+        var result = await generationService.RequestGenerationAsync(WorkspaceId, targetScope, request.Design.ToDesign(), request.ReplaceCurrent, cancellationToken);
+        return Ok(new
         {
-            var result = await generationService.RequestGenerationAsync(WorkspaceId, targetScope, request.Design.ToDesign(), request.ReplaceCurrent, cancellationToken);
-            return Ok(new
-            {
-                status = result.Status.ToString().ToUpperInvariant(),
-                message = "Generación de documento solicitada exitosamente.",
-                sourceHash = result.SourceHash
-            });
-        }
-        catch (DomainException ex)
-        {
-            return StatusCode(429, new { code = "RateLimit.Exceeded", message = ex.Message });
-        }
+            status = result.Status.ToString().ToUpperInvariant(),
+            message = "Generación de documento solicitada exitosamente.",
+            sourceHash = result.SourceHash
+        });
     }
 
     [HttpPost("artifact/upload")]

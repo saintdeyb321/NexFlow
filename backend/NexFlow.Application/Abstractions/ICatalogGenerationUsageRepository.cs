@@ -4,5 +4,6 @@ namespace NexFlow.Application.Abstractions;
 
 public interface ICatalogGenerationUsageRepository
 {
-    Task IncrementUsageAtomicallyAsync(Guid workspaceId, DateTime date, CancellationToken cancellationToken);
+    // Artifact claim and daily reservation belong to the same Firestore transaction.
+    Task<CatalogArtifact> ReserveGenerationAsync(CatalogArtifact artifact, DateTime date, CancellationToken cancellationToken);
 }

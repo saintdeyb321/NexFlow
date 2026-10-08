@@ -8,6 +8,8 @@ using NexFlow.Domain.Entities.System;
 using NexFlow.Domain.Exceptions; // Agregado para usar excepciones limpias
 using NexFlow.Domain.ValueObjects;
 using System.Text.Json;
+using NexFlow.Application.Common;
+using NexFlow.Application.Features.Catalog.Uploads;
 
 namespace NexFlow.Application.Features.Business;
 
@@ -18,6 +20,7 @@ public interface ICatalogGenerationService
     Task<CatalogArtifact> RequestGenerationAsync(Guid workspaceId, string scope, ArtifactDesign design, bool replaceCurrent, CancellationToken cancellationToken);
     Task<CatalogArtifact> UploadPdfAsync(Guid workspaceId, string scope, Stream fileStream, string fileName, string contentType, long length, bool replaceCurrent, CancellationToken cancellationToken);
     Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken);
+    Task ReconcileUploadAsync(PdfUploadOperation operation, CancellationToken cancellationToken);
 }
 
 public class CatalogGenerationService : ICatalogGenerationService
@@ -30,6 +33,7 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly IBusinessProfileRepository _profileRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IFileStorage _fileStorage;
+    private readonly ICatalogUploadRepository _uploadRepository;
     private readonly IOutboxRepository _outboxRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CatalogGenerationService> _logger;
@@ -42,6 +46,7 @@ public class CatalogGenerationService : ICatalogGenerationService
         IBusinessProfileRepository profileRepository,
         ILocationRepository locationRepository,
         IFileStorage fileStorage,
+        ICatalogUploadRepository uploadRepository,
         IOutboxRepository outboxRepository,
         IUnitOfWork unitOfWork,
         ILogger<CatalogGenerationService> logger)
@@ -53,6 +58,7 @@ public class CatalogGenerationService : ICatalogGenerationService
         _profileRepository = profileRepository;
         _locationRepository = locationRepository;
         _fileStorage = fileStorage;
+        _uploadRepository = uploadRepository;
         _outboxRepository = outboxRepository;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -125,12 +131,12 @@ public class CatalogGenerationService : ICatalogGenerationService
         artifact.EnsureCanReplace(replaceCurrent);
         var content = await GetContentAsync(workspaceId, scope, ct);
         var hash = _hashService.ComputeContentHash(new { content.BusinessData, content.CatalogData, content.Locations });
-        await _usageRepository.IncrementUsageAtomicallyAsync(workspaceId, DateTime.UtcNow.Date, ct);
         var generationId = Guid.NewGuid().ToString("N");
         artifact.MarkAsGenerating(hash, generationId, design);
+        artifact = await _usageRepository.ReserveGenerationAsync(artifact, DateTime.UtcNow.Date, ct);
+        if (artifact.Status != CatalogArtifactStatus.Generating) return artifact;
         try
         {
-            await _artifactRepository.SaveArtifactAsync(artifact, ct);
             var payload = new N8nEventPayload<object>(workspaceId, "CATALOG_GENERATION_REQUESTED", generationId,
                 $"catalog_{generationId}", DateTime.UtcNow,
                 new { GenerationId = generationId, Scope = scope, SourceHash = hash,
@@ -139,15 +145,12 @@ public class CatalogGenerationService : ICatalogGenerationService
             await _outboxRepository.AddAsync(new OutboxMessage { WorkspaceId = workspaceId, EventType = payload.EventType, PayloadJson = JsonSerializer.Serialize(payload) }, ct);
             await _unitOfWork.SaveChangesAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not (DomainException or ConcurrencyException or ArgumentException or UnauthorizedAccessException or KeyNotFoundException))
         {
             _logger.LogError(ex, "Catalog generation enqueue failed for {WorkspaceId}/{GenerationId}", workspaceId, generationId);
-            artifact.MarkAsFailed();
-            // A request cancellation must not prevent the durable failure marker.
-            using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            try { await _artifactRepository.SaveArtifactAsync(artifact, recovery.Token); }
-            catch (Exception failure) { _logger.LogError(failure, "Failed to persist artifact failure; read reconciliation will recover {GenerationId}", generationId); }
-            throw;
+            // SQL may have committed before an acknowledgement was lost. Keep the generation valid for its callback.
+            // Unenqueued reservations expire through the existing one-hour reconciliation; never refund their tokens.
+            throw new ArtifactDependencyException("No se pudo confirmar el encolado del folleto. Consulta su estado antes de reintentar.", ex);
         }
         return artifact;
     }
@@ -171,13 +174,47 @@ public class CatalogGenerationService : ICatalogGenerationService
 
         var artifact = await GetArtifactAsync(workspaceId, scope, ct) ?? CatalogArtifact.Initialize(workspaceId, scope);
         artifact.EnsureCanReplace(replaceCurrent);
-        var safeFileName = $"{Guid.NewGuid():N}.pdf";
+        var operation = PdfUploadOperation.Create(workspaceId, scope, DateTime.UtcNow);
+        // The intent and artifact lease are durable before any storage request is sent.
+        await _uploadRepository.BeginAsync(artifact, operation, ct);
+        var safeFileName = $"{operation.Id}.pdf";
         var folder = $"nexflow/workspaces/{workspaceId:D}/artifacts/{scope}";
-        var pdfUrl = await _fileStorage.UploadPdfAsync(fileStream, safeFileName, folder, ct);
-        var hash = await GetCurrentSourceHashAsync(workspaceId, scope, ct);
-        artifact.CompleteUpload(pdfUrl, hash);
-        // The same Firestore version check prevents an upload from overwriting a concurrent generation.
-        await _artifactRepository.SaveArtifactAsync(artifact, ct);
-        return artifact;
+        try
+        {
+            var asset = await _fileStorage.UploadPdfAsync(fileStream, safeFileName, folder, ct);
+            if (asset.PublicId != operation.PublicId) throw new ArtifactDependencyException("La identidad devuelta por almacenamiento es inválida.");
+            operation = operation with { StorageConfirmed = true, PdfUrl = asset.Url };
+            var hash = await GetCurrentSourceHashAsync(workspaceId, scope, ct);
+            return await _uploadRepository.PublishAsync(operation, asset, hash, ct);
+        }
+        catch (Exception ex)
+        {
+            // A request cancellation must not cancel recovery. If Firestore is unavailable the durable intent remains.
+            using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await CleanupUploadAsync(operation, cancelUpload: true, recovery.Token); }
+            catch (Exception failure) { _logger.LogError(failure, "Upload cleanup deferred for {WorkspaceId}/{Scope}/{UploadId}", workspaceId, scope, operation.Id); }
+            if (ex is DomainException or ConcurrencyException or ArgumentException or UnauthorizedAccessException or KeyNotFoundException) throw;
+            throw new ArtifactDependencyException("No se pudo confirmar la subida del PDF. Consulta su estado antes de reemplazarlo.", ex);
+        }
+    }
+
+    public Task ReconcileUploadAsync(PdfUploadOperation operation, CancellationToken cancellationToken)
+        => CleanupUploadAsync(operation, cancelUpload: false, cancellationToken);
+
+    private async Task CleanupUploadAsync(PdfUploadOperation operation, bool cancelUpload, CancellationToken ct)
+    {
+        operation.ValidateStorageIdentity();
+        var claimed = await _uploadRepository.TryClaimCleanupAsync(operation, cancelUpload, ct);
+        if (claimed == null) return; // Committed/referenced/leased files cannot be deleted.
+        var deleted = false;
+        try
+        {
+            await _fileStorage.DeletePdfAsync(claimed.PublicId, ct);
+            deleted = true;
+        }
+        finally
+        {
+            await _uploadRepository.RecordCleanupAsync(claimed, deleted, ct);
+        }
     }
 }
