@@ -27,6 +27,8 @@ public sealed class WhatsAppConnectionRepository(NexFlowDbContext db) : IWhatsAp
 
     public async Task<Guid> AcquireAsync(Guid workspaceId, bool logout, DateTime now, DateTime until, CancellationToken ct)
     {
+        await using var lifecycle = await db.Database.BeginTransactionAsync(ct);
+        if (db.Database.IsNpgsql()) await TenantLifecycleLock.AcquireAsync(db, workspaceId, false, ct);
         await GetAsync(workspaceId, ct);
         if (!await db.Workspaces.AnyAsync(w => w.Id == workspaceId && w.Status == WorkspaceStatus.Active, ct)) throw new UnauthorizedAccessException("Workspace no disponible.");
         var id = Guid.NewGuid();
@@ -35,6 +37,7 @@ public sealed class WhatsAppConnectionRepository(NexFlowDbContext db) : IWhatsAp
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.OperationId, id).SetProperty(c => c.OperationUntil, until)
                 .SetProperty(c => c.LogoutPending, c => logout || c.LogoutPending).SetProperty(c => c.PersistenceVersion, Guid.NewGuid()), ct);
         if (changed != 1) throw new ConcurrencyException("Hay una operación de WhatsApp pendiente. Consulta el estado antes de reintentar.");
+        await lifecycle.CommitAsync(ct);
         return id;
     }
 

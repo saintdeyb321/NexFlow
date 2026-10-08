@@ -13,6 +13,14 @@ export const whatsappPollInterval = (data: WhatsAppStatusResponse | undefined, v
   return data.status === 'CONNECTING' || data.status === 'RECONNECTING' ? 5000 : false;
 };
 
+export const whatsappPairingDeadline = (data: WhatsAppStatusResponse | undefined, now: number): number => {
+  if (data?.status === 'QR_AVAILABLE' && data.qrExpiresAt) return Math.max(now, Date.parse(data.qrExpiresAt));
+  return data?.status === 'CONNECTING' || data?.status === 'RECONNECTING' ? now + 60_000 : 0;
+};
+
+export const whatsappDeadlineReview = (data: WhatsAppStatusResponse | undefined, visible: boolean, until: number): boolean =>
+  Boolean(visible && until && (data?.status === 'QR_AVAILABLE' || data?.status === 'CONNECTING' || data?.status === 'RECONNECTING'));
+
 export const canPairWhatsApp = (data: WhatsAppStatusResponse | undefined, canConfigure: boolean, processing: boolean, status: ConnectionStatus): boolean =>
   Boolean(canConfigure && !processing && data?.canConnect && !data.isLinked && !data.requiresLogout
     && status !== 'UNAVAILABLE' && status !== 'QR_AVAILABLE' && status !== 'CONNECTED');

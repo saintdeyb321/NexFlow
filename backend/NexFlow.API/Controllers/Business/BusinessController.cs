@@ -7,6 +7,7 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Business.Locations;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Enums;
+using NexFlow.API.Middleware;
 
 namespace NexFlow.API.Controllers.Business;
 
@@ -205,6 +206,7 @@ public class BusinessController : ControllerBase
     // WHATSAPP (Evolution API)
     // =======================================================
     [HttpGet("whatsapp/status")]
+    [ReleaseTenantLifecycleLock]
     public async Task<IActionResult> GetWhatsAppStatus(
         [FromQuery] bool refresh,
         [FromServices] IEvolutionConnectionService evolutionService,
@@ -218,6 +220,7 @@ public class BusinessController : ControllerBase
     }
 
     [HttpPost("whatsapp/connect")]
+    [ReleaseTenantLifecycleLock]
     public async Task<IActionResult> ConnectWhatsApp(
         [FromServices] IEvolutionConnectionService evolutionService,
         CancellationToken cancellationToken)
@@ -227,6 +230,7 @@ public class BusinessController : ControllerBase
     }
 
     [HttpPost("whatsapp/disconnect")]
+    [ReleaseTenantLifecycleLock]
     public async Task<IActionResult> DisconnectWhatsApp(
         [FromBody] DisconnectWhatsAppRequest request,
         [FromServices] IEvolutionConnectionService evolutionService,

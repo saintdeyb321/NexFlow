@@ -46,17 +46,20 @@ public class EvolutionWebhookController : ControllerBase
 
         var providedWebhookKey = Request.Headers["X-NexFlow-Webhook-Key"].FirstOrDefault()?.Trim();
 
-        if (string.IsNullOrEmpty(payload?.Instance) || string.IsNullOrEmpty(providedWebhookKey)
+        // Missing configuration preserves existing installations during migration. Explicit false retires the shared key.
+        var legacySetting = configuration["Evolution:AllowLegacyWebhookKey"];
+        var allowLegacyKey = legacySetting == null || bool.TryParse(legacySetting, out var allowed) && allowed;
+        if (string.IsNullOrWhiteSpace(payload?.Instance) || string.IsNullOrEmpty(providedWebhookKey)
             || (!KeyEquals(providedWebhookKey, EvolutionConnectionService.InstanceWebhookKey(expectedWebhookKey, payload.Instance))
-                && !KeyEquals(providedWebhookKey, expectedWebhookKey)))
+                && !(allowLegacyKey && KeyEquals(providedWebhookKey, expectedWebhookKey))))
             return Unauthorized(new { Error = "Acceso denegado. Webhook Key inválida o ausente." });
 
+        if (!string.IsNullOrEmpty(payload.Data?.Instance) && payload.Data.Instance != payload.Instance)
+            return BadRequest(new { Error = "Instance mismatch." });
         var normalizedEvent = payload.Event?.Trim().Replace(".", "_").ToUpperInvariant();
         if (normalizedEvent == "CONNECTION_UPDATE")
         {
-            if (!string.IsNullOrEmpty(payload.Data?.Instance) && payload.Data.Instance != payload.Instance)
-                return BadRequest(new { Error = "Instance mismatch." });
-            var owner = await instanceResolver.ResolveInstanceAsync(payload.Instance, HttpContext.RequestAborted);
+            var owner = await instanceResolver.ResolveAuthenticatedInstanceAsync(payload.Instance, HttpContext.RequestAborted);
             if (owner is not { } id || id == Guid.Empty) return BadRequest(new { Error = "Unknown instance." });
             await connections.ObserveConnectionAsync(id, payload.Data?.State?.ToLowerInvariant() ?? string.Empty, HttpContext.RequestAborted);
             return Ok();
@@ -79,7 +82,7 @@ public class EvolutionWebhookController : ControllerBase
 
         var phone = IncomingMessageGuard.NormalizePhone(payload.Data.Key.RemoteJid);
         if (string.IsNullOrEmpty(phone)) return BadRequest(new { Error = "Invalid phone." });
-        var workspaceId = await instanceResolver.ResolveInstanceAsync(payload.Instance, HttpContext.RequestAborted);
+        var workspaceId = await instanceResolver.ResolveAuthenticatedInstanceAsync(payload.Instance, HttpContext.RequestAborted);
         if (!workspaceId.HasValue || workspaceId == Guid.Empty)
             return BadRequest(new { Error = "Unknown instance." });
 

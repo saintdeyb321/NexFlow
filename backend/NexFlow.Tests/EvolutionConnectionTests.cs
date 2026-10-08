@@ -16,6 +16,62 @@ namespace NexFlow.Tests;
 public sealed class EvolutionConnectionTests
 {
     [Fact]
+    public async Task Authenticated_connection_observation_is_served_from_postgres_without_polling_provider()
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        await f.Service.ObserveConnectionAsync(f.Workspace.Id, "open", default);
+        var status = await f.Service.GetStatusAsync(f.Workspace.Id, false, default);
+        Assert.Equal("CONNECTED", status.Status);
+        Assert.True(status.IsLinked);
+        Assert.Empty(f.Transport.Calls);
+    }
+
+    [Fact]
+    public async Task Local_client_uses_explicit_http_verbs_and_never_deletes_instances()
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        await f.Service.ConnectAsync(f.Workspace.Id, default);
+        f.Transport.State = "open"; f.Transport.Owner = "51999999999@s.whatsapp.net";
+        await f.Service.GetStatusAsync(f.Workspace.Id, true, default);
+        await f.Service.DisconnectAsync(f.Workspace.Id, true, default);
+        Assert.All(f.Transport.Calls.Where(c => c.Path == "/instance/fetchInstances"), c => Assert.Equal("GET", c.Method));
+        Assert.Equal("POST", Assert.Single(f.Transport.Calls, c => c.Path == "/instance/create").Method);
+        Assert.Equal("GET", Assert.Single(f.Transport.Calls, c => c.Path.StartsWith("/instance/connect/")).Method);
+        Assert.Equal("POST", Assert.Single(f.Transport.Calls, c => c.Path.StartsWith("/webhook/set/")).Method);
+        Assert.Equal("DELETE", Assert.Single(f.Transport.Calls, c => c.Path.StartsWith("/instance/logout/")).Method);
+        Assert.DoesNotContain(f.Transport.Calls, c => c.Path.Contains("/instance/delete/"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Existing_workspace_without_instance_fails_closed_until_migration_backfills_identity(string? name)
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        await f.Db.Workspaces.Where(w => w.Id == f.Workspace.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.EvolutionInstanceName, name));
+        await Assert.ThrowsAsync<ConcurrencyException>(() => f.Service.ConnectAsync(f.Workspace.Id, default));
+        Assert.Empty(f.Transport.Calls);
+    }
+
+    [Theory]
+    [InlineData("SUCCESS", "close", true)]
+    [InlineData("SUCCESS", "created", false)]
+    [InlineData("SUCCESS", "connecting", false)]
+    [InlineData("PENDING", "close", false)]
+    public async Task Incomplete_logout_proof_never_releases_binding(string acknowledgement, string state, bool disappear)
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        f.Transport.Exists = true; f.Transport.State = "open";
+        await f.Service.GetStatusAsync(f.Workspace.Id, true, default);
+        f.Transport.LogoutAcknowledgement = acknowledgement; f.Transport.StateAfterLogout = state; f.Transport.DisappearAfterLogout = disappear;
+        await Assert.ThrowsAsync<HttpRequestException>(() => f.Service.DisconnectAsync(f.Workspace.Id, true, default));
+        Assert.True((await f.State()).IsLinked);
+        Assert.True((await f.State()).LogoutPending);
+        await Assert.ThrowsAsync<ConcurrencyException>(() => f.Service.ConnectAsync(f.Workspace.Id, default));
+    }
+
+    [Fact]
     public async Task Provisioning_assigns_stable_normalized_unique_identity_without_provider_dependency()
     {
         var workspaceRepo = new Mock<IWorkspaceRepository>();
@@ -250,6 +306,18 @@ public sealed class EvolutionConnectionTests
         f.Transport.Exists = true; f.Transport.State = "open"; f.Transport.Owner = "old-owner@s.whatsapp.net";
         await f.Service.GetStatusAsync(f.Workspace.Id, true, default);
         f.Transport.State = "close"; f.Transport.RejectClosedLogout = true;
+        await Assert.ThrowsAsync<HttpRequestException>(() => f.Service.DisconnectAsync(f.Workspace.Id, true, default));
+        Assert.True((await f.State()).IsLinked);
+        Assert.True((await f.State()).LogoutPending);
+    }
+
+    [Fact]
+    public async Task Closed_provider_with_missing_owner_and_rejected_logout_is_still_ambiguous()
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        f.Transport.Exists = true; f.Transport.State = "open"; f.Transport.Owner = "old-owner@s.whatsapp.net";
+        await f.Service.GetStatusAsync(f.Workspace.Id, true, default);
+        f.Transport.State = "close"; f.Transport.Owner = null; f.Transport.RejectClosedLogout = true;
         await Assert.ThrowsAsync<HttpRequestException>(() => f.Service.DisconnectAsync(f.Workspace.Id, true, default));
         Assert.True((await f.State()).IsLinked);
         Assert.True((await f.State()).LogoutPending);

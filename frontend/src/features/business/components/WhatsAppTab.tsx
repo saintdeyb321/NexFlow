@@ -5,14 +5,14 @@ import { LoadingState, ErrorState, StatusBadge } from '../../../components/ui/Fe
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { QrCode, RefreshCw, PowerOff, ShieldCheck, MessageCircle } from 'lucide-react';
 import { getWhatsAppStatus, connectWhatsApp, disconnectWhatsApp } from '../services/business.service';
-import { canPairWhatsApp, whatsappPollInterval, whatsappStatus } from '../whatsAppState';
+import { canPairWhatsApp, whatsappDeadlineReview, whatsappPairingDeadline, whatsappPollInterval, whatsappStatus } from '../whatsAppState';
 import type { ConnectionStatus, WhatsAppStatusResponse } from '../types/business.types';
 
 const labels: Record<ConnectionStatus, string> = {
@@ -29,6 +29,7 @@ export const WhatsAppTab = () => {
 const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefined }) => {
   const toast = useToast();
   const { can } = usePermissions();
+  const canRead = can('CONVERSATIONS', 'READ');
   const canConfigure = can('CONVERSATIONS', 'CONFIGURE');
   const queryClient = useQueryClient();
   const visible = usePageVisible();
@@ -36,20 +37,30 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
   const [now, setNow] = useState(Date.now);
   const [pollUntil, setPollUntil] = useState(0);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const forceRefresh = useRef(false);
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     ...queryPolicies.dynamic, queryKey,
-    queryFn: ({ signal }) => getWhatsAppStatus(signal, true),
-    enabled: !!workspaceId && can('CONVERSATIONS', 'READ'),
+    queryFn: ({ signal }) => {
+      const refresh = forceRefresh.current;
+      forceRefresh.current = false;
+      return getWhatsAppStatus(signal, refresh);
+    },
+    enabled: visible && !!workspaceId && canRead,
     refetchOnWindowFocus: false,
     retry: false,
-    refetchInterval: query => whatsappPollInterval(query.state.data, visible, Date.now(), pollUntil),
+    refetchInterval: query => query.state.error ? false : whatsappPollInterval(query.state.data, visible, Date.now(), pollUntil),
   });
+  const reviewStatus = () => {
+    if (!visible || !workspaceId || !canRead) return;
+    forceRefresh.current = true;
+    void refetch({ cancelRefetch: false });
+  };
   const saveStatus = (response: WhatsAppStatusResponse) => queryClient.setQueryData<WhatsAppStatusResponse>(queryKey, response);
   const connectMutation = useSessionMutation({
     mutationFn: connectWhatsApp,
     onSuccess: response => {
       saveStatus(response);
-      setPollUntil(response.qrExpiresAt ? Date.parse(response.qrExpiresAt) : Date.now() + 60_000);
+      setPollUntil(whatsappPairingDeadline(response, Date.now()));
       toast.success(response.status === 'CONNECTED' ? 'WhatsApp ya está vinculado.'
         : response.qrBase64 ? 'Escanea el QR antes de su expiración.' : 'La sesión se conserva. Consulta su reconexión.');
     },
@@ -68,25 +79,32 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
   });
   const processing = connectMutation.isPending || disconnectMutation.isPending;
   const status = whatsappStatus(data, Boolean(error), now);
+  const pairingPending = !error && (data?.status === 'QR_AVAILABLE' || data?.status === 'CONNECTING' || data?.status === 'RECONNECTING');
+  const activePollUntil = pairingPending ? pollUntil : 0;
   const qr = canConfigure && status === 'QR_AVAILABLE' && !data?.isLinked ? data?.qrBase64 : null;
-  const expiresAt = data?.qrExpiresAt ? Date.parse(data.qrExpiresAt) : 0;
+  const expiresAt = status === 'QR_AVAILABLE' && data?.qrExpiresAt ? Date.parse(data.qrExpiresAt) : 0;
   const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   useEffect(() => {
-    if (!visible || (!expiresAt && !pollUntil)) return;
+    if (!visible || (!expiresAt && !activePollUntil)) return;
     const timer = setInterval(() => {
       const current = Date.now();
       setNow(current);
-      if (current >= Math.max(expiresAt, pollUntil)) clearInterval(timer);
+      if (current >= Math.max(expiresAt, activePollUntil)) clearInterval(timer);
     }, 1000);
     return () => clearInterval(timer);
-  }, [visible, expiresAt, pollUntil]);
+  }, [visible, expiresAt, activePollUntil]);
   // Stop the timer/poll budget after its bounded deadline; no permanent provider polling.
   useEffect(() => {
-    if (!pollUntil) return;
-    const timer = setTimeout(() => { setPollUntil(0); void queryClient.invalidateQueries({ queryKey, exact: true }); }, Math.max(0, pollUntil - Date.now()));
+    if (!canRead || error || !whatsappDeadlineReview(data, visible, activePollUntil)) return;
+    const timer = setTimeout(() => {
+      setPollUntil(0);
+      forceRefresh.current = true;
+      void refetch({ cancelRefetch: false });
+    }, Math.max(0, activePollUntil - Date.now()));
     return () => clearTimeout(timer);
-  }, [pollUntil, queryClient, queryKey]);
+  }, [canRead, activePollUntil, data, error, visible, refetch]);
 
+  if (!canRead) return <ErrorState description="No tienes permiso para consultar la conexión de WhatsApp." />;
   if (isLoading) return <LoadingState title="Consultando conexión de WhatsApp..." />;
   return <div className="nf-panel p-5 sm:p-6 max-w-3xl">
     <ConfirmDialog isOpen={showDisconnectConfirm} title="¿Cerrar la sesión de WhatsApp?"
@@ -102,7 +120,7 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
     <div aria-live="polite" className="mb-4">
       <StatusBadge label={labels[status]} tone={status === 'CONNECTED' ? 'success' : status === 'UNAVAILABLE' || status === 'DISCONNECT_PENDING' ? 'warning' : 'neutral'} />
     </div>
-    {error && <ErrorState description={getApiErrorPresentation(error)} onRetry={() => void refetch()} />}
+    {error && <ErrorState description={getApiErrorPresentation(error)} onRetry={reviewStatus} />}
     {data?.message && <p role="status" className="text-sm text-muted mb-4">{data.message}</p>}
     {status === 'UNAVAILABLE' && <p className="text-sm text-muted mb-4">No se ha liberado la vinculación. Revisa la conexión antes de intentar otra operación.</p>}
     {data?.isLinked && <div className="flex items-center gap-2 text-sm mb-4"><ShieldCheck aria-hidden="true" className="w-5 h-5" />La sesión sigue asignada a este workspace. No se permite vincular otro número.</div>}
@@ -119,7 +137,7 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
         onClick={() => { if (canPairWhatsApp(data, canConfigure, processing, status)) connectMutation.mutate(); }}>
         <QrCode aria-hidden="true" className="w-4 h-4 mr-2" />{status === 'QR_EXPIRED' ? 'Generar otro QR' : 'Conectar WhatsApp'}
       </Button>}
-      <Button variant="secondary" disabled={processing || isFetching} isLoading={isFetching} onClick={() => void refetch()}>
+      <Button variant="secondary" disabled={!workspaceId || processing || isFetching} isLoading={isFetching} onClick={reviewStatus}>
         <RefreshCw aria-hidden="true" className="w-4 h-4 mr-2" />Revisar estado
       </Button>
       {data?.isLinked && status === 'RECONNECTING' && <Button variant="secondary" disabled={!canConfigure || processing} isLoading={connectMutation.isPending}

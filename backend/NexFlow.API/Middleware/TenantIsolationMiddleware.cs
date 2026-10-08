@@ -48,20 +48,29 @@ public class TenantIsolationMiddleware
 
                 using var lifecycleScope = scopes.CreateScope();
                 var lifecycleDb = lifecycleScope.ServiceProvider.GetRequiredService<NexFlowDbContext>();
-                await using var lifecycle = await lifecycleDb.Database.BeginTransactionAsync(context.RequestAborted);
-                await TenantLifecycleLock.AcquireAsync(lifecycleDb, workspaceId, false, context.RequestAborted);
-                var workspace = await workspaces.GetByIdForSuperAdminAsync(workspaceId, context.RequestAborted);
-                if (workspace == null || workspace.Status == NexFlow.Domain.Enums.WorkspaceStatus.Deleting)
+                await using (var lifecycle = await lifecycleDb.Database.BeginTransactionAsync(context.RequestAborted))
                 {
-                    context.Response.StatusCode = 409;
-                    await context.Response.WriteAsJsonAsync(new { code = "Workspace.Unavailable", message = "El workspace no está disponible.", correlationId = context.TraceIdentifier });
-                    return;
+                    await TenantLifecycleLock.AcquireAsync(lifecycleDb, workspaceId, false, context.RequestAborted);
+                    var workspace = await workspaces.GetByIdForSuperAdminAsync(workspaceId, context.RequestAborted);
+                    if (workspace == null || workspace.Status == NexFlow.Domain.Enums.WorkspaceStatus.Deleting)
+                    {
+                        context.Response.StatusCode = 409;
+                        await context.Response.WriteAsJsonAsync(new { code = "Workspace.Unavailable", message = "El workspace no está disponible.", correlationId = context.TraceIdentifier });
+                        return;
+                    }
+                    if (isSuperAdmin)
+                        _logger.LogWarning("SuperAdmin tenant access: UserId {UserId}, WorkspaceId {WorkspaceId}", currentUser.UserId, workspaceId);
+                    context.Items["VerifiedWorkspaceId"] = workspaceId;
+                    if (context.GetEndpoint()?.Metadata.GetMetadata<ReleaseTenantLifecycleLockAttribute>() == null)
+                    {
+                        await _next(context);
+                        await lifecycle.CommitAsync(context.RequestAborted);
+                        return;
+                    }
+                    // Evolution actions acquire a durable lease separately. Close this transaction before dispatch.
+                    await lifecycle.CommitAsync(context.RequestAborted);
                 }
-                if (isSuperAdmin)
-                    _logger.LogWarning("SuperAdmin tenant access: UserId {UserId}, WorkspaceId {WorkspaceId}", currentUser.UserId, workspaceId);
-                context.Items["VerifiedWorkspaceId"] = workspaceId;
                 await _next(context);
-                await lifecycle.CommitAsync(context.RequestAborted);
                 return;
             }
         }

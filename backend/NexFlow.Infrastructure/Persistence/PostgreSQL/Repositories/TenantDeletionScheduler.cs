@@ -12,6 +12,8 @@ public class TenantDeletionScheduler(NexFlowDbContext db, IEntitlementService en
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await TenantLifecycleLock.AcquireAsync(db, workspaceId, true, ct);
         var workspace = (await db.Workspaces.FromSqlInterpolated($"SELECT * FROM \"Workspaces\" WHERE \"Id\" = {workspaceId} FOR UPDATE").ToListAsync(ct)).FirstOrDefault();
+        if (workspace != null && await db.WhatsAppConnections.AnyAsync(c => c.WorkspaceId == workspaceId && c.OperationUntil > DateTime.UtcNow, ct))
+            throw new NexFlow.Domain.Exceptions.ConcurrencyException("Espera a que termine la operación de WhatsApp antes de eliminar el workspace.");
         var job = await db.Set<TenantDeletionJob>().FindAsync(new object[] { workspaceId }, ct);
         if (workspace == null) return job?.Status == TenantDeletionStatus.Completed ? Result.Success() : Result.Failure(new Error("Workspace.NotFound", "El negocio no existe."));
         workspace.BeginDeletion();

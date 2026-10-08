@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canPairWhatsApp, whatsappPollInterval, whatsappStatus } from '../src/features/business/whatsAppState.ts';
+import { canPairWhatsApp, whatsappDeadlineReview, whatsappPairingDeadline, whatsappPollInterval, whatsappStatus } from '../src/features/business/whatsAppState.ts';
 import type { WhatsAppStatusResponse } from '../src/features/business/types/business.types.ts';
 
 const now = Date.parse('2026-10-08T00:00:00Z');
@@ -30,3 +30,20 @@ test('double click and missing configuration permissions prevent pairing', () =>
   assert.equal(canPairWhatsApp(unlinked, true, false, 'DISCONNECTED'), true);
 });
 test('provider unavailability cannot offer a new QR', () => assert.equal(canPairWhatsApp(unlinked, true, false, 'UNAVAILABLE'), false));
+
+test('successful connection has no pairing deadline or final provider refresh', () => {
+  const linked = { ...unlinked, status: 'CONNECTED' as const, isLinked: true };
+  assert.equal(whatsappPairingDeadline(linked, now), 0);
+  assert.equal(whatsappDeadlineReview(linked, true, now + 60_000), false);
+});
+test('pairing deadline reviews never run in the background or after failure', () => {
+  assert.equal(whatsappDeadlineReview(qr, false, now + 30_000), false);
+  assert.equal(whatsappDeadlineReview({ ...unlinked, status: 'UNAVAILABLE' }, true, now + 30_000), false);
+  assert.equal(whatsappDeadlineReview(qr, true, 0), false);
+  assert.equal(whatsappDeadlineReview(qr, true, now + 30_000), true);
+});
+test('QR and reconnection budgets are finite and disconnected sessions do not start one', () => {
+  assert.equal(whatsappPairingDeadline(qr, now), now + 30_000);
+  assert.equal(whatsappPairingDeadline({ ...unlinked, status: 'RECONNECTING' }, now), now + 60_000);
+  assert.equal(whatsappPairingDeadline(unlinked, now), 0);
+});

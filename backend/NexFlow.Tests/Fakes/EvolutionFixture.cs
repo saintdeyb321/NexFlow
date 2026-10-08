@@ -47,7 +47,8 @@ public sealed class EvolutionFixture : IAsyncDisposable
         fixture.Service = new(fixture.Client, fixture.Config, fixture.Repository, fixture.Time, NullLogger<EvolutionConnectionService>.Instance);
         return fixture;
     }
-    public EvolutionDb NewContext() => new(new DbContextOptionsBuilder<NexFlowDbContext>().UseSqlite(Connection).Options);
+    public EvolutionDb NewContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) =>
+        new(new DbContextOptionsBuilder<NexFlowDbContext>().UseSqlite(Connection).AddInterceptors(interceptors).Options);
     public async Task<WhatsAppConnection> State() => (await Repository.GetAsync(Workspace.Id, default)).Connection;
     public async ValueTask DisposeAsync() { Client.Dispose(); await Db.DisposeAsync(); await Connection.DisposeAsync(); }
 
@@ -75,6 +76,9 @@ public sealed class EvolutionFixture : IAsyncDisposable
         public bool FailRequests { get; set; }
         public bool RejectClosedLogout { get; set; }
         public bool RejectMissingLogout { get; set; }
+        public bool DisappearAfterLogout { get; set; }
+        public string LogoutAcknowledgement { get; set; } = "SUCCESS";
+        public string StateAfterLogout { get; set; } = "close";
         public HttpStatusCode MissingLogoutStatus { get; set; } = HttpStatusCode.NotFound;
         public int? DisconnectionReasonCode { get; set; }
         public TaskCompletionSource? FirstFetchEntered { get; set; }
@@ -118,8 +122,9 @@ public sealed class EvolutionFixture : IAsyncDisposable
                 if (RejectMissingLogout && !Exists) return new(MissingLogoutStatus) { Content = new StringContent("{\"error\":true}", Encoding.UTF8, "application/json") };
                 if (RejectClosedLogout && State == "close") return new(HttpStatusCode.BadRequest) { Content = new StringContent("{\"error\":true}", Encoding.UTF8, "application/json") };
                 if (FailLogout) throw new HttpRequestException("Logout acknowledgement unavailable");
-                State = "close"; // Evolution retains historical owner metadata after logout.
-                response = new { status = "SUCCESS", error = false };
+                State = StateAfterLogout; // Evolution retains historical owner metadata after logout.
+                if (DisappearAfterLogout) Exists = false;
+                response = new { status = LogoutAcknowledgement, error = false };
             }
             else throw new InvalidOperationException($"Unexpected provider call: {request.Method} {path}");
             return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(response), Encoding.UTF8, "application/json") };

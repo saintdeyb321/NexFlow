@@ -18,7 +18,13 @@ public class DefaultInstanceResolver : IInstanceResolver
         _dbContext = dbContext;
     }
 
-    public async Task<Guid?> ResolveInstanceAsync(string instanceName, CancellationToken cancellationToken)
+    public Task<Guid?> ResolveInstanceAsync(string instanceName, CancellationToken cancellationToken) =>
+        ResolveAsync(instanceName, false, cancellationToken);
+
+    public Task<Guid?> ResolveAuthenticatedInstanceAsync(string instanceName, CancellationToken cancellationToken) =>
+        ResolveAsync(instanceName, true, cancellationToken);
+
+    private async Task<Guid?> ResolveAsync(string instanceName, bool authenticated, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(instanceName)) return null;
 
@@ -31,7 +37,8 @@ public class DefaultInstanceResolver : IInstanceResolver
             .Select(w => new { w.Id, w.EvolutionInstanceName }).Take(2).ToListAsync(cancellationToken);
         if (matches.Count != 1) return null;
         var match = matches[0];
-        if (match.EvolutionInstanceName == instanceName) return match.Id;
+        // Queued legacy envelopes may retain the original spelling after a verified alias repair.
+        if (match.EvolutionInstanceName == instanceName || !authenticated) return match.Id;
         if (EvolutionInstanceIdentity.LegacyAlias(match.EvolutionInstanceName!) != instanceName) return null;
         // An authenticated inbound alias is evidence of the actual provider identity. Repair routing once.
         var changed = await _dbContext.Workspaces.Where(w => w.Id == match.Id && w.EvolutionInstanceName == match.EvolutionInstanceName)

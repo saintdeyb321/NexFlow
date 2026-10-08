@@ -14,11 +14,107 @@ using NexFlow.Domain.Exceptions;
 using NexFlow.Infrastructure.Gateways;
 using NexFlow.Tests.Fakes;
 using Xunit;
+using NexFlow.Application.Features.Automation.ProcessMessage;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 namespace NexFlow.Tests;
 
 public sealed class EvolutionSecurityTests
 {
+    [Fact]
+    public async Task Rejected_foreign_workspace_message_cannot_reassign_legacy_instance_identity()
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        await f.Db.Workspaces.Where(w => w.Id == f.Workspace.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.EvolutionInstanceName, "Existing-Business"));
+        var resolver = new DefaultInstanceResolver(f.Db);
+        var entitlements = new Mock<IEntitlementService>(MockBehavior.Strict);
+        var guard = new IncomingMessageGuard(resolver, entitlements.Object, NullLogger<IncomingMessageGuard>.Instance);
+        var command = new ProcessIncomingMessageCommand("existingbusiness", "51999999999", "Customer", "Hello", "message", false, Guid.NewGuid(), f.Time.UtcNow);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => guard.CheckMessageAsync(command, default));
+        Assert.Equal("Existing-Business", await resolver.GetInstanceNameAsync(f.Workspace.Id, default));
+        entitlements.VerifyNoOtherCalls();
+        Assert.Empty(f.Transport.Calls);
+    }
+
+    [Fact]
+    public async Task Only_authenticated_provider_webhook_can_confirm_a_legacy_alias()
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        await f.Db.Workspaces.Where(w => w.Id == f.Workspace.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.EvolutionInstanceName, "Existing-Business"));
+        var resolver = new DefaultInstanceResolver(f.Db);
+        var payload = new EvolutionWebhookController.EvolutionWebhookPayload { Instance = "existingbusiness", Event = "connection.update", Data = new() { State = "open" } };
+        Assert.IsType<UnauthorizedObjectResult>(await Webhook("invalid-key").ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        Assert.Equal("Existing-Business", await resolver.GetInstanceNameAsync(f.Workspace.Id, default));
+        var key = EvolutionConnectionService.InstanceWebhookKey("unit-test-webhook", payload.Instance);
+        Assert.IsType<OkResult>(await Webhook(key).ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        Assert.Equal(payload.Instance, await resolver.GetInstanceNameAsync(f.Workspace.Id, default));
+        Assert.True((await f.State()).IsLinked);
+        Assert.Empty(f.Transport.Calls);
+    }
+
+    [Theory]
+    [InlineData("text", "Legacy#Business")]
+    [InlineData("document", "Legacy?Business")]
+    [InlineData("image", "Legacy#Business")]
+    public async Task Outbound_legacy_name_remains_one_url_parameter_and_cannot_route_to_another_instance(string kind, string name)
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        var other = Workspace.Create("Other business"); f.Db.Workspaces.Add(other); await f.Db.SaveChangesAsync();
+        await f.Db.Workspaces.Where(w => w.Id == f.Workspace.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.EvolutionInstanceName, name));
+        await f.Db.Workspaces.Where(w => w.Id == other.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.EvolutionInstanceName, "Legacy"));
+        using var transport = new MessageTransport(); using var http = new HttpClient(transport);
+        var gateway = new EvolutionMessageGateway(http, f.Config, NullLogger<EvolutionMessageGateway>.Instance, new DefaultInstanceResolver(f.Db));
+        var result = kind switch
+        {
+            "text" => await gateway.SendTextAsync(f.Workspace.Id, "51999999999", "Hello", "message", _ => Task.CompletedTask, default),
+            "document" => await gateway.SendDocumentAsync(f.Workspace.Id, "51999999999", "https://media.example.test/catalog.pdf", "catalog.pdf", "Catalog", "message", _ => Task.CompletedTask, default),
+            _ => await gateway.SendImageAsync(f.Workspace.Id, "51999999999", "https://media.example.test/image.png", "Image", "message", default)
+        };
+        Assert.Equal("provider-message", result);
+        Assert.NotNull(transport.Uri);
+        Assert.Equal($"/message/{(kind == "text" ? "sendText" : "sendMedia")}/{Uri.EscapeDataString(name)}", transport.Uri.AbsolutePath);
+        Assert.Empty(transport.Uri.Query);
+        Assert.Empty(transport.Uri.Fragment);
+    }
+
+    private sealed class MessageTransport : HttpMessageHandler
+    {
+        public Uri? Uri { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Uri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"key\":{\"id\":\"provider-message\"}}", System.Text.Encoding.UTF8, "application/json") });
+        }
+    }
+
+    [Theory]
+    [InlineData("false")]
+    [InlineData("invalid")]
+    public async Task Legacy_key_retirement_rejects_shared_key_but_preserves_instance_authentication(string setting)
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        f.Config["Evolution:AllowLegacyWebhookKey"] = setting;
+        var payload = new EvolutionWebhookController.EvolutionWebhookPayload { Instance = f.Workspace.EvolutionInstanceName!, Event = "connection.update", Data = new() { State = "open" } };
+        var resolver = new DefaultInstanceResolver(f.Db);
+        Assert.IsType<UnauthorizedObjectResult>(await Webhook("unit-test-webhook").ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        Assert.False(await f.Db.WhatsAppConnections.AnyAsync());
+        var key = EvolutionConnectionService.InstanceWebhookKey("unit-test-webhook", payload.Instance);
+        Assert.IsType<OkResult>(await Webhook(key).ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        Assert.True((await f.State()).IsLinked);
+        Assert.Empty(f.Transport.Calls);
+    }
+
+    [Fact]
+    public async Task Conflicting_instance_in_message_event_never_reaches_durable_inbound_repository()
+    {
+        await using var f = await EvolutionFixture.CreateAsync();
+        var inbound = new Mock<IInboundMessageRepository>(MockBehavior.Strict);
+        var payload = new EvolutionWebhookController.EvolutionWebhookPayload { Instance = f.Workspace.EvolutionInstanceName!, Event = "messages.upsert", Data = new() { Instance = "another-workspace", Key = new() { Id = "message", RemoteJid = "51999999999@s.whatsapp.net" }, Message = new() { Conversation = "Hello" } } };
+        Assert.IsType<BadRequestObjectResult>(await Webhook("unit-test-webhook").ReceiveMessage(payload, f.Config, inbound.Object, new DefaultInstanceResolver(f.Db), f.Service));
+        inbound.VerifyNoOtherCalls();
+        Assert.Empty(f.Transport.Calls);
+    }
+
     [Fact]
     public async Task Workspace_without_permissions_cannot_read_connect_or_logout()
     {
@@ -82,6 +178,10 @@ public sealed class EvolutionSecurityTests
         await f.Db.Workspaces.Where(w => w.Id == f.Workspace.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.EvolutionInstanceName, "Existing-Business"));
         var resolver = new DefaultInstanceResolver(f.Db);
         Assert.Equal(f.Workspace.Id, await resolver.ResolveInstanceAsync("existingbusiness", default));
+        Assert.Equal("Existing-Business", await resolver.GetInstanceNameAsync(f.Workspace.Id, default));
+        Assert.Equal(f.Workspace.Id, await resolver.ResolveAuthenticatedInstanceAsync("existingbusiness", default));
+        Assert.Equal("existingbusiness", await resolver.GetInstanceNameAsync(f.Workspace.Id, default));
+        Assert.Equal(f.Workspace.Id, await resolver.ResolveInstanceAsync("Existing-Business", default));
         Assert.Equal("existingbusiness", await resolver.GetInstanceNameAsync(f.Workspace.Id, default));
         f.Transport.Name = "existingbusiness"; f.Transport.Exists = true; f.Transport.State = "open";
         Assert.True((await f.Service.ConnectAsync(f.Workspace.Id, default)).IsLinked);

@@ -142,7 +142,7 @@ public sealed class EvolutionConnectionService : IEvolutionConnectionService
             if (logout.StatusCode == HttpStatusCode.BadRequest)
             {
                 var proof = await InspectAsync(workspaceId, remote.Name, timeout.Token);
-                if (!proof.Exists || !(proof.State is "close" or "closed" && (proof.LoggedOut || !proof.HasSession)))
+                if (!proof.Exists || !(proof.State is "close" or "closed" && proof.LoggedOut))
                     throw new HttpRequestException("Evolution no confirmó el cierre de la sesión. La vinculación se conserva.");
             }
             else
@@ -152,7 +152,8 @@ public sealed class EvolutionConnectionService : IEvolutionConnectionService
                     throw new HttpRequestException("Evolution no confirmó la desconexión. La vinculación se conserva.");
             }
             remote = await InspectAsync(workspaceId, remote.Name, timeout.Token);
-            if (remote.State == "open" || remote.State == "connecting") throw new HttpRequestException("Evolution todavía no confirmó el cierre de la sesión.");
+            if (!remote.Exists || remote.State is not ("close" or "closed"))
+                throw new HttpRequestException("Evolution todavía no confirmó el cierre de la sesión. La vinculación se conserva.");
             await _connections.ConfirmLogoutAsync(workspaceId, operation, owner, _clock.UtcNow, timeout.Token);
             return await FinishAsync(workspaceId, operation, timeout.Token);
         }
