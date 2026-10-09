@@ -215,6 +215,133 @@ const resetAgenda = async (options = {}) => {
 const agendaReady = () => until("[...document.querySelectorAll('article')].filter(e=>e.getClientRects().length).length===4", 'Agenda did not load after context.');
 const contextReads = () => evaluate("window.reservationAudit.calls.filter(c=>c.path==='/reservations/context')");
 
+test('UX-06B0: Nueva reserva conserva el borrador al recuperar foco con la misma zona', async () => {
+  await resetAgenda(); await agendaReady();
+  await change('Ir a fecha', '2030-12-31');
+  await until("document.querySelector('input[type=date]').value==='2030-12-30'&&!document.body.textContent.includes('Se muestra todavía')", 'Chosen week did not load.');
+  await click('Nueva reserva');
+  await until("document.querySelector('[role=dialog]')", 'Create dialog missing.');
+  await change('Sede', 'location-a'); await change('Servicio', 'service-a');
+  await change('Fecha', '2030-12-31');
+  await change('Nombre del Cliente', 'Borrador seguro'); await change('Teléfono (WhatsApp)', '+51912345678');
+  await until("document.querySelector('[role=dialog]').textContent.includes('10:00')", 'Available slot missing.');
+  await evaluate("(()=>{const a=window.reservationAudit;a.fixture.contextDelay=800;a.focusManager.setFocused(false);a.focusManager.setFocused(true)})()");
+  await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Focus revalidation missing.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog]')!==null"), true, 'Focus revalidation unmounted the create draft.');
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  assert.equal(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.trim()==='Confirmar Cita').disabled"), true);
+  assert.equal(await evaluate("document.querySelector('[role=dialog]').textContent.includes('10:00')"), false);
+  await until("!document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Context did not finish revalidating.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=text]:not(:disabled)').value"), 'Borrador seguro');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=tel]').value"), '+51912345678');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=date]').value"), '2030-12-31');
+  assert.equal(await evaluate("document.querySelector('input[type=date]').value"), '2030-12-30');
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("document.querySelector('[role=dialog] button[aria-label=\"Cerrar diálogo\"]').click();window.reservationAudit.focusManager.setFocused(undefined)");
+});
+
+test('UX-06B0: Reagendar conserva fecha y hora al recuperar foco con la misma zona', async () => {
+  await resetAgenda(); await agendaReady();
+  await evaluate("document.querySelector('button[aria-label=\"Reagendar reserva de Ana Prueba\"]').click()");
+  await until("document.querySelector('[role=dialog]')", 'Reschedule dialog missing.');
+  await change('Nueva Fecha', '2030-12-31'); await change('Nueva Hora (HH:mm)', '11:15');
+  await evaluate("(()=>{const a=window.reservationAudit;a.fixture.contextDelay=800;a.focusManager.setFocused(false);a.focusManager.setFocused(true)})()");
+  await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Focus revalidation missing.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog]')!==null"), true, 'Focus revalidation unmounted the reschedule draft.');
+  assert.equal(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.trim()==='Confirmar Cambio').disabled"), true);
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=time]').getClientRects().length"), 0);
+  await until("!document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Context did not finish revalidating.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=date]').value"), '2030-12-31');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=time]').value"), '11:15');
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("document.querySelector('[role=dialog] button[aria-label=\"Cerrar diálogo\"]').click();window.reservationAudit.focusManager.setFocused(undefined)");
+});
+
+const fillCreateDraft = async () => {
+  await click('Nueva reserva'); await until("document.querySelector('[role=dialog]')", 'Create draft missing.');
+  await change('Sede', 'location-a'); await change('Servicio', 'service-a'); await change('Fecha', '2030-12-31');
+  await change('Nombre del Cliente', 'Cliente conservado'); await change('Teléfono (WhatsApp)', '+51912345678');
+  await until("document.querySelector('[role=dialog]').textContent.includes('10:00')", 'Draft availability missing.');
+  await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.includes('10:00')).click()");
+};
+const revalidateContext = options => evaluate("(()=>{const a=window.reservationAudit;Object.assign(a.fixture,{contextDelay:400},"+JSON.stringify(options??{})+");void a.client.invalidateQueries({queryKey:['workspace','workspace-zone-a','reservations','context'],exact:true})})()");
+
+test('UX-06B0: una zona nueva conserva cliente, recalcula fecha y descarta el slot seleccionado', async () => {
+  await resetAgenda(); await agendaReady(); await fillCreateDraft();
+  await revalidateContext({ timeZone: 'America/New_York' });
+  await until("document.querySelector('[role=dialog]').textContent.includes('La zona horaria cambió')", 'Changed zone was not reviewed in the open draft.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=text]:not(:disabled)').value"), 'Cliente conservado');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=tel]').value"), '+51912345678');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=date]').value===new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())"), true);
+  assert.equal(await evaluate("document.querySelectorAll('[role=dialog] button[aria-pressed=true]').length"), 0);
+  assert.equal(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.trim()==='Confirmar Cita').disabled"), true);
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("document.querySelector('[role=dialog] button[aria-label=\"Cerrar diálogo\"]').click()");
+});
+
+test('UX-06B0: Reagendar recalcula fecha y exige elegir una hora nueva cuando cambia la zona', async () => {
+  await resetAgenda(); await agendaReady();
+  await evaluate("document.querySelector('button[aria-label=\"Reagendar reserva de Ana Prueba\"]').click()");
+  await until("document.querySelector('[role=dialog]')", 'Reschedule draft missing.');
+  await change('Nueva Fecha', '2030-12-31'); await change('Nueva Hora (HH:mm)', '11:15');
+  await revalidateContext({ timeZone: 'America/New_York' });
+  await until("document.querySelector('[role=dialog]').textContent.includes('La zona horaria cambió')", 'Reschedule zone change missing.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=time]').value"), '');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=date]').value!== '2030-12-31'"), true);
+  assert.equal(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.trim()==='Confirmar Cambio').disabled"), true);
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("document.querySelector('[role=dialog] button[aria-label=\"Cerrar diálogo\"]').click()");
+});
+
+test('UX-06B0: 503 conserva el borrador bloqueado y recupera sin enviar operaciones', async () => {
+  await resetAgenda(); await agendaReady(); await fillCreateDraft();
+  await revalidateContext({ contextStatus: 503 });
+  await until("document.querySelector('[role=dialog]')?.textContent.includes('No se pudo cargar la zona horaria')", 'Transient error discarded the draft.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=tel]').value"), '+51912345678');
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  assert.equal(await evaluate("document.querySelector('[role=dialog]').textContent.includes('10:00')"), false);
+  assert.equal(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.trim()==='Confirmar Cita').disabled"), true);
+  // Even programmatic submit cannot use the hidden, unverified slot.
+  await evaluate("document.querySelector('[role=dialog] form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))");
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("Object.assign(window.reservationAudit.fixture,{contextStatus:0,contextDelay:0});[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.trim()==='Reintentar').click()");
+  await until("!document.body.textContent.includes('Cargando zona horaria de la agenda')&&!document.body.textContent.includes('No se pudo cargar la zona horaria')", 'Transient retry did not finish.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=text]:not(:disabled)').value"), 'Cliente conservado');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=date]').value"), '2030-12-31');
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("document.querySelector('[role=dialog] button[aria-label=\"Cerrar diálogo\"]').click()");
+});
+
+for (const status of [401, 403]) test(`UX-06B0: revalidación ${status} descarta el borrador y exige contexto autorizado nuevo`, async () => {
+  await resetAgenda(); await agendaReady(); await fillCreateDraft();
+  await revalidateContext({ contextStatus: status });
+  await until("document.body.textContent.includes('No se pudo cargar la zona horaria')&&!document.querySelector('[role=dialog]')", 'Unauthorized draft remained mounted.');
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  await evaluate("Object.assign(window.reservationAudit.fixture,{contextStatus:0,contextDelay:0})"); await click('Reintentar'); await agendaReady();
+  assert.equal(await evaluate("document.querySelector('[role=dialog]')===null"), true);
+  await click('Nueva reserva'); await until("document.querySelector('[role=dialog]')", 'New authorized form missing.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog] input[type=tel]').value"), '');
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+  await evaluate("document.querySelector('[role=dialog] button[aria-label=\"Cerrar diálogo\"]').click()");
+});
+
+for (const identityChange of ['logout', 'workspace', 'user', 'permissions']) test(`UX-06B0: ${identityChange} durante revalidación elimina el borrador y descarta la respuesta tardía`, async () => {
+  await resetAgenda(); await agendaReady(); await fillCreateDraft();
+  await revalidateContext({ contextDelay: 800 });
+  await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Pending revalidation missing.');
+  const previous = (await contextReads()).length;
+  await evaluate("(()=>{const a=window.reservationAudit;const kind="+JSON.stringify(identityChange)+";const me=structuredClone(a.store.getState().me);a.fixture.contextDelay=0;if(kind==='workspace')me.workspace.id='zone-after-change';if(kind==='user')me.user.id='user-after-change';if(kind==='workspace'||kind==='user')a.zones.set(me.workspace.id,'Asia/Kathmandu');if(kind==='permissions')me.capabilities.RESERVATIONS=[];a.setIdentity(kind==='logout'?null:me)})()");
+  assert.equal(await evaluate("document.querySelector('[role=dialog]')===null"), true);
+  if (identityChange === 'workspace' || identityChange === 'user') await agendaReady();
+  else await until("document.body.textContent.includes('No tienes permiso para consultar reservas')", 'Revoked identity still displayed agenda.');
+  await until(`window.reservationAudit.calls.filter(c=>c.path==='/reservations/context').slice(0,${previous}).every(c=>c.responded)`, 'Previous context did not finish its delayed response.');
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  assert.equal(await evaluate("document.querySelector('[role=dialog]')===null"), true);
+  assert.equal(await evaluate("document.body.textContent.includes('Cliente conservado')"), false);
+  assert.equal(await evaluate(identityChange === 'user' ? "window.reservationAudit.client.getQueryData(['workspace','workspace-zone-a','reservations','context']).timeZone==='Asia/Kathmandu'" : "window.reservationAudit.client.getQueryData(['workspace','workspace-zone-a','reservations','context'])===undefined"), true);
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.method==='post'||c.method==='put')"), false);
+});
+
 test('RESERVATIONS autorizado sin perfil carga semana, fechas y horas exactas sin leer perfil', async () => {
   await resetAgenda({ contextDelay: 400 });
   await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Context loading missing.');

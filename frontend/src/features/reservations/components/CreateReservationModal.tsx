@@ -10,6 +10,7 @@ import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Clock, Calendar as CalendarIcon } from 'lucide-react';
 import { createReservation, getAvailability } from '../services/reservation.service';
@@ -27,16 +28,18 @@ interface CreateReservationModalProps {
   services: ServiceDto[];
   timeZone: string;
   initialDate?: string;
+  timeZoneBlocked: boolean;
+  timeZoneStatus: ReactNode;
 }
 
 export const CreateReservationModal = (props: CreateReservationModalProps) => {
   const locationId = useAuthStore(state => state.selectedLocationId);
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   if (!props.isOpen) return null;
-  return <CreateReservationForm key={`${workspaceId}:${locationId}:${props.timeZone}:${props.initialDate ?? ''}`} {...props} />;
+  return <CreateReservationForm key={`${workspaceId}:${locationId}:${props.initialDate ?? ''}`} {...props} />;
 };
 
-const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services, timeZone, initialDate }: CreateReservationModalProps) => {
+const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services, timeZone, initialDate, timeZoneBlocked, timeZoneStatus }: CreateReservationModalProps) => {
   const toast = useToast();
   const globalLocationId = useAuthStore(state => state.selectedLocationId);
   const { can } = usePermissions();
@@ -48,12 +51,16 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
   const today = getBusinessToday(timeZone);
 
   const [formData, setFormData] = useState({
+    timeZone,
+    zoneChanged: false,
     serviceId: eligibleServices[0]?.id || '',
     customerName: '',
     customerIdentifier: '',
     date: initialDate || today,
     timeSlot: '' // Ahora guardamos el ISO string exacto devuelto por la disponibilidad
   });
+  // Keep customer fields, but never carry a civil date/selected slot into a different zone.
+  if (formData.timeZone !== timeZone) setFormData({ ...formData, timeZone, zoneChanged: true, date: today, timeSlot: '' });
   const selectedService = eligibleServices.find(service => service.id === formData.serviceId);
   const concreteLocation = locationId !== 'all' && locations.some(location => location.id === locationId);
   const validDate = isCivilDate(formData.date) && formData.date >= today;
@@ -62,7 +69,7 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
     ...queryPolicies.dynamic,
     queryKey: queryKeys.reservations.slots(workspaceId, locationId, formData.serviceId, formData.date, timeZone),
     queryFn: ({ signal }) => getAvailability(locationId, formData.serviceId, formData.date, signal),
-    enabled: isOpen && !!workspaceId && concreteLocation && !!selectedService && validDate && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
+    enabled: !timeZoneBlocked && isOpen && !!workspaceId && concreteLocation && !!selectedService && validDate && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
   });
 
   const saveMutation = useSessionMutation({
@@ -76,7 +83,7 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSaving || !can('RESERVATIONS', 'CREATE') || !can('RESERVATIONS', 'CHECK_AVAILABILITY')) return;
+    if (timeZoneBlocked || isSaving || !can('RESERVATIONS', 'CREATE') || !can('RESERVATIONS', 'CHECK_AVAILABILITY')) return;
     setErrorMessage(null);
 
     if (!concreteLocation || !selectedService || !validDate || isFetchingSlots || slotsError
@@ -113,9 +120,12 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Nueva Reserva Manual" size="lg" closeDisabled={isSaving}>
+      {timeZoneBlocked && timeZoneStatus}
+      {!timeZoneBlocked && formData.zoneChanged && <Alert tone="warning" className="mb-4">La zona horaria cambió. Conservamos los datos del cliente; revisa la fecha y elige un horario nuevo.</Alert>}
       {errorMessage && <Alert tone="error" className="mb-4">{errorMessage}</Alert>}
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5" aria-busy={timeZoneBlocked}>
 
+          <fieldset disabled={timeZoneBlocked} className="space-y-5">
           <FormField label="Sede" required>
             {globalLocationId === 'all' ? <Select value={locationId} required onChange={event => { setLocationId(event.target.value); setFormData({ ...formData, serviceId: '', timeSlot: '' }); }}>
               <option value="" disabled>Selecciona una sede...</option>
@@ -146,7 +156,9 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
               <Clock aria-hidden="true" className="w-4 h-4 mr-2" /> Horarios Disponibles
             </legend>
 
-            {!can('RESERVATIONS', 'CHECK_AVAILABILITY') ? (
+            {timeZoneBlocked ? (
+              <EmptyState className="py-6" title="Verifica la zona horaria antes de consultar horarios." />
+            ) : !can('RESERVATIONS', 'CHECK_AVAILABILITY') ? (
               <EmptyState className="py-6" title="La consulta de horarios requiere permiso de disponibilidad." />
             ) : !concreteLocation || !selectedService || !validDate ? (
               <EmptyState className="py-6" title="Elige sede, servicio y una fecha vigente para consultar horarios." />
@@ -185,10 +197,11 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
               <Input type="tel" pattern="^\+?[0-9]{9,15}$" title="El teléfono debe tener entre 9 y 15 números y puede incluir el código de país (Ej: +51987654321)" value={formData.customerIdentifier} onChange={e => setFormData({...formData, customerIdentifier: e.target.value})} placeholder="Ej: +51987654321" className="w-full border focus:ring-primary text-sm" required />
             </FormField>
           </div>
+          </fieldset>
 
           <div className="pt-4 flex justify-end space-x-3">
             <Button variant="secondary" type="button" disabled={isSaving} onClick={onClose} className="text-sm font-medium transition-colors">Cancelar</Button>
-            <Button variant="primary" isLoading={isSaving} type="submit" disabled={isSaving || isFetchingSlots || !!slotsError || !selectedSlotIsAvailable || !validDate || !concreteLocation || !selectedService || !can('RESERVATIONS', 'CREATE') || !can('RESERVATIONS', 'CHECK_AVAILABILITY')} className="text-sm font-medium disabled:opacity-50 transition-colors">
+            <Button variant="primary" isLoading={isSaving} type="submit" disabled={timeZoneBlocked || isSaving || isFetchingSlots || !!slotsError || !selectedSlotIsAvailable || !validDate || !concreteLocation || !selectedService || !can('RESERVATIONS', 'CREATE') || !can('RESERVATIONS', 'CHECK_AVAILABILITY')} className="text-sm font-medium disabled:opacity-50 transition-colors">
               {isSaving ? 'Agendando...' : 'Confirmar Cita'}
             </Button>
           </div>

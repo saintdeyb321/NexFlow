@@ -8,7 +8,7 @@ export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public correlationId?: string) { super(message); }
 }
 export const getApiErrorPresentation = (error: unknown) => error instanceof Error ? error.message : 'Error de prueba';
-export const calls: { path: string; method: string; params: Record<string, string>; data: unknown; workspace: string; user: string }[] = [];
+export const calls: { path: string; method: string; params: Record<string, string>; data: unknown; workspace: string; user: string; responded: boolean }[] = [];
 export const fixture = { delay: 0, fail: false, empty: false, timeZone: 'America/Lima', readOnly: false, contextDelay: 0, contextStatus: 0, contextResponse: undefined as unknown, rows: null as ReservationDto[] | null };
 export const profiles = new Map<string, BusinessProfile>();
 export const zones = new Map<string, string>();
@@ -31,10 +31,12 @@ export const axiosClient = axios.create({ adapter: async config => {
   const path = config.url!.split('?')[0];
   const params = { ...Object.fromEntries(new URLSearchParams(config.url!.split('?')[1] ?? '')), ...config.params } as Record<string, string>;
   const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-  calls.push({ path, method: config.method!, params, data: body, workspace, user: me?.user.id ?? '' });
+  const call = { path, method: config.method!, params, data: body, workspace, user: me?.user.id ?? '', responded: false };
+  calls.push(call);
   const zone = profiles.get(workspace)?.timeZone ?? zones.get(workspace) ?? state.timeZone;
   const delay = path === '/reservations/context' ? state.contextDelay : state.delay;
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+  call.responded = true;
   if (state.fail && path === '/reservations') throw new ApiError(503, 'TEST', 'Dependencia de prueba temporalmente indisponible.');
   let data: unknown;
   if (path === '/reservations/context') {

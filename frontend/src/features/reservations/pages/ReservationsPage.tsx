@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calendar, List, Search } from 'lucide-react';
 import { PageHeader } from '../../../components/ui/Layout';
@@ -52,12 +53,14 @@ const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
     refetchOnMount: 'always',
     refetchOnWindowFocus: 'always',
   });
-  if (context.isError) return <ErrorState title="No se pudo cargar la zona horaria de la agenda" description={context.error instanceof ApiError ? getApiErrorPresentation(context.error) : context.error.message} onRetry={() => void context.refetch()} />;
-  if (context.isPending || context.isFetching) return <LoadingState title="Cargando zona horaria de la agenda..." />;
-  return <ResolvedAgenda key={context.data.timeZone} workspaceId={workspaceId} timeZone={context.data.timeZone} chosenDate={chosenDate} setChosenDate={setChosenDate} />;
+  const timeZoneStatus = context.isPending || context.isFetching ? <LoadingState title="Cargando zona horaria de la agenda..." />
+    : context.isError ? <ErrorState title="No se pudo cargar la zona horaria de la agenda" description={context.error instanceof ApiError ? getApiErrorPresentation(context.error) : context.error.message} onRetry={() => void context.refetch()} /> : null;
+  // Authorization failures clear drafts; transient revalidation keeps them mounted but blocked.
+  if (!context.data || (context.isError && context.error instanceof ApiError && [401, 403].includes(context.error.status))) return timeZoneStatus;
+  return <ResolvedAgenda workspaceId={workspaceId} timeZone={context.data.timeZone} chosenDate={chosenDate} setChosenDate={setChosenDate} timeZoneBlocked={context.isFetching || context.isError} timeZoneStatus={timeZoneStatus} />;
 };
 
-const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { workspaceId: string; timeZone: string; chosenDate: string; setChosenDate: (date: string) => void }) => {
+const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate, timeZoneBlocked, timeZoneStatus }: { workspaceId: string; timeZone: string; chosenDate: string; setChosenDate: (date: string) => void; timeZoneBlocked: boolean; timeZoneStatus: ReactNode }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { can } = usePermissions();
@@ -102,7 +105,7 @@ const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { 
         throw error;
       }
     },
-    enabled: Boolean(selectedLocationId) && can('RESERVATIONS', 'READ'),
+    enabled: !timeZoneBlocked && Boolean(selectedLocationId) && can('RESERVATIONS', 'READ'),
     placeholderData: (previous, previousQuery) => canRetainWeek(previousQuery?.queryKey, weekKey) ? previous : undefined,
   });
   const loadedRange = reservationsQuery.data ? weekOf(reservationsQuery.data.from) : range;
@@ -113,7 +116,7 @@ const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { 
   const summary = useMemo(() => summarizeReservations(reservations ?? []), [reservations]);
   const selectedDay = loadedRange.days.includes(chosenDay) ? chosenDay : loadedRange.days.includes(today) ? today : loadedRange.from;
   const showingPrevious = reservationsQuery.isPlaceholderData;
-  const canCreate = can('RESERVATIONS', 'CREATE') && !showingPrevious;
+  const canCreate = !timeZoneBlocked && can('RESERVATIONS', 'CREATE') && !showingPrevious;
 
   const refresh = (reservation: Pick<ReservationDto, 'locationId'>) => invalidateReservationViews(queryClient, workspaceId, reservation.locationId);
   const cancelMutation = useSessionMutation({
@@ -129,9 +132,9 @@ const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { 
   const mutating = cancelMutation.isPending || completeMutation.isPending;
   const view = {
     timeZone, serviceNames, locationNames, showLocation: selectedLocationId === 'all',
-    canEdit: can('RESERVATIONS', 'UPDATE') && !showingPrevious && !mutating,
-    canCancel: can('RESERVATIONS', 'CANCEL') && !showingPrevious && !mutating,
-    canComplete: can('RESERVATIONS', 'COMPLETE') && !showingPrevious && !mutating,
+    canEdit: !timeZoneBlocked && can('RESERVATIONS', 'UPDATE') && !showingPrevious && !mutating,
+    canCancel: !timeZoneBlocked && can('RESERVATIONS', 'CANCEL') && !showingPrevious && !mutating,
+    canComplete: !timeZoneBlocked && can('RESERVATIONS', 'COMPLETE') && !showingPrevious && !mutating,
     onEdit: setEditingRes,
     onCancel: (reservation: ReservationDto) => setConfirmDialog({ action: 'cancel', reservation }),
     onComplete: (reservation: ReservationDto) => setConfirmDialog({ action: 'complete', reservation }),
@@ -141,7 +144,7 @@ const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { 
     catch { setRangeError('Selecciona una fecha válida cuya semana completa pueda consultarse.'); }
   };
   const executeAction = () => {
-    if (!confirmDialog || mutating) return;
+    if (!confirmDialog || mutating || timeZoneBlocked) return;
     if (confirmDialog.action === 'cancel' && can('RESERVATIONS', 'CANCEL')) cancelMutation.mutate(confirmDialog.reservation);
     if (confirmDialog.action === 'complete' && can('RESERVATIONS', 'COMPLETE') && confirmDialog.reservation.status === 'Confirmed') completeMutation.mutate(confirmDialog.reservation);
   };
@@ -150,7 +153,7 @@ const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { 
     <PageHeader title="Reservas" description="Tu agenda de lunes a domingo. Consulta citas actuales e históricas por sede." icon={<Calendar className="w-5 h-5" />} actions={
       <Button onClick={() => setCreateDate(getBusinessToday(timeZone))} disabled={!canCreate}>Nueva reserva</Button>
     } />
-    <>
+    {timeZoneBlocked ? timeZoneStatus : <>
       <WeekNavigation from={range.from} to={range.to} today={today} onChange={navigate} onCurrentWeek={() => navigate(getBusinessToday(timeZone))} />
       {rangeError && <Alert tone="error" className="mb-4">{rangeError}</Alert>}
       <p className="text-xs text-muted mb-4">Zona horaria: {timeZone} · {selectedLocationId === 'all' ? 'Todas las sedes' : locationNames.get(selectedLocationId) ?? 'Sede seleccionada'}</p>
@@ -185,10 +188,10 @@ const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { 
           {viewMode === 'week' ? <WeeklyAgenda {...view} reservations={visibleReservations} days={loadedRange.days} selectedDay={selectedDay} today={today} canCreate={canCreate} onSelectDay={setChosenDay} onCreate={setCreateDate} /> : <ReservationList {...view} reservations={visibleReservations} />}
         </section>
       </> : null}
-    </>
+    </>}
 
-    <ConfirmDialog isOpen={confirmDialog !== null} title={confirmDialog?.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'} description={confirmDialog?.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'} destructive={confirmDialog?.action === 'cancel'} confirmLabel={confirmDialog?.action === 'cancel' ? 'Sí, cancelar' : 'Sí, completar'} cancelLabel="No, volver" isLoading={mutating} confirmDisabled={!can('RESERVATIONS', confirmDialog?.action === 'cancel' ? 'CANCEL' : 'COMPLETE')} onClose={() => { if (!mutating) setConfirmDialog(null); }} onConfirm={executeAction} />
-    <CreateReservationModal isOpen={createDate !== null && can('RESERVATIONS', 'CREATE')} initialDate={createDate ?? undefined} onClose={() => setCreateDate(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva creada exitosamente.'); }} locations={canReadLocations ? locationsQuery.data ?? [] : []} services={canReadServices ? servicesQuery.data ?? [] : []} timeZone={timeZone} />
-    <EditReservationModal isOpen={editingRes !== null && can('RESERVATIONS', 'UPDATE')} onClose={() => setEditingRes(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva reprogramada exitosamente.'); }} reservation={editingRes} timeZone={timeZone} />
+    <ConfirmDialog isOpen={confirmDialog !== null} title={confirmDialog?.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'} description={timeZoneBlocked ? 'Verifica la zona horaria de la agenda antes de continuar.' : confirmDialog?.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'} destructive={confirmDialog?.action === 'cancel'} confirmLabel={confirmDialog?.action === 'cancel' ? 'Sí, cancelar' : 'Sí, completar'} cancelLabel="No, volver" isLoading={mutating} confirmDisabled={timeZoneBlocked || !can('RESERVATIONS', confirmDialog?.action === 'cancel' ? 'CANCEL' : 'COMPLETE')} onClose={() => { if (!mutating) setConfirmDialog(null); }} onConfirm={executeAction} />
+    <CreateReservationModal isOpen={createDate !== null && can('RESERVATIONS', 'CREATE')} initialDate={createDate ?? undefined} onClose={() => setCreateDate(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva creada exitosamente.'); }} locations={canReadLocations ? locationsQuery.data ?? [] : []} services={canReadServices ? servicesQuery.data ?? [] : []} timeZone={timeZone} timeZoneBlocked={timeZoneBlocked} timeZoneStatus={timeZoneStatus} />
+    <EditReservationModal isOpen={editingRes !== null && can('RESERVATIONS', 'UPDATE')} onClose={() => setEditingRes(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva reprogramada exitosamente.'); }} reservation={editingRes} timeZone={timeZone} timeZoneBlocked={timeZoneBlocked} timeZoneStatus={timeZoneStatus} />
   </div>;
 };
