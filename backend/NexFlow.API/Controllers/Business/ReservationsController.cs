@@ -51,8 +51,8 @@ public class ReservationsController : ControllerBase
         var profile = await profileRepo.GetProfileAsync(WorkspaceId, cancellationToken);
         var zone = ResolveWorkspaceZone(profile?.TimeZone);
         // Existing Windows IDs must be translated explicitly; Intl accepts IANA IDs.
-        var ianaId = zone.Id;
-        if (!zone.HasIanaId && !TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out ianaId))
+        var ianaId = IanaId(zone);
+        if (ianaId == null)
             return StatusCode(503, new { code = "Dependency.TimeZoneUnsupported", message = "No se puede representar la zona horaria de la agenda con un identificador IANA." });
         return Ok(new ReservationContextDto(ianaId));
     }
@@ -65,7 +65,8 @@ public class ReservationsController : ControllerBase
         [FromServices] ILocationRepository locationRepo,
         CancellationToken cancellationToken,
         [FromQuery] string? from = null,
-        [FromQuery] string? to = null)
+        [FromQuery] string? to = null,
+        [FromQuery] string? timeZone = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var denied = await ReadAccessDeniedAsync(cancellationToken);
@@ -73,7 +74,7 @@ public class ReservationsController : ControllerBase
         if (string.IsNullOrWhiteSpace(locationId)) return BadRequest(new { code = "Validation.Error", message = "LocationId es requerido; usa 'all' para todas las sedes." });
 
         var query = HttpContext?.Request.Query;
-        if (query != null && new[] { "locationId", "date", "from", "to" }.Any(key => query.TryGetValue(key, out var values) && values.Count > 1))
+        if (query != null && new[] { "locationId", "date", "from", "to", "timeZone" }.Any(key => query.TryGetValue(key, out var values) && values.Count > 1))
             return BadRequest(new { code = "Validation.Error", message = "Cada parámetro de consulta debe aparecer una sola vez." });
         var hasDate = date.HasValue || query?.ContainsKey("date") == true;
         var hasRange = from != null || to != null || query?.ContainsKey("from") == true || query?.ContainsKey("to") == true;
@@ -111,6 +112,10 @@ public class ReservationsController : ControllerBase
 
         var profile = await profileRepo.GetProfileAsync(WorkspaceId, cancellationToken);
         var workspaceZone = ResolveWorkspaceZone(profile?.TimeZone);
+        // Optional expectation detects changes from other sessions; the server still selects the zone.
+        // Legacy callers without this parameter keep their existing list/date contract.
+        if (timeZone != null && !string.Equals(timeZone, IanaId(workspaceZone), StringComparison.Ordinal))
+            return Conflict(new { code = "Reservation.TimeZoneChanged", message = "La zona horaria de la agenda cambió. Vuelve a cargar su contexto." });
 
         DateTime startUtc, endUtc;
         try
@@ -128,6 +133,9 @@ public class ReservationsController : ControllerBase
             reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
             reservation.CustomerName, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString())));
     }
+
+    private static string? IanaId(TimeZoneInfo zone) => zone.HasIanaId ? zone.Id
+        : TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out var id) ? id : null;
 
     private static TimeZoneInfo ResolveWorkspaceZone(string? configuredId)
     {

@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { useEffect, useState } from 'react';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { queryClient as client } from '../../src/core/query/queryClient';
 import { connectQueryIdentity, disconnectQueryIdentity } from '../../src/core/query/queryPersistence';
 import { ToastProvider } from '../../src/components/ui/Toast';
@@ -20,7 +20,7 @@ const setIdentity = (me: MeResponse | null) => flushSync(() => {
   useAuthStore.setState({ me, selectedLocationId: 'all' });
 });
 // This entry is served only by the dedicated localhost test server, never the production entry.
-const audit = { calls, fixture, store: useAuthStore, client, setIdentity, defaultIdentity: reservationIdentity, profiles, zones, initialProfile, rowsFor };
+const audit = { calls, fixture, store: useAuthStore, client, setIdentity, defaultIdentity: reservationIdentity, profiles, zones, initialProfile, rowsFor, focusManager };
 Object.assign(window, { reservationAudit: audit });
 export const ReservationsPreview = () => {
   const [showProfile, setShowProfile] = useState(false);

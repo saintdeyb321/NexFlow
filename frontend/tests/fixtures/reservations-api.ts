@@ -51,6 +51,7 @@ export const axiosClient = axios.create({ adapter: async config => {
   else if (path === '/reservations/availability') data = [{ startTime: `${params.date}T15:00:00Z`, endTime: `${params.date}T15:30:00Z`, isAvailable: true }, { startTime: `${params.date}T16:00:00Z`, endTime: `${params.date}T16:30:00Z`, isAvailable: false }];
   else if (path === '/reservations' && config.method === 'get') {
     if (!can(me, 'RESERVATIONS', 'READ')) throw new ApiError(403, 'Security.CapabilityDenied', 'Reservas denegadas.');
+    if (params.timeZone && params.timeZone !== zone) throw new ApiError(409, 'Reservation.TimeZoneChanged', 'La zona horaria de la agenda cambió.');
     const key = `${workspace}:${params.from ?? params.date}`;
     const rows = state.rows ?? changed.get(key) ?? rowsFor(workspace, params.from ?? params.date);
     changed.set(key, rows);

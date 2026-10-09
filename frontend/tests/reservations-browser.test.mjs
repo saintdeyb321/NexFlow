@@ -122,7 +122,7 @@ test('salto de fecha cruza año y conserva semana anterior identificada durante 
   assert.equal(await evaluate("[...document.querySelectorAll('button[aria-label^=\"Nueva reserva para\"]')].every(e=>e.disabled)"), true);
   await until("!document.body.textContent.includes('Se muestra todavía')&&document.body.textContent.includes('2031')", 'New week did not replace previous week.');
   const reads = await weeklyReads();
-  assert.deepEqual(reads.at(-1).params, { locationId: 'all', from: '2030-12-30', to: '2031-01-06' });
+  assert.deepEqual(reads.at(-1).params, { locationId: 'all', from: '2030-12-30', to: '2031-01-06', timeZone: 'America/Lima' });
   await evaluate('window.reservationAudit.fixture.delay=0');
 });
 test('filtros/lista/búsqueda conservan resumen completo y estados históricos', async () => {
@@ -226,7 +226,7 @@ test('RESERVATIONS autorizado sin perfil carga semana, fechas y horas exactas si
   assert.equal(await evaluate("[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Nueva reserva').disabled"), false);
   await change('Ir a fecha', '2030-12-31');
   await until("document.body.textContent.includes('2031')&&!document.body.textContent.includes('Se muestra todavía')", 'Cross-year week missing.');
-  assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2030-12-30', to: '2031-01-06' });
+  assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2030-12-30', to: '2031-01-06', timeZone: 'America/Lima' });
   await click('Lista'); await click('Semana'); assert.equal((await contextReads()).length, 1);
   await capture('timezone-permission-resolved');
 });
@@ -312,7 +312,7 @@ test('render DST New York conserva ambas 01:30 y semana octubre/noviembre', asyn
   await evaluate("(()=>{const a=window.reservationAudit;const rows=a.rowsFor('workspace-zone-a','2026-10-26').slice(0,2);rows[0].dateTime='2026-11-01T05:30:00Z';rows[1].dateTime='2026-11-01T06:30:00Z';a.fixture.rows=rows})()");
   await change('Ir a fecha', '2026-11-01');
   await until("document.querySelectorAll('th[scope=row]').length===1&&document.querySelector('th[scope=row]').textContent==='01:30'", 'Repeated DST hour missing.');
-  assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2026-10-26', to: '2026-11-02' });
+  assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2026-10-26', to: '2026-11-02', timeZone: 'America/New_York' });
   assert.equal(await evaluate("document.querySelectorAll('article time').length"), 2);
   assert.equal(await evaluate("[...document.querySelectorAll('article time')].map(e=>e.dateTime).join(',')"), '2026-11-01T05:30:00Z,2026-11-01T06:30:00Z');
   await metrics(360); await change('Día de la agenda', '2026-11-01');
@@ -332,4 +332,29 @@ test('PUT autorizado del perfil refresca contexto y slots propios, sin invalidar
   assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','zone-foreign','reservations','context']).isInvalidated"), false);
   assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima']).isInvalidated"), true);
   await evaluate('window.reservationAudit.setShowProfile(false)');
+});
+
+test('cambio de zona desde otra sesión se detecta antes de mostrar una semana nueva', async () => {
+  await resetAgenda(); await agendaReady();
+  await evaluate("(()=>{const a=window.reservationAudit;a.profiles.set('workspace-zone-a',{...a.initialProfile('workspace-zone-a'),timeZone:'America/New_York'})})()");
+  await change('Ir a fecha', '2030-07-02');
+  await until("document.body.textContent.includes('Zona horaria: America/New_York')", 'A new weekly read used stale context after an external profile change.');
+  await agendaReady();
+  assert.equal(await evaluate("document.querySelector('article[aria-label=\"Reserva de Ana Prueba\"] time').textContent"), '11:00');
+  assert.equal(await evaluate("document.querySelector('input[type=date]').value"), '2030-07-01');
+  assert.equal((await weeklyReads()).at(-1).params.from, '2030-07-01');
+  assert.equal((await weeklyReads()).at(-1).params.timeZone, 'America/New_York');
+});
+
+test('volver a una sesión abierta revalida zona externa antes de recuperar la agenda', async () => {
+  await resetAgenda(); await agendaReady();
+  const before = (await contextReads()).length;
+  await evaluate("(()=>{const a=window.reservationAudit;a.focusManager.setFocused(false);a.profiles.set('workspace-zone-a',{...a.initialProfile('workspace-zone-a'),timeZone:'America/New_York'});a.fixture.contextDelay=200;a.focusManager.setFocused(true)})()");
+  await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Focus did not revalidate stale zone.');
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  await until("document.body.textContent.includes('Zona horaria: America/New_York')", 'External zone remained cached after focus.');
+  await agendaReady();
+  assert.equal((await contextReads()).length, before + 1);
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.path==='/business/profile')"), false);
+  await evaluate('window.reservationAudit.focusManager.setFocused(undefined)');
 });

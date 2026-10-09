@@ -67,6 +67,15 @@ test('guardar perfil invalida contexto, semanas y slots solo del workspace afect
   client.clear();
 });
 
+test('semana envía la zona validada como expectativa y rechaza contexto desactualizado', async () => {
+  calls.length = 0;
+  await getReservationsForWeek('all', week.from, week.to, undefined, 'America/Lima');
+  assert.equal(calls[0].params.timeZone, 'America/Lima');
+  await assert.rejects(() => getReservationsForWeek('all', week.from, week.to, undefined, 'America/New_York'), error => {
+    return error instanceof Error && 'code' in error && error.code === 'Reservation.TimeZoneChanged';
+  });
+});
+
 test('lunes-domingo cruza mes/año con límite superior exclusivo', () => {
   assert.equal(week.from, '2026-12-28'); assert.equal(week.to, '2027-01-04');
   assert.equal(week.days.length, 7); assert.equal(week.days.at(-1), '2027-01-03');

@@ -26,7 +26,7 @@ import { WeeklyAgenda } from '../components/WeeklyAgenda';
 import { WeekNavigation } from '../components/WeekNavigation';
 import { canRetainWeek, filterReservations, formatWeek, reservationStatusLabels, summarizeReservations, weekOf } from '../utils/weeklyAgenda';
 import type { StatusFilter } from '../utils/weeklyAgenda';
-import type { ReservationDto } from '../types/reservation.types';
+import type { ReservationContextDto, ReservationDto } from '../types/reservation.types';
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'Todas' }, { value: 'Pending', label: 'Pendientes' },
@@ -43,17 +43,21 @@ export const ReservationsPage = () => {
 };
 
 const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
+  const [chosenDate, setChosenDate] = useState('');
   const context = useQuery({
     ...queryPolicies.stable,
     queryKey: queryKeys.reservations.context(workspaceId),
     queryFn: ({ signal }) => getReservationContext(signal),
+    // Another session may have changed the profile since the cached read.
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
   });
   if (context.isError) return <ErrorState title="No se pudo cargar la zona horaria de la agenda" description={context.error instanceof ApiError ? getApiErrorPresentation(context.error) : context.error.message} onRetry={() => void context.refetch()} />;
   if (context.isPending || context.isFetching) return <LoadingState title="Cargando zona horaria de la agenda..." />;
-  return <ResolvedAgenda key={context.data.timeZone} workspaceId={workspaceId} timeZone={context.data.timeZone} />;
+  return <ResolvedAgenda key={context.data.timeZone} workspaceId={workspaceId} timeZone={context.data.timeZone} chosenDate={chosenDate} setChosenDate={setChosenDate} />;
 };
 
-const ResolvedAgenda = ({ workspaceId, timeZone }: { workspaceId: string; timeZone: string }) => {
+const ResolvedAgenda = ({ workspaceId, timeZone, chosenDate, setChosenDate }: { workspaceId: string; timeZone: string; chosenDate: string; setChosenDate: (date: string) => void }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { can } = usePermissions();
@@ -61,7 +65,6 @@ const ResolvedAgenda = ({ workspaceId, timeZone }: { workspaceId: string; timeZo
   const canReadServices = can('SERVICES', 'READ');
   const canReadLocations = can('LOCATIONS', 'READ');
   const today = getBusinessToday(timeZone);
-  const [chosenDate, setChosenDate] = useState('');
   const [rangeError, setRangeError] = useState('');
   const range = weekOf(chosenDate || today);
   const [chosenDay, setChosenDay] = useState('');
@@ -88,10 +91,17 @@ const ResolvedAgenda = ({ workspaceId, timeZone }: { workspaceId: string; timeZo
   const reservationsQuery = useQuery({
     ...queryPolicies.dynamic,
     queryKey: weekKey,
-    queryFn: async ({ signal }) => ({
-      reservations: await getReservationsForWeek(selectedLocationId, range.from, range.to, signal),
-      from: range.from, to: range.to,
-    }),
+    queryFn: async ({ signal }) => {
+      try {
+        return { reservations: await getReservationsForWeek(selectedLocationId, range.from, range.to, signal, timeZone), from: range.from, to: range.to };
+      } catch (error) {
+        const contextKey = queryKeys.reservations.context(workspaceId);
+        const currentZone = queryClient.getQueryData<ReservationContextDto>(contextKey)?.timeZone;
+        if (!signal.aborted && error instanceof ApiError && error.code === 'Reservation.TimeZoneChanged' && currentZone === timeZone)
+          void queryClient.invalidateQueries({ queryKey: contextKey, exact: true }, { cancelRefetch: false });
+        throw error;
+      }
+    },
     enabled: Boolean(selectedLocationId) && can('RESERVATIONS', 'READ'),
     placeholderData: (previous, previousQuery) => canRetainWeek(previousQuery?.queryKey, weekKey) ? previous : undefined,
   });

@@ -30,6 +30,40 @@ namespace NexFlow.Tests;
 public sealed class ReservationsApiTests
 {
     [Fact]
+    public async Task Weekly_http_rejects_stale_zone_before_repository_and_legacy_callers_remain_compatible()
+    {
+        await using var f = new ApiFixture();
+        var client = await f.StartAsync();
+        using var context = await client.GetAsync("/api/reservations/context");
+        Assert.Equal(HttpStatusCode.OK, context.StatusCode);
+        f.Profiles.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BusinessProfileDto("Business", "", "", "", "", "America/New_York"));
+        using var stale = await client.GetAsync("/api/reservations?locationId=all&from=2030-07-01&to=2030-07-08&timeZone=America%2FLima");
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var error = JsonDocument.Parse(await stale.Content.ReadAsStringAsync());
+        Assert.Equal("Reservation.TimeZoneChanged", error.RootElement.GetProperty("code").GetString());
+        f.Repository.VerifyNoOtherCalls();
+        foreach (var expectation in new[] { "", "&timeZone=America%2FNew_York" })
+        {
+            using var response = await client.GetAsync("/api/reservations?locationId=all&from=2030-07-01&to=2030-07-08" + expectation);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var rows = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(JsonValueKind.Array, rows.RootElement.ValueKind);
+        }
+        Assert.All(f.Reads, read => Assert.Equal(Utc("2030-07-01T04:00:00Z"), read.Start));
+    }
+
+    [Fact]
+    public async Task Windows_zone_metadata_matches_iana_historical_calendar_boundaries()
+    {
+        await using var f = new ApiFixture { Zone = "SA Pacific Standard Time" };
+        var context = Assert.IsType<ReservationContextDto>(Assert.IsType<OkObjectResult>(await f.ContextAsync()).Value);
+        Assert.Equal("America/Bogota", context.TimeZone);
+        Assert.IsType<OkObjectResult>(await f.ReadAsync(from: "1992-06-01", to: "1992-06-08"));
+        Assert.Equal(Utc("1992-06-01T04:00:00Z"), Assert.Single(f.Reads).Start);
+    }
+
+    [Fact]
     public async Task Context_http_requires_only_reservations_read_and_returns_no_business_profile_data()
     {
         await using var f = new ApiFixture { Zone = "Asia/Kathmandu" };
