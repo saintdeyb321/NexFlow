@@ -449,15 +449,33 @@ test('render DST New York conserva ambas 01:30 y semana octubre/noviembre', asyn
 
 test('PUT autorizado del perfil refresca contexto y slots propios, sin invalidar otro workspace', async () => {
   await resetAgenda(); await agendaReady();
-  await evaluate("(()=>{const a=window.reservationAudit;a.client.setQueryData(['workspace','zone-foreign','reservations','context'],{timeZone:'Asia/Kathmandu'});a.client.setQueryData(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima'],[]);a.profiles.set('workspace-zone-a',{...a.initialProfile('workspace-zone-a'),timeZone:'America/New_York'});const me=structuredClone(a.store.getState().me);me.capabilities.BUSINESS_PROFILE=['READ','UPDATE'];a.store.setState({me});a.setShowProfile(true)})()");
+  await evaluate("(()=>{const a=window.reservationAudit;a.client.setQueryData(['workspace','zone-foreign','reservations','context'],{timeZone:'Asia/Kathmandu'});a.client.setQueryData(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima'],[]);a.profiles.set('workspace-zone-a',{...a.initialProfile('workspace-zone-a'),timeZone:'America/Lima'});const me=structuredClone(a.store.getState().me);me.capabilities.BUSINESS_PROFILE=['READ','UPDATE'];a.store.setState({me});a.setShowProfile(true)})()");
   await until("[...document.querySelectorAll('[data-test-profile] button')].some(e=>e.textContent.trim()==='Editar Perfil'&&!e.disabled)", 'Authorized profile missing.');
   await click('Editar Perfil'); await change('Nombre Comercial', 'Nombre confirmado');
   const prior = (await contextReads()).length; await click('Guardar Cambios');
-  await until("document.body.textContent.includes('Zona horaria: America/New_York')", 'Profile save did not refresh effective zone.');
+  await until("(()=>{const a=window.reservationAudit;const reads=a.calls.filter(c=>c.path==='/reservations/context');return reads.length==="+(prior+1)+"&&reads.at(-1).responded&&a.client.getQueryState(['workspace','workspace-zone-a','reservations','context']).fetchStatus==='idle'&&document.body.textContent.includes('Zona horaria: America/Lima')})()", 'Profile save did not finish refreshing the Peru zone.');
   assert.equal((await contextReads()).length, prior + 1);
   assert.equal(await evaluate("window.reservationAudit.calls.filter(c=>c.path==='/business/profile'&&c.method==='put').length"), 1);
   assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','zone-foreign','reservations','context']).isInvalidated"), false);
   assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima']).isInvalidated"), true);
+  await evaluate('window.reservationAudit.setShowProfile(false)');
+});
+
+test('perfil legacy fuera de Perú rechaza escritura sin perder edición ni invalidar Reservas', async () => {
+  await resetAgenda(); await agendaReady();
+  await evaluate("(()=>{const a=window.reservationAudit;a.client.setQueryData(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima'],[]);a.profiles.set('workspace-zone-a',{...a.initialProfile('workspace-zone-a'),timeZone:'America/New_York'});const me=structuredClone(a.store.getState().me);me.capabilities.BUSINESS_PROFILE=['READ','UPDATE'];a.store.setState({me});a.setShowProfile(true)})()");
+  await until("[...document.querySelectorAll('[data-test-profile] button')].some(e=>e.textContent.trim()==='Editar Perfil'&&!e.disabled)", 'Legacy profile missing.');
+  await click('Editar Perfil'); await change('Nombre Comercial', 'Borrador conservado');
+  const prior = (await contextReads()).length; await click('Guardar Cambios');
+  await until("document.body.textContent.includes('NexFlow V1 utiliza exclusivamente la zona horaria America/Lima.')", 'Foreign zone write was not rejected.');
+  assert.equal(await evaluate("[...document.querySelectorAll('[data-test-profile] button')].some(e=>e.textContent.trim()==='Guardar Cambios'&&!e.disabled)"), true);
+  assert.equal(await evaluate("document.querySelector('[data-test-profile] input').value"), 'Borrador conservado');
+  assert.equal(await evaluate("window.reservationAudit.profiles.get('workspace-zone-a').timeZone"), 'America/New_York');
+  assert.notEqual(await evaluate("window.reservationAudit.profiles.get('workspace-zone-a').commercialName"), 'Borrador conservado');
+  assert.equal((await contextReads()).length, prior);
+  assert.equal(await evaluate("window.reservationAudit.calls.filter(c=>c.path==='/business/profile'&&c.method==='put').length"), 1);
+  assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','workspace-zone-a','reservations','context']).isInvalidated"), false);
+  assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima']).isInvalidated"), false);
   await evaluate('window.reservationAudit.setShowProfile(false)');
 });
 

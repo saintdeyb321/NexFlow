@@ -69,6 +69,9 @@ public class BusinessController : ControllerBase
     {
         if (!await HasAccessTo("BUSINESS_PROFILE", cancellationToken)) return StatusCode(403, "Módulo BUSINESS_PROFILE no contratado.");
 
+        if (!string.Equals(profile.TimeZone, "America/Lima", StringComparison.Ordinal))
+            return BadRequest(new { code = "Validation.Error", message = "NexFlow V1 utiliza exclusivamente la zona horaria America/Lima." });
+
         await _profileRepository.SaveProfileAsync(WorkspaceId, profile, cancellationToken);
 
         var workspace = await _workspaceRepository.GetByIdAsync(WorkspaceId, cancellationToken);

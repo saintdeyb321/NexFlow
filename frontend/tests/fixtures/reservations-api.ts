@@ -45,7 +45,10 @@ export const axiosClient = axios.create({ adapter: async config => {
     data = state.contextResponse === undefined ? { timeZone: zone } : state.contextResponse;
   } else if (path === '/business/profile') {
     if (!can(me, 'BUSINESS_PROFILE', config.method === 'put' ? 'UPDATE' : 'READ')) throw new ApiError(403, 'TEST', 'Perfil denegado.');
-    if (config.method === 'put') profiles.set(workspace, structuredClone(body));
+    if (config.method === 'put') {
+      if (body.timeZone !== 'America/Lima') throw new ApiError(400, 'Validation.Error', 'NexFlow V1 utiliza exclusivamente la zona horaria America/Lima.');
+      profiles.set(workspace, structuredClone(body));
+    }
     else data = structuredClone(profiles.get(workspace) ?? initialProfile(workspace));
   }
   else if (path === '/business/locations') data = [{ id: 'location-a', name: 'Sede A de prueba', isMain: true }, { id: 'location-b', name: 'Sede B de prueba', isMain: false }];
