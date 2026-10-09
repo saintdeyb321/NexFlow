@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '../../src/core/query/queryClient';
@@ -12,7 +13,12 @@ import { useAuthStore, navigationIdentity } from './navigation-store';
 import type { MeResponse } from '../../src/core/types/auth.types';
 import '../../src/index.css';
 
-const setIdentity = (me: MeResponse | null) => { disconnectQueryIdentity(); if (me) connectQueryIdentity(me); useAuthStore.setState({ me, selectedLocationId: 'all' }); };
+// CDP assertions must observe the committed identity, not the previous React render.
+const setIdentity = (me: MeResponse | null) => flushSync(() => {
+  disconnectQueryIdentity();
+  if (me) connectQueryIdentity(me);
+  useAuthStore.setState({ me, selectedLocationId: 'all' });
+});
 queryClient.setDefaultOptions({ queries: { ...queryClient.getDefaultOptions().queries, retry: false } });
 connectQueryIdentity(useAuthStore.getState().me!);
 let logoutCount = 0;

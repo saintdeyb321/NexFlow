@@ -90,6 +90,8 @@ const reset = async () => {
   await metrics(1280);
   await evaluate("document.querySelectorAll('button[aria-label=\"Cerrar notificación\"]').forEach(button=>button.click())");
   await evaluate("(()=>{const a=window.navigationAudit;Object.assign(a.fixture,{loadDelay:0,saveDelay:0,failLoad:0,failSave:0,ignoreAbort:false});sessionStorage.clear();a.remote.clear();a.locations.clear();a.calls.length=0;a.navigate('/');a.setIdentity(structuredClone(a.defaultIdentity))})()");
+  // Wait for the new route and query, rather than matching the previous render's identity.
+  await until("document.querySelector('[data-current-module]')?.textContent==='Dashboard'&&window.navigationAudit.calls.some(c=>c.path==='/business/profile'&&c.method==='get')&&window.navigationAudit.client.isFetching()===0", 'Navigation reset did not finish.');
   await ready();
 };
 const navigate = async path => { await evaluate("window.navigationAudit.navigate("+JSON.stringify(path)+")"); await until("document.querySelector('[data-current-module]').textContent!==''",'Route not loaded.'); };

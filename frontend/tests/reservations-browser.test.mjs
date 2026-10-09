@@ -199,3 +199,15 @@ test('vacío y error son distintos; recuperación conserva el contrato sin llama
   await click('Reintentar'); await until("[...document.querySelectorAll('article')].filter(e=>e.getClientRects().length).length===2", 'Retry did not recover.');
   assert.equal((await weeklyReads()).every(read => read.params.from && read.params.to && !read.params.date), true);
 });
+
+test('RESERVATIONS autorizado sin perfil: bloqueo de zona explícito, sin lectura prohibida ni horas supuestas', async () => {
+  await evaluate("(()=>{const a=window.reservationAudit;a.client.clear();a.calls.length=0;a.store.setState({me:{...a.store.getState().me,workspace:{id:'workspace-zone-denied',name:'Zona de prueba',status:'Active'},capabilities:{...a.store.getState().me.capabilities,RESERVATIONS:['READ','CREATE','UPDATE','COMPLETE','CANCEL','CHECK_AVAILABILITY'],BUSINESS_PROFILE:[]}},selectedLocationId:'all'})})()");
+  await until("document.body.textContent.includes('Necesitas acceso de lectura al perfil del negocio para resolver su zona horaria.')", 'Missing profile permission did not show the timezone blocker.');
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.path==='/business/profile')"), false);
+  assert.equal((await weeklyReads()).length, 0);
+  assert.equal(await evaluate("document.querySelectorAll('article,th[scope=row],input[type=date]').length"), 0);
+  assert.equal(await evaluate("document.body.textContent.includes('Zona horaria:')"), false);
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Nueva reserva')?.disabled"), true);
+  await capture('timezone-permission-blocked');
+  // Characterizes the safe failure; it does not satisfy the functional release gate.
+});
