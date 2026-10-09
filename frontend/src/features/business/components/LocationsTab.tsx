@@ -2,7 +2,7 @@ import { Button, IconButton } from '../../../components/ui/Button';
 import { Input, FormField } from '../../../components/ui/Form';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { useToast } from '../../../components/ui/useToast';
-import { LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
+import { Alert, Badge, LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
 import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -61,7 +61,7 @@ export const LocationsTab = () => {
   const handleEditClick = (loc: LocationDto) => {
     setNewLocation(loc);
     setIsFormOpen(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
 
   const handleSaveLocation = (e: React.FormEvent) => {
@@ -77,22 +77,25 @@ export const LocationsTab = () => {
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
 
   return (
-    <div className="space-y-6 animate-in fade-in">
+    <div className="space-y-6">
       <ConfirmDialog isOpen={deleteId !== null} title="Eliminar sede" description="¿Eliminar esta sede? Las reservas futuras o referencias impedirán su eliminación." destructive confirmLabel="Eliminar" isLoading={deleteMutation.isPending} confirmDisabled={!can('LOCATIONS', 'DELETE')} onClose={() => setDeleteId(null)} onConfirm={() => { if (deleteId && can('LOCATIONS', 'DELETE')) deleteMutation.mutate(deleteId); }} />
-      <div className="flex justify-between items-center bg-surface p-4 rounded-xl border shadow-sm">
-        <h3 className="font-bold text-foreground">Gestión de Locales</h3>
+      <div className="nf-panel nf-settings-panel overflow-hidden">
+      <div className="nf-settings-panel-header">
+        <div><h2 className="text-lg font-semibold">Sedes del negocio</h2><p className="text-sm text-muted mt-1">Mantén las direcciones y la sede principal que tus clientes pueden consultar.</p></div>
         {!isFormOpen && (
           <Button variant="primary" disabled={!can('LOCATIONS', 'CREATE')} onClick={() => { setNewLocation(emptyLocation); setIsFormOpen(true); }} className="text-sm font-medium transition-colors">
-            + Añadir Nueva Sede
+            Añadir nueva sede
           </Button>
         )}
       </div>
+      {!can('LOCATIONS', 'CREATE') && !can('LOCATIONS', 'UPDATE') && !can('LOCATIONS', 'DELETE') && <div className="nf-settings-panel-body"><Alert>Solo lectura. Puedes consultar las sedes; necesitas permiso para modificarlas.</Alert></div>}
+      </div>
 
       {isFormOpen && (
-        <form onSubmit={handleSaveLocation} className="bg-surface shadow-sm border-2 border-blue-100 rounded-xl p-6 animate-in slide-in-from-top-4">
-          <div className="flex justify-between items-center mb-4 pb-2 border-b">
-            <h3 className="text-lg font-bold text-blue-900 flex items-center">
-              <MapPin aria-hidden="true" className="w-5 h-5 mr-2 text-primary"/> {newLocation.id ? 'Editar Sede' : 'Registrar Nueva Sede'}
+        <form onSubmit={handleSaveLocation} className="nf-panel nf-settings-panel nf-settings-panel-body" aria-busy={saveMutation.isPending}>
+          <div className="flex flex-wrap gap-3 justify-between items-center mb-5 pb-4 border-b border-line">
+            <h3 className="text-lg font-semibold flex items-center">
+              <MapPin aria-hidden="true" className="w-5 h-5 mr-2 text-primary"/> {newLocation.id ? 'Editar sede' : 'Nueva sede'}
             </h3>
             <IconButton variant="ghost" label="Cerrar formulario de sede" type="button"  disabled={saveMutation.isPending} onClick={() => setIsFormOpen(false)} className="">
               <X aria-hidden="true" className="w-5 h-5" />
@@ -100,59 +103,59 @@ export const LocationsTab = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <FormField label="Nombre (Ej: Sucursal Centro)">
-              <Input type="text" value={newLocation.name || ''} onChange={e => setNewLocation({...newLocation, name: e.target.value})} className="w-full border focus:ring-primary text-sm" required />
+            <FormField label="Nombre de la sede" helperText="Por ejemplo: Sede Centro.">
+              <Input type="text" autoFocus disabled={saveMutation.isPending} value={newLocation.name || ''} onChange={e => setNewLocation({...newLocation, name: e.target.value})} required />
             </FormField>
-            <FormField label="Dirección Exacta">
-              <Input type="text" value={newLocation.address || ''} onChange={e => setNewLocation({...newLocation, address: e.target.value})} className="w-full border focus:ring-primary text-sm" required />
+            <FormField label="Dirección exacta">
+              <Input type="text" disabled={saveMutation.isPending} value={newLocation.address || ''} onChange={e => setNewLocation({...newLocation, address: e.target.value})} required />
             </FormField>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
             <FormField label="Referencia">
-              <Input type="text" value={newLocation.reference || ''} onChange={e => setNewLocation({...newLocation, reference: e.target.value})} className="w-full border focus:ring-primary text-sm" placeholder="Ej: Frente al parque central" />
+              <Input type="text" disabled={saveMutation.isPending} value={newLocation.reference || ''} onChange={e => setNewLocation({...newLocation, reference: e.target.value})} placeholder="Ej.: Frente al parque central" />
             </FormField>
-            <FormField label="Enlace de Google Maps" helperText="Vital para guiar a los clientes mediante IA.">
-              <Input type="url" value={newLocation.mapUrl || ''} onChange={e => setNewLocation({...newLocation, mapUrl: e.target.value})} className="w-full border focus:ring-primary text-sm" placeholder="https://maps.app.goo.gl/..." />
+            <FormField label="Enlace de Google Maps" helperText="Opcional. Ayuda a tus clientes a encontrar esta sede.">
+              <Input type="url" disabled={saveMutation.isPending} value={newLocation.mapUrl || ''} onChange={e => setNewLocation({...newLocation, mapUrl: e.target.value})} placeholder="https://maps.app.goo.gl/..." />
             </FormField>
           </div>
 
           {locations.length > 0 && (
-            <div className="mb-4 flex items-center">
-               <Input type="checkbox" id="isMain" checked={newLocation.isMain || false} onChange={e => setNewLocation({...newLocation, isMain: e.target.checked})} className="w-4 h-4 focus:ring-primary" />
-               <label htmlFor="isMain" className="ml-2 text-sm text-gray-700">Definir como mi Sede Principal</label>
-            </div>
+            <label className="mb-5 flex items-center gap-3 min-h-11 text-sm text-foreground">
+               <Input type="checkbox" disabled={saveMutation.isPending} checked={newLocation.isMain || false} onChange={e => setNewLocation({...newLocation, isMain: e.target.checked})} />
+               Definir como sede principal
+            </label>
           )}
 
-          <div className="flex justify-end pt-4 mt-2 border-t gap-3">
-            <Button variant="secondary" type="button" onClick={() => setIsFormOpen(false)} className="text-sm font-medium">
+          <div className="nf-settings-actions">
+            <Button variant="secondary" type="button" disabled={saveMutation.isPending} onClick={() => setIsFormOpen(false)}>
               Cancelar
             </Button>
             <Button variant="primary" isLoading={saveMutation.isPending} type="submit" disabled={saveMutation.isPending || !can('LOCATIONS', newLocation.id ? 'UPDATE' : 'CREATE')} className="text-sm font-medium disabled:opacity-50">
-              {saveMutation.isPending ? 'Guardando...' : (newLocation.id ? 'Guardar Cambios' : 'Añadir Sede')}
+              {saveMutation.isPending ? 'Guardando...' : (newLocation.id ? 'Guardar cambios' : 'Añadir sede')}
             </Button>
           </div>
         </form>
       )}
 
-      <div className="bg-surface shadow-sm border border-line rounded-xl overflow-hidden">
+      <div className="nf-panel nf-settings-panel overflow-hidden">
         {locations.length === 0 ? (
-          <EmptyState title="Aún no hay sedes registradas." />
+          <EmptyState title="Aún no hay sedes registradas" description="Añade una sede para compartir su dirección y configurar sus horarios." />
         ) : (
-          <ul className="divide-y divide-gray-100">
+          <ul className="divide-y divide-line">
             {locations.map(loc => (
               <li key={loc.id} className="p-5 flex flex-col sm:flex-row justify-between items-start gap-4 hover:bg-surface-soft transition-colors">
                 <div className="min-w-0">
                   <h4 className="font-semibold text-foreground flex flex-wrap gap-2 items-center text-base break-words">
                     {loc.name}
-                    {loc.isMain && <span className="ml-3 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full border border-green-200">Sede Principal</span>}
+                    {loc.isMain && <Badge tone="success">Sede principal</Badge>}
                   </h4>
                   <div className="mt-2 space-y-1">
-                    <p className="text-sm text-muted flex items-start break-words"><MapPin aria-hidden="true" className="w-4 h-4 mr-2 text-gray-400 mt-0.5 shrink-0"/> {loc.address}</p>
-                    {loc.reference && <p className="text-sm text-muted flex items-start pl-6"><span className="font-medium mr-1">Ref:</span> {loc.reference}</p>}
+                    <p className="text-sm text-muted flex items-start"><MapPin aria-hidden="true" className="w-4 h-4 mr-2 mt-0.5 shrink-0"/><span className="min-w-0 break-words">{loc.address}</span></p>
+                    {loc.reference && <p className="text-sm text-muted pl-6 break-words"><span className="font-medium mr-1">Referencia:</span> {loc.reference}</p>}
 
                     {loc.mapUrl && (
-                       <a href={loc.mapUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline flex items-center pl-6 mt-1">
+                       <a href={loc.mapUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline flex items-center pl-6 mt-1 min-h-11">
                          <Map aria-hidden="true" className="w-4 h-4 mr-1"/> Ver en Google Maps
                        </a>
                     )}
@@ -160,10 +163,10 @@ export const LocationsTab = () => {
                 </div>
 
                 <div className="flex space-x-2">
-                  <IconButton variant="ghost" label="Editar Sede" disabled={!can('LOCATIONS', 'UPDATE')} onClick={() => handleEditClick(loc)} className="transition-all" title="Editar Sede">
+                  <IconButton variant="ghost" label={`Editar sede ${loc.name}`} disabled={!can('LOCATIONS', 'UPDATE')} onClick={() => handleEditClick(loc)} title={`Editar sede ${loc.name}`}>
                     <Pencil aria-hidden="true" className="w-5 h-5" />
                   </IconButton>
-                  <IconButton variant="ghost" label="Eliminar Sede" disabled={!can('LOCATIONS', 'DELETE')} onClick={() => handleDeleteLocation(loc.id!)} className="transition-all text-danger" title="Eliminar Sede">
+                  <IconButton variant="ghost" label={`Eliminar sede ${loc.name}`} disabled={!can('LOCATIONS', 'DELETE')} onClick={() => handleDeleteLocation(loc.id!)} className="text-danger" title={`Eliminar sede ${loc.name}`}>
                     <Trash2 aria-hidden="true" className="w-5 h-5" />
                   </IconButton>
                 </div>

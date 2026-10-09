@@ -27,7 +27,7 @@ export const HoursWeekEditor = ({ hours, unconfigured, partial, edited, editable
     }
     onSave(hours);
   };
-  return <section className="nf-panel p-4 sm:p-6 space-y-5" aria-labelledby={`${id}-title`} aria-busy={saving}>
+  return <section className="nf-panel nf-settings-panel nf-settings-panel-body space-y-5" aria-labelledby={`${id}-title`} aria-busy={saving}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 id={`${id}-title`} className="text-lg font-semibold">Horario semanal</h2><p className="text-sm text-muted mt-1">Configura la atención de esta sede y revisa la semana antes de guardar.</p></div>
       <Badge tone={edited || unconfigured ? 'warning' : 'neutral'}>{edited || unconfigured ? 'Sin guardar' : 'Horario guardado'}</Badge>

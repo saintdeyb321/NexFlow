@@ -1,7 +1,7 @@
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea, FormField } from '../../../components/ui/Form';
 import { useToast } from '../../../components/ui/useToast';
-import { LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
+import { Alert, LoadingState, ErrorState, EmptyState } from '../../../components/ui/Feedback';
 
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions, can as hasCapability } from '../../../core/auth/permissions';
@@ -69,9 +69,9 @@ const ProfileEditor = ({ workspaceId, userId }: { workspaceId: string; userId: s
   if (error || !profile) return <ErrorState onRetry={() => void refetch()} />;
 
   return (
-    <div className="bg-surface rounded-xl shadow-sm border border-line overflow-hidden relative">
-      <div className="px-5 sm:px-6 py-4 border-b border-line bg-surface-soft flex flex-wrap gap-3 justify-between items-center">
-        <h2 className="text-lg font-bold text-foreground">Identidad y contacto</h2>
+    <section className="nf-panel nf-settings-panel overflow-hidden relative" aria-label="Identidad y contacto">
+      <div className="nf-settings-panel-header">
+        <div><h2 className="text-lg font-semibold">Identidad y contacto</h2><p className="text-sm text-muted mt-1">La información que identifica a tu negocio y sus canales de contacto.</p></div>
         {!isEditing && (
           <Button variant="ghost" disabled={isSaving || !can('BUSINESS_PROFILE', 'UPDATE')} onClick={() => setProfile({ ...profile })} className="flex items-center text-sm font-medium transition-colors">
             <Pencil aria-hidden="true" className="w-4 h-4 mr-2" /> Editar Perfil
@@ -79,7 +79,9 @@ const ProfileEditor = ({ workspaceId, userId }: { workspaceId: string; userId: s
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-6">
+      <form onSubmit={handleSubmit} className="nf-settings-panel-body space-y-6" aria-busy={isSaving}>
+        {!can('BUSINESS_PROFILE', 'UPDATE') && <Alert>Solo lectura. Necesitas permiso de edición para actualizar el perfil.</Alert>}
+        {isEditing && <p role="status" className="text-sm text-muted">{isSaving ? 'Guardando el perfil...' : 'Los cambios se guardarán al pulsar Guardar cambios.'}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <FormField label="Nombre Comercial">
             <Input type="text" disabled={isSaving || !isEditing || !can('BUSINESS_PROFILE', 'UPDATE')} value={profile.commercialName} onChange={e => setProfile({...profile, commercialName: e.target.value})} required className={inputClass} />
@@ -100,7 +102,7 @@ const ProfileEditor = ({ workspaceId, userId }: { workspaceId: string; userId: s
         </FormField>
 
         {isEditing && (
-          <div className="flex flex-wrap justify-end pt-4 gap-3 border-t mt-4">
+          <div className="nf-settings-actions">
             <Button variant="secondary" type="button" disabled={isSaving} onClick={handleCancel} className="flex items-center text-sm font-medium transition-colors">
               <X aria-hidden="true" className="w-4 h-4 mr-1" /> Cancelar
             </Button>
@@ -110,6 +112,6 @@ const ProfileEditor = ({ workspaceId, userId }: { workspaceId: string; userId: s
           </div>
         )}
       </form>
-    </div>
+    </section>
   );
 };

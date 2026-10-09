@@ -1,7 +1,7 @@
 import { Button } from '../../../components/ui/Button';
 import { useToast } from '../../../components/ui/useToast';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { LoadingState, ErrorState, StatusBadge } from '../../../components/ui/Feedback';
+import { Alert, LoadingState, ErrorState, StatusBadge } from '../../../components/ui/Feedback';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { usePermissions } from '../../../core/auth/permissions';
@@ -17,8 +17,18 @@ import type { ConnectionStatus, WhatsAppStatusResponse } from '../types/business
 
 const labels: Record<ConnectionStatus, string> = {
   CONNECTED: 'Conectado', DISCONNECTED: 'Sin vinculación', CONNECTING: 'Conectando',
-  QR_AVAILABLE: 'QR listo para vincular', QR_EXPIRED: 'QR expirado', RECONNECTING: 'Sesión vinculada, conexión interrumpida',
-  UNAVAILABLE: 'Evolution no disponible', DISCONNECT_PENDING: 'Desconexión pendiente de confirmar',
+  QR_AVAILABLE: 'QR listo para vincular', QR_EXPIRED: 'QR expirado', RECONNECTING: 'Reconectando sesión',
+  UNAVAILABLE: 'Conexión no disponible', DISCONNECT_PENDING: 'Desconexión por confirmar',
+};
+const descriptions: Record<ConnectionStatus, string> = {
+  CONNECTED: 'WhatsApp está vinculado a este negocio. La sesión se conserva hasta que confirmes una desconexión.',
+  DISCONNECTED: 'No hay una sesión vinculada. Puedes conectar el número que usará tu negocio.',
+  CONNECTING: 'La vinculación está en curso. Revisa el estado para continuar con la misma sesión.',
+  QR_AVAILABLE: 'Escanea el código desde el teléfono que deseas vincular antes de que expire.',
+  QR_EXPIRED: 'El código venció. Revisa el estado antes de generar otro si aún no completaste la vinculación.',
+  RECONNECTING: 'La sesión sigue vinculada. Puedes revisar o reintentar la conexión de esa misma sesión.',
+  UNAVAILABLE: 'No se pudo comprobar la conexión. Revisa el estado antes de intentar otra operación.',
+  DISCONNECT_PENDING: 'La desconexión aún no está confirmada. Revisa el estado antes de vincular otro número.',
 };
 
 export const WhatsAppTab = () => {
@@ -38,6 +48,7 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
   const [pollUntil, setPollUntil] = useState(0);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const forceRefresh = useRef(false);
+  const actionInFlight = useRef(false);
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     ...queryPolicies.dynamic, queryKey,
     queryFn: ({ signal }) => {
@@ -73,11 +84,20 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
       setPollUntil(0);
       setShowDisconnectConfirm(false);
       connectMutation.reset();
-      toast.success('Desconexión confirmada. Ya puedes vincular otro número.');
+      if (response.status === 'DISCONNECTED' && !response.isLinked && !response.requiresLogout)
+        toast.success('Desconexión confirmada.');
+      else toast.warning('No se pudo confirmar la desconexión; revisa el estado.');
     },
     onError: failure => { toast.toastApiError(failure); void queryClient.invalidateQueries({ queryKey, exact: true }); },
   });
   const processing = connectMutation.isPending || disconnectMutation.isPending;
+  // Guard reentrant UI clicks before TanStack's pending state has rendered.
+  // The existing callbacks still own status, errors, cache and polling behavior.
+  const runAction = (request: () => Promise<WhatsAppStatusResponse>) => {
+    if (actionInFlight.current || processing) return;
+    actionInFlight.current = true;
+    void request().catch(() => undefined).finally(() => { actionInFlight.current = false; });
+  };
   const status = whatsappStatus(data, Boolean(error), now);
   const pairingPending = !error && (data?.status === 'QR_AVAILABLE' || data?.status === 'CONNECTING' || data?.status === 'RECONNECTING');
   const activePollUntil = pairingPending ? pollUntil : 0;
@@ -106,45 +126,53 @@ const WhatsAppConnectionPanel = ({ workspaceId }: { workspaceId: string | undefi
 
   if (!canRead) return <ErrorState description="No tienes permiso para consultar la conexión de WhatsApp." />;
   if (isLoading) return <LoadingState title="Consultando conexión de WhatsApp..." />;
-  return <div className="nf-panel p-5 sm:p-6 max-w-3xl">
+  return <section className="nf-panel nf-settings-panel overflow-hidden" aria-label="Conexión a WhatsApp">
     <ConfirmDialog isOpen={showDisconnectConfirm} title="¿Cerrar la sesión de WhatsApp?"
       description="Esta acción cierra la vinculación actual y detiene la atención por WhatsApp. Solo después de la confirmación podrás vincular otro número. Si Evolution falla, la vinculación seguirá reservada."
       destructive confirmLabel="Confirmar desconexión" isLoading={disconnectMutation.isPending}
       confirmDisabled={!canConfigure || processing} onClose={() => setShowDisconnectConfirm(false)}
-      onConfirm={() => { if (canConfigure && !processing) disconnectMutation.mutate(); }} />
-    <div className="flex items-center gap-3 mb-5">
-      <MessageCircle aria-hidden="true" className="w-8 h-8 text-primary" />
-      <div><h2 className="text-xl font-bold text-foreground">Conexión a WhatsApp</h2>
+      onConfirm={() => { if (canConfigure && !processing) runAction(() => disconnectMutation.mutateAsync()); }}>
+      {disconnectMutation.isError && <Alert tone="warning">No se pudo confirmar la desconexión; revisa el estado. {getApiErrorPresentation(disconnectMutation.error)}</Alert>}
+    </ConfirmDialog>
+    <div className="nf-settings-panel-header">
+      <div className="flex items-start gap-3 min-w-0"><MessageCircle aria-hidden="true" className="w-6 h-6 shrink-0 text-primary mt-1" />
+      <div className="min-w-0"><h2 className="text-lg font-semibold">Conexión a WhatsApp</h2>
         <p className="text-sm text-muted">Una sesión exclusiva para este negocio. Cambiar de número requiere cerrar la sesión actual.</p></div>
+      </div>
     </div>
-    <div aria-live="polite" className="mb-4">
-      <StatusBadge label={labels[status]} tone={status === 'CONNECTED' ? 'success' : status === 'UNAVAILABLE' || status === 'DISCONNECT_PENDING' ? 'warning' : 'neutral'} />
+    <div className="nf-settings-panel-body space-y-5">
+    <div aria-live="polite" className="rounded-xl border border-line bg-surface-soft p-4 space-y-3" data-whatsapp-state={status}>
+      <p className="text-sm font-medium">Estado de la conexión</p>
+      <StatusBadge className="max-w-full whitespace-normal!" label={labels[status]} tone={status === 'CONNECTED' ? 'success' : status === 'UNAVAILABLE' || status === 'DISCONNECT_PENDING' ? 'warning' : 'neutral'} />
+      <p className="text-sm text-muted leading-relaxed">{descriptions[status]}</p>
     </div>
     {error && <ErrorState description={getApiErrorPresentation(error)} onRetry={reviewStatus} />}
-    {data?.message && <p role="status" className="text-sm text-muted mb-4">{data.message}</p>}
-    {status === 'UNAVAILABLE' && <p className="text-sm text-muted mb-4">No se ha liberado la vinculación. Revisa la conexión antes de intentar otra operación.</p>}
-    {data?.isLinked && <div className="flex items-center gap-2 text-sm mb-4"><ShieldCheck aria-hidden="true" className="w-5 h-5" />La sesión sigue asignada a este workspace. No se permite vincular otro número.</div>}
-    {qr && <div className="flex flex-col items-center text-center gap-3 mb-5">
-      <p>Abre WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>
-      <img src={qr.startsWith('data:image') ? qr : `data:image/png;base64,${qr}`} alt="Código QR para vincular WhatsApp" className="w-64 h-64 bg-white p-3 rounded-lg" />
-      <p>El QR expira en {seconds} segundos.</p>
+    {data?.message && <Alert tone="neutral">{data.message}</Alert>}
+    {disconnectMutation.isError && !showDisconnectConfirm && <Alert tone="warning">No se pudo confirmar la desconexión; revisa el estado. {getApiErrorPresentation(disconnectMutation.error)}</Alert>}
+    {status === 'UNAVAILABLE' && <Alert tone="warning">No se ha liberado la vinculación. Revisa la conexión antes de intentar otra operación.</Alert>}
+    {data?.isLinked && <div className="flex items-start gap-2 text-sm"><ShieldCheck aria-hidden="true" className="w-5 h-5 shrink-0 text-primary" /><p>La sesión sigue asignada a este negocio. No se permite vincular otro número.</p></div>}
+    {qr && <div className="rounded-xl border border-line p-4 space-y-4" aria-label="Instrucciones de vinculación">
+      <div><h3 className="font-semibold">Vincula tu teléfono</h3><ol className="list-decimal pl-5 mt-2 space-y-1 text-sm text-muted"><li>Abre WhatsApp en tu teléfono.</li><li>Entra en Dispositivos vinculados.</li><li>Elige Vincular un dispositivo y escanea este código.</li></ol></div>
+      <img src={qr.startsWith('data:image') ? qr : `data:image/png;base64,${qr}`} alt="Código QR para vincular WhatsApp" className="block mx-auto w-full max-w-64 aspect-square object-contain bg-surface p-3 border border-line rounded-xl" />
+      <p className="text-sm text-muted text-center">El QR expira en {seconds} segundos.</p>
     </div>}
-    {status === 'QR_EXPIRED' && <p className="text-sm text-muted mb-4">El QR expiró. Revisa el estado y genera otro si no completaste la vinculación.</p>}
-    {!canConfigure && <p className="text-sm text-muted mb-4">Necesitas permiso de configuración para vincular o desconectar WhatsApp.</p>}
-    <div className="flex flex-wrap gap-3">
+    {status === 'QR_EXPIRED' && <Alert tone="warning">El QR expiró. Revisa el estado y genera otro si no completaste la vinculación.</Alert>}
+    {!canConfigure && <Alert>Solo lectura. Necesitas permiso de configuración para vincular o desconectar WhatsApp.</Alert>}
+    <div className="nf-settings-actions justify-start!">
       {!data?.isLinked && !data?.requiresLogout && <Button variant="primary" isLoading={connectMutation.isPending}
         disabled={!canPairWhatsApp(data, canConfigure, processing, status)}
-        onClick={() => { if (canPairWhatsApp(data, canConfigure, processing, status)) connectMutation.mutate(); }}>
+        onClick={() => { if (canPairWhatsApp(data, canConfigure, processing, status)) runAction(() => connectMutation.mutateAsync()); }}>
         <QrCode aria-hidden="true" className="w-4 h-4 mr-2" />{status === 'QR_EXPIRED' ? 'Generar otro QR' : 'Conectar WhatsApp'}
       </Button>}
       <Button variant="secondary" disabled={!workspaceId || processing || isFetching} isLoading={isFetching} onClick={reviewStatus}>
         <RefreshCw aria-hidden="true" className="w-4 h-4 mr-2" />Revisar estado
       </Button>
       {data?.isLinked && status === 'RECONNECTING' && <Button variant="secondary" disabled={!canConfigure || processing} isLoading={connectMutation.isPending}
-        onClick={() => { if (canConfigure && !processing) connectMutation.mutate(); }}>Reintentar conexión de esta sesión</Button>}
+        onClick={() => { if (canConfigure && !processing) runAction(() => connectMutation.mutateAsync()); }}>Reintentar conexión de esta sesión</Button>}
       {(data?.requiresLogout || data?.isLinked || qr) && <Button variant="secondary" disabled={!canConfigure || processing}
         onClick={() => setShowDisconnectConfirm(true)}><PowerOff aria-hidden="true" className="w-4 h-4 mr-2" />
         {status === 'DISCONNECT_PENDING' ? 'Reintentar desconexión' : 'Desconectar explícitamente'}</Button>}
     </div>
-  </div>;
+    </div>
+  </section>;
 };
