@@ -53,14 +53,37 @@ public sealed class ReservationsApiTests
         Assert.All(f.Reads, read => Assert.Equal(Utc("2030-07-01T04:00:00Z"), read.Start));
     }
 
-    [Fact]
-    public async Task Windows_zone_metadata_matches_iana_historical_calendar_boundaries()
+    [Theory]
+    [InlineData("2024-02-26", "2024-03-04", "2024-02-26T05:00:00Z", "2024-03-04T05:00:00Z")]
+    [InlineData("2026-03-02", "2026-03-09", "2026-03-02T05:00:00Z", "2026-03-09T05:00:00Z")]
+    [InlineData("2030-12-30", "2031-01-06", "2030-12-30T05:00:00Z", "2031-01-06T05:00:00Z")]
+    public async Task Peru_context_week_and_daily_http_queries_share_exact_utc_boundaries(
+        string from, string to, string start, string end)
     {
-        await using var f = new ApiFixture { Zone = "SA Pacific Standard Time" };
-        var context = Assert.IsType<ReservationContextDto>(Assert.IsType<OkObjectResult>(await f.ContextAsync()).Value);
-        Assert.Equal("America/Bogota", context.TimeZone);
-        Assert.IsType<OkObjectResult>(await f.ReadAsync(from: "1992-06-01", to: "1992-06-08"));
-        Assert.Equal(Utc("1992-06-01T04:00:00Z"), Assert.Single(f.Reads).Start);
+        await using var f = new ApiFixture { Zone = "America/Lima" };
+        var client = await f.StartAsync();
+        using var context = await client.GetAsync("/api/reservations/context");
+        Assert.Equal(HttpStatusCode.OK, context.StatusCode);
+        using var body = JsonDocument.Parse(await context.Content.ReadAsStringAsync());
+        Assert.Equal("America/Lima", body.RootElement.GetProperty("timeZone").GetString());
+
+        using var week = await client.GetAsync($"/api/reservations?locationId=all&from={from}&to={to}&timeZone=America%2FLima");
+        Assert.Equal(HttpStatusCode.OK, week.StatusCode);
+        var weeklyRead = Assert.Single(f.Reads);
+        Assert.Equal(Utc(start), weeklyRead.Start);
+        Assert.Equal(Utc(end), weeklyRead.End);
+        Assert.Equal(TimeSpan.FromDays(7), weeklyRead.End - weeklyRead.Start);
+        Assert.Equal(DateTimeKind.Utc, weeklyRead.Start.Kind);
+        Assert.Equal(DateTimeKind.Utc, weeklyRead.End.Kind);
+
+        // The legacy daily contract resolves the same Peru midnight as the weekly query.
+        using var day = await client.GetAsync($"/api/reservations?locationId=all&date={from}");
+        Assert.Equal(HttpStatusCode.OK, day.StatusCode);
+        Assert.Equal(2, f.Reads.Count);
+        Assert.Equal(weeklyRead.Start, f.Reads[1].Start);
+        Assert.Equal(Utc(start).AddDays(1), f.Reads[1].End);
+        Assert.All(f.Reads, read => Assert.Equal(f.Workspace, read.Workspace));
+        f.Engine.VerifyNoOtherCalls();
     }
 
     [Fact]
