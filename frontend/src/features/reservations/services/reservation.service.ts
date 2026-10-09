@@ -1,5 +1,16 @@
 import { axiosClient } from '../../../core/api/axiosClient';
-import type { CreateReservationRequest, ReservationDto } from '../types/reservation.types';
+import type { CreateReservationRequest, ReservationContextDto, ReservationDto } from '../types/reservation.types';
+
+export const getReservationContext = async (signal?: AbortSignal): Promise<ReservationContextDto> => {
+  const { data } = await axiosClient.get<ReservationContextDto>('/reservations/context', { signal });
+  // Do not turn a failed or incompatible metadata read into a guessed business zone.
+  const zone = data?.timeZone;
+  if (typeof zone !== 'string' || !zone || /^[+-]/.test(zone))
+    throw new Error('La zona horaria de la agenda no es compatible con este navegador.');
+  try { new Intl.DateTimeFormat('es-PE', { timeZone: zone }).format(0); }
+  catch { throw new Error('La zona horaria de la agenda no es compatible con este navegador.'); }
+  return { timeZone: zone };
+};
 
 export interface TimeSlotDto {
   startTime: string;

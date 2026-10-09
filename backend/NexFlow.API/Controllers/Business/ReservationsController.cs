@@ -33,6 +33,30 @@ public class ReservationsController : ControllerBase
         return activeModules.Contains(moduleCode.ToUpperInvariant());
     }
 
+    private async Task<IActionResult?> ReadAccessDeniedAsync(CancellationToken ct)
+    {
+        if (WorkspaceId == Guid.Empty) return StatusCode(403, new { code = "Security.WorkspaceRequired", message = "Workspace autenticado requerido." });
+        if (!await HasAccessTo("RESERVATIONS", ct)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
+        if (!await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "RESERVATIONS", "READ", ct))
+            return StatusCode(403, new { code = "Security.CapabilityDenied", message = "No tienes permiso para consultar reservas." });
+        return null;
+    }
+
+    [HttpGet("context")]
+    public async Task<IActionResult> GetContext([FromServices] IBusinessProfileRepository profileRepo, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var denied = await ReadAccessDeniedAsync(cancellationToken);
+        if (denied != null) return denied;
+        var profile = await profileRepo.GetProfileAsync(WorkspaceId, cancellationToken);
+        var zone = ResolveWorkspaceZone(profile?.TimeZone);
+        // Existing Windows IDs must be translated explicitly; Intl accepts IANA IDs.
+        var ianaId = zone.Id;
+        if (!zone.HasIanaId && !TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out ianaId))
+            return StatusCode(503, new { code = "Dependency.TimeZoneUnsupported", message = "No se puede representar la zona horaria de la agenda con un identificador IANA." });
+        return Ok(new ReservationContextDto(ianaId));
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetReservations(
         [FromQuery] string? locationId,
@@ -44,10 +68,8 @@ public class ReservationsController : ControllerBase
         [FromQuery] string? to = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (WorkspaceId == Guid.Empty) return StatusCode(403, new { code = "Security.WorkspaceRequired", message = "Workspace autenticado requerido." });
-        if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
-        if (!await _entitlementService.HasCapabilityAccessAsync(WorkspaceId, "RESERVATIONS", "READ", cancellationToken))
-            return StatusCode(403, new { code = "Security.CapabilityDenied", message = "No tienes permiso para consultar reservas." });
+        var denied = await ReadAccessDeniedAsync(cancellationToken);
+        if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(locationId)) return BadRequest(new { code = "Validation.Error", message = "LocationId es requerido; usa 'all' para todas las sedes." });
 
         var query = HttpContext?.Request.Query;
@@ -88,12 +110,7 @@ public class ReservationsController : ControllerBase
         }
 
         var profile = await profileRepo.GetProfileAsync(WorkspaceId, cancellationToken);
-        var tzId = string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone;
-
-        TimeZoneInfo workspaceZone;
-        try { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById(tzId); }
-        catch (TimeZoneNotFoundException) { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
-        catch (InvalidTimeZoneException) { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        var workspaceZone = ResolveWorkspaceZone(profile?.TimeZone);
 
         DateTime startUtc, endUtc;
         try
@@ -110,6 +127,14 @@ public class ReservationsController : ControllerBase
         return Ok(reservations.Select(reservation => new ReservationDto(
             reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
             reservation.CustomerName, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString())));
+    }
+
+    private static TimeZoneInfo ResolveWorkspaceZone(string? configuredId)
+    {
+        var id = string.IsNullOrWhiteSpace(configuredId) ? "America/Lima" : configuredId;
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
     }
 
     private static DateTime CivilBoundaryUtc(DateOnly date, TimeZoneInfo zone)

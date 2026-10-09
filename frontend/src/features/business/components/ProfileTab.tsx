@@ -14,6 +14,7 @@ import { Pencil, X } from 'lucide-react';
 import { updateBusinessProfile } from '../services/business.service';
 import { useBusinessProfile } from '../hooks/useBusinessProfile';
 import type { BusinessProfile } from '../types/business.types';
+import { invalidateReservationContext } from '../../reservations/services/reservation.queries';
 
 export const ProfileTab = () => {
   const { can } = usePermissions();
@@ -46,7 +47,10 @@ const ProfileEditor = ({ workspaceId, userId }: { workspaceId: string; userId: s
       queryClient.setQueryData(queryKey, { ...saved });
       setProfile(null);
       toast.success('Perfil actualizado correctamente');
-      await queryClient.invalidateQueries({ queryKey, exact: true });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey, exact: true }),
+        invalidateReservationContext(queryClient, workspaceId),
+      ]);
     },
     onError: error => toast.toastApiError(error),
     onSettled: () => { submitting.current = false; },

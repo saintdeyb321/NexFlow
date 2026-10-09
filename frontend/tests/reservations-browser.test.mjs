@@ -1,7 +1,8 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { startPreview } from './reservations-preview.server.mjs';
 
@@ -65,13 +66,20 @@ before(async () => {
   await until("[...document.querySelectorAll('article')].filter(e=>e.getClientRects().length).length===4", 'Weekly agenda did not load.');
 });
 after(async () => {
-  if (socket?.readyState === WebSocket.OPEN) { await send('Browser.close').catch(() => {}); socket.close(); }
-  if (browser) { await Promise.race([exit, wait(3000)]); browser.kill(); }
+  if (socket?.readyState === WebSocket.OPEN) {
+    const closed = new Promise(done => socket.addEventListener('close', done, { once: true }));
+    await send('Browser.close').catch(() => {});
+    await Promise.race([closed, wait(3000)]); socket.close();
+  }
+  if (browser) {
+    await Promise.race([exit, wait(3000)]);
+    if (browser.exitCode === null) { browser.kill(); await Promise.race([exit, wait(3000)]); }
+  }
   await preview?.server.close();
   // Only this newly created profile inside the test cache is removed.
   const root = resolve('node_modules/.tmp') + '/';
   if (profile && resolve(profile).replaceAll('\\', '/').startsWith(root.replaceAll('\\', '/') + 'ux01b-browser-'))
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
 });
 
 test('desktop: siete columnas, tres horas reales y una sola lectura semanal agregada', async () => {
@@ -200,14 +208,128 @@ test('vacío y error son distintos; recuperación conserva el contrato sin llama
   assert.equal((await weeklyReads()).every(read => read.params.from && read.params.to && !read.params.date), true);
 });
 
-test('RESERVATIONS autorizado sin perfil: bloqueo de zona explícito, sin lectura prohibida ni horas supuestas', async () => {
-  await evaluate("(()=>{const a=window.reservationAudit;a.client.clear();a.calls.length=0;a.store.setState({me:{...a.store.getState().me,workspace:{id:'workspace-zone-denied',name:'Zona de prueba',status:'Active'},capabilities:{...a.store.getState().me.capabilities,RESERVATIONS:['READ','CREATE','UPDATE','COMPLETE','CANCEL','CHECK_AVAILABILITY'],BUSINESS_PROFILE:[]}},selectedLocationId:'all'})})()");
-  await until("document.body.textContent.includes('Necesitas acceso de lectura al perfil del negocio para resolver su zona horaria.')", 'Missing profile permission did not show the timezone blocker.');
+const resetAgenda = async (options = {}) => {
+  await metrics(1280);
+  await evaluate("(()=>{const a=window.reservationAudit;const options="+JSON.stringify(options)+";a.setShowProfile(false);sessionStorage.clear();a.profiles.clear();a.zones.clear();Object.assign(a.fixture,{delay:0,fail:false,empty:false,timeZone:'America/Lima',contextDelay:0,contextStatus:0,contextResponse:undefined,rows:null},options);const me=structuredClone(a.defaultIdentity);me.workspace.id=options.workspace??'workspace-zone-a';me.user.id=options.user??'zone-user';me.capabilities.BUSINESS_PROFILE=[];if(options.permissions)me.capabilities.RESERVATIONS=options.permissions;if(options.entitlements)me.entitlements=options.entitlements;a.calls.length=0;a.setIdentity(me)})()");
+};
+const agendaReady = () => until("[...document.querySelectorAll('article')].filter(e=>e.getClientRects().length).length===4", 'Agenda did not load after context.');
+const contextReads = () => evaluate("window.reservationAudit.calls.filter(c=>c.path==='/reservations/context')");
+
+test('RESERVATIONS autorizado sin perfil carga semana, fechas y horas exactas sin leer perfil', async () => {
+  await resetAgenda({ contextDelay: 400 });
+  await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Context loading missing.');
+  assert.equal((await weeklyReads()).length, 0);
+  await agendaReady();
   assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.path==='/business/profile')"), false);
+  assert.equal((await contextReads()).length, 1); assert.equal((await weeklyReads()).length, 1);
+  assert.equal(await evaluate("[...document.querySelectorAll('th[scope=row]')].map(e=>e.textContent).join(',')"), '10:00,12:30,14:00');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Nueva reserva').disabled"), false);
+  await change('Ir a fecha', '2030-12-31');
+  await until("document.body.textContent.includes('2031')&&!document.body.textContent.includes('Se muestra todavía')", 'Cross-year week missing.');
+  assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2030-12-30', to: '2031-01-06' });
+  await click('Lista'); await click('Semana'); assert.equal((await contextReads()).length, 1);
+  await capture('timezone-permission-resolved');
+});
+
+test('sin RESERVATIONS/READ no consulta ni contexto ni semana, aunque exista caché previa', async () => {
+  await resetAgenda({ permissions: [] });
+  await until("document.body.textContent.includes('No tienes permiso para consultar reservas')", 'Reservation denial missing.');
+  assert.equal((await contextReads()).length, 0); assert.equal((await weeklyReads()).length, 0);
+  assert.equal(await evaluate("document.querySelectorAll('article,input[type=date]').length"), 0);
+});
+
+test('solo RESERVATIONS/READ carga agenda sin dependencias de permisos de otros módulos', async () => {
+  await resetAgenda({ permissions: ['READ'], entitlements: ['RESERVATIONS'] }); await agendaReady();
+  assert.equal(await evaluate("window.reservationAudit.calls.every(c=>c.path==='/reservations/context'||c.path==='/reservations')"), true);
+  assert.equal(await evaluate("document.querySelector('article[aria-label=\"Reserva de Ana Prueba\"] time').textContent"), '10:00');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Nueva reserva').disabled"), true);
+});
+
+for (const status of [401, 403, 503]) test(`contexto ${status} bloquea semana y horas; reintento recupera sin fallback`, async () => {
+  await resetAgenda({ contextStatus: status });
+  await until("document.body.textContent.includes('No se pudo cargar la zona horaria de la agenda')", 'Context error missing.');
   assert.equal((await weeklyReads()).length, 0);
   assert.equal(await evaluate("document.querySelectorAll('article,th[scope=row],input[type=date]').length"), 0);
   assert.equal(await evaluate("document.body.textContent.includes('Zona horaria:')"), false);
-  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Nueva reserva')?.disabled"), true);
-  await capture('timezone-permission-blocked');
-  // Characterizes the safe failure; it does not satisfy the functional release gate.
+  await evaluate('window.reservationAudit.fixture.contextStatus=0'); await click('Reintentar'); await agendaReady();
+  assert.equal((await contextReads()).length, 2); assert.equal((await weeklyReads()).length, 1);
+});
+
+test('zona ausente, inválida o Windows sin conversión no muestra horas aproximadas; recuperación explícita', async () => {
+  for (const response of [null, {}, { timeZone: '' }, { timeZone: 'not/a-zone' }, { timeZone: 'Eastern Standard Time' }, { timeZone: '+03:00' }]) {
+    await resetAgenda({ contextResponse: response });
+    await until("document.body.textContent.includes('La zona horaria de la agenda no es compatible')", 'Invalid zone was not rejected.');
+    assert.equal((await weeklyReads()).length, 0);
+    assert.equal(await evaluate("document.querySelectorAll('article,th[scope=row],input[type=date]').length"), 0);
+    await evaluate('window.reservationAudit.fixture.contextResponse=undefined'); await click('Reintentar'); await agendaReady();
+  }
+});
+
+test('relectura fallida con contexto cacheado oculta horas anteriores y recupera una zona nueva', async () => {
+  for (const failure of [403, 503, 'invalid']) {
+    await resetAgenda(); await agendaReady();
+    const before = (await weeklyReads()).length;
+    await evaluate("(()=>{const a=window.reservationAudit;a.fixture.contextDelay=200;"+(failure === 'invalid' ? "a.fixture.contextResponse={timeZone:'not/a-zone'};" : "a.fixture.contextStatus="+failure+";")+"void a.client.invalidateQueries({queryKey:['workspace','workspace-zone-a','reservations','context'],exact:true})})()");
+    await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Cached zone remained visible during refresh.');
+    assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+    await until("document.body.textContent.includes('No se pudo cargar la zona horaria de la agenda')", 'Cached context failure was hidden.');
+    assert.equal((await weeklyReads()).length, before);
+    assert.equal(await evaluate("document.body.textContent.includes('Zona horaria:')"), false);
+    await evaluate("Object.assign(window.reservationAudit.fixture,{contextStatus:0,contextResponse:undefined,contextDelay:0,timeZone:'America/New_York'})");
+    await click('Reintentar'); await agendaReady();
+    assert.ok(await evaluate("document.body.textContent.includes('Zona horaria: America/New_York')"));
+    assert.equal((await weeklyReads()).length, before + 1);
+    assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.path==='/business/profile')"), false);
+  }
+});
+
+test('contexto y formularios no cruzan workspace/cuenta/permisos ni respuestas anteriores', async () => {
+  await resetAgenda({ workspace: 'zone-race-a', contextDelay: 650 });
+  await until("window.reservationAudit.calls.some(c=>c.path==='/reservations/context')", 'Slow context missing.');
+  await evaluate("(()=>{const a=window.reservationAudit;const me=structuredClone(a.store.getState().me);me.workspace.id='zone-race-b';a.zones.set('zone-race-b','Asia/Kathmandu');a.fixture.contextDelay=0;a.setIdentity(me)})()");
+  await agendaReady(); await wait(750);
+  assert.ok(await evaluate("document.body.textContent.includes('Zona horaria: Asia/Kathmandu')"));
+  assert.equal(await evaluate("document.querySelector('article[aria-label=\"Reserva de Ana Prueba\"] time').textContent"), '20:45');
+  assert.equal(await evaluate("window.reservationAudit.client.getQueryData(['workspace','zone-race-a','reservations','context'])===undefined"), true);
+  assert.equal((await weeklyReads()).every(c=>c.workspace==='zone-race-b'), true);
+  await click('Nueva reserva'); await until("document.querySelector('[role=dialog]')", 'Create form missing.');
+  await evaluate("(()=>{const a=window.reservationAudit;const me=structuredClone(a.store.getState().me);me.user.id='zone-other-user';a.fixture.contextDelay=350;a.zones.set('zone-race-b','America/New_York');a.setIdentity(me)})()");
+  await until("document.body.textContent.includes('Cargando zona horaria de la agenda')", 'Account context did not reload.');
+  assert.equal(await evaluate("document.querySelector('[role=dialog]')===null"), true);
+  assert.equal(await evaluate("document.querySelectorAll('article').length"), 0);
+  await agendaReady(); assert.ok(await evaluate("document.body.textContent.includes('Zona horaria: America/New_York')"));
+  await evaluate("(()=>{const a=window.reservationAudit;const me=structuredClone(a.store.getState().me);me.capabilities.RESERVATIONS=[];a.calls.length=0;a.setIdentity(me)})()");
+  await until("document.body.textContent.includes('No tienes permiso para consultar reservas')", 'Revoked read remained visible.');
+  assert.equal((await contextReads()).length, 0); assert.equal((await weeklyReads()).length, 0);
+  await evaluate("(()=>{const a=window.reservationAudit;const me=structuredClone(a.store.getState().me);me.capabilities.RESERVATIONS=['READ'];a.fixture.contextDelay=0;a.setIdentity(me)})()");
+  await agendaReady();
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Nueva reserva').disabled"), true);
+  assert.equal(await evaluate("window.reservationAudit.calls.some(c=>c.path==='/business/profile')"), false);
+});
+
+test('render DST New York conserva ambas 01:30 y semana octubre/noviembre', async () => {
+  await resetAgenda({ timeZone: 'America/New_York' }); await agendaReady();
+  await evaluate("(()=>{const a=window.reservationAudit;const rows=a.rowsFor('workspace-zone-a','2026-10-26').slice(0,2);rows[0].dateTime='2026-11-01T05:30:00Z';rows[1].dateTime='2026-11-01T06:30:00Z';a.fixture.rows=rows})()");
+  await change('Ir a fecha', '2026-11-01');
+  await until("document.querySelectorAll('th[scope=row]').length===1&&document.querySelector('th[scope=row]').textContent==='01:30'", 'Repeated DST hour missing.');
+  assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2026-10-26', to: '2026-11-02' });
+  assert.equal(await evaluate("document.querySelectorAll('article time').length"), 2);
+  assert.equal(await evaluate("[...document.querySelectorAll('article time')].map(e=>e.dateTime).join(',')"), '2026-11-01T05:30:00Z,2026-11-01T06:30:00Z');
+  await metrics(360); await change('Día de la agenda', '2026-11-01');
+  assert.equal(await evaluate("[...document.querySelectorAll('article')].filter(e=>e.getClientRects().length).length"), 2);
+  await metrics(1280);
+});
+
+test('PUT autorizado del perfil refresca contexto y slots propios, sin invalidar otro workspace', async () => {
+  await resetAgenda(); await agendaReady();
+  await evaluate("(()=>{const a=window.reservationAudit;a.client.setQueryData(['workspace','zone-foreign','reservations','context'],{timeZone:'Asia/Kathmandu'});a.client.setQueryData(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima'],[]);a.profiles.set('workspace-zone-a',{...a.initialProfile('workspace-zone-a'),timeZone:'America/New_York'});const me=structuredClone(a.store.getState().me);me.capabilities.BUSINESS_PROFILE=['READ','UPDATE'];a.store.setState({me});a.setShowProfile(true)})()");
+  await until("[...document.querySelectorAll('[data-test-profile] button')].some(e=>e.textContent.trim()==='Editar Perfil'&&!e.disabled)", 'Authorized profile missing.');
+  await click('Editar Perfil'); await change('Nombre Comercial', 'Nombre confirmado');
+  const prior = (await contextReads()).length; await click('Guardar Cambios');
+  await until("document.body.textContent.includes('Zona horaria: America/New_York')", 'Profile save did not refresh effective zone.');
+  assert.equal((await contextReads()).length, prior + 1);
+  assert.equal(await evaluate("window.reservationAudit.calls.filter(c=>c.path==='/business/profile'&&c.method==='put').length"), 1);
+  assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','zone-foreign','reservations','context']).isInvalidated"), false);
+  assert.equal(await evaluate("window.reservationAudit.client.getQueryState(['workspace','workspace-zone-a','reservations','availability','location-a','service-a','2030-12-30','America/Lima']).isInvalidated"), true);
+  await evaluate('window.reservationAudit.setShowProfile(false)');
 });

@@ -26,12 +26,13 @@ export const queryKeys = {
     list: (id: WorkspaceId, locationId?: string | null) => [...workspace(id), 'services', location(locationId)] as const,
   },
   reservations: {
+    context: (id: WorkspaceId) => [...workspace(id), 'reservations', 'context'] as const,
     lists: (id: WorkspaceId) => [...workspace(id), 'reservations', 'list'] as const,
     list: (id: WorkspaceId, locationId: string, date: string) => [...workspace(id), 'reservations', 'list', locationId, date] as const,
     week: (id: WorkspaceId, locationId: string, from: string, to: string, timeZone = 'America/Lima') => [...workspace(id), 'reservations', 'list', locationId, 'range', from, to, timeZone] as const,
     availability: (id: WorkspaceId) => [...workspace(id), 'reservations', 'availability'] as const,
     availabilityByLocation: (id: WorkspaceId, locationId: string) => [...workspace(id), 'reservations', 'availability', locationId] as const,
-    slots: (id: WorkspaceId, locationId: string, serviceId: string, date: string) => [...workspace(id), 'reservations', 'availability', locationId, serviceId, date] as const,
+    slots: (id: WorkspaceId, locationId: string, serviceId: string, date: string, timeZone?: string) => [...workspace(id), 'reservations', 'availability', locationId, serviceId, date, ...(timeZone ? [timeZone] : [])] as const,
   },
   requests: {
     lists: (id: WorkspaceId) => [...workspace(id), 'requests', 'list'] as const,

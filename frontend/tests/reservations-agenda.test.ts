@@ -8,13 +8,13 @@ import { queryKeys } from '../src/core/query/queryKeys.ts';
 import { stableQueryModule } from '../src/core/query/queryPolicies.ts';
 import { can } from '../src/core/auth/permissions.ts';
 import { weekOf, addCivilDays, agendaRows, filterReservations, summarizeReservations, servicesForLocation, canRetainWeek, localReservationStart, formatWeek } from '../src/features/reservations/utils/weeklyAgenda.ts';
-import { getReservations, getReservationsForWeek } from '../src/features/reservations/services/reservation.service.ts';
-import { invalidateReservationViews } from '../src/features/reservations/services/reservation.queries.ts';
+import { getReservationContext, getReservations, getReservationsForWeek } from '../src/features/reservations/services/reservation.service.ts';
+import { invalidateReservationContext, invalidateReservationViews } from '../src/features/reservations/services/reservation.queries.ts';
 import { WeeklyAgenda } from '../src/features/reservations/components/WeeklyAgenda.tsx';
 import { WeekNavigation } from '../src/features/reservations/components/WeekNavigation.tsx';
 import { ReservationList } from '../src/features/reservations/components/ReservationList.tsx';
 import { ReservationActions } from '../src/features/reservations/components/ReservationCard.tsx';
-import { calls, rowsFor } from './fixtures/reservations-api.ts';
+import { calls, fixture, rowsFor } from './fixtures/reservations-api.ts';
 import { useAuthStore } from './fixtures/reservations-store.ts';
 import type { ServiceDto } from '../src/features/services/types/services.types.ts';
 
@@ -25,6 +25,47 @@ const view = {
   locationNames: new Map([['location-a', 'Sede A'], ['location-b', 'Sede B']]),
   canEdit: true, canCancel: true, canComplete: true, onEdit: () => {}, onCancel: () => {}, onComplete: () => {},
 };
+
+test('contexto devuelve exclusivamente la zona validada, deduplica caché por workspace y respeta AbortSignal', async () => {
+  const client = new QueryClient(); calls.length = 0;
+  const key = queryKeys.reservations.context('workspace-a');
+  const options = { queryKey: key, queryFn: ({ signal }: { signal: AbortSignal }) => getReservationContext(signal), staleTime: 10_000 };
+  const results = await Promise.all([client.fetchQuery(options), client.fetchQuery(options)]);
+  await client.fetchQuery(options);
+  assert.deepEqual(results, [{ timeZone: 'America/Lima' }, { timeZone: 'America/Lima' }]);
+  assert.equal(calls.length, 1); assert.equal(calls[0].path, '/reservations/context');
+  assert.deepEqual(calls[0].params, {});
+  assert.notDeepEqual(key, queryKeys.reservations.context('workspace-b'));
+  assert.equal(stableQueryModule(key), null); // Metadata is not restored from persisted business profile cache.
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(() => getReservationContext(controller.signal), /cancel/i);
+  assert.equal(calls.length, 1);
+  client.clear();
+});
+
+for (const response of [null, {}, { timeZone: '' }, { timeZone: 'not/a-zone' }, { timeZone: 'Eastern Standard Time' }, { timeZone: '+03:00' }]) test(`contexto inválido ${JSON.stringify(response)} no inventa fallback`, async () => {
+  fixture.contextResponse = response;
+  try { await assert.rejects(() => getReservationContext(), /zona horaria.*no es compatible/i); }
+  finally { fixture.contextResponse = undefined; }
+});
+
+for (const timeZone of ['UTC', 'Etc/UTC', 'America/New_York', 'Asia/Kathmandu']) test(`identificador backend ${timeZone} es compatible con Intl sin cambiarlo`, async () => {
+  fixture.contextResponse = { timeZone };
+  try { assert.deepEqual(await getReservationContext(), { timeZone }); }
+  finally { fixture.contextResponse = undefined; }
+});
+
+test('guardar perfil invalida contexto, semanas y slots solo del workspace afectado', async () => {
+  const client = new QueryClient();
+  const own = [queryKeys.reservations.context('workspace-a'), queryKeys.reservations.week('workspace-a', 'all', week.from, week.to), queryKeys.reservations.slots('workspace-a', 'location-a', 'service-a', week.from, 'America/Lima')];
+  const other = [queryKeys.reservations.context('workspace-b'), queryKeys.reservations.week('workspace-b', 'all', week.from, week.to), queryKeys.reservations.slots('workspace-b', 'location-a', 'service-a', week.from), queryKeys.services.list('workspace-a', 'all'), queryKeys.business.profile('workspace-b')];
+  for (const key of [...own, ...other]) client.setQueryData(key, []);
+  await invalidateReservationContext(client, 'workspace-a');
+  for (const key of own) assert.equal(client.getQueryState(key)?.isInvalidated, true);
+  for (const key of other) assert.equal(client.getQueryState(key)?.isInvalidated, false);
+  assert.notDeepEqual(own[2], queryKeys.reservations.slots('workspace-a', 'location-a', 'service-a', week.from, 'America/New_York'));
+  client.clear();
+});
 
 test('lunes-domingo cruza mes/año con límite superior exclusivo', () => {
   assert.equal(week.from, '2026-12-28'); assert.equal(week.to, '2027-01-04');

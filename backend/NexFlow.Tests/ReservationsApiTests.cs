@@ -16,6 +16,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using NexFlow.API.Controllers.Reservations;
+using NexFlow.API.Middleware;
+using NexFlow.API.Security;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Reservations;
@@ -27,6 +29,103 @@ namespace NexFlow.Tests;
 
 public sealed class ReservationsApiTests
 {
+    [Fact]
+    public async Task Context_http_requires_only_reservations_read_and_returns_no_business_profile_data()
+    {
+        await using var f = new ApiFixture { Zone = "Asia/Kathmandu" };
+        var client = await f.StartAsync();
+        using var response = await client.GetAsync($"/api/reservations/context?workspaceId={Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(new[] { "timeZone" }, body.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("Asia/Kathmandu", body.RootElement.GetProperty("timeZone").GetString());
+        // The strict entitlement mock grants RESERVATIONS only; a profile permission check would fail.
+        f.Profiles.Verify(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()), Times.Once);
+        f.Profiles.VerifyNoOtherCalls(); f.Repository.VerifyNoOtherCalls(); f.Locations.VerifyNoOtherCalls(); f.Engine.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public async Task Context_http_rejects_missing_license_read_or_workspace_before_profile_access(bool licensed, bool canRead, bool missingWorkspace)
+    {
+        await using var f = new ApiFixture(missingWorkspace ? Guid.Empty : Guid.NewGuid()) { Licensed = licensed, CanRead = canRead };
+        var client = await f.StartAsync();
+        using var response = await client.GetAsync("/api/reservations/context");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        f.Profiles.VerifyNoOtherCalls(); f.Repository.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(null, "America/Lima", "2026-03-02T05:00:00Z", "2026-03-09T05:00:00Z")]
+    [InlineData("", "America/Lima", "2026-03-02T05:00:00Z", "2026-03-09T05:00:00Z")]
+    [InlineData("not/a-zone", "America/Lima", "2026-03-02T05:00:00Z", "2026-03-09T05:00:00Z")]
+    [InlineData("Asia/Kathmandu", "Asia/Kathmandu", "2026-03-01T18:15:00Z", "2026-03-08T18:15:00Z")]
+    [InlineData("America/New_York", "America/New_York", "2026-03-02T05:00:00Z", "2026-03-09T04:00:00Z")]
+    [InlineData("Eastern Standard Time", "America/New_York", "2026-03-02T05:00:00Z", "2026-03-09T04:00:00Z")]
+    public async Task Context_and_weekly_http_share_effective_zone_and_windows_ids_are_explicitly_converted(
+        string? configured, string expected, string start, string end)
+    {
+        await using var f = new ApiFixture { Zone = configured };
+        var client = await f.StartAsync();
+        using var context = await client.GetAsync("/api/reservations/context");
+        Assert.Equal(HttpStatusCode.OK, context.StatusCode);
+        using var body = JsonDocument.Parse(await context.Content.ReadAsStringAsync());
+        Assert.Equal(expected, body.RootElement.GetProperty("timeZone").GetString());
+        using var response = await client.GetAsync("/api/reservations?locationId=all&from=2026-03-02&to=2026-03-09");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var rows = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Array, rows.RootElement.ValueKind);
+        var read = Assert.Single(f.Reads);
+        Assert.Equal(Utc(start), read.Start); Assert.Equal(Utc(end), read.End);
+    }
+
+    [Fact]
+    public async Task Context_http_isolated_workspaces_ignore_client_supplied_workspace_and_headers()
+    {
+        await using var a = new ApiFixture { Zone = "America/Lima" };
+        await using var b = new ApiFixture { Zone = "Asia/Kathmandu" };
+        foreach (var (fixture, foreign, expected) in new[] { (a, b.Workspace, "America/Lima"), (b, a.Workspace, "Asia/Kathmandu") })
+        {
+            var client = await fixture.StartAsync();
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/reservations/context?workspaceId={foreign}");
+            request.Headers.Add("X-Workspace-Id", foreign.ToString());
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(expected, body.RootElement.GetProperty("timeZone").GetString());
+            fixture.Profiles.Verify(p => p.GetProfileAsync(fixture.Workspace, It.IsAny<CancellationToken>()), Times.Once);
+            fixture.Profiles.VerifyNoOtherCalls();
+        }
+    }
+
+    [Fact]
+    public async Task Context_dependency_failure_is_503_without_fallback_and_cancellation_reaches_profile()
+    {
+        await using var f = new ApiFixture();
+        f.Profiles.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException());
+        var client = await f.StartAsync();
+        using var response = await client.GetAsync("/api/reservations/context");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.TryGetProperty("timeZone", out _));
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.ContextAsync(cancellation.Token));
+        f.Profiles.Verify(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Context_passes_cancellation_to_profile_and_returns_a_browser_supported_utc_identifier()
+    {
+        await using var f = new ApiFixture { Zone = "UTC" };
+        using var cancellation = new CancellationTokenSource();
+        var result = Assert.IsType<OkObjectResult>(await f.ContextAsync(cancellation.Token));
+        var context = Assert.IsType<ReservationContextDto>(result.Value);
+        Assert.Contains(context.TimeZone, new[] { "UTC", "Etc/UTC" });
+        f.Profiles.Verify(p => p.GetProfileAsync(f.Workspace, cancellation.Token), Times.Once);
+    }
+
     [Fact]
     public async Task Legacy_daily_http_contract_preserves_dto_and_all_historical_states()
     {
@@ -267,6 +366,8 @@ public sealed class ReservationsApiTests
         public Task<IActionResult> ReadAsync(string? location = "all", DateTime? date = null, string? from = null, string? to = null, CancellationToken ct = default) =>
             _controller.GetReservations(location, date, Profiles.Object, Locations.Object, ct, from, to);
 
+        public Task<IActionResult> ContextAsync(CancellationToken ct = default) => _controller.GetContext(Profiles.Object, ct);
+
         public async Task<HttpClient> StartAsync()
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing", ContentRootPath = Path.GetTempPath(), ApplicationName = typeof(ReservationsController).Assembly.GetName().Name });
@@ -275,11 +376,13 @@ public sealed class ReservationsApiTests
             builder.Services.AddSingleton(_workspace.Object); builder.Services.AddSingleton(_entitlements.Object);
             builder.Services.AddSingleton(Repository.Object); builder.Services.AddSingleton(Engine.Object);
             builder.Services.AddSingleton(Profiles.Object); builder.Services.AddSingleton(Locations.Object);
+            builder.Services.AddSingleton(Mock.Of<ICurrentUser>());
+            builder.Services.AddScoped<TenantCapabilityFilter>();
             // Test transport only: no production Program, Firebase authentication, Firestore or PostgreSQL connection.
             builder.Services.AddAuthorization(options => options.AddPolicy("WorkspaceMember", policy => policy.RequireAssertion(_ => true)));
-            builder.Services.AddControllers().AddApplicationPart(typeof(ReservationsController).Assembly)
+            builder.Services.AddControllers(options => options.Filters.AddService<TenantCapabilityFilter>()).AddApplicationPart(typeof(ReservationsController).Assembly)
                 .ConfigureApplicationPartManager(parts => parts.FeatureProviders.Add(new ReservationsOnly()));
-            _app = builder.Build(); _app.UseAuthorization(); _app.MapControllers();
+            _app = builder.Build(); _app.UseMiddleware<GlobalExceptionMiddleware>(); _app.UseAuthorization(); _app.MapControllers();
             await _app.StartAsync();
             var address = _app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             _client = new HttpClient { BaseAddress = new Uri(address) };

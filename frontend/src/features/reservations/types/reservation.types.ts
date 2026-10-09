@@ -1,3 +1,7 @@
+export interface ReservationContextDto {
+  timeZone: string;
+}
+
 export interface CreateReservationRequest {
   locationId: string;
   serviceId: string;

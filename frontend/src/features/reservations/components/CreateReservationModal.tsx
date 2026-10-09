@@ -60,7 +60,7 @@ const CreateReservationForm = ({ isOpen, onClose, onSuccess, locations, services
 
   const { data: slots = [], isLoading: isLoadingSlots, isFetching: isFetchingSlots, error: slotsError, refetch: refetchSlots } = useQuery({
     ...queryPolicies.dynamic,
-    queryKey: queryKeys.reservations.slots(workspaceId, locationId, formData.serviceId, formData.date),
+    queryKey: queryKeys.reservations.slots(workspaceId, locationId, formData.serviceId, formData.date, timeZone),
     queryFn: ({ signal }) => getAvailability(locationId, formData.serviceId, formData.date, signal),
     enabled: isOpen && !!workspaceId && concreteLocation && !!selectedService && validDate && can('RESERVATIONS', 'CHECK_AVAILABILITY'),
   });

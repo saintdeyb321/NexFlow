@@ -11,12 +11,13 @@ import { queryPolicies } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { usePermissions } from '../../../core/auth/permissions';
-import { getApiErrorPresentation } from '../../../core/api/axiosClient';
+import { ApiError, getApiErrorPresentation } from '../../../core/api/axiosClient';
 import { useAuthStore } from '../../../core/store/useAuthStore';
-import { getBusinessToday, resolveBusinessTimeZone } from '../../../core/utils/dateTime';
-import { getReservationsForWeek, cancelReservation, completeReservation } from '../services/reservation.service';
+import { getBusinessToday } from '../../../core/utils/dateTime';
+import { getQuerySession } from '../../../core/query/queryPersistence';
+import { getReservationContext, getReservationsForWeek, cancelReservation, completeReservation } from '../services/reservation.service';
 import { invalidateReservationViews } from '../services/reservation.queries';
-import { getLocations, getBusinessProfile } from '../../business/services/business.service';
+import { getLocations } from '../../business/services/business.service';
 import { getServices } from '../../services/services/services.service';
 import { CreateReservationModal } from '../components/CreateReservationModal';
 import { EditReservationModal } from '../components/EditReservationModal';
@@ -33,30 +34,32 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 ];
 
 export const ReservationsPage = () => {
-  const workspaceId = useAuthStore(state => state.me?.workspace?.id);
+  const me = useAuthStore(state => state.me);
+  const workspaceId = me?.workspace?.id;
   const { can } = usePermissions();
   if (!workspaceId || !can('RESERVATIONS', 'READ')) return <Alert tone="warning">No tienes permiso para consultar reservas en este workspace.</Alert>;
   // Reset local navigation/forms when tenant identity changes; server state remains in TanStack Query.
-  return <WorkspaceAgenda key={workspaceId} workspaceId={workspaceId} />;
+  return <WorkspaceAgenda key={JSON.stringify([me.user.id, workspaceId, getQuerySession()])} workspaceId={workspaceId} />;
 };
 
 const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
+  const context = useQuery({
+    ...queryPolicies.stable,
+    queryKey: queryKeys.reservations.context(workspaceId),
+    queryFn: ({ signal }) => getReservationContext(signal),
+  });
+  if (context.isError) return <ErrorState title="No se pudo cargar la zona horaria de la agenda" description={context.error instanceof ApiError ? getApiErrorPresentation(context.error) : context.error.message} onRetry={() => void context.refetch()} />;
+  if (context.isPending || context.isFetching) return <LoadingState title="Cargando zona horaria de la agenda..." />;
+  return <ResolvedAgenda key={context.data.timeZone} workspaceId={workspaceId} timeZone={context.data.timeZone} />;
+};
+
+const ResolvedAgenda = ({ workspaceId, timeZone }: { workspaceId: string; timeZone: string }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { can } = usePermissions();
   const selectedLocationId = useAuthStore(state => state.selectedLocationId);
-  const canReadProfile = can('BUSINESS_PROFILE', 'READ');
   const canReadServices = can('SERVICES', 'READ');
   const canReadLocations = can('LOCATIONS', 'READ');
-  const profile = useQuery({
-    ...queryPolicies.stable,
-    queryKey: queryKeys.business.profile(workspaceId),
-    queryFn: ({ signal }) => getBusinessProfile(signal),
-    enabled: canReadProfile,
-  });
-  const timeZone = resolveBusinessTimeZone(profile.data?.timeZone);
-  // A failed/forbidden profile read is not evidence that the business uses the fallback zone.
-  const zoneReady = canReadProfile && (profile.isSuccess || Boolean(profile.data));
   const today = getBusinessToday(timeZone);
   const [chosenDate, setChosenDate] = useState('');
   const [rangeError, setRangeError] = useState('');
@@ -89,7 +92,7 @@ const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
       reservations: await getReservationsForWeek(selectedLocationId, range.from, range.to, signal),
       from: range.from, to: range.to,
     }),
-    enabled: zoneReady && Boolean(selectedLocationId) && can('RESERVATIONS', 'READ'),
+    enabled: Boolean(selectedLocationId) && can('RESERVATIONS', 'READ'),
     placeholderData: (previous, previousQuery) => canRetainWeek(previousQuery?.queryKey, weekKey) ? previous : undefined,
   });
   const loadedRange = reservationsQuery.data ? weekOf(reservationsQuery.data.from) : range;
@@ -100,7 +103,7 @@ const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
   const summary = useMemo(() => summarizeReservations(reservations ?? []), [reservations]);
   const selectedDay = loadedRange.days.includes(chosenDay) ? chosenDay : loadedRange.days.includes(today) ? today : loadedRange.from;
   const showingPrevious = reservationsQuery.isPlaceholderData;
-  const canCreate = can('RESERVATIONS', 'CREATE') && zoneReady && !showingPrevious;
+  const canCreate = can('RESERVATIONS', 'CREATE') && !showingPrevious;
 
   const refresh = (reservation: Pick<ReservationDto, 'locationId'>) => invalidateReservationViews(queryClient, workspaceId, reservation.locationId);
   const cancelMutation = useSessionMutation({
@@ -137,9 +140,7 @@ const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
     <PageHeader title="Reservas" description="Tu agenda de lunes a domingo. Consulta citas actuales e históricas por sede." icon={<Calendar className="w-5 h-5" />} actions={
       <Button onClick={() => setCreateDate(getBusinessToday(timeZone))} disabled={!canCreate}>Nueva reserva</Button>
     } />
-    {!canReadProfile ? <Alert tone="warning">Necesitas acceso de lectura al perfil del negocio para resolver su zona horaria.</Alert> : !zoneReady ? (
-      profile.isError ? <ErrorState description={getApiErrorPresentation(profile.error)} onRetry={() => void profile.refetch()} /> : <LoadingState title="Cargando zona horaria del negocio..." />
-    ) : <>
+    <>
       <WeekNavigation from={range.from} to={range.to} today={today} onChange={navigate} onCurrentWeek={() => navigate(getBusinessToday(timeZone))} />
       {rangeError && <Alert tone="error" className="mb-4">{rangeError}</Alert>}
       <p className="text-xs text-muted mb-4">Zona horaria: {timeZone} · {selectedLocationId === 'all' ? 'Todas las sedes' : locationNames.get(selectedLocationId) ?? 'Sede seleccionada'}</p>
@@ -174,10 +175,10 @@ const WorkspaceAgenda = ({ workspaceId }: { workspaceId: string }) => {
           {viewMode === 'week' ? <WeeklyAgenda {...view} reservations={visibleReservations} days={loadedRange.days} selectedDay={selectedDay} today={today} canCreate={canCreate} onSelectDay={setChosenDay} onCreate={setCreateDate} /> : <ReservationList {...view} reservations={visibleReservations} />}
         </section>
       </> : null}
-    </>}
+    </>
 
     <ConfirmDialog isOpen={confirmDialog !== null} title={confirmDialog?.action === 'cancel' ? '¿Cancelar reserva?' : '¿Completar reserva?'} description={confirmDialog?.action === 'cancel' ? 'El cliente perderá su espacio agendado.' : 'Esta acción marcará la cita como finalizada.'} destructive={confirmDialog?.action === 'cancel'} confirmLabel={confirmDialog?.action === 'cancel' ? 'Sí, cancelar' : 'Sí, completar'} cancelLabel="No, volver" isLoading={mutating} confirmDisabled={!can('RESERVATIONS', confirmDialog?.action === 'cancel' ? 'CANCEL' : 'COMPLETE')} onClose={() => { if (!mutating) setConfirmDialog(null); }} onConfirm={executeAction} />
-    <CreateReservationModal isOpen={createDate !== null && can('RESERVATIONS', 'CREATE') && zoneReady} initialDate={createDate ?? undefined} onClose={() => setCreateDate(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva creada exitosamente.'); }} locations={canReadLocations ? locationsQuery.data ?? [] : []} services={canReadServices ? servicesQuery.data ?? [] : []} timeZone={timeZone} />
-    <EditReservationModal isOpen={editingRes !== null && can('RESERVATIONS', 'UPDATE') && zoneReady} onClose={() => setEditingRes(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva reprogramada exitosamente.'); }} reservation={editingRes} timeZone={timeZone} />
+    <CreateReservationModal isOpen={createDate !== null && can('RESERVATIONS', 'CREATE')} initialDate={createDate ?? undefined} onClose={() => setCreateDate(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva creada exitosamente.'); }} locations={canReadLocations ? locationsQuery.data ?? [] : []} services={canReadServices ? servicesQuery.data ?? [] : []} timeZone={timeZone} />
+    <EditReservationModal isOpen={editingRes !== null && can('RESERVATIONS', 'UPDATE')} onClose={() => setEditingRes(null)} onSuccess={reservation => { void refresh(reservation); toast.success('Reserva reprogramada exitosamente.'); }} reservation={editingRes} timeZone={timeZone} />
   </div>;
 };
