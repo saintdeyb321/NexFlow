@@ -6,17 +6,19 @@ import { connectQueryIdentity, disconnectQueryIdentity } from '../../src/core/qu
 import { ToastProvider } from '../../src/components/ui/Toast';
 import { ArtifactGenerator } from '../../src/features/artifacts/components/ArtifactGenerator';
 import { useAuthStore, reservationIdentity } from './reservations-store';
-import { fixture, calls, states, quota, key, initial } from './artifacts-api';
+import { fixture, calls, states, quota, key, initial, axiosClient, getApiErrorPresentation } from './artifacts-api';
+import { setActiveWorkspaceId } from '../../src/core/api/axiosClient';
 import type { MeResponse } from '../../src/core/types/auth.types';
 import '../../src/index.css';
 
 const identity: MeResponse = { ...structuredClone(reservationIdentity), entitlements: ['CATALOG', 'SERVICES'], capabilities: { CATALOG: ['READ', 'GENERATE'], SERVICES: ['READ', 'GENERATE'] } };
 const setIdentity = (me: MeResponse | null) => flushSync(() => {
   disconnectQueryIdentity(); if (me) connectQueryIdentity(me); useAuthStore.setState({ me, selectedLocationId: 'all' });
+  setActiveWorkspaceId(me?.workspace?.id ?? null);
 });
 client.setDefaultOptions({ queries: { retry: false, refetchOnWindowFocus: false }, mutations: { retry: false } });
 setIdentity(identity);
-Object.assign(window, { artifactAudit: { fixture, calls, states, quota, key, initial, client, setIdentity, identity } });
+Object.assign(window, { artifactAudit: { fixture, calls, states, quota, key, initial, client, setIdentity, identity, axiosClient, getApiErrorPresentation } });
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><ToastProvider><div className="p-5">
   <ArtifactGenerator scope="PRODUCT" title="Folleto PRODUCT" /><ArtifactGenerator scope="SERVICE" title="Folleto SERVICE" />
 </div></ToastProvider></QueryClientProvider>);

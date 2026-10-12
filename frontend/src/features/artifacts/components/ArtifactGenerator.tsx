@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Eye, FileText, Loader2, Plus, RefreshCw, Upload } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { useToast } from '../../../components/ui/useToast';
-import { Skeleton, ErrorState } from '../../../components/ui/Feedback';
+import { Skeleton, ErrorState, Alert } from '../../../components/ui/Feedback';
 import { queryPolicies, usePageVisible } from '../../../core/query/queryPolicies';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -53,6 +53,7 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
     queryKey: artifactKey,
     queryFn: ({ signal }) => readStatus(signal),
     enabled: !!workspaceId && can(module, 'READ'),
+    retry: false,
     refetchInterval: query => (isPageVisible && query.state.data?.status === 'GENERATING' ? 5000 : false),
   });
 
@@ -61,7 +62,8 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
     try {
       // Do not reuse a GET that began before the uncertain POST completed.
       await queryClient.cancelQueries({ queryKey: artifactKey, exact: true });
-      await queryClient.fetchQuery({ queryKey: artifactKey, queryFn: ({ signal }) => readStatus(signal), staleTime: 0 });
+      if (!isCurrentQuerySession(session)) return;
+      await queryClient.fetchQuery({ queryKey: artifactKey, queryFn: ({ signal }) => readStatus(signal), staleTime: 0, retry: false });
       if (isCurrentQuerySession(session)) setUncertain(false);
     } catch (error) {
       if (isCurrentQuerySession(session)) toast.toastApiError(error);
@@ -69,12 +71,15 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
   };
   const generateMutation = useSessionMutation({
     mutationFn: generateArtifact,
+    retry: false,
     onSuccess: async () => {
       setCreationMode(null);
       toast.info('Estamos creando tu nuevo folleto.');
       await confirmState();
     },
     onError: async (error: unknown) => {
+      // The HTTP submission ended; reconciliation must not trap the user in its modal.
+      setCreationMode(null);
       toast.toastApiError(error);
       await confirmState();
     },
@@ -96,6 +101,7 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
   });
   const cancelMutation = useSessionMutation({
     mutationFn: cancelArtifactGeneration,
+    retry: false,
     onSuccess: async result => {
       queryClient.setQueryData(artifactKey, result);
       setCreationMode(null);
@@ -120,7 +126,8 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
   };
 
   if (isLoading) return <Skeleton className="mb-6 h-20 rounded-xl" />;
-  if (isError) return <ErrorState description="No pudimos confirmar el estado del folleto. Consulta su estado antes de reintentar." onRetry={() => void confirmState()} />;
+  if (isError) return <ErrorState description="No pudimos confirmar el estado del folleto. Consulta su estado antes de reintentar."
+    action={<Button variant="secondary" disabled={isFetching} isLoading={isFetching} onClick={() => void confirmState()}>Consultar estado</Button>} />;
   const isStale = artifact?.status === 'STALE';
   const isGenerating = artifact?.status === 'GENERATING';
   const isCurrent = artifact?.status === 'CURRENT';
@@ -140,6 +147,7 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
 
   return (
     <div className="mb-5 rounded-xl border border-line bg-surface px-4 py-4">
+      {uncertain && <Alert className="mb-3">Estamos verificando el estado de tu solicitud. Espera la confirmación antes de generar otra versión.</Alert>}
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div className="flex items-start gap-3">
           <div className="rounded-lg bg-primary/10 p-2 text-primary"><FileText aria-hidden="true" className="h-5 w-5" /></div>

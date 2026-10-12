@@ -2,17 +2,17 @@ import { axiosClient } from '../../../core/api/axiosClient';
 import type { ArtifactScope, ArtifactStatusDto, GenerateArtifactRequest, GenerateArtifactResponse, UploadArtifactRequest } from '../types/artifact.types';
 
 export const getArtifactStatus = async (scope: ArtifactScope, signal?: AbortSignal): Promise<ArtifactStatusDto> => {
-  const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`, { signal });
+  const { data } = await axiosClient.get<ArtifactStatusDto>(`/catalog/artifact?scope=${scope}`, { signal, timeout: 15_000 });
   return data;
 };
 
 export const generateArtifact = async (request: GenerateArtifactRequest): Promise<GenerateArtifactResponse> => {
-  const { data } = await axiosClient.post<GenerateArtifactResponse>('/catalog/artifact/generate', request);
+  const { data } = await axiosClient.post<GenerateArtifactResponse>('/catalog/artifact/generate', request, { timeout: 20_000 });
   return data;
 };
 
 export const cancelArtifactGeneration = async (request: { scope: ArtifactScope; generationId: string }): Promise<ArtifactStatusDto> => {
-  const { data } = await axiosClient.post<ArtifactStatusDto>('/catalog/artifact/cancel', request);
+  const { data } = await axiosClient.post<ArtifactStatusDto>('/catalog/artifact/cancel', request, { timeout: 15_000 });
   return data;
 };
 

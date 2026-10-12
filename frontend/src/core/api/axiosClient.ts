@@ -18,6 +18,7 @@ export class ApiError extends Error {
 // 🔥 SPRINT 01: Utilidad central para estandarizar mensajes de error en la UI y evitar leer error.response
 export const getApiErrorPresentation = (error: unknown): string => {
   if (error instanceof ApiError) {
+    if (error.code === 'HTTP_TIMEOUT') return error.message;
     if (error.status === 401) return "Tu sesión ha expirado.";
     if (error.status === 403) return "No tienes acceso a esta función.";
     if (error.status === 404) return "El recurso solicitado no existe.";
@@ -65,6 +66,10 @@ axiosClient.interceptors.request.use(
 axiosClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return Promise.reject(new ApiError(0, 'HTTP_TIMEOUT',
+        'No recibimos respuesta del servidor a tiempo. Estamos verificando si tu solicitud fue registrada.'));
+    }
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data;
