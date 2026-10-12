@@ -274,6 +274,17 @@ public class CatalogController : ControllerBase
         return Ok(ArtifactStatusDto.From(artifact));
     }
 
+    [HttpPost("artifact/cancel")]
+    public async Task<IActionResult> CancelArtifactGeneration([FromBody] CancelArtifactGenerationRequest request,
+        [FromServices] ICatalogGenerationService generationService, CancellationToken cancellationToken)
+    {
+        if (request.Scope is not ("PRODUCT" or "SERVICE")) return BadRequest(new { message = "Scope inválido." });
+        var module = request.Scope == "SERVICE" ? "SERVICES" : "CATALOG";
+        if (!await HasAccessTo(module, cancellationToken)) return StatusCode(403, $"Módulo {module} no contratado.");
+        return Ok(ArtifactStatusDto.From(await generationService.CancelGenerationAsync(WorkspaceId, request.Scope,
+            request.GenerationId, cancellationToken)));
+    }
+
     private void QueueArtifactInvalidation(Guid workspaceId)
     {
         _taskQueue.QueueBackgroundWorkItemAsync(async (serviceProvider, token) =>
@@ -306,4 +317,10 @@ public sealed class UploadArtifactRequest
     public bool ReplaceCurrent { get; set; }
     [Required]
     public IFormFile File { get; set; } = null!;
+}
+
+public sealed class CancelArtifactGenerationRequest
+{
+    [Required, AllowedValues("PRODUCT", "SERVICE")] public string Scope { get; set; } = string.Empty;
+    [Required, StringLength(64)] public string GenerationId { get; set; } = string.Empty;
 }

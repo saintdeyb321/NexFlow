@@ -16,6 +16,7 @@ internal sealed class FirestoreCatalogArtifactDocument
     [FirestoreProperty] public DateTime? LastGeneratedAt { get; set; }
     [FirestoreProperty] public string? GenerationId { get; set; }
     [FirestoreProperty] public DateTime? GenerationStartedAt { get; set; }
+    [FirestoreProperty] public string? FailureCode { get; set; }
     [FirestoreProperty] public string? PersistenceVersion { get; set; }
     [FirestoreProperty] public string? Origin { get; set; }
     [FirestoreProperty] public string? VisualStyle { get; set; }
@@ -32,7 +33,7 @@ internal sealed class FirestoreCatalogArtifactDocument
             LastGeneratedAt, GenerationId, GenerationStartedAt, PersistenceVersion,
             Parse<CatalogArtifactOrigin>(Origin) ?? CatalogArtifactOrigin.Generated,
             Parse<ArtifactVisualStyle>(VisualStyle), Parse<ArtifactPalette>(Palette), Parse<ArtifactCreativity>(Creativity),
-            PdfStoragePublicId, PendingUploadId, UploadLeaseExpiresAt);
+            PdfStoragePublicId, PendingUploadId, UploadLeaseExpiresAt, FailureCode);
     }
 
     public static FirestoreCatalogArtifactDocument FromDomain(CatalogArtifact artifact, string? version = null) => new()
@@ -40,6 +41,7 @@ internal sealed class FirestoreCatalogArtifactDocument
         Id = artifact.Id.ToString(), Scope = artifact.Scope, SourceHash = artifact.SourceHash, PdfUrl = artifact.PdfUrl,
         Status = artifact.Status.ToString(), LastGeneratedAt = artifact.LastGeneratedAt, GenerationId = artifact.GenerationId,
         GenerationStartedAt = artifact.GenerationStartedAt, PersistenceVersion = version ?? artifact.PersistenceVersion,
+        FailureCode = artifact.FailureCode,
         Origin = artifact.Origin.ToString().ToUpperInvariant(), VisualStyle = artifact.VisualStyle?.ToString(),
         Palette = artifact.Palette?.ToString(), Creativity = artifact.Creativity?.ToString(), PdfStoragePublicId = artifact.PdfStoragePublicId,
         PendingUploadId = artifact.PendingUploadId, UploadLeaseExpiresAt = artifact.UploadLeaseExpiresAt

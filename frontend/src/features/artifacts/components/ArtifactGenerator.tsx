@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Eye, FileText, Loader2, Plus, RefreshCw, Upload } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
@@ -9,7 +9,8 @@ import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { usePermissions } from '../../../core/auth/permissions';
-import { getArtifactStatus, generateArtifact, uploadArtifact } from '../services/artifact.service';
+import { getQuerySession, isCurrentQuerySession } from '../../../core/query/queryPersistence';
+import { getArtifactStatus, generateArtifact, uploadArtifact, cancelArtifactGeneration } from '../services/artifact.service';
 import { ArtifactCreationModal } from './ArtifactCreationModal';
 import type { ArtifactCreationMode } from './ArtifactCreationModal';
 import { PdfPreviewModal } from './PdfPreviewModal';
@@ -23,7 +24,9 @@ interface ArtifactGeneratorProps {
 export const ArtifactGenerator = (props: ArtifactGeneratorProps) => {
   const workspaceId = useAuthStore(state => state.me?.workspace?.id);
   const userId = useAuthStore(state => state.me?.user.id);
-  return <WorkspaceArtifactGenerator key={`${userId}:${workspaceId}:${props.scope}`} {...props} workspaceId={workspaceId} />;
+  const { can } = usePermissions();
+  if (!workspaceId || !can(props.scope === 'PRODUCT' ? 'CATALOG' : 'SERVICES', 'READ')) return null;
+  return <WorkspaceArtifactGenerator key={`${userId}:${workspaceId}:${getQuerySession()}:${props.scope}`} {...props} workspaceId={workspaceId} />;
 };
 
 const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGeneratorProps & { workspaceId?: string }) => {
@@ -35,28 +38,47 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
   const canGenerate = can(module, 'GENERATE');
   const [creationMode, setCreationMode] = useState<ArtifactCreationMode | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
+  const submitting = useRef(false);
+  const session = getQuerySession();
   const artifactKey = queryKeys.artifacts.byScope(workspaceId, scope);
+  const readStatus = async (signal: AbortSignal) => {
+    const result = await getArtifactStatus(scope, signal);
+    if (!signal.aborted && isCurrentQuerySession(session)) setUncertain(false);
+    return result;
+  };
 
-  const { data: artifact, isLoading, isError, refetch } = useQuery({
+  const { data: artifact, isLoading, isError, isFetching } = useQuery({
     ...queryPolicies.dynamic,
     queryKey: artifactKey,
-    queryFn: ({ signal }) => getArtifactStatus(scope, signal),
+    queryFn: ({ signal }) => readStatus(signal),
     enabled: !!workspaceId && can(module, 'READ'),
     refetchInterval: query => (isPageVisible && query.state.data?.status === 'GENERATING' ? 5000 : false),
   });
 
-  const invalidateArtifact = () => queryClient.invalidateQueries({ queryKey: artifactKey });
+  const confirmState = async () => {
+    setUncertain(true);
+    try {
+      // Do not reuse a GET that began before the uncertain POST completed.
+      await queryClient.cancelQueries({ queryKey: artifactKey, exact: true });
+      await queryClient.fetchQuery({ queryKey: artifactKey, queryFn: ({ signal }) => readStatus(signal), staleTime: 0 });
+      if (isCurrentQuerySession(session)) setUncertain(false);
+    } catch (error) {
+      if (isCurrentQuerySession(session)) toast.toastApiError(error);
+    }
+  };
   const generateMutation = useSessionMutation({
     mutationFn: generateArtifact,
     onSuccess: async () => {
       setCreationMode(null);
       toast.info('Estamos creando tu nuevo folleto.');
-      await invalidateArtifact();
+      await confirmState();
     },
     onError: async (error: unknown) => {
       toast.toastApiError(error);
-      await invalidateArtifact();
+      await confirmState();
     },
+    onSettled: () => { submitting.current = false; },
   });
   const uploadMutation = useSessionMutation({
     mutationFn: uploadArtifact,
@@ -64,12 +86,26 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
       queryClient.setQueryData(artifactKey, result);
       setCreationMode(null);
       toast.success('Tu PDF está listo para compartir.');
-      await invalidateArtifact();
+      await confirmState();
     },
     onError: async (error: unknown) => {
       toast.toastApiError(error);
-      await invalidateArtifact();
+      await confirmState();
     },
+    onSettled: () => { submitting.current = false; },
+  });
+  const cancelMutation = useSessionMutation({
+    mutationFn: cancelArtifactGeneration,
+    onSuccess: async result => {
+      queryClient.setQueryData(artifactKey, result);
+      setCreationMode(null);
+      toast.info(result.failureCode === 'Catalog.GenerationCancelled'
+        ? 'Generación cancelada. Puedes solicitar otra; la cuota utilizada se conserva.'
+        : 'La generación ya terminó. Revisa su estado antes de reintentar.');
+      await confirmState();
+    },
+    onError: async error => { toast.toastApiError(error); await confirmState(); },
+    onSettled: () => { submitting.current = false; },
   });
 
   const pdfUrl = artifact?.pdfUrl && /^https?:\/\//i.test(artifact.pdfUrl) ? artifact.pdfUrl : null;
@@ -84,14 +120,23 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
   };
 
   if (isLoading) return <Skeleton className="mb-6 h-20 rounded-xl" />;
-  if (isError) return <ErrorState onRetry={() => void refetch()} />;
+  if (isError) return <ErrorState description="No pudimos confirmar el estado del folleto. Consulta su estado antes de reintentar." onRetry={() => void confirmState()} />;
   const isStale = artifact?.status === 'STALE';
   const isGenerating = artifact?.status === 'GENERATING';
   const isCurrent = artifact?.status === 'CURRENT';
   const hasError = artifact?.status === 'FAILED';
   const isNotGenerated = !artifact || artifact.status === 'NOT_GENERATED';
-  const isSubmitting = generateMutation.isPending || uploadMutation.isPending;
-  const blocked = isGenerating || !canGenerate;
+  const isSubmitting = generateMutation.isPending || uploadMutation.isPending || cancelMutation.isPending;
+  const blocked = isGenerating || uncertain || isFetching || !canGenerate;
+  const cancel = () => {
+    if (!isGenerating || !artifact.generationId || !canGenerate || uncertain || isSubmitting || submitting.current) return;
+    submitting.current = true;
+    cancelMutation.mutate({ scope, generationId: artifact.generationId });
+  };
+  const failureMessage = artifact?.failureCode === 'Catalog.GenerationTimeout' ? 'La generación superó el plazo máximo. Puedes reintentar.'
+    : artifact?.failureCode === 'Catalog.GenerationCancelled' ? 'Generación cancelada. Puedes crear otra versión.'
+      : artifact?.failureCode === 'Catalog.GenerationDeliveryFailed' ? 'No pudimos entregar la solicitud al generador. Puedes reintentar.'
+        : 'No pudimos crear tu nueva versión. Puedes reintentar o subir tu PDF.';
 
   return (
     <div className="mb-5 rounded-xl border border-line bg-surface px-4 py-4">
@@ -104,7 +149,7 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
               {isCurrent && 'Tu folleto está actualizado y listo para compartir.'}
               {isStale && 'Tu folleto puede estar desactualizado.'}
               {isGenerating && 'Estamos creando tu nuevo folleto.'}
-              {hasError && 'No pudimos crear tu nueva versión. Puedes reintentar o subir tu PDF.'}
+              {hasError && failureMessage}
               {isNotGenerated && 'Crea un folleto con NexFlow o sube tu propio PDF.'}
             </p>
             {pdfUrl && <p className="mt-1 text-xs text-muted">{artifact?.origin === 'UPLOADED' ? 'PDF propio' : 'Creado con NexFlow'}</p>}
@@ -116,7 +161,8 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
             {isGenerating || hasError ? 'Ver versión anterior' : isStale ? 'Previsualizar versión actual' : 'Previsualizar'}
           </Button>}
           {isCurrent && pdfUrl && <Button variant="secondary" onClick={() => void copyLink()}><Copy aria-hidden="true" className="h-4 w-4" /> Copiar enlace</Button>}
-          {isGenerating ? <span className="inline-flex items-center gap-2 text-sm text-muted"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> En proceso</span> : <>
+          {isGenerating ? <><span className="inline-flex items-center gap-2 text-sm text-muted"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> En proceso</span>
+            {canGenerate && <Button variant="secondary" disabled={!artifact.generationId || uncertain || isSubmitting} onClick={cancel}>Cancelar generación</Button>}</> : <>
             <Button variant="secondary" disabled={blocked || isSubmitting} onClick={() => setCreationMode('generate')}>
               {isNotGenerated || isCurrent ? <Plus aria-hidden="true" className="h-4 w-4" /> : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
               {isNotGenerated ? 'Crear folleto' : isCurrent ? 'Crear nueva versión' : isStale ? 'Actualizar con NexFlow' : 'Reintentar'}
@@ -129,8 +175,9 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
       </div>
       {creationMode && <ArtifactCreationModal scope={scope} artifact={artifact} initialMode={creationMode}
         isSubmitting={isSubmitting} blocked={blocked} onClose={() => setCreationMode(null)}
-        onGenerate={(design, replaceCurrent) => { if (!blocked && !isSubmitting) generateMutation.mutate({ scope, design, replaceCurrent }); }}
-        onUpload={(file, replaceCurrent) => { if (!blocked && !isSubmitting) uploadMutation.mutate({ scope, file, replaceCurrent }); }} />}
+        onCancelGeneration={isGenerating && canGenerate ? cancel : undefined}
+        onGenerate={(design, replaceCurrent) => { if (!blocked && !isSubmitting && !submitting.current) { submitting.current = true; generateMutation.mutate({ scope, design, replaceCurrent }); } }}
+        onUpload={(file, replaceCurrent) => { if (!blocked && !isSubmitting && !submitting.current) { submitting.current = true; uploadMutation.mutate({ scope, file, replaceCurrent }); } }} />}
       {previewOpen && pdfUrl && <PdfPreviewModal pdfUrl={pdfUrl} title={title} onClose={() => setPreviewOpen(false)} onCopy={() => void copyLink()} />}
     </div>
   );

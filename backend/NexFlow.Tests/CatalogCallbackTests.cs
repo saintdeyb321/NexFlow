@@ -19,6 +19,48 @@ namespace NexFlow.Tests;
 
 public sealed class CatalogCallbackTests
 {
+    [Theory]
+    [InlineData("PRODUCT")]
+    [InlineData("SERVICE")]
+    public async Task Cancelled_generation_ignores_signed_late_callback_and_preserves_previous_pdf(string scope)
+    {
+        var f = new CatalogFixture();
+        var workspace = Workspace.Create("Cancellation fixture");
+        var previous = await f.SeedCurrent(scope, workspace.Id);
+        var active = await f.Generate(scope, workspace: workspace.Id);
+        await f.Service.CancelGenerationAsync(workspace.Id, scope, active.GenerationId!, default);
+        Assert.IsType<OkObjectResult>(await Callback(f, workspace, active.GenerationId!, active.SourceHash, scope: scope));
+        var artifact = (await f.Artifacts.GetCurrentArtifactAsync(workspace.Id, scope, default))!;
+        Assert.Equal(previous.PdfUrl, artifact.PdfUrl);
+        Assert.Equal("Catalog.GenerationCancelled", artifact.FailureCode);
+    }
+
+    [Fact]
+    public async Task Callback_received_after_deadline_cannot_publish_even_with_valid_hmac_and_hash()
+    {
+        var f = new CatalogFixture(); var workspace = Workspace.Create("Timeout fixture");
+        var previous = await f.SeedCurrent(workspace: workspace.Id);
+        var active = await f.Generate(workspace: workspace.Id);
+        f.Now = active.GenerationStartedAt!.Value.AddMinutes(5);
+        Assert.IsType<OkObjectResult>(await Callback(f, workspace, active.GenerationId!, active.SourceHash));
+        var current = (await f.Artifacts.GetCurrentArtifactAsync(workspace.Id, "PRODUCT", default))!;
+        Assert.Equal("Catalog.GenerationTimeout", current.FailureCode);
+        Assert.Equal(previous.PdfUrl, current.PdfUrl);
+    }
+
+    [Fact]
+    public async Task Callback_hash_resolution_crossing_deadline_does_not_publish()
+    {
+        var f = new CatalogFixture(); var workspace = Workspace.Create("Slow hash fixture");
+        var active = await f.Generate(workspace: workspace.Id);
+        f.Profiles.Setup(p => p.GetProfileAsync(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() =>
+        {
+            f.Now = active.GenerationStartedAt!.Value.AddMinutes(5);
+            return new NexFlow.Application.Features.Business.BusinessProfileDto("Real business", "123", "real@example.test", "51999999999", "Facts");
+        });
+        Assert.IsType<OkObjectResult>(await Callback(f, workspace, active.GenerationId!, active.SourceHash));
+        Assert.Equal("Catalog.GenerationTimeout", (await f.Artifacts.GetCurrentArtifactAsync(workspace.Id, "PRODUCT", default))!.FailureCode);
+    }
     [Fact]
     public async Task Obsolete_callback_does_not_replace_newer_generation_or_previous_pdf()
     {
@@ -85,7 +127,7 @@ public sealed class CatalogCallbackTests
         Assert.Equal(previous.PdfUrl, current.PdfUrl);
     }
 
-    private static async Task<IActionResult> Callback(CatalogFixture f, Workspace workspace, string generationId, string hash, bool invalidSignature = false)
+    private static async Task<IActionResult> Callback(CatalogFixture f, Workspace workspace, string generationId, string hash, bool invalidSignature = false, string scope = "PRODUCT")
     {
         // A test-only relational database supplies the existing lifecycle transaction and workspace check.
         // Advisory functions are no-ops here; this does not exercise or alter a PostgreSQL schema.
@@ -100,7 +142,7 @@ public sealed class CatalogCallbackTests
         const string secret = "unit-test-secret";
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["N8n:WebhookSecret"] = secret }).Build();
         var controller = new N8nWebhookController(f.Artifacts, config) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
-        var body = JsonSerializer.Serialize(new CatalogReadyPayload { WorkspaceId = workspace.Id, Scope = "PRODUCT", GenerationId = generationId, SourceHash = hash, PdfUrl = "https://storage.example.test/generated.pdf" });
+        var body = JsonSerializer.Serialize(new CatalogReadyPayload { WorkspaceId = workspace.Id, Scope = scope, GenerationId = generationId, SourceHash = hash, PdfUrl = "https://storage.example.test/generated.pdf" });
         controller.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         var signature = Convert.ToBase64String(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"{timestamp}.{body}")));

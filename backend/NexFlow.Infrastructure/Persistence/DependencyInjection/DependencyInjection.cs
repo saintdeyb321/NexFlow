@@ -17,6 +17,7 @@ using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
 using NexFlow.Infrastructure.Workers;
 using StackExchange.Redis;
+using NexFlow.Application.Features.Business;
 
 namespace NexFlow.Infrastructure.DependencyInjection;
 
@@ -75,6 +76,12 @@ public static class DependencyInjection
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();
         services.AddHostedService<CatalogUploadCleanupWorker>();
+        services.AddOptions<CatalogGenerationOptions>().Configure(options =>
+        {
+            var value = configuration["CatalogGeneration:TimeoutMinutes"];
+            if (value != null) options.TimeoutMinutes = int.TryParse(value, out var minutes) ? minutes : 0;
+        }).Validate(options => options.TimeoutMinutes is >= 1 and <= 30, "CatalogGeneration:TimeoutMinutes debe estar entre 1 y 30.").ValidateOnStart();
+        services.AddHostedService<CatalogGenerationRecoveryWorker>();
         services.AddScoped<ITenantDeletionScheduler, TenantDeletionScheduler>();
         services.AddHostedService<TenantDeletionWorker>();
 

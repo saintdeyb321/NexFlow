@@ -38,6 +38,8 @@ export interface ArtifactStatusDto {
   visualStyle: ArtifactDesign['visualStyle'] | null;
   palette: ArtifactDesign['palette'] | null;
   creativity: ArtifactDesign['creativity'] | null;
+  generationId?: string | null;
+  failureCode?: string | null;
 }
 
 export interface GenerateArtifactRequest {

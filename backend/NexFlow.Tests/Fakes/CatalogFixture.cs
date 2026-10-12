@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
@@ -28,8 +29,10 @@ public sealed class CatalogFixture
     public Mock<IUnitOfWork> UnitOfWork { get; } = new(MockBehavior.Strict);
     public List<OutboxMessage> Messages { get; } = new();
     public CatalogGenerationService Service { get; }
+    public DateTime Now { get; set; } = DateTime.UtcNow;
+    public Mock<IClock> Clock { get; } = new();
 
-    public CatalogFixture()
+    public CatalogFixture(int timeoutMinutes = 5)
     {
         Artifacts = new(Firestore.Db);
         Uploads = new(Firestore.Db);
@@ -42,8 +45,10 @@ public sealed class CatalogFixture
         Storage.Setup(r => r.UploadPdfAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Stream _, string name, string folder, CancellationToken _) => new StoredPdfAsset($"https://storage.example.test/{folder}/{name}", $"{folder}/{name}"));
         Storage.Setup(r => r.DeletePdfAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        Clock.SetupGet(c => c.UtcNow).Returns(() => Now);
         Service = new(Catalog.Object, Artifacts, Artifacts, new CatalogHashService(), Profiles.Object, Locations.Object,
-            Storage.Object, Uploads, Outbox.Object, UnitOfWork.Object, NullLogger<CatalogGenerationService>.Instance);
+            Storage.Object, Uploads, Outbox.Object, UnitOfWork.Object, NullLogger<CatalogGenerationService>.Instance,
+            Options.Create(new CatalogGenerationOptions { TimeoutMinutes = timeoutMinutes }), Clock.Object);
     }
 
     public string ArtifactPath(string scope = "PRODUCT", Guid? workspace = null) => $"workspaces/{workspace ?? WorkspaceId}/catalogArtifacts/current_{scope.ToLowerInvariant()}";

@@ -19,9 +19,10 @@ interface ArtifactCreationModalProps {
   onClose: () => void;
   onGenerate: (design: ArtifactDesign, replaceCurrent: boolean) => void;
   onUpload: (file: File, replaceCurrent: boolean) => void;
+  onCancelGeneration?: () => void;
 }
 
-export const ArtifactCreationModal = ({ scope, artifact, initialMode, isSubmitting, blocked, onClose, onGenerate, onUpload }: ArtifactCreationModalProps) => {
+export const ArtifactCreationModal = ({ scope, artifact, initialMode, isSubmitting, blocked, onClose, onGenerate, onUpload, onCancelGeneration }: ArtifactCreationModalProps) => {
   const [mode, setMode] = useState<ArtifactCreationMode>(initialMode);
   const [design, setDesign] = useState<ArtifactDesign>(() => ({
     visualStyle: artifact?.visualStyle ?? 'MODERN',
@@ -117,6 +118,7 @@ export const ArtifactCreationModal = ({ scope, artifact, initialMode, isSubmitti
           </>}
         </fieldset>
         <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
+          {onCancelGeneration && <Button variant="secondary" disabled={isSubmitting || !artifact?.generationId} onClick={onCancelGeneration}>Cancelar generación</Button>}
           <Button variant="secondary" disabled={isSubmitting} onClick={onClose}>Cancelar</Button>
           <Button type="submit" isLoading={isSubmitting} disabled={blocked || (mode === 'upload' && !file)}>
             {mode === 'generate' ? 'Generar folleto' : 'Subir PDF'}

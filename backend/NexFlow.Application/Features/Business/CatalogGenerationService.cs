@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Abstractions.Repositories;
@@ -21,6 +22,10 @@ public interface ICatalogGenerationService
     Task<CatalogArtifact> UploadPdfAsync(Guid workspaceId, string scope, Stream fileStream, string fileName, string contentType, long length, bool replaceCurrent, CancellationToken cancellationToken);
     Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken cancellationToken);
     Task ReconcileUploadAsync(PdfUploadOperation operation, CancellationToken cancellationToken);
+    bool IsGenerationExpired(CatalogArtifact artifact);
+    Task ReconcileGenerationAsync(Guid workspaceId, string scope, CancellationToken cancellationToken);
+    Task ReconcileFailedDeliveryAsync(OutboxMessage message, CancellationToken cancellationToken);
+    Task<CatalogArtifact> CancelGenerationAsync(Guid workspaceId, string scope, string generationId, CancellationToken cancellationToken);
 }
 
 public class CatalogGenerationService : ICatalogGenerationService
@@ -37,6 +42,9 @@ public class CatalogGenerationService : ICatalogGenerationService
     private readonly IOutboxRepository _outboxRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CatalogGenerationService> _logger;
+    private readonly TimeSpan _generationTimeout;
+    private readonly IClock? _clock;
+    private DateTime UtcNow => _clock?.UtcNow ?? DateTime.UtcNow;
 
     public CatalogGenerationService(
         ICatalogRepository catalogRepository,
@@ -49,7 +57,9 @@ public class CatalogGenerationService : ICatalogGenerationService
         ICatalogUploadRepository uploadRepository,
         IOutboxRepository outboxRepository,
         IUnitOfWork unitOfWork,
-        ILogger<CatalogGenerationService> logger)
+        ILogger<CatalogGenerationService> logger,
+        IOptions<CatalogGenerationOptions>? options = null,
+        IClock? clock = null)
     {
         _catalogRepository = catalogRepository;
         _artifactRepository = artifactRepository;
@@ -62,6 +72,10 @@ public class CatalogGenerationService : ICatalogGenerationService
         _outboxRepository = outboxRepository;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        var minutes = options?.Value.TimeoutMinutes ?? 5;
+        if (minutes is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(options), "TimeoutMinutes debe estar entre 1 y 30.");
+        _generationTimeout = TimeSpan.FromMinutes(minutes);
+        _clock = clock;
     }
 
     private static string ValidateScope(string scope)
@@ -104,11 +118,11 @@ public class CatalogGenerationService : ICatalogGenerationService
         scope = ValidateScope(scope);
         var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
         if (artifact == null) return null;
-        if (artifact.Status == CatalogArtifactStatus.Generating &&
-            (artifact.GenerationStartedAt == null || artifact.GenerationStartedAt < DateTime.UtcNow.AddHours(-1)))
+        if (IsGenerationExpired(artifact))
         {
-            artifact.MarkAsFailed();
-            await _artifactRepository.SaveArtifactAsync(artifact, ct);
+            await TryFailGenerationAsync(workspaceId, scope, artifact.GenerationId, "Catalog.GenerationTimeout", ct);
+            artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+            if (artifact == null) return null;
         }
         if (artifact.Status == CatalogArtifactStatus.Current && artifact.SourceHash != await GetCurrentSourceHashAsync(workspaceId, scope, ct))
         {
@@ -116,6 +130,63 @@ public class CatalogGenerationService : ICatalogGenerationService
             await _artifactRepository.SaveArtifactAsync(artifact, ct);
         }
         return artifact;
+    }
+
+    public bool IsGenerationExpired(CatalogArtifact artifact) => artifact.Status == CatalogArtifactStatus.Generating
+        && (artifact.GenerationStartedAt == null || artifact.GenerationStartedAt.Value + _generationTimeout <= UtcNow);
+
+    public async Task ReconcileGenerationAsync(Guid workspaceId, string scope, CancellationToken ct)
+    {
+        scope = ValidateScope(scope);
+        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+        if (artifact != null && IsGenerationExpired(artifact))
+            await TryFailGenerationAsync(workspaceId, scope, artifact.GenerationId, "Catalog.GenerationTimeout", ct);
+    }
+
+    private async Task<bool> TryFailGenerationAsync(Guid workspaceId, string scope, string? generationId, string code, CancellationToken ct, string? sourceHash = null)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+            if (artifact == null || artifact.WorkspaceId != workspaceId || artifact.Scope != scope
+                || artifact.Status != CatalogArtifactStatus.Generating || artifact.GenerationId != generationId
+                || (sourceHash != null && artifact.SourceHash != sourceHash)) return false;
+            if (code == "Catalog.GenerationTimeout" && !IsGenerationExpired(artifact)) return false;
+            artifact.MarkAsFailed(code);
+            try { await _artifactRepository.SaveArtifactAsync(artifact, ct); return true; }
+            catch (ConcurrencyException) when (attempt < 2) { /* Re-read; never overwrite a callback/new generation. */ }
+        }
+        return false;
+    }
+
+    public async Task<CatalogArtifact> CancelGenerationAsync(Guid workspaceId, string scope, string generationId, CancellationToken ct)
+    {
+        scope = ValidateScope(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(generationId);
+        await TryFailGenerationAsync(workspaceId, scope, generationId, "Catalog.GenerationCancelled", ct);
+        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+        if (artifact == null || artifact.WorkspaceId != workspaceId || artifact.Scope != scope
+            || artifact.GenerationId != generationId || artifact.Status != CatalogArtifactStatus.Failed)
+            throw new ConcurrencyException("La generación ya cambió. Consulta el estado actualizado.");
+        return artifact;
+    }
+
+    public async Task ReconcileFailedDeliveryAsync(OutboxMessage message, CancellationToken ct)
+    {
+        if (message.Status != OutboxStatus.Failed || message.EventType != "CATALOG_GENERATION_REQUESTED") return;
+        N8nEventPayload<JsonElement>? payload;
+        try { payload = JsonSerializer.Deserialize<N8nEventPayload<JsonElement>>(message.PayloadJson); }
+        catch (JsonException) { return; }
+        if (payload == null || payload.WorkspaceId != message.WorkspaceId || payload.EventType != message.EventType
+            || payload.Data.ValueKind != JsonValueKind.Object) return;
+        if (!payload.Data.TryGetProperty("Scope", out var scopeValue) || scopeValue.ValueKind != JsonValueKind.String
+            || !payload.Data.TryGetProperty("GenerationId", out var generationValue) || generationValue.ValueKind != JsonValueKind.String) return;
+        var scope = scopeValue.GetString();
+        var generationId = generationValue.GetString();
+        if (scope is not ("PRODUCT" or "SERVICE") || string.IsNullOrWhiteSpace(generationId)
+            || payload.CorrelationId != generationId || payload.IdempotencyKey != $"catalog_{generationId}"
+            || !payload.Data.TryGetProperty("SourceHash", out var hash) || hash.ValueKind != JsonValueKind.String) return;
+        await TryFailGenerationAsync(message.WorkspaceId, scope, generationId, "Catalog.GenerationDeliveryFailed", ct, hash.GetString());
     }
 
     public async Task CheckAndInvalidateStaleArtifactsAsync(Guid workspaceId, CancellationToken ct)
@@ -132,8 +203,8 @@ public class CatalogGenerationService : ICatalogGenerationService
         var content = await GetContentAsync(workspaceId, scope, ct);
         var hash = _hashService.ComputeContentHash(new { content.BusinessData, content.CatalogData, content.Locations });
         var generationId = Guid.NewGuid().ToString("N");
-        artifact.MarkAsGenerating(hash, generationId, design);
-        artifact = await _usageRepository.ReserveGenerationAsync(artifact, DateTime.UtcNow.Date, ct);
+        artifact.MarkAsGenerating(hash, generationId, design, UtcNow);
+        artifact = await _usageRepository.ReserveGenerationAsync(artifact, UtcNow.Date, ct);
         if (artifact.Status != CatalogArtifactStatus.Generating) return artifact;
         try
         {
@@ -149,7 +220,7 @@ public class CatalogGenerationService : ICatalogGenerationService
         {
             _logger.LogError(ex, "Catalog generation enqueue failed for {WorkspaceId}/{GenerationId}", workspaceId, generationId);
             // SQL may have committed before an acknowledgement was lost. Keep the generation valid for its callback.
-            // Unenqueued reservations expire through the existing one-hour reconciliation; never refund their tokens.
+            // Unenqueued reservations expire through durable background reconciliation; never refund their tokens.
             throw new ArtifactDependencyException("No se pudo confirmar el encolado del folleto. Consulta su estado antes de reintentar.", ex);
         }
         return artifact;

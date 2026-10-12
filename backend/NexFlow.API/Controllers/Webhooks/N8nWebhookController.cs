@@ -91,6 +91,12 @@ public class N8nWebhookController : ControllerBase
                 return Ok(new { message = "PDF invalidado: los datos del catálogo cambiaron durante la generación." });
             }
 
+            // Hash resolution can take time; check the asynchronous deadline again before publication.
+            if (generationService.IsGenerationExpired(artifact))
+            {
+                await generationService.ReconcileGenerationAsync(payload.WorkspaceId, scope, cancellationToken);
+                return Ok(new { message = "La generación expiró; callback ignorado." });
+            }
             artifact.CompleteGeneration(payload.PdfUrl);
             await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
 

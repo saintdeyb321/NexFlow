@@ -11,6 +11,11 @@ export const generateArtifact = async (request: GenerateArtifactRequest): Promis
   return data;
 };
 
+export const cancelArtifactGeneration = async (request: { scope: ArtifactScope; generationId: string }): Promise<ArtifactStatusDto> => {
+  const { data } = await axiosClient.post<ArtifactStatusDto>('/catalog/artifact/cancel', request);
+  return data;
+};
+
 export const uploadArtifact = async ({ scope, replaceCurrent, file }: UploadArtifactRequest): Promise<ArtifactStatusDto> => {
   const form = new FormData();
   form.append('scope', scope);

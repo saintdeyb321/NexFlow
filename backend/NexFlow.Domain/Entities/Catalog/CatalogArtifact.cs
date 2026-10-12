@@ -14,6 +14,7 @@ public class CatalogArtifact : Entity
     public DateTime? LastGeneratedAt { get; private set; }
     public string? GenerationId { get; private set; }
     public DateTime? GenerationStartedAt { get; private set; }
+    public string? FailureCode { get; private set; }
     public string? PersistenceVersion { get; set; }
     public CatalogArtifactOrigin Origin { get; private set; } = CatalogArtifactOrigin.Generated;
     public ArtifactVisualStyle? VisualStyle { get; private set; }
@@ -39,7 +40,7 @@ public class CatalogArtifact : Entity
 
     public static CatalogArtifact Restore(Guid id, Guid workspaceId, string scope, string sourceHash, string? pdfUrl, CatalogArtifactStatus status, DateTime? lastGeneratedAt, string? generationId, DateTime? generationStartedAt = null, string? persistenceVersion = null,
         CatalogArtifactOrigin origin = CatalogArtifactOrigin.Generated, ArtifactVisualStyle? visualStyle = null, ArtifactPalette? palette = null, ArtifactCreativity? creativity = null,
-        string? pdfStoragePublicId = null, string? pendingUploadId = null, DateTime? uploadLeaseExpiresAt = null)
+        string? pdfStoragePublicId = null, string? pendingUploadId = null, DateTime? uploadLeaseExpiresAt = null, string? failureCode = null)
     {
         return new CatalogArtifact
         {
@@ -52,6 +53,7 @@ public class CatalogArtifact : Entity
             LastGeneratedAt = lastGeneratedAt,
             GenerationId = generationId,
             GenerationStartedAt = generationStartedAt,
+            FailureCode = failureCode,
             PersistenceVersion = persistenceVersion,
             Origin = origin,
             VisualStyle = visualStyle,
@@ -72,13 +74,14 @@ public class CatalogArtifact : Entity
             throw new ConcurrencyException("Confirma explícitamente el reemplazo del folleto actual.");
     }
 
-    public void MarkAsGenerating(string currentHash, string generationId, ArtifactDesign design)
+    public void MarkAsGenerating(string currentHash, string generationId, ArtifactDesign design, DateTime? startedAt = null)
     {
         if (Status == CatalogArtifactStatus.Generating || PendingUploadId != null) throw new ConcurrencyException("Ya existe una operación de folleto en curso.");
         Status = CatalogArtifactStatus.Generating;
         SourceHash = currentHash;
         GenerationId = generationId;
-        GenerationStartedAt = DateTime.UtcNow;
+        GenerationStartedAt = startedAt ?? DateTime.UtcNow;
+        FailureCode = null;
         VisualStyle = design.VisualStyle;
         Palette = design.Palette;
         Creativity = design.Creativity;
@@ -90,6 +93,7 @@ public class CatalogArtifact : Entity
 
         PdfUrl = pdfUrl;
         Status = CatalogArtifactStatus.Current;
+        FailureCode = null;
         LastGeneratedAt = DateTime.UtcNow;
         Origin = CatalogArtifactOrigin.Generated;
         PdfStoragePublicId = null;
@@ -126,6 +130,7 @@ public class CatalogArtifact : Entity
         Creativity = null;
         GenerationId = null;
         GenerationStartedAt = null;
+        FailureCode = null;
     }
 
     public void MarkAsStale()
@@ -136,8 +141,9 @@ public class CatalogArtifact : Entity
         }
     }
 
-    public void MarkAsFailed()
+    public void MarkAsFailed(string? failureCode = null)
     {
         Status = CatalogArtifactStatus.Failed;
+        FailureCode = failureCode;
     }
 }
