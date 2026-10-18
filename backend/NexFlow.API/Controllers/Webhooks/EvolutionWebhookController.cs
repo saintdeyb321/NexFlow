@@ -69,16 +69,13 @@ public class EvolutionWebhookController : ControllerBase
 
         if (payload?.Data?.Message == null || payload.Data.Key == null ||
             string.IsNullOrWhiteSpace(payload.Data.Key.Id) || string.IsNullOrWhiteSpace(payload.Instance) ||
-            string.IsNullOrWhiteSpace(payload.Data.Key.RemoteJid))
+            string.IsNullOrWhiteSpace(payload.Data.Key.RemoteJid) || !payload.Data.Message.HasContent())
             return BadRequest(new { Error = "Malformed message envelope." });
 
         if (payload.Data.Key.RemoteJid.Contains("@g.us") || payload.Data.Key.RemoteJid.Contains("-") || payload.Data.Key.RemoteJid == "status@broadcast")
             return Ok();
 
         var messageText = payload.Data.Message.GetRealText();
-
-        if (string.IsNullOrWhiteSpace(messageText))
-            return BadRequest(new { Error = "Unsupported or empty message." });
 
         var phone = IncomingMessageGuard.NormalizePhone(payload.Data.Key.RemoteJid);
         if (string.IsNullOrEmpty(phone)) return BadRequest(new { Error = "Invalid phone." });
@@ -94,7 +91,8 @@ public class EvolutionWebhookController : ControllerBase
             MessageId: payload.Data.Key.Id,
             FromMe: payload.Data.Key.FromMe,
             WorkspaceId: workspaceId,
-            ObservedAtUtc: DateTime.UtcNow
+            ObservedAtUtc: DateTime.UtcNow,
+            Kind: payload.Data.Message.GetContentKind()
         );
 
         // 🔥 SPRINT 01: Persistencia Transaccional. Guardamos y respondemos rápido.
@@ -130,7 +128,7 @@ public class EvolutionWebhookController : ControllerBase
         [JsonPropertyName("state")] public string? State { get; set; }
         [JsonPropertyName("instance")] public string? Instance { get; set; }
         [JsonPropertyName("key")] public EvolutionKey Key { get; set; } = new();
-        [JsonPropertyName("message")] public EvolutionMessage Message { get; set; } = new();
+        [JsonPropertyName("message")] public EvolutionMessage? Message { get; set; }
         [JsonPropertyName("pushName")] public string? PushName { get; set; } = string.Empty;
     }
     public class EvolutionKey
@@ -143,18 +141,42 @@ public class EvolutionWebhookController : ControllerBase
     {
         [JsonPropertyName("conversation")] public string? Conversation { get; set; } = string.Empty;
         [JsonPropertyName("extendedTextMessage")] public ExtendedTextMessage? ExtendedTextMessage { get; set; }
-        public object? ImageMessage { get; set; }
-        public object? AudioMessage { get; set; }
-        public object? DocumentMessage { get; set; }
+        [JsonPropertyName("imageMessage")] public object? ImageMessage { get; set; }
+        [JsonPropertyName("audioMessage")] public object? AudioMessage { get; set; }
+        [JsonPropertyName("documentMessage")] public object? DocumentMessage { get; set; }
+        [JsonPropertyName("stickerMessage")] public object? StickerMessage { get; set; }
+        [JsonPropertyName("videoMessage")] public object? VideoMessage { get; set; }
+        [JsonExtensionData] public Dictionary<string, JsonElement>? AdditionalContent { get; set; }
+
+        public bool HasContent() => GetContentKind() != IncomingMessageKind.Unsupported
+            || AdditionalContent?.Any(p => p.Value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)) == true;
+
+        public IncomingMessageKind GetContentKind()
+        {
+            if (ImageMessage != null) return IncomingMessageKind.Image;
+            if (AudioMessage != null) return IncomingMessageKind.Audio;
+            if (DocumentMessage != null) return IncomingMessageKind.Document;
+            if (StickerMessage != null) return IncomingMessageKind.Sticker;
+            if (VideoMessage != null) return IncomingMessageKind.Video;
+            if (!string.IsNullOrWhiteSpace(Conversation) || !string.IsNullOrWhiteSpace(ExtendedTextMessage?.Text)) return IncomingMessageKind.Text;
+            if (AdditionalContent?.Any(p => p.Key is "reactionMessage" or "protocolMessage" or "senderKeyDistributionMessage"
+                && p.Value.ValueKind == JsonValueKind.Object) == true) return IncomingMessageKind.Control;
+            return IncomingMessageKind.Unsupported;
+        }
 
         public string GetRealText()
         {
-            if (!string.IsNullOrEmpty(Conversation)) return Conversation;
-            if (ExtendedTextMessage != null && !string.IsNullOrEmpty(ExtendedTextMessage.Text)) return ExtendedTextMessage.Text;
-            if (ImageMessage != null) return "[El cliente envió una imagen]";
-            if (AudioMessage != null) return "[El cliente envió un audio]";
-            if (DocumentMessage != null) return "[El cliente envió un documento]";
-            return string.Empty;
+            return GetContentKind() switch
+            {
+                IncomingMessageKind.Text => !string.IsNullOrWhiteSpace(Conversation) ? Conversation : ExtendedTextMessage!.Text!,
+                IncomingMessageKind.Image => "[Imagen recibida; contenido no interpretado]",
+                IncomingMessageKind.Audio => "[Audio recibido; contenido no interpretado]",
+                IncomingMessageKind.Document => "[Documento recibido; contenido no interpretado]",
+                IncomingMessageKind.Sticker => "[Sticker recibido; contenido no interpretado]",
+                IncomingMessageKind.Video => "[Video recibido; contenido no interpretado]",
+                IncomingMessageKind.Control => "[Evento de control de WhatsApp]",
+                _ => "[Mensaje no textual recibido; contenido no interpretado]"
+            };
         }
     }
     public class ExtendedTextMessage

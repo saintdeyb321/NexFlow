@@ -56,7 +56,9 @@ public class EvolutionMessageGateway : IMessageGateway
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
 
         var url = $"{_baseUrl}/message/sendMedia/{Uri.EscapeDataString(instanceName)}";
-        var payload = new { number = customerIdentifier, options = new { delay = 2000, presence = "composing" }, mediaMessage = new { mediatype = "document", fileName = fileName, caption = caption, media = documentUrl } };
+        // Evolution 2.3.7 SendMediaDto uses top-level media fields and delay.
+        var mimetype = string.Equals(Path.GetExtension(fileName), ".pdf", StringComparison.OrdinalIgnoreCase) ? "application/pdf" : "application/octet-stream";
+        var payload = new { number = customerIdentifier, mediatype = "document", mimetype, media = documentUrl, fileName, caption, delay = 2000 };
         return await ExecutePostAsync(url, payload, cancellationToken, transportStarting);
     }
 
@@ -66,7 +68,15 @@ public class EvolutionMessageGateway : IMessageGateway
         if (string.IsNullOrEmpty(instanceName)) throw new InvalidOperationException("No se encontró instancia de Evolution.");
 
         var url = $"{_baseUrl}/message/sendMedia/{Uri.EscapeDataString(instanceName)}";
-        var payload = new { number = customerIdentifier, options = new { delay = 1500, presence = "composing" }, mediaMessage = new { mediatype = "image", caption = caption, media = imageUrl } };
+        var fileName = Uri.TryCreate(imageUrl, UriKind.Absolute, out var imageUri) ? Path.GetFileName(imageUri.AbsolutePath) : null;
+        var mimetype = Path.GetExtension(fileName)?.ToLowerInvariant() switch
+        {
+            ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", ".gif" => "image/gif", _ => null
+        };
+        var payload = new Dictionary<string, object> { ["number"] = customerIdentifier, ["mediatype"] = "image", ["media"] = imageUrl, ["caption"] = caption, ["delay"] = 1500 };
+        // Evolution can infer media metadata when an opaque URL has no known image extension.
+        if (mimetype != null) payload["mimetype"] = mimetype;
+        if (!string.IsNullOrEmpty(fileName)) payload["fileName"] = fileName;
         return await ExecutePostAsync(url, payload, cancellationToken);
     }
 

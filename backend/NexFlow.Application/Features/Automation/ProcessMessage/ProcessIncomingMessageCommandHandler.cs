@@ -44,6 +44,8 @@ public class ProcessIncomingMessageCommandHandler
     {
         var guardResult = await _guard.CheckMessageAsync(request, cancellationToken);
         if (!guardResult.IsValid) return Result.Success();
+        // Reactions/key/protocol events are durable input, not consumer questions or human takeovers.
+        if (request.Kind == IncomingMessageKind.Control) return Result.Success();
 
         if (!request.FromMe && await _outboundMessageService.TryResumeResponseAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken))
             return Result.Success();

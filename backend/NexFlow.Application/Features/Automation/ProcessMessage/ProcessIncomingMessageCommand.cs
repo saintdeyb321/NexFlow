@@ -1,5 +1,7 @@
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
+public enum IncomingMessageKind { Text, Image, Audio, Document, Sticker, Video, Unsupported, Control }
+
 public record ProcessIncomingMessageCommand(
     string InstanceName,
     string CustomerPhone,
@@ -8,5 +10,6 @@ public record ProcessIncomingMessageCommand(
     string MessageId,
     bool FromMe,
     Guid? WorkspaceId = null,
-    DateTime? ObservedAtUtc = null
+    DateTime? ObservedAtUtc = null,
+    IncomingMessageKind Kind = IncomingMessageKind.Text
 );

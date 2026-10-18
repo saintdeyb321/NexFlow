@@ -208,7 +208,7 @@ public class OutboundMessageService : IOutboundMessageService
             await _notifications.NotifyAsync(workspaceId, "CONVERSATIONS", NotificationType.SystemAlert,
                 message.Status == MessageStatus.UnknownDelivery ? "Entrega de mensaje sin confirmar" : "Mensaje rechazado",
                 $"Envío {message.Id}: {message.Status}. No se reenviará automáticamente; revisa el chat y el proveedor.",
-                "/conversations", timeout.Token);
+                "/inbox", timeout.Token);
         }
         catch (Exception notificationError)
         {

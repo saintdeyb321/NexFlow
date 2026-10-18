@@ -1,5 +1,7 @@
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './ProtectedRoute';
+import { LegacyConversationsRedirect } from './LegacyConversationsRedirect';
+import { RouteErrorPage } from './RouteErrorPage';
 import { WorkspaceLayout } from '../../layouts/WorkspaceLayout';
 import { LoginPage } from '../../auth/pages/LoginPage';
 import { SettingsPage } from '../../features/business/pages/SettingsPage';
@@ -32,10 +34,12 @@ const router = createBrowserRouter([
   {
     path: '/login',
     element: <LoginPage />,
+    errorElement: <RouteErrorPage />,
   },
   {
     path: '/',
     element: <ProtectedRoute />, 
+    errorElement: <RouteErrorPage />,
     children: [
       {
         path: '/',
@@ -47,6 +51,7 @@ const router = createBrowserRouter([
           { path: 'faqs', element: <ModuleGuard requiredModule="FAQ"><FaqsPage/></ModuleGuard> },
           { path: 'services', element: <ModuleGuard requiredModule="SERVICES"><ServicesPage/></ModuleGuard> },
           { path: 'inbox', element: <ModuleGuard requiredModule="CONVERSATIONS"><InboxPage/></ModuleGuard> },
+          { path: 'conversations', element: <LegacyConversationsRedirect /> },
           { path: 'requests', element: <ModuleGuard requiredModule="REQUESTS"><RequestsPage/></ModuleGuard> },
           { path: 'catalog', element: <ModuleGuard requiredModule="CATALOG"><CatalogPage/></ModuleGuard> },
           { path: 'orders', element: <ModuleGuard requiredModule="ORDERS"><OrdersPage/></ModuleGuard> }, 

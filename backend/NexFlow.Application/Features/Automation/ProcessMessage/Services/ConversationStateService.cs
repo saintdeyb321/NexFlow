@@ -87,7 +87,7 @@ public sealed class ConversationStateService : IConversationStateService
                     await _notificationService.NotifyAsync(workspaceId, "CONVERSATIONS", NotificationType.SystemAlert,
                         "Origen de envío sin confirmar",
                         $"El eco {request.MessageId} tiene posibles envíos de NexFlow sin confirmar. Revisión requerida; no se asumió control humano.",
-                        "/conversations", cancellationToken);
+                        "/inbox", cancellationToken);
                     return (false, conversation!, null);
                 }
                 if (origin == null && await _conversationRepo.HasUnconfirmedOutboundAsync(workspaceId, normalizedPhone, cancellationToken))
@@ -144,6 +144,11 @@ public sealed class ConversationStateService : IConversationStateService
 
                 return (false, conversation, null);
             }
+
+            // Existing queued envelopes can still contain the former media markers without Kind.
+            if (request.Kind != IncomingMessageKind.Text || request.MessageText is "[El cliente envió una imagen]"
+                or "[El cliente envió un audio]" or "[El cliente envió un documento]")
+                return (false, conversation, "No puedo interpretar imágenes, audios, documentos, videos ni stickers. Escribe tu consulta en un mensaje de texto para continuar.");
 
             if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return (true, conversation, null);
 
