@@ -2,6 +2,8 @@ using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
@@ -54,5 +56,34 @@ public class FirestoreConversationStateRepository : IConversationStateRepository
     public async Task DeleteStateAsync(Guid workspaceId, string phone, CancellationToken cancellationToken)
     {
         await GetDocRef(workspaceId, phone).DeleteAsync(cancellationToken: cancellationToken);
+    }
+
+    public async Task<bool> TryConsumeAiBudgetAsync(Guid workspaceId, string phone, string sourceMessageId, DateTime now,
+        int clientLimit, int workspaceLimit, CancellationToken ct)
+    {
+        if (workspaceId == Guid.Empty || string.IsNullOrWhiteSpace(phone) || string.IsNullOrWhiteSpace(sourceMessageId)
+            || clientLimit < 1 || workspaceLimit < 1) throw new ArgumentException("Invalid assistant budget identity.");
+        var reference = GetDocRef(workspaceId, "__ai_budget__");
+        var client = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(phone)));
+        var source = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{phone}:{sourceMessageId}")));
+        var window = now.Ticks / TimeSpan.TicksPerMinute;
+        return await _db.RunTransactionAsync(async tx =>
+        {
+            var snapshot = await tx.GetSnapshotAsync(reference, ct);
+            var budget = snapshot.Exists ? JsonSerializer.Deserialize<AiBudget>(snapshot.GetValue<string>("budgetJson"))! : new AiBudget();
+            if (budget.Window != window) budget = new() { Window = window };
+            if (budget.Sources.Contains(source)) return true;
+            var count = budget.Clients.GetValueOrDefault(client);
+            if (budget.Sources.Count >= workspaceLimit || count >= clientLimit) return false;
+            budget.Clients[client] = count + 1; budget.Sources.Add(source);
+            tx.Set(reference, new Dictionary<string, object> { ["budgetJson"] = JsonSerializer.Serialize(budget) });
+            return true;
+        }, cancellationToken: ct);
+    }
+    private sealed class AiBudget
+    {
+        public long Window { get; set; }
+        public Dictionary<string, int> Clients { get; set; } = new();
+        public HashSet<string> Sources { get; set; } = new();
     }
 }

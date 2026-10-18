@@ -4,6 +4,8 @@ using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 using NexFlow.Domain.Enums;
+using NexFlow.Application.Engines.AI;
+using System.Text.RegularExpressions;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -24,18 +26,22 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IContextRecoveryService _contextRecovery;
     private readonly IOutboundMessageService _outboundMessageService;
     private readonly ILogger<AiResponseOrchestrator> _logger;
+    private readonly IConversationRecoveryService? _recovery;
+    private readonly IClock? _clock;
 
     public AiResponseOrchestrator(
         IAiInterpreter interpreter, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
-        ILogger<AiResponseOrchestrator> logger)
+        ILogger<AiResponseOrchestrator> logger, IConversationRecoveryService? recovery = null, IClock? clock = null)
     {
         _interpreter = interpreter; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
         _supportFlow = supportFlow; _chatFlow = chatFlow;
         _contextRecovery = contextRecovery; _outboundMessageService = outboundMessageService;
         _logger = logger;
+        _recovery = recovery;
+        _clock = clock;
     }
 
     public async Task<MessageRecord> RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
@@ -51,13 +57,57 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     replay, SenderType.AI, request.MessageId, cancellationToken);
         }
 
-        var interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", context.CurrentStep, activeModules, cancellationToken);
+        var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
+        if (recovery?.Response != null) return await SendText(recovery.Response);
+        AiInterpretation interpretation;
+        if (recovery?.Interpretation != null) interpretation = recovery.Interpretation;
+        else
+        {
+            if (_recovery != null && !await _recovery.AcquireAiAsync(workspaceId, normalizedPhone, request.MessageId, cancellationToken))
+                return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone,
+                    "Hemos alcanzado el límite temporal de consultas. Espera un minuto o escribe asesor para recibir ayuda humana.", SenderType.AI,
+                    $"assistant-limit:{conversation.Id}:{normalizedPhone}:{_clock?.UtcNow ?? DateTime.UtcNow:yyyyMMddHHmm}", cancellationToken);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(20));
+            try { interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", context.CurrentStep, activeModules, deadline.Token); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = AiFailureKind.Timeout }; }
+        }
+        var normalized = ConversationRecoveryService.Normalize(request.MessageText);
+        interpretation.Confirmed = context.CurrentStep == "CONFIRM" && normalized is "si" or "si confirmo" or "confirmo" or "confirmar" or "de acuerdo";
+        if (context.PendingRecoveryAction != null && interpretation.Directive == ConversationDirective.None
+            && interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Support or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited))
+            return await SendText("Antes de continuar, confirma la decisión pendiente: responde sí o no, o escribe asesor para recibir ayuda.");
+
+        if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && _recovery != null)
+        {
+            var confirmation = await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request with { MessageText = "cancelar" }, context, activeModules, cancellationToken);
+            return await SendText(confirmation!.Response!);
+        }
+        if (_recovery != null && (interpretation.Intent is ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited
+            || recovery?.Interpretation == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
+                || (interpretation.Intent == ConversationIntent.Order && !Regex.IsMatch(normalized, @"\b(compr|pedid|pedir|llevar|orden)"))
+                || (interpretation.Intent == ConversationIntent.Request && !Regex.IsMatch(normalized, @"\b(solicit|reclamo|queja|cotiz|registr|tramite|soporte)")))))
+        {
+            var introduction = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes usar estas opciones sin IA:"
+                : interpretation.Intent == ConversationIntent.ProviderUnavailable ? "No pude interpretar tu consulta en este momento. Podemos continuar con opciones verificadas:"
+                : "Necesito precisar qué deseas hacer. Elige una opción o escribe el nombre completo de lo que necesitas:";
+            var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context, activeModules, introduction, cancellationToken);
+            if (clarification.Response != null) return await SendText(clarification.Response);
+            interpretation = clarification.Interpretation!;
+        }
 
         string finalResponse;
+        if (context.ClarificationAttempts > 0 && interpretation.Intent is not (ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited or ConversationIntent.Support))
+        {
+            context.ClarificationAttempts = 0;
+            await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
+        }
 
         if (interpretation.Intent == ConversationIntent.ProviderUnavailable || interpretation.Intent == ConversationIntent.RateLimited)
         {
-            finalResponse = "Lo siento, en este momento estoy experimentando una alta demanda y no puedo procesar tu consulta. Por favor, intenta de nuevo en unos minutos.";
+            finalResponse = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes intentar en un minuto o solicitar un asesor."
+                : "No pude interpretar tu consulta en este momento. Indica qué información necesitas o solicita un asesor.";
         }
         else
         {
@@ -67,20 +117,28 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 "ORDER" => ConversationIntent.Order,
                 _ => interpretation.Intent
             };
-            var deniedResponse = interpretation.DeniedResponse
+            var informational = interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.ProductQuery
+                or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq;
+            var activeFlowDenied = AiIntentAccess.GetDeniedResponse(effectiveIntent, activeModules);
+            var deniedResponse = interpretation.Intent == ConversationIntent.Support ? null : interpretation.DeniedResponse
                 ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules)
-                ?? AiIntentAccess.GetDeniedResponse(effectiveIntent, activeModules);
+                ?? (informational ? null : activeFlowDenied);
             if (deniedResponse != null)
             {
                 finalResponse = deniedResponse;
             }
-            else if ((context.CurrentGoal == "ORDER" && (interpretation.Intent is ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq))
-                || ((context.CurrentGoal is "BOOKING" or "RESERVATION") && interpretation.Directive == ConversationDirective.None
-                    && (interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)))
+            else if (interpretation.Intent == ConversationIntent.Support)
+            {
+                finalResponse = await _supportFlow.ProcessAsync(workspaceId, conversation.Id, cancellationToken);
+            }
+            else if (context.CurrentGoal is "ORDER" or "BOOKING" or "RESERVATION" && interpretation.Directive == ConversationDirective.None
+                && interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq)
             {
                 var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, context.SelectedLocationId, cancellationToken);
-                var continuation = context.CurrentGoal == "ORDER" ? context.LastQuestion
+                var continuation = activeFlowDenied != null ? "Tu borrador sigue guardado. " + activeFlowDenied
+                    : context.CurrentGoal == "ORDER" ? context.LastQuestion ?? "Tu pedido sigue guardado. Puedes mostrar pedido o continuar agregando productos."
                     : await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
+                if (context.PendingRecoveryAction is "CANCEL" or "EXPIRE") continuation = "Sigue pendiente tu confirmación para descartar el borrador: responde sí o no.";
                 if (!string.IsNullOrWhiteSpace(continuation)) answer = answer with { Text = answer.Text + "\n\n" + continuation };
                 return await SendChatResponseAsync(workspaceId, normalizedPhone, request.MessageId, conversation.Id, answer, cancellationToken);
             }
@@ -89,6 +147,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 finalResponse = !activeModules.Contains("SERVICES")
                     ? AiIntentAccess.ServicesUnavailable
                     : await _bookingFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, request.MessageId, cancellationToken);
+                if (_recovery != null && context.CurrentGoal is "BOOKING" or "RESERVATION" && context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE" or "COLLECT_TIME")
+                    finalResponse = await _recovery.DecorateAsync(workspaceId, normalizedPhone, context, activeModules, finalResponse, cancellationToken);
             }
             else if ((context.CurrentGoal == "ORDER" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Order)) && activeModules.Contains("ORDERS"))
             {
@@ -103,10 +163,6 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             {
                 finalResponse = await _requestFlow.ProcessAsync(workspaceId, normalizedPhone, request.MessageText, conversation.Id, request.MessageId, cancellationToken);
             }
-            else if (interpretation.Intent == ConversationIntent.Support)
-            {
-                finalResponse = await _supportFlow.ProcessAsync(workspaceId, conversation.Id, cancellationToken);
-            }
             else
             {
                 var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, null, cancellationToken);
@@ -115,6 +171,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
 
         return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, SenderType.AI, request.MessageId, cancellationToken);
+        Task<MessageRecord> SendText(string response) => _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, response, SenderType.AI, request.MessageId, cancellationToken);
     }
 
     private Task<MessageRecord> SendChatResponseAsync(Guid workspaceId, string phone, string sourceMessageId, string conversationId, ChatResponse response, CancellationToken ct)

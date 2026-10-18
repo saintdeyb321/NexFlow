@@ -33,6 +33,34 @@ namespace NexFlow.Tests;
 public sealed class EvolutionInboundTests
 {
     [Theory]
+    [InlineData("{\"buttonsResponseMessage\":{\"selectedDisplayText\":\"Consultar productos\",\"selectedButtonId\":\"opaque\"}}", "Consultar productos")]
+    [InlineData("{\"templateButtonReplyMessage\":{\"selectedDisplayText\":\"Servicios\",\"selectedId\":\"opaque\"}}", "Servicios")]
+    [InlineData("{\"listResponseMessage\":{\"singleSelectReply\":{\"selectedRowId\":\"2\"}}}", "2")]
+    [InlineData("{\"interactiveResponseMessage\":{\"nativeFlowResponseMessage\":{\"paramsJson\":\"{\\\"id\\\":\\\"1\\\"}\"}}}", "1")]
+    public async Task Supported_interactive_replies_preserve_the_actual_label_or_numeric_selection(string json, string expected)
+    {
+        await using var f = await Fixture.StartAsync();
+        using var body = JsonDocument.Parse(json); using var response = await f.Post("tenant-a", body.RootElement);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = JsonSerializer.Deserialize<ProcessIncomingMessageCommand>(Assert.Single(f.Messages.Values).PayloadJson)!;
+        Assert.Equal(IncomingMessageKind.Text, command.Kind); Assert.Equal(expected, command.MessageText);
+    }
+
+    [Theory]
+    [InlineData("{\"buttonsResponseMessage\":{\"selectedButtonId\":\"cancel_everything\"}}")]
+    [InlineData("{\"interactiveResponseMessage\":{\"nativeFlowResponseMessage\":{\"paramsJson\":\"not-json\"}}}")]
+    public async Task Unknown_or_malformed_interactive_content_is_retained_without_turning_ids_into_commands(string json)
+    {
+        await using var f = await Fixture.StartAsync(); using var body = JsonDocument.Parse(json);
+        using var response = await f.Post("tenant-a", body.RootElement); Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = JsonSerializer.Deserialize<ProcessIncomingMessageCommand>(Assert.Single(f.Messages.Values).PayloadJson)!;
+        Assert.Equal(IncomingMessageKind.Unsupported, command.Kind);
+    }
+
+    [Fact]
+    public async Task Human_mode_blocks_ai_for_following_plain_text_and_preserves_the_draft()
+        => await ProcessNontext(new("tenant-a", "+51999999999", "Cliente", "quiero reservar", "after-handoff", false, Guid.NewGuid()), automatic: false);
+    [Theory]
     [InlineData("stickerMessage", IncomingMessageKind.Sticker)]
     [InlineData("imageMessage", IncomingMessageKind.Image)]
     [InlineData("audioMessage", IncomingMessageKind.Audio)]

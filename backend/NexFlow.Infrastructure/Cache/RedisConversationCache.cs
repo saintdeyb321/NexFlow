@@ -31,7 +31,7 @@ public class RedisConversationCache : IConversationCache
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: No se pudo guardar el contexto en Redis para {Phone}.", customerPhone);
+            _logger.LogWarning("Redis context write unavailable in workspace {WorkspaceId}: {FailureType}.", workspaceId, ex.GetType().Name);
         }
     }
 
@@ -50,7 +50,7 @@ public class RedisConversationCache : IConversationCache
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: Redis no disponible o JSON inválido para {Phone}.", customerPhone);
+            _logger.LogWarning("Redis context read unavailable in workspace {WorkspaceId}: {FailureType}.", workspaceId, ex.GetType().Name);
             return null;
         }
     }
@@ -64,7 +64,7 @@ public class RedisConversationCache : IConversationCache
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Degradación: No se pudo eliminar el contexto en Redis para {Phone}.", customerPhone);
+            _logger.LogWarning("Redis context deletion unavailable in workspace {WorkspaceId}: {FailureType}.", workspaceId, ex.GetType().Name);
             throw;
         }
     }

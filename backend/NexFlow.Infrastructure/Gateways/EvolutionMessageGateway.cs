@@ -46,7 +46,7 @@ public class EvolutionMessageGateway : IMessageGateway
         if (string.IsNullOrWhiteSpace(message)) throw new ArgumentException("Message content is required.", nameof(message));
 
         // Idempotency is enforced by the durable outbound repository, not provider options.
-        var payload = new { number = customerIdentifier, text = message, options = new { delay = 1200, presence = "composing" } };
+        var payload = new { number = customerIdentifier, text = message, delay = 1200 };
         return await ExecutePostAsync(url, payload, cancellationToken, transportStarting);
     }
 
@@ -82,6 +82,9 @@ public class EvolutionMessageGateway : IMessageGateway
 
     private async Task<string> ExecutePostAsync(string url, object payload, CancellationToken cancellationToken, Func<CancellationToken, Task>? transportStarting = null)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_httpClient.Timeout);
+        cancellationToken = deadline.Token;
         // Resolve, validate and serialize before claiming a durable transport attempt.
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(url, UriKind.Absolute))
         {

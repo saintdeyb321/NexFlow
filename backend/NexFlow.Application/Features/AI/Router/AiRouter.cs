@@ -45,7 +45,7 @@ public class AiRouter : IAiRouter
         catch (Exception ex) when (IsTransientError(ex))
         {
             // 🔥 SPRINT 10: Solo ejecutamos Fallback si el error es transitorio (caída temporal)
-            _logger.LogWarning(ex, "Fallo transitorio (Timeout/RateLimit) en {Provider}. Tarea {TaskType}. Iniciando Fallback a {FallbackProvider}.", primaryProvider.ProviderType, taskType, fallbackProvider.ProviderType);
+            _logger.LogWarning("Fallo transitorio {FailureType} en {Provider}; fallback a {FallbackProvider}.", ex.GetType().Name, primaryProvider.ProviderType, fallbackProvider.ProviderType);
 
             try
             {
@@ -54,14 +54,14 @@ public class AiRouter : IAiRouter
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception fallbackEx)
             {
-                _logger.LogError(fallbackEx, "Fallo catastrófico. Ambos proveedores IA ({Primary} y {Fallback}) fallaron para la tarea {TaskType}.", primaryProvider.ProviderType, fallbackProvider.ProviderType, taskType);
+                _logger.LogError("Fallback IA {Provider} falló: {FailureType}.", fallbackProvider.ProviderType, fallbackEx.GetType().Name);
                 throw; // Preserve the provider HTTP status for the interpreter.
             }
         }
         catch (Exception ex)
         {
             // 🔥 SPRINT 10: Si el error es 400 (Bad Request), 401 (Auth) o formato JSON, abortamos sin gastar saldo en el fallback.
-            _logger.LogError(ex, "Error de cliente o no recuperable en {Provider}. Tarea abortada sin fallback para evitar sobrecostos.", primaryProvider.ProviderType);
+            _logger.LogError("Error IA no recuperable {FailureType} en {Provider}; sin fallback.", ex.GetType().Name, primaryProvider.ProviderType);
             throw;
         }
     }
@@ -69,7 +69,7 @@ public class AiRouter : IAiRouter
     private IAiProvider GetProvider(AiProviderType type)
     {
         return _providers.FirstOrDefault(p => p.ProviderType == type)
-               ?? _providers.First();
+               ?? throw new AiProviderConfigurationException(type.ToString());
     }
 
     private static bool IsTransientError(Exception ex) => ex switch

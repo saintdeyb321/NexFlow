@@ -75,6 +75,7 @@ public class ProcessIncomingMessageCommandHandler
 
     private async Task<bool> TryHandleZeroTokenKnowledgeAsync(Guid workspaceId, string phone, string message, string sourceMessageId, ConversationRecord conversation, CancellationToken ct)
     {
+        if (message.Length > 8000) return false;
         var normalizedText = message.ToLowerInvariant()
             .Replace("á", "a").Replace("é", "e").Replace("í", "i").Replace("ó", "o").Replace("ú", "u")
             .Replace("¿", "").Replace("?", "").Trim();

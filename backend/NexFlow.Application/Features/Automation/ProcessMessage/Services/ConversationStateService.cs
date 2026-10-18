@@ -52,6 +52,8 @@ public sealed class ConversationStateService : IConversationStateService
 
     public async Task<(bool ShouldAiRespond, ConversationRecord Record, string? FastReply)> ProcessStateAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
+        // Keep the full input in the SQL inbound envelope; bound only its conversation-history projection.
+        var historyText = request.MessageText.Length <= 8000 ? request.MessageText : request.MessageText[..8000] + " [Mensaje extenso conservado en la recepción durable]";
         var conversation = await _conversationRepo.GetActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
 
         var sessionContext = await _contextStore.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
@@ -111,7 +113,7 @@ public sealed class ConversationStateService : IConversationStateService
             conversation = conversation with { Mode = ConversationMode.Human, HandoffReason = HandoffReason.ManualIntervention };
             // Registramos el mensaje como enviado por el humano
             if (origin == null)
-                await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Origin = MessageOrigin.WhatsAppHuman, Direction = "outbound", Sender = SenderType.BusinessUser, Content = request.MessageText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
+                await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Origin = MessageOrigin.WhatsAppHuman, Direction = "outbound", Sender = SenderType.BusinessUser, Content = historyText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
             return (false, conversation, null);
         }
 
@@ -119,7 +121,7 @@ public sealed class ConversationStateService : IConversationStateService
         await _consumerRepo.UpsertConsumerAsync(workspaceId, new ConsumerIdentityRecord { Phone = normalizedPhone, DisplayName = request.CustomerName, FirstSeenAt = DateTime.UtcNow, LastInteractionAt = DateTime.UtcNow }, cancellationToken);
 
         conversation ??= await _conversationRepo.GetOrCreateActiveConversationAsync(workspaceId, normalizedPhone, cancellationToken);
-        await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Origin = MessageOrigin.Consumer, Direction = "inbound", Sender = SenderType.Consumer, Content = request.MessageText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
+        await _conversationRepo.AddMessageAsync(workspaceId, conversation.Id, new MessageRecord { Id = request.MessageId, Origin = MessageOrigin.Consumer, Direction = "inbound", Sender = SenderType.Consumer, Content = historyText, ExternalMessageId = request.MessageId, Status = MessageStatus.Sent, Timestamp = DateTime.UtcNow }, cancellationToken);
 
         var stateLock = GetStateLock(workspaceId, conversation.Id);
         await stateLock.WaitAsync(cancellationToken);
@@ -152,24 +154,6 @@ public sealed class ConversationStateService : IConversationStateService
 
             if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return (true, conversation, null);
 
-            var txt = request.MessageText.Trim().ToLowerInvariant();
-            var wordCount = txt.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
-
-            string? fastResponse = null;
-            if (wordCount <= 3 && Regex.IsMatch(txt, @"^(hola|buenas|ola|buenos dias|buenas tardes|hey)$"))
-            {
-                fastResponse = "¡Hola! Soy el asistente virtual. ¿En qué te puedo ayudar el día de hoy?";
-            }
-            else if (wordCount <= 3 && Regex.IsMatch(txt, @"^(gracias|ok|perfecto|entendido|vale|listo)$"))
-            {
-                fastResponse = "¡Con gusto! Si necesitas algo más, aquí estoy.";
-            }
-
-            if (fastResponse != null)
-            {
-                _logger.LogInformation("Interceptado mensaje '{Msg}'. Resolviendo sin IA.", txt);
-                return (false, conversation, fastResponse);
-            }
 
             return (true, conversation, null);
         }

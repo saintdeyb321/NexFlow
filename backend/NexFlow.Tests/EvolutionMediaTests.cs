@@ -25,6 +25,8 @@ public sealed class EvolutionMediaTests
     [InlineData("image", "400")]
     [InlineData("document", "timeout")]
     [InlineData("image", "timeout")]
+    [InlineData("document", "body-timeout")]
+    [InlineData("image", "body-timeout")]
     [InlineData("document", "missing-id")]
     [InlineData("image", "missing-id")]
     [InlineData("document", "network")]
@@ -38,7 +40,7 @@ public sealed class EvolutionMediaTests
             : await f.Gateway.SendImageAsync(f.Workspace, "51999999999", "https://media.example.test/image.png?version=1", "Imagen real", "durable-id", default);
         if (outcome == "success") Assert.Equal("provider-message", await Send());
         else if (outcome == "400") Assert.Equal(HttpStatusCode.BadRequest, (await Assert.ThrowsAsync<HttpRequestException>(Send)).StatusCode);
-        else if (outcome == "timeout") await Assert.ThrowsAnyAsync<OperationCanceledException>(Send);
+        else if (outcome is "timeout" or "body-timeout") await Assert.ThrowsAnyAsync<OperationCanceledException>(Send);
         else if (outcome == "network") await Assert.ThrowsAsync<HttpRequestException>(Send);
         else await Assert.ThrowsAsync<InvalidOperationException>(Send);
         var body = Assert.Single(f.Transport.Bodies);
@@ -75,6 +77,7 @@ public sealed class EvolutionMediaTests
     [InlineData("success", MessageStatus.Sent)]
     [InlineData("400", MessageStatus.Failed)]
     [InlineData("timeout", MessageStatus.UnknownDelivery)]
+    [InlineData("body-timeout", MessageStatus.UnknownDelivery)]
     [InlineData("network", MessageStatus.UnknownDelivery)]
     [InlineData("missing-id", MessageStatus.UnknownDelivery)]
     [InlineData("invalid-json", MessageStatus.UnknownDelivery)]
@@ -96,7 +99,14 @@ public sealed class EvolutionMediaTests
         Assert.Equal(expected == MessageStatus.Sent ? "provider-message" : null, first.ExternalMessageId);
         Assert.Equal(first.Id, (await Send()).Id);
         Assert.True(await service.TryResumeResponseAsync(f.Workspace, "inbound-id", default));
-        Assert.Single(f.Transport.Bodies);
+        Assert.Equal(outcome == "400" ? 2 : 1, f.Transport.Bodies.Count);
+        if (outcome == "400")
+        {
+            using var fallback = JsonDocument.Parse(f.Transport.Bodies[1]);
+            Assert.Equal(new[] { "delay", "number", "text" }, fallback.RootElement.EnumerateObject().Select(p => p.Name).Order());
+            Assert.Equal(1200, fallback.RootElement.GetProperty("delay").GetInt32());
+            Assert.Contains("por texto", fallback.RootElement.GetProperty("text").GetString());
+        }
         Assert.Null(await repo.GetOutboundAsync(Guid.NewGuid(), first.Id, default));
         Assert.Equal(expected.ToString(), store.Read($"workspaces/{f.Workspace}/conversations/chat/messages/{first.Id}")!.Fields["status"].StringValue);
         if (expected != MessageStatus.Sent) notifications.Verify(n => n.NotifyAsync(f.Workspace, "CONVERSATIONS", NotificationType.SystemAlert, It.IsAny<string>(), It.IsAny<string>(), "/inbox", It.IsAny<CancellationToken>()), Times.AtLeastOnce);
@@ -140,6 +150,21 @@ public sealed class EvolutionMediaTests
 
     private static void SeedConversation(InMemoryFirestore store, Guid workspace) => store.Seed($"workspaces/{workspace}/conversations/chat", new Dictionary<string, Value> { ["consumerPhone"] = new() { StringValue = "51999999999" } });
 
+    [Fact]
+    public async Task Failed_document_after_a_crash_recovers_one_textual_alternative_without_resending_media()
+    {
+        using var f = new Fixture("400"); var store = new InMemoryFirestore(); var repo = new FirestoreConversationRepository(store.Db);
+        SeedConversation(store, f.Workspace);
+        var service = new OutboundMessageService(repo, f.Gateway, Mock.Of<INotificationService>(), NullLogger<OutboundMessageService>.Instance);
+        store.BeforeCommit = c => c.Writes.Any(w => w.Update?.Fields.TryGetValue("kind", out var kind) == true && kind.StringValue == "Text") ? new IOException("Crash before text fallback preparation") : null;
+        await Assert.ThrowsAsync<IOException>(() => service.SendDocumentAsync(f.Workspace, "chat", "51999999999", "Catálogo", "https://media.example.test/catalog.pdf", "catalog.pdf", "PRODUCT", "inbound", default));
+        Assert.Single(f.Transport.Bodies); store.BeforeCommit = null;
+        Assert.True(await service.TryResumeResponseAsync(f.Workspace, "inbound", default));
+        Assert.True(await service.TryResumeResponseAsync(f.Workspace, "inbound", default));
+        Assert.Equal(2, f.Transport.Bodies.Count);
+        Assert.Single(f.Transport.Bodies, b => { using var parsed = JsonDocument.Parse(b); return parsed.RootElement.TryGetProperty("mediatype", out _); });
+    }
+
     private sealed class Fixture : IDisposable
     {
         public Guid Workspace { get; } = Guid.NewGuid();
@@ -165,10 +190,22 @@ public sealed class EvolutionMediaTests
             var body = await request.Content!.ReadAsStringAsync(ct); lock (Bodies) Bodies.Add(body); Uri = request.RequestUri;
             Assert.Equal("application/json", request.Content.Headers.ContentType!.MediaType);
             if (outcome == "timeout") await Task.Delay(Timeout.Infinite, ct);
+            if (outcome == "body-timeout") return new(HttpStatusCode.OK) { Content = new StreamContent(new HangingStream()) };
             if (outcome == "network") throw new HttpRequestException("Simulated lost acknowledgement");
             var providerId = Bodies.Count == 1 ? "provider-message" : $"provider-message-{Bodies.Count}";
-            return new(outcome == "400" ? HttpStatusCode.BadRequest : outcome == "503" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
+            return new(outcome == "400" && request.RequestUri!.AbsolutePath.Contains("sendMedia") ? HttpStatusCode.BadRequest : outcome == "503" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
             { Content = new StringContent(outcome == "invalid-json" ? "not-json" : outcome == "missing-id" ? "{}" : JsonSerializer.Serialize(new { key = new { id = providerId } }), Encoding.UTF8, "application/json") };
         }
+    }
+
+    private sealed class HangingStream : Stream
+    {
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException(); public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) { await Task.Delay(Timeout.Infinite, ct); return 0; }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException(); public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

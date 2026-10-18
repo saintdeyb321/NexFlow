@@ -18,6 +18,7 @@ using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
 using NexFlow.Infrastructure.Workers;
 using StackExchange.Redis;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 namespace NexFlow.Infrastructure.DependencyInjection;
 
@@ -69,8 +70,12 @@ public static class DependencyInjection
 
         // 5. Utilidades y Motores de IA
         services.AddSingleton<IClock, SystemClock>();
-        services.AddHttpClient<IAiProvider, GeminiAiProvider>();
-        services.AddHttpClient<IAiProvider, GroqAiProvider>();
+        services.AddOptions<AssistantRecoveryOptions>().Bind(configuration.GetSection("AssistantRecovery"))
+            .Validate(o => o.MaxClarifications is >= 1 and <= 10 && o.MaxInputCharacters is >= 100 and <= 8000
+                && o.ClientAiCallsPerMinute is >= 1 and <= 30 && o.WorkspaceAiCallsPerMinute is >= 1 and <= 1000
+                && o.ContextExpiryHours is >= 1 and <= 168, "Invalid AssistantRecovery limits.").ValidateOnStart();
+        services.AddHttpClient<IAiProvider, GeminiAiProvider>().RedactLoggedHeaders(static _ => true);
+        services.AddHttpClient<IAiProvider, GroqAiProvider>().RedactLoggedHeaders(static _ => true);
         services.AddScoped<IAiRouter, AiRouter>();
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();

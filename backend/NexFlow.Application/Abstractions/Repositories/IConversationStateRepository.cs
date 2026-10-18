@@ -7,4 +7,6 @@ public interface IConversationStateRepository
     Task<ConversationContextDto?> GetStateAsync(Guid workspaceId, string phone, CancellationToken cancellationToken);
     Task UpsertStateAsync(Guid workspaceId, string phone, ConversationContextDto state, CancellationToken cancellationToken);
     Task DeleteStateAsync(Guid workspaceId, string phone, CancellationToken cancellationToken);
+    Task<bool> TryConsumeAiBudgetAsync(Guid workspaceId, string phone, string sourceMessageId, DateTime now,
+        int clientLimit, int workspaceLimit, CancellationToken ct);
 }

@@ -25,12 +25,11 @@ public class LocationResolverService : ILocationResolverService
         var term = spokenLocation.ToLowerInvariant();
 
         // 1. Busca coincidencia exacta
-        var exactMatch = locations.FirstOrDefault(l => l.Name.ToLowerInvariant() == term);
-        if (exactMatch != null) return exactMatch.Id;
+        var exactMatches = locations.Where(l => l.Name.ToLowerInvariant() == term || string.Equals(l.Id, spokenLocation, StringComparison.Ordinal)).ToList();
+        if (exactMatches.Count != 0) return exactMatches.Count == 1 ? exactMatches[0].Id : null;
 
         // 2. Busca coincidencia parcial (ej: "principal" hace match con "Sede Principal")
-        var partialMatch = locations.FirstOrDefault(l => l.Name.ToLowerInvariant().Contains(term) || (l.IsMain && term.Contains("principal")));
-
-        return partialMatch?.Id;
+        var matches = locations.Where(l => l.Name.ToLowerInvariant().Contains(term) || (l.IsMain && term.Contains("principal"))).ToList();
+        return matches.Count == 1 ? matches[0].Id : null;
     }
 }

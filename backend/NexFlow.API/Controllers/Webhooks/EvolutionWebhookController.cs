@@ -49,6 +49,9 @@ public class EvolutionWebhookController : ControllerBase
         // Missing configuration preserves existing installations during migration. Explicit false retires the shared key.
         var legacySetting = configuration["Evolution:AllowLegacyWebhookKey"];
         var allowLegacyKey = legacySetting == null || bool.TryParse(legacySetting, out var allowed) && allowed;
+        if (!string.IsNullOrWhiteSpace(payload?.Instance) && allowLegacyKey && !string.IsNullOrEmpty(providedWebhookKey)
+            && KeyEquals(providedWebhookKey, expectedWebhookKey))
+            _logger.LogWarning("Legacy Evolution webhook authentication used for instance {Instance}. Verify its scoped key before retiring legacy authentication.", payload.Instance);
         if (string.IsNullOrWhiteSpace(payload?.Instance) || string.IsNullOrEmpty(providedWebhookKey)
             || (!KeyEquals(providedWebhookKey, EvolutionConnectionService.InstanceWebhookKey(expectedWebhookKey, payload.Instance))
                 && !(allowLegacyKey && KeyEquals(providedWebhookKey, expectedWebhookKey))))
@@ -146,9 +149,14 @@ public class EvolutionWebhookController : ControllerBase
         [JsonPropertyName("documentMessage")] public object? DocumentMessage { get; set; }
         [JsonPropertyName("stickerMessage")] public object? StickerMessage { get; set; }
         [JsonPropertyName("videoMessage")] public object? VideoMessage { get; set; }
+        [JsonPropertyName("buttonsResponseMessage")] public JsonElement? ButtonsResponse { get; set; }
+        [JsonPropertyName("templateButtonReplyMessage")] public JsonElement? TemplateResponse { get; set; }
+        [JsonPropertyName("listResponseMessage")] public JsonElement? ListResponse { get; set; }
+        [JsonPropertyName("interactiveResponseMessage")] public JsonElement? InteractiveResponse { get; set; }
         [JsonExtensionData] public Dictionary<string, JsonElement>? AdditionalContent { get; set; }
 
         public bool HasContent() => GetContentKind() != IncomingMessageKind.Unsupported
+            || ButtonsResponse.HasValue || TemplateResponse.HasValue || ListResponse.HasValue || InteractiveResponse.HasValue
             || AdditionalContent?.Any(p => p.Value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)) == true;
 
         public IncomingMessageKind GetContentKind()
@@ -158,7 +166,7 @@ public class EvolutionWebhookController : ControllerBase
             if (DocumentMessage != null) return IncomingMessageKind.Document;
             if (StickerMessage != null) return IncomingMessageKind.Sticker;
             if (VideoMessage != null) return IncomingMessageKind.Video;
-            if (!string.IsNullOrWhiteSpace(Conversation) || !string.IsNullOrWhiteSpace(ExtendedTextMessage?.Text)) return IncomingMessageKind.Text;
+            if (!string.IsNullOrWhiteSpace(Conversation) || !string.IsNullOrWhiteSpace(ExtendedTextMessage?.Text) || !string.IsNullOrWhiteSpace(GetInteractiveText())) return IncomingMessageKind.Text;
             if (AdditionalContent?.Any(p => p.Key is "reactionMessage" or "protocolMessage" or "senderKeyDistributionMessage"
                 && p.Value.ValueKind == JsonValueKind.Object) == true) return IncomingMessageKind.Control;
             return IncomingMessageKind.Unsupported;
@@ -168,7 +176,7 @@ public class EvolutionWebhookController : ControllerBase
         {
             return GetContentKind() switch
             {
-                IncomingMessageKind.Text => !string.IsNullOrWhiteSpace(Conversation) ? Conversation : ExtendedTextMessage!.Text!,
+                IncomingMessageKind.Text => !string.IsNullOrWhiteSpace(Conversation) ? Conversation : !string.IsNullOrWhiteSpace(ExtendedTextMessage?.Text) ? ExtendedTextMessage.Text : GetInteractiveText()!,
                 IncomingMessageKind.Image => "[Imagen recibida; contenido no interpretado]",
                 IncomingMessageKind.Audio => "[Audio recibido; contenido no interpretado]",
                 IncomingMessageKind.Document => "[Documento recibido; contenido no interpretado]",
@@ -177,6 +185,27 @@ public class EvolutionWebhookController : ControllerBase
                 IncomingMessageKind.Control => "[Evento de control de WhatsApp]",
                 _ => "[Mensaje no textual recibido; contenido no interpretado]"
             };
+        }
+
+        private string? GetInteractiveText()
+        {
+            static string? Read(JsonElement? value, string property) => value is { ValueKind: JsonValueKind.Object } v
+                && v.TryGetProperty(property, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+            static string? Number(string? value) => value != null && value.Length <= 2 && value.All(char.IsAsciiDigit) ? value : null;
+            var text = Read(ButtonsResponse, "selectedDisplayText") ?? Read(TemplateResponse, "selectedDisplayText") ?? Read(ListResponse, "title");
+            if (!string.IsNullOrWhiteSpace(text)) return text;
+            var id = Read(ButtonsResponse, "selectedButtonId") ?? Read(TemplateResponse, "selectedId");
+            if (ListResponse is { ValueKind: JsonValueKind.Object } list && list.TryGetProperty("singleSelectReply", out var selection)) id ??= Read(selection, "selectedRowId");
+            if (InteractiveResponse is { ValueKind: JsonValueKind.Object } interactive && interactive.TryGetProperty("nativeFlowResponseMessage", out var native))
+            {
+                var json = Read(native, "paramsJson");
+                if (json?.Length <= 2048)
+                {
+                    try { using var parameters = JsonDocument.Parse(json); text = Read(parameters.RootElement, "title"); id ??= Read(parameters.RootElement, "id"); }
+                    catch (JsonException) { return null; }
+                }
+            }
+            return !string.IsNullOrWhiteSpace(text) ? text : Number(id);
         }
     }
     public class ExtendedTextMessage

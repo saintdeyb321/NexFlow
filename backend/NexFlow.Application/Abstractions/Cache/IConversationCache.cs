@@ -3,6 +3,15 @@ namespace NexFlow.Application.Abstractions.Cache;
 public class ConversationContextDto
 {
     public string? StateVersion { get; set; }
+    public List<ConversationMenuOption> RecoveryOptions { get; set; } = new();
+    public string? RecoveryOptionsContext { get; set; }
+    public int RecoveryOptionsOffset { get; set; }
+    public bool RecoveryHasMore { get; set; }
+    public int ClarificationAttempts { get; set; }
+    public string? PendingRecoveryAction { get; set; }
+    public string? RecoveryLastMessageId { get; set; }
+    public string? RecoveryLastResponse { get; set; }
+    public string? RecoveryLastInterpretation { get; set; }
 
     public string Mode { get; set; } = "Automatic"; // Automatic, Human
     public string? HandoffReason { get; set; }
@@ -31,6 +40,8 @@ public class ConversationContextDto
 
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
+
+public sealed record ConversationMenuOption(string Key, string Label, string Kind);
 
 public class OrderDraftItem
 {

@@ -45,7 +45,12 @@ public class OutboundMessageService : IOutboundMessageService
         {
             var existing = await _conversationRepo.GetOutboundAsync(workspaceId, GetId(key), ct);
             if (!existing.HasValue) continue;
-            if (existing.Value.Message.Status is MessageStatus.Sent or MessageStatus.Failed) return true;
+            if (existing.Value.Message.Status is MessageStatus.Sent or MessageStatus.Failed)
+            {
+                if (existing.Value.Message.Kind == MessageKind.Document && existing.Value.Message.Status == MessageStatus.Failed)
+                    await SendDocumentFallbackAsync(workspaceId, existing.Value.ConversationId, existing.Value.Phone, sourceInboundMessageId, ct);
+                return true;
+            }
             if (existing.Value.Message.Status is MessageStatus.UnknownDelivery or MessageStatus.Attempting)
             {
                 await FinalizeUnconfirmedAsync(workspaceId, existing.Value.Message);
@@ -94,8 +99,15 @@ public class OutboundMessageService : IOutboundMessageService
             Kind = MessageKind.Document, MediaUrl = mediaUrl, FileName = fileName,
             Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
         }, ct);
-        return await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
+        var result = await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
+        if (result.Status == MessageStatus.Failed)
+            await SendDocumentFallbackAsync(workspaceId, conversationId, phone, sourceInboundMessageId, ct);
+        return result;
     }
+
+    private Task<MessageRecord> SendDocumentFallbackAsync(Guid workspaceId, string conversationId, string phone, string source, CancellationToken ct)
+        => SendMessageAsync(workspaceId, conversationId, phone,
+            "No pude entregar el PDF. Puedo ayudarte por texto: indica qué producto o servicio deseas consultar.", SenderType.AI, source, ct);
 
     private async Task<MessageRecord> SendPreparedAsync(Guid workspaceId, string phone, MessageRecord message, CancellationToken ct)
     {

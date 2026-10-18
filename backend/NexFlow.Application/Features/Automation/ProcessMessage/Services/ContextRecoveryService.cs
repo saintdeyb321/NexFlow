@@ -1,5 +1,6 @@
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
+using NexFlow.Application.Abstractions;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -14,11 +15,13 @@ public class ContextRecoveryService : IContextRecoveryService
 {
     private readonly IConversationCache _cache;
     private readonly IConversationStateRepository _stateRepo;
+    private readonly IClock? _clock;
 
-    public ContextRecoveryService(IConversationCache cache, IConversationStateRepository stateRepo)
+    public ContextRecoveryService(IConversationCache cache, IConversationStateRepository stateRepo, IClock? clock = null)
     {
         _cache = cache;
         _stateRepo = stateRepo;
+        _clock = clock;
     }
 
     public async Task<ConversationContextDto> GetOrRecoverContextAsync(Guid workspaceId, string phone, CancellationToken ct)
@@ -41,7 +44,7 @@ public class ContextRecoveryService : IContextRecoveryService
 
     public async Task SaveContextAsync(Guid workspaceId, string phone, ConversationContextDto context, CancellationToken ct)
     {
-        context.LastUpdated = DateTime.UtcNow;
+        context.LastUpdated = _clock?.UtcNow ?? DateTime.UtcNow;
         await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
         await _cache.SetContextAsync(workspaceId, phone, context, ct);
     }

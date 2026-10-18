@@ -57,7 +57,7 @@ public class OrderFlow : IOrderFlow
         if (command is "mostrar pedido" or "listar pedido" or "ver pedido" or "mi pedido")
             return Summary(context);
 
-        if (command is "enviar pedido" or "finalizar pedido" or "finalizar" || interpretation.SearchTerm == "FINALIZAR_PEDIDO")
+        if (command is "enviar pedido" or "finalizar pedido" or "finalizar")
         {
             if (context.OrderDraftItems.Count == 0) return "Tu pedido está vacío. ¿Qué producto deseas agregar?";
             var orderId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));

@@ -113,7 +113,7 @@ public static class OfferingServiceReservationExtensions
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal)
             .ToList();
         var term = NormalizeServiceName(serviceName, stripPrefixes: true);
-        var matches = services.Where(s => NormalizeServiceName(s.Name) == term).ToList();
+        var matches = services.Where(s => NormalizeServiceName(s.Name) == term || s.Id.Equals(serviceName, StringComparison.Ordinal)).ToList();
         if (matches.Count == 0 && term.Length > 0)
             matches = services.Where(s => NormalizeServiceName(s.Name).Contains(term, StringComparison.Ordinal)
                 || term.Contains(NormalizeServiceName(s.Name), StringComparison.Ordinal)).ToList();

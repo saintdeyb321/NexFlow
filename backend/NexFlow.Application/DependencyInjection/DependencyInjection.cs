@@ -43,6 +43,7 @@ public static class DependencyInjection
         services.AddScoped<IIncomingMessageGuard, IncomingMessageGuard>();
         services.AddScoped<IConversationStateService, ConversationStateService>();
         services.AddScoped<IAiResponseOrchestrator, AiResponseOrchestrator>();
+        services.AddScoped<IConversationRecoveryService, ConversationRecoveryService>();
 
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();

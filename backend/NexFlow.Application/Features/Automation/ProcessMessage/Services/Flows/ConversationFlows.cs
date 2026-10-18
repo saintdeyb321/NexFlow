@@ -239,6 +239,8 @@ public class BookingFlow : IBookingFlow
             UpdateStep(context);
             return "No pude interpretar la fecha u hora indicada.\n\n" + await PromptAsync(workspaceId, context, false, ct);
         }
+        if (!interpretation.Confirmed)
+            return $"Reserva por confirmar: {service.Name}, {selectedTime:dd/MM/yyyy} a las {selectedTime:HH:mm}. ¿Confirmas? Responde sí o no.";
         var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, service.Id,
             phone, context.RealCustomerName!, DateTime.SpecifyKind(selectedTime, DateTimeKind.Unspecified), ct, sourceMessageId);
         if (result.IsSuccess)
@@ -301,7 +303,7 @@ public class BookingFlow : IBookingFlow
                     await ReservableServicesAsync(workspaceId, context.SelectedLocationId, ct), context.ReservationServiceOffset),
             "COLLECT_DATE" => "¿Para qué fecha deseas reservar? Puedes indicar el día o escribir 'mañana'.",
             "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct),
-            "CONFIRM" => $"Conservé tu reserva para el {context.TargetDate} a las {context.TargetTime}. ¿Deseas continuar con esos datos?",
+            "CONFIRM" => $"Tu borrador de reserva para el {context.TargetDate} a las {context.TargetTime} está pendiente de confirmación. ¿Confirmas? Responde sí o no.",
             _ => "Para continuar con tu reserva, ¿cuál es tu nombre y apellido?"
         };
         if (!preserveDraft) context.LastQuestion = question;

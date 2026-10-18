@@ -21,15 +21,18 @@ public class GroqAiProvider : IAiProvider
         _httpClient = httpClient;
         _logger = logger;
         _apiKey = configuration["Groq:ApiKey"]?.Trim() ?? "";
-        _model = configuration["Groq:Model"] ?? "llama3-8b-8192";
+        _model = configuration["Groq:Model"]?.Trim() ?? "";
 
         var rawTimeout = configuration["Groq:TimeoutSeconds"];
-        _httpClient.Timeout = TimeSpan.FromSeconds(int.TryParse(rawTimeout, out var t) ? t : 5);
+        _httpClient.Timeout = TimeSpan.FromSeconds(int.TryParse(rawTimeout, out var t) && t is >= 1 and <= 60 ? t : 5);
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        _httpClient.MaxResponseContentBufferSize = 65_536;
     }
 
     public async Task<string> GenerateTextAsync(string systemPrompt, string userMessage, bool useJsonMode = false, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(_apiKey) || string.IsNullOrWhiteSpace(_model) || _model.Length > 128 || _model.Any(char.IsControl))
+            throw new AiProviderConfigurationException("Groq");
         var messages = new List<object>
         {
             new { role = "system", content = systemPrompt },
@@ -40,40 +43,43 @@ public class GroqAiProvider : IAiProvider
         {
             { "model", _model },
             { "messages", messages },
-            { "temperature", 0.0 } // 0.0 para máximo determinismo en extracción JSON
+            { "temperature", 0.0 },
+            { "max_completion_tokens", 1024 }
         };
 
         if (useJsonMode)
         {
             payload.Add("response_format", new { type = "json_object" });
         }
+        if (_model is "openai/gpt-oss-20b" or "openai/gpt-oss-120b") payload["reasoning_effort"] = "low";
 
         string jsonPayload = JsonSerializer.Serialize(payload);
         using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
         try
         {
-            var response = await _httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken);
+            using var response = await _httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
-                var error = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("Groq API Error {StatusCode}: {ErrorDetails}. Fallback será manejado por el Router.", response.StatusCode, error);
+                _logger.LogWarning("Groq API Error {StatusCode}.", response.StatusCode);
 
                 // 🔥 SPRINT 8: Propagación correcta del StatusCode para activar el fallback
                 throw new HttpRequestException($"Groq Fallo: {(int)response.StatusCode} {response.StatusCode}", inner: null, statusCode: response.StatusCode);
             }
 
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
-            var jsonNode = JsonNode.Parse(responseString);
-            var text = jsonNode?["choices"]?[0]?["message"]?["content"]?.ToString();
-
-            return text ?? string.Empty;
+            using var json = JsonDocument.Parse(responseString);
+            if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("choices", out var choices)
+                && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0 && choices[0].ValueKind == JsonValueKind.Object
+                && choices[0].TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object
+                && message.TryGetProperty("content", out var text) && text.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(text.GetString()))
+                return text.GetString()!;
+            throw new AiInvalidResponseException("Groq");
         }
-        catch (Exception ex)
+        catch (JsonException)
         {
-            _logger.LogError(ex, "Fallo general en Groq. Revisa Rate Limits o API Key.");
-            throw;
+            throw new AiInvalidResponseException("Groq");
         }
     }
 
