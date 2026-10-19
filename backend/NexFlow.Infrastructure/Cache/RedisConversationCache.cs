@@ -57,15 +57,19 @@ public class RedisConversationCache : IConversationCache
 
     public async Task DeleteContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             var key = $"workspace:{workspaceId}:conversation:{customerPhone}:context";
-            await _redisDb.KeyDeleteAsync(key);
+            await _redisDb.KeyDeleteAsync(key).WaitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _logger.LogWarning("Redis context deletion unavailable in workspace {WorkspaceId}: {FailureType}.", workspaceId, ex.GetType().Name);
-            throw;
+            // Durable state is authoritative; failed invalidation must not block recovery.
         }
     }
 
