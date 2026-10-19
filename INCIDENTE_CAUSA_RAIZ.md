@@ -1,0 +1,75 @@
+# RC-3 / Sprint 0 — diagnóstico local del incidente
+
+Fecha: 2026-10-19 (America/Lima). HEAD local: `67016bdb37c054711e57e0ac3c048b9999eedae6`.
+Alcance: reproducción y diagnóstico; **ningún parche de aplicación**. Resultado: **NO-GO para despliegue / producción**.
+
+## Alcance y procedencia de la evidencia
+
+El incidente referido por el plan ocurrió el 18/10/2026 23:07–23:10 Perú, equivalente al 19/10/2026 04:07–04:10 UTC.
+No se consultaron Oracle, Evolution, IA ni bases reales. No se recibieron aquí la imagen ejecutada, filas SQL, logs originales ni respuestas HTTP del incidente.
+Los health previos y cuatro eventos PDF fallidos son antecedentes **referidos por el plan**, no evidencia operacional verificada en esta ejecución.
+No hay ZIP en la raíz para comparar; no se consultó GitHub ni se presupone sincronización remota. El HEAD coincide con la referencia local esperada por el plan.
+El único archivo local previo era el plan maestro, no versionado; se conservó intacto. No había diff staged ni unstaged de archivos versionados.
+
+## Hallazgos y causa demostrable
+
+| ID / prioridad | Clasificación | Evidencia local y límite de la conclusión |
+|---|---|---|
+| NF-01 / P1 | CONFIRMADO y REPRODUCIDO, con límite de motor | `InboundMessageRepository.cs:59`: una entrada Failed anterior impide seleccionar el siguiente turno del mismo workspace/consumidor. La prueba ejecuta el predicado del repositorio con SQLite temporal, función regexp_replace y sin el sufijo de locks PostgreSQL; otro tenant progresa y el turno posterior avanza después de completar el predecesor. **No certifica SKIP LOCKED ni concurrencia PostgreSQL**. |
+| NF-02 / P1 | REPRODUCIDO | `AiInterpreter.cs:57`: un RpcException Unavailable leyendo el perfil escapa antes del try de interpretación. No se llama al router. El worker captura la excepción y registra Failed/reintento; combinarlo con NF-01 es un mecanismo de silencio temporal, no una causa probada del servidor. |
+| NF-03 / P1 | REPRODUCIDO | `AiResponseOrchestrator.cs:72`: dos inbounds limitados distintos comparten source de respuesta por minuto. La prueba obtiene 7 respuestas lógicas únicas para 8 turnos: seis consultas admitidas y un único aviso compartido. El contador no supera seis llamadas IA. |
+| NF-04 / P1 | REPRODUCIDO en Chromium | `useConversations.ts:165` combina errores; `InboxPage.tsx:40` sustituye toda la vista. Ante 503 simulado de messages o conversations, ambos caches retienen un elemento y el panel sano desaparece. **Se demuestra ocultamiento de UI, no borrado de datos**. |
+| NF-05 / P2 | REPRODUCIDO | `ConversationRecoveryService.cs:105`: la frase exacta «Escojo la opción 1» no produce selección directa bajo un menú vigente; requiere IA/aclaración. No explica por sí sola el silencio de «Hola?». |
+| NF-06 / observabilidad | CONFIRMADO EN CÓDIGO | `ProcessIncomingMessageCommandHandler.cs:124` acepta Sent, Failed y UnknownDelivery como resultados durables de turno. SQL Processed no acredita entrega. Ya existen avisos de fallo de outbound y protección contra reenvío; no duplicarlos ni cambiar Processed por una falsa confirmación. |
+| Incidente real | PENDIENTE DE EVIDENCIA | No se demuestra cuál de estos mecanismos ocurrió ni una causa raíz única en Oracle. También falta descartar ausencia/rechazo de webhook, licencia, modo Human, excepciones de almacenamiento, transporte y error HTTP de la bandeja. |
+
+Hay logging de errores y reintentos durables en el worker; no se afirma ausencia total de observabilidad.
+El backoff inspeccionado espera 1, 2, 4 y 8 minutos antes de agotar cinco intentos y pasar a DeadLetter. No equivale a bloqueo infinito.
+
+## Secuencia exacta, con dependencias simuladas sanas
+
+Se usa el recuperador, orquestador y flujos reales de la fixture existente, estado Firestore simulado e interpretaciones/salidas simuladas; no un LLM real ni transporte WhatsApp real.
+
+| Paso del caso de prueba | Resultado |
+|---|---|
+| Quiero informacion | Menú real de datos ficticios autorizados, numerado. |
+| Como puedo hacer una reserva? | Con interpretación Reservation preparada: inicia borrador y solicita nombre. Ninguna reserva creada. |
+| Hola? | Respuesta determinista, sin incrementar llamadas IA; conserva borrador. |
+| Que productos tienen | Con interpretación ProductQuery preparada: información factual y continuación; conserva borrador. |
+| Escojo la opción 1 | No selecciona directamente; con interpretación General preparada responde aclaración. |
+
+Resultado del control: cinco respuestas simuladas, tres llamadas al intérprete simulado, cero reservas/pedidos.
+**El silencio de cuatro mensajes no se reproduce con estas dependencias sanas.** La prueba no acredita las interpretaciones del modelo en producción.
+
+## Validación ejecutada
+
+| Comando | Resultado |
+|---|---|
+| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --verbosity minimal` antes de añadir reproducciones | 500 aprobadas, 0 fallidas, 0 omitidas; 9 s de ejecución de tests. |
+| Mismo comando, con reproducciones | 505 totales: 502 aprobadas, 3 fallidas (NF-02/03/05), 0 omitidas; 9 s. |
+| `dotnet build backend/backend.slnx --no-restore` | Correcto, 0 errores/advertencias en la última ejecución incremental. En la recompilación inicial: dos CS8981 de migraciones históricas y un CS8602 de FirestoreCatalogRepository:198, preexistentes. |
+| `node --test tests/rc3-inbox-browser.test.mjs` en frontend | 3 totales: 1 control aprobado, 2 fallos de aceptación NF-04; 7,49 s. Red externa bloqueada. |
+| `npm run build` en frontend | Correcto; advertencia de chunk JS de 709,26 kB (>500 kB). |
+| `npm run lint` en frontend | Correcto, exit 0. |
+
+Las cinco expectativas rojas se conservan deliberadamente como evidencia, **sin skips ni modificación de expectativas para ocultarlas**. Las 500 pruebas anteriores siguen pasando.
+No se ejecutó npm ci: se utilizaron dependencias instaladas, sin cambios de versiones/lockfile.
+
+## Evidencia operacional pendiente (sin ejecutar comandos)
+
+Identificar imagen/digest y Compose efectivo que estaban activos en el intervalo; verificar si era este código.
+Obtener salida agregada del script de solo lectura citado en el plan para 03:55–04:35 UTC: estados inbox, edad/retries/errores y dead letters.
+Correlacionar en entorno privado los webhooks/HTTP, inbound, contexto/modo/licencia, outbound y evidencia Evolution del consumidor autorizado, sin exportar PII.
+Obtener estados HTTP/errores de consultas de bandeja. Healthy antes del incidente no acredita workers, canal, permisos ni salud durante el incidente.
+Los cuatro eventos de Outbox PDF no son la cola de inbounds ni los outbound Firestore; no atribuirles el silencio ni reinyectarlos sin evidencia.
+
+## Propuesta exacta para Sprint 1 (NO implementada, NO autorizada aún)
+
+1. `AiResponseOrchestrator`: usar request.MessageId como source del aviso limitado; mantener presupuesto atómico y replay idempotente separado. Convertir NF-03 en verde.
+2. `AiInterpreter`: cubrir la lectura inicial del perfil con clasificación de fallos transitorios y resultado seguro; propagar cancelación del solicitante y errores de autorización/tenant. No inventar perfil, zona ni datos comerciales cuando Firestore está caído. Convertir NF-02 en verde y probar permisos/cancelación.
+3. `InboundMessageWorker`/repositorio: conservar FIFO, claim y retries; hacer observable edad del predecesor y transición Failed/DeadLetter, aprovechando logging/notificaciones existentes y sin spam. No saltar operaciones transaccionales ni reenviar mensajes inciertos.
+4. Handler/outbound: correlacionar resultado de turno e intento por WorkspaceId + inbound.MessageId sin datos sensibles; distinguir Processed de entrega. Reutilizar alertas/reconciliación existentes y probar que UnknownDelivery no vuelve a transportar.
+
+NF-04 (UI) y NF-05 (parser) corresponden a **Sprint 2**, no al parche backend de Sprint 1.
+Las pruebas están etiquetadas por sprint cuando aplica. No declarar G1/global verde mientras permanezcan reproducciones pendientes.
+G0 permanece parcial por falta de evidencia del servidor; G1 no pasa por las expectativas nuevas rojas. GO solamente para continuar diagnóstico y proponer revisión; no desplegar.
