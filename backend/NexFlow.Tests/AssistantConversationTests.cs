@@ -273,7 +273,7 @@ public sealed class AssistantConversationTests
                 .Returns((Guid w, string chatId, string phone, string content, string source, CancellationToken ct) => outbound.Object.SendMessageAsync(w, chatId, phone, content, SenderType.AI, source, ct));
             support.Setup(s => s.ProcessAsync(Workspace, "chat", It.IsAny<CancellationToken>())).Returns(async () => { Handoffs++; var c = await Context(); c.Mode = "Human"; await Contexts.SaveContextAsync(Workspace, Phone, c, default); return "Un asesor continuará la conversación."; });
             var chat = new ChatFlow(knowledge.Object, entitlements.Object, new LocationResolverService(locations.Object), NullLogger<ChatFlow>.Instance, Mock.Of<ICatalogGenerationService>(), notifications);
-            Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()));
+            Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()), profiles.Object);
             _orchestrator = new(interpreter.Object, entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, Recovery, clock.Object);
         }
         public Task<ConversationContextDto> Context() => Contexts.GetOrRecoverContextAsync(Workspace, Phone, default);

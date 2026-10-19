@@ -24,7 +24,7 @@ public interface IConversationRecoveryService
 
 public sealed class ConversationRecoveryService(IContextRecoveryService contexts, IConversationStateRepository states,
     IOfferingService offerings, ILocationRepository locations, IBusinessHoursRepository hours, IReservationEngine reservations,
-    IClock clock, IOptions<AssistantRecoveryOptions> options) : IConversationRecoveryService
+    IClock clock, IOptions<AssistantRecoveryOptions> options, IBusinessProfileRepository profiles) : IConversationRecoveryService
 {
     private AssistantRecoveryOptions Limits => options.Value;
     public static string Normalize(string text) => string.Join(' ', new string(text.Normalize(NormalizationForm.FormD)
@@ -151,29 +151,48 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
 
     public async Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct)
     {
-        // Replace the flow's unnumbered picker with one authoritative numbered list.
-        if (response.Split('\n').Any(line => line.TrimStart().StartsWith("• ", StringComparison.Ordinal)))
-            response = string.Join('\n', response.Split('\n').TakeWhile(line => !line.TrimStart().StartsWith("• ", StringComparison.Ordinal))).TrimEnd();
-        var decorated = await PrepareOptionsAsync(workspace, context, modules, response, ct);
+        var decorated = await PrepareOptionsAsync(workspace, context, modules, response, ct, replacePicker: true);
         await contexts.SaveContextAsync(workspace, phone, context, ct);
         return decorated;
     }
 
-    private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct)
+    private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, bool replacePicker = false)
     {
         if (context.RecoveryOptionsContext != Fingerprint(context)) context.RecoveryOptionsOffset = 0;
-        context.RecoveryOptions = await BuildOptions(workspace, context, modules, ct);
+        var available = await BuildOptions(workspace, context, modules, ct, paginate: false);
+        context.RecoveryOptions = available.Skip(context.RecoveryOptionsOffset).Take(5).ToList();
         context.RecoveryOptionsContext = Fingerprint(context);
         var noOptions = context.CurrentStep is "COLLECT_CUSTOMERNAME" or "COLLECT_DATE" or "CONFIRM" ? Continuation(context)
             : "No hay opciones vigentes para este paso. Puedes indicar otra sede o fecha, o escribir asesor para solicitar ayuda humana.";
-        return response + (context.RecoveryOptions.Count == 0 ? "\n" + noOptions
-            : "\n" + string.Join("\n", context.RecoveryOptions.Select((o, i) => $"{i + 1}. {o.Label}"))
+        if (context.RecoveryOptions.Count == 0) return response + "\n" + noOptions;
+        var menu = string.Join("\n", context.RecoveryOptions.Select((o, i) => $"{i + 1}. {o.Label}"))
                 + (context.RecoveryHasMore ? "\nHay más opciones disponibles: escribe ver más. Para solicitar ayuda humana escribe asesor." : "")
-                + (context.RecoveryOptionsOffset > 0 ? "\nPara volver al inicio escribe menú." : "")
-                + "\n¿Cuál opción eliges? Escribe su número.");
+                + (context.RecoveryOptionsOffset > 0 ? "\nPara volver al inicio escribe menú." : "");
+        return replacePicker ? ComposePickerResponse(response, available, menu)
+            : response + "\n" + menu + "\n¿Cuál opción eliges? Escribe su número.";
     }
 
-    private async Task<List<ConversationMenuOption>> BuildOptions(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
+    private static string ComposePickerResponse(string response, List<ConversationMenuOption> available, string menu)
+    {
+        // Only replace exact, authoritative option lines. Other lists, explanations
+        // and questions belong to the response and must survive the composition.
+        var pickerLines = available.Select(o => "• " + o.Label).ToHashSet(StringComparer.Ordinal);
+        var lines = response.Replace("\r\n", "\n").Split('\n');
+        var finalLine = Array.FindLastIndex(lines, line => !string.IsNullOrWhiteSpace(line));
+        var hasQuestion = finalLine >= 0 && lines[finalLine].TrimEnd().EndsWith('?');
+        var insertion = Array.FindIndex(lines, line => pickerLines.Contains(line.Trim()));
+        if (insertion < 0) insertion = hasQuestion ? finalLine : lines.Length;
+        var parts = new List<string>();
+        for (var i = 0; i <= lines.Length; i++)
+        {
+            if (i == insertion) parts.Add(menu);
+            if (i < lines.Length && !pickerLines.Contains(lines[i].Trim())) parts.Add(lines[i]);
+        }
+        if (!hasQuestion) parts.Add("¿Cuál opción eliges? Escribe su número.");
+        return string.Join("\n", parts);
+    }
+
+    private async Task<List<ConversationMenuOption>> BuildOptions(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct, bool paginate = true)
     {
         var result = new List<ConversationMenuOption>();
         if (context.CurrentGoal is "RESERVATION" or "BOOKING" && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
@@ -183,7 +202,11 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 result.AddRange((await offerings.GetServicesAsync(workspace, context.SelectedLocationId, null, ct)).Where(s => s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new ConversationMenuOption(s.Id, s.Name, "Service")));
             else if (context.CurrentStep == "COLLECT_TIME" && context.SelectedLocationId != null && context.SelectedServiceId != null && DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
             {
-                var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var profile = await profiles.GetProfileAsync(workspace, ct);
+                TimeZoneInfo zone;
+                try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone); }
+                catch (TimeZoneNotFoundException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+                catch (InvalidTimeZoneException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
                 result.AddRange((await reservations.GetAvailabilityAsync(workspace, context.SelectedLocationId, context.SelectedServiceId, date, ct)).Where(s => s.IsAvailable).OrderBy(s => s.StartTime).Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).Distinct().Select(t => new ConversationMenuOption(t, t, "Time")));
             }
             else return result;
@@ -203,7 +226,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         }
         context.RecoveryOptionsOffset = Math.Clamp(context.RecoveryOptionsOffset, 0, result.Count == 0 ? 0 : (result.Count - 1) / 5 * 5);
         context.RecoveryHasMore = context.RecoveryOptionsOffset + 5 < result.Count;
-        return result.Skip(context.RecoveryOptionsOffset).Take(5).ToList();
+        return paginate ? result.Skip(context.RecoveryOptionsOffset).Take(5).ToList() : result;
     }
 
     private async Task<RecoveryDecision> SaveAsync(Guid workspace, string phone, string source, ConversationContextDto context, RecoveryDecision decision, CancellationToken ct)
