@@ -25,6 +25,8 @@ public sealed class InMemoryReservationResourceCoordinator : IReservationResourc
     public Func<ReservationResourceMutation, Exception?>? BeforeBeginCommit { get; set; }
     public Func<ReservationResourceMutation, Exception?>? AfterBeginCommit { get; set; }
     public Func<ReservationResourceMutation, Exception?>? BeforeComplete { get; set; }
+    public Func<ReservationResourceMutation, Exception?>? AfterComplete { get; set; }
+    public Task ExecuteRecoveryAsync(Guid workspaceId, Func<Task> apply, CancellationToken ct) => apply();
     public InMemoryReservationResourceCoordinator(Store? store = null) => Durable = store ?? new();
 
     public async Task<ReservationResourceStamp> ReadAsync(ReservationResourceKey key, CancellationToken ct)
@@ -77,6 +79,7 @@ public sealed class InMemoryReservationResourceCoordinator : IReservationResourc
         var row = Durable.Rows[operation.Key]; await row.Gate.WaitAsync(ct);
         try { if (row.Pending?.OperationId == operation.OperationId && row.Version == operation.Version) row.Pending = null; }
         finally { row.Gate.Release(); }
+        failure = AfterComplete?.Invoke(operation); if (failure != null) throw failure;
     }
     public Task<IReadOnlyList<ReservationResourceMutation>> ClaimPendingAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<ReservationResourceMutation>>(Durable.Rows.Values.Where(r => r.Pending != null).Select(r => r.Pending!).ToArray());

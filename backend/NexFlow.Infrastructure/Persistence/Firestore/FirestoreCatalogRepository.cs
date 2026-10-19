@@ -147,7 +147,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
     public Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, CancellationToken cancellationToken) =>
         SaveItemCoreAsync(workspaceId, item, isCreate, null, cancellationToken);
 
-    private async Task SaveItemCoreAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, ReservationResourceMutation? operation, CancellationToken cancellationToken)
+    private async Task SaveItemCoreAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, ReservationResourceMutation? operation, CancellationToken cancellationToken, bool throwOnRejected = true)
     {
         item.Name = item.Name?.Trim() ?? "";
         item.Currency = item.Currency?.Trim().ToUpperInvariant() ?? "";
@@ -179,12 +179,13 @@ public class FirestoreCatalogRepository : ICatalogRepository
         {
             requested.Id = docId;
             var stamp = await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Service, docId), cancellationToken);
-            var previous = await GetItemByIdAsync(workspaceId, docId, cancellationToken) as ServiceDto;
+            var observed = await docRef.GetSnapshotAsync(cancellationToken);
+            var previous = observed.Exists ? MapToItemDto(observed) as ServiceDto : null;
             if (CriticalChange(previous, requested))
             {
                 var change = new ReservationResourceChange("SaveService", requested, isCreate,
                     !requested.IsActive || !requested.RequiresReservation || requested.DurationInMinutes != previous?.DurationInMinutes,
-                    requested.LocationScope == "ALL" ? null : requested.LocationIds.ToArray());
+                    requested.LocationScope == "ALL" ? null : requested.LocationIds.ToArray(), observed.UpdateTime?.ToDateTime());
                 await ReconcileMutationAsync(await _resources.BeginAsync(stamp, change, cancellationToken), cancellationToken);
                 return;
             }
@@ -216,6 +217,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
         {
             await tx.GetSnapshotAsync(workspace, cancellationToken);
             var existing = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            if (operation != null && existing.UpdateTime?.ToDateTime() != ReservationResourceFence.Decode(operation).ExpectedUpdatedAtUtc)
+                throw new ConcurrencyException("El servicio fue editado mientras el cambio estaba pendiente. Recarga sus datos y vuelve a intentarlo.");
             if (isCreate && existing.Exists) throw new ConcurrencyException("El offering ya existe.");
             if (!isCreate && !existing.Exists) throw new KeyNotFoundException("Offering no encontrado.");
             if (existing.Exists && MapToItemDto(existing).Type != item.Type)
@@ -244,22 +247,23 @@ public class FirestoreCatalogRepository : ICatalogRepository
         var result = operation == null
             ? await _firestoreDb.RunTransactionAsync(Write, cancellationToken: cancellationToken)
             : await new ReservationResourceFence(_firestoreDb, _resources).ApplyAsync(operation, Write, cancellationToken);
-        if (result.Error.Code == "Resource.Conflict") throw new ConcurrencyException(result.Error.Description);
-        if (result.IsFailure) throw new DomainException(result.Error.Description);
+        if (throwOnRejected && result.Error.Code == "Resource.Conflict") throw new ConcurrencyException(result.Error.Description);
+        if (throwOnRejected && result.IsFailure) throw new DomainException(result.Error.Description);
     }
 
     public Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken) =>
         DeleteItemCoreAsync(workspaceId, itemId, null, cancellationToken);
 
-    private async Task DeleteItemCoreAsync(Guid workspaceId, string itemId, ReservationResourceMutation? operation, CancellationToken cancellationToken)
+    private async Task DeleteItemCoreAsync(Guid workspaceId, string itemId, ReservationResourceMutation? operation, CancellationToken cancellationToken, bool throwOnRejected = true)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(itemId);
         if (operation == null)
         {
             var existing = await GetItemByIdAsync(workspaceId, itemId, cancellationToken);
-            if (existing is ServiceDto)
+            if (existing is ServiceDto service)
             {
                 var stamp = await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Service, itemId), cancellationToken);
+                if (!service.IsActive && stamp.PendingOperationId == null) return;
                 await ReconcileMutationAsync(await _resources.BeginAsync(stamp, new("DeactivateService"), cancellationToken), cancellationToken);
                 return;
             }
@@ -276,18 +280,18 @@ public class FirestoreCatalogRepository : ICatalogRepository
         }
         var result = operation == null ? await _firestoreDb.RunTransactionAsync(Write, cancellationToken: cancellationToken)
             : await new ReservationResourceFence(_firestoreDb, _resources).ApplyAsync(operation, Write, cancellationToken);
-        if (result.IsFailure) throw new DomainException(result.Error.Description);
+        if (throwOnRejected && result.IsFailure) throw new DomainException(result.Error.Description);
     }
 
-    public Task ReconcileMutationAsync(ReservationResourceMutation operation, CancellationToken ct)
+    public Task ReconcileMutationAsync(ReservationResourceMutation operation, CancellationToken ct, bool throwOnRejected = true)
     {
         var change = ReservationResourceFence.Decode(operation);
-        if (operation.Key.Kind != ReservationResourceKind.Service) throw new InvalidOperationException("Wrong resource kind.");
+        if (operation.Key.Kind != ReservationResourceKind.Service) throw new InvalidReservationResourceMutationException();
         return change.Action switch
         {
-            "SaveService" when change.Service?.Id == operation.Key.Id => SaveItemCoreAsync(operation.Key.WorkspaceId, change.Service, change.IsCreate, operation, ct),
-            "DeactivateService" => DeleteItemCoreAsync(operation.Key.WorkspaceId, operation.Key.Id, operation, ct),
-            _ => throw new InvalidOperationException("Invalid service mutation.")
+            "SaveService" when change.Service?.Id == operation.Key.Id => SaveItemCoreAsync(operation.Key.WorkspaceId, change.Service, change.IsCreate, operation, ct, throwOnRejected),
+            "DeactivateService" => DeleteItemCoreAsync(operation.Key.WorkspaceId, operation.Key.Id, operation, ct, throwOnRejected),
+            _ => throw new InvalidReservationResourceMutationException()
         };
     }
 

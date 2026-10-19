@@ -70,7 +70,7 @@ namespace NexFlow.Infrastructure.Migrations
                     ) THEN
                         RAISE EXCEPTION 'Rollback refused: reused reservation slots are incompatible with the old unique index.' USING ERRCODE = '55000';
                     END IF;
-                END
+                END;
                 $guard$;
                 """);
             migrationBuilder.DropTable(

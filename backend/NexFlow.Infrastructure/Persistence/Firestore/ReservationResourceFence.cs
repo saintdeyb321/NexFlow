@@ -18,6 +18,7 @@ internal sealed class ReservationResourceFence(FirestoreDb db, IReservationResou
 
     public async Task<Result> ApplyAsync(ReservationResourceMutation operation, Func<Transaction, Task<Result>> write, CancellationToken ct)
     {
+        ValidateIdentity(operation);
         Result result;
         try { result = await RunAsync(operation, write, ct); }
         catch (Exception ex) when (ex is DomainException or KeyNotFoundException or ConcurrencyException)
@@ -63,11 +64,30 @@ internal sealed class ReservationResourceFence(FirestoreDb db, IReservationResou
 
     internal static ReservationResourceChange Decode(ReservationResourceMutation operation)
     {
-        var change = JsonSerializer.Deserialize<ReservationResourceChange>(operation.PayloadJson)
-            ?? throw new InvalidOperationException("Missing resource mutation.");
-        if (change.Service?.Metadata != null)
-            change.Service.Metadata = change.Service.Metadata.ToDictionary(p => p.Key, p => Materialize(p.Value)!);
-        return change;
+        ValidateIdentity(operation);
+        try
+        {
+            var change = JsonSerializer.Deserialize<ReservationResourceChange>(operation.PayloadJson)
+                ?? throw new InvalidReservationResourceMutationException();
+            var valid = operation.Key.Kind == ReservationResourceKind.Location
+                ? change.Action == "DeleteLocation" && change.Service == null
+                : (change.Action == "DeactivateService" && change.Service == null)
+                    || (change.Action == "SaveService" && change.Service?.Id == operation.Key.Id && change.Service.Type == "SERVICE");
+            if (!valid) throw new InvalidReservationResourceMutationException();
+            if (change.Service?.Metadata != null)
+                change.Service.Metadata = change.Service.Metadata.ToDictionary(p => p.Key, p => Materialize(p.Value)!);
+            return change;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        { throw new InvalidReservationResourceMutationException(); }
+    }
+
+    private static void ValidateIdentity(ReservationResourceMutation operation)
+    {
+        if (operation.Version <= 0 || operation.OperationId == Guid.Empty || operation.Key.WorkspaceId == Guid.Empty
+            || !Enum.IsDefined(operation.Key.Kind) || string.IsNullOrWhiteSpace(operation.Key.Id) || operation.Key.Id.Contains('/')
+            || Encoding.UTF8.GetByteCount(operation.Key.Id) > 1500)
+            throw new InvalidOperationException("Invalid resource mutation identity; administrative repair required.");
     }
 
     private static object? Materialize(object? value) => value is not JsonElement json ? value : json.ValueKind switch
@@ -79,3 +99,5 @@ internal sealed class ReservationResourceFence(FirestoreDb db, IReservationResou
         JsonValueKind.Null => null, _ => throw new InvalidOperationException("Invalid mutation metadata.")
     };
 }
+
+internal sealed class InvalidReservationResourceMutationException : Exception;

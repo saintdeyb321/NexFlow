@@ -59,6 +59,9 @@ public class FirestoreLocationRepository : ILocationRepository
         if (string.IsNullOrWhiteSpace(locationId) || locationId.Contains('/'))
             return Result.Failure(new Error("Location.Invalid", "ID de sede inválido."));
         var stamp = await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Location, locationId), cancellationToken);
+        if (stamp.PendingOperationId == null && !(await _firestoreDb.Collection("workspaces").Document(workspaceId.ToString())
+            .Collection("locations").Document(locationId).GetSnapshotAsync(cancellationToken)).Exists)
+            return Result.Success();
         var operation = await _resources.BeginAsync(stamp, new("DeleteLocation"), cancellationToken);
         return await ReconcileMutationAsync(operation, cancellationToken);
     }
@@ -66,7 +69,7 @@ public class FirestoreLocationRepository : ILocationRepository
     public async Task<Result> ReconcileMutationAsync(ReservationResourceMutation operation, CancellationToken cancellationToken)
     {
         if (operation.Key.Kind != ReservationResourceKind.Location || ReservationResourceFence.Decode(operation).Action != "DeleteLocation")
-            throw new InvalidOperationException("Invalid location mutation.");
+            throw new InvalidReservationResourceMutationException();
         var workspaceId = operation.Key.WorkspaceId; var locationId = operation.Key.Id;
         var workspace = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString());
         return await new ReservationResourceFence(_firestoreDb, _resources).ApplyAsync(operation, async tx =>

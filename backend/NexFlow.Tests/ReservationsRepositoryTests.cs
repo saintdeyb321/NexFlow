@@ -172,6 +172,42 @@ public sealed class ReservationsRepositoryTests
         await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
     }
 
+    [Theory]
+    [InlineData(ReservationStatus.Confirmed)] [InlineData(ReservationStatus.Pending)] [InlineData(ReservationStatus.Completed)]
+    public async Task Every_non_cancelled_status_has_matching_availability_and_unique_index_rules(ReservationStatus status)
+    {
+        await using var f = await DbFixture.CreateAsync(); var start = Utc("2030-07-01T12:00:00Z");
+        f.Add(f.Workspace, "location", "service", start, status, 1); await f.SeedAsync();
+        Assert.False(await f.Repository.IsTimeSlotAvailableAsync(f.Workspace, "location", start, start.AddMinutes(30)));
+        f.Repository.Add(Reservation.Create(f.Workspace, "location", "service", "other", "Other", start, start.AddMinutes(30)));
+        await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Cancellation_does_not_release_the_independent_source_message_identity()
+    {
+        await using var f = await DbFixture.CreateAsync(); var start = Utc("2030-07-01T12:00:00Z");
+        var original = Reservation.Create(f.Workspace, "location", "service", "customer", "Customer", start, start.AddMinutes(30), "source");
+        original.Cancel(); f.Repository.Add(original); await f.SeedAsync();
+        Assert.Equal(original.Id, (await f.Repository.GetBySourceMessageIdAsync(f.Workspace, "source", default))!.Id);
+        f.Repository.Add(Reservation.Create(f.Workspace, "other-location", "other-service", "customer", "Customer", start.AddHours(1), start.AddHours(1.5), "source"));
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+        Assert.Contains("SourceMessageId", error.InnerException!.Message);
+    }
+
+    [Fact]
+    public async Task Rescheduling_into_another_active_exact_slot_is_rejected_without_rewriting_either_reservation()
+    {
+        await using var f = await DbFixture.CreateAsync(); var start = Utc("2030-07-01T12:00:00Z");
+        f.Add(f.Workspace, "location", "service", start, ReservationStatus.Confirmed, 1);
+        f.Add(f.Workspace, "location", "service", start.AddHours(1), ReservationStatus.Confirmed, 2); await f.SeedAsync();
+        var row = (await f.Repository.GetByIdAsync(f.Workspace, Id(2), default))!;
+        row.Reschedule(start, start.AddMinutes(30));
+        await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync()); f.Db.ChangeTracker.Clear();
+        Assert.Equal(start, (await f.Repository.GetByIdAsync(f.Workspace, Id(1), default))!.StartTime);
+        Assert.Equal(start.AddHours(1), (await f.Repository.GetByIdAsync(f.Workspace, Id(2), default))!.StartTime);
+    }
+
     private static DateTime Utc(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
     private static Guid Id(int value) => Guid.Parse($"00000000-0000-0000-0000-{value:D12}");
 

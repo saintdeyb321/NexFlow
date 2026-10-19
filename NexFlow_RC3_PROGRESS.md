@@ -5,10 +5,10 @@ Antes de cada sesión leer `AGENTS.md`, `NexFlow_PLAN_MAESTRO_CORRECCION_MVP_RC3
 
 ## Estado
 
-- Sprint actual: **4**, parches locales implementados y comprobados; cierre integral pendiente de autorización de coordinación/migraciones descritas al final. Sprint 3 aprobado por el usuario.
-- HEAD local al iniciar Sprint 4: `96e472cdd041ed7443088b85b4e1510274bff4ab`; coincidía con la referencia, árbol limpio, conservado. Sin consulta a GitHub.
-- Autorización: exclusivamente NF-09 e integridad cruzada del Sprint 4. **Próximo sprint autorizado: ninguno. Sprint 5 NO autorizado.**
-- Veredicto: **SPRINT 4 NO APROBABLE / NO-GO de integridad completa**: las pruebas reproducen una carrera entre bases y un índice que impide reutilizar un horario cancelado. No se autorizaron los cambios estructurales necesarios. Los parches seguros y las propuestas quedan para revisión; no constituye validación de producción.
+- Sprint actual: **4.1, recuperación**, completados los parches y pruebas locales; certificación distribuida pendiente. Se conserva el historial de Sprints 0–4 abajo.
+- HEAD recuperado: `16efe690278cb8bbab82ee2a3b6e9c2001147d5c`, árbol limpio al recibir la instrucción de recuperación; anterior `4d1d0fb8fb2e8c5c9ef521253f9f0c0dadee54a1`. Cambios de esta recuperación sin commit/push.
+- Autorización: exclusivamente Sprint 4.1, coordinación de recursos e índice de horarios cancelados. **Próximo sprint autorizado: ninguno. Sprint 5 NO autorizado.**
+- Veredicto: **SPRINT 4.1 NO APROBABLE como certificación integral**. P1 corregido localmente; P0 implementado y probado en límites locales, sin certificar locks/SSI/ACK reales. La guarda de ciclo de vida del tenant conserva SQL durante IO remoto; se documenta su justificación y la validación pendiente. No constituye GO de despliegue.
 
 ## Evidencia y decisiones del Sprint 0 (histórico)
 
@@ -300,3 +300,63 @@ Rutas relativas a `C:\Proyectos\NexFlow`:
 - Frontend, esquemas, migraciones, configuración, secretos e infraestructura: **ningún cambio**.
 
 **SPRINT 4 NO APROBABLE como cierre completo del DoD; NO-GO de integridad integral.** Parches mínimos comprobados, sin regresiones locales; carrera entre bases e índice cancelado siguen reproducidos y requieren autorización de cambios estructurales. Se detiene para revisión. **Sprint 5 NO AUTORIZADO.**
+
+## Sprint 4.1 — recuperación del commit parcial 16efe69 (2026-10-19)
+
+### Estado recuperado y límites
+
+Se ejecutaron primero `git status --short`, `git log -3 --oneline`, `git diff --stat`, `git diff --check`. HEAD completo: `16efe690278cb8bbab82ee2a3b6e9c2001147d5c`, árbol limpio; sin cambios locales adicionales. Se releen contrato, plan, registro e incidente. No se rehízo la implementación publicada: ya contenía coordinador, entidad/configuración SQL, fence, worker, DI, motor/repositorios coordinados, nueva migración/Designer/snapshot, fake y adaptación de pruebas.
+
+Faltaban pruebas de recuperación/ACK/fences y convivencia de ediciones, SQL exportado y documento de arquitectura; no había constructores rotos ni archivos sintácticamente incompletos. El registro todavía indicaba Sprint 4. Validación inmediata antes de nuevas ediciones: build correcto (0 errores, warnings conocidos CS8981 x2 y CS8602 x1), **628/628 tests**. No se confundió falta de PostgreSQL local con regresión: `psql`/`postgres` no disponibles en PATH; no se instaló nada ni se llamó Oracle.
+
+### Correcciones respecto de 16efe69
+
+- **CONFIRMADO/REPRODUCIDO:** SaveService pendiente podía sobrescribir nombre/precio confirmado después. Prueba roja encontró `Service` en vez del nombre concurrente. Ahora la intención incluye UpdateTime observado y su transacción exige igualdad. Una edición inocua ganadora se conserva; una edición inocua que reintentara restaurar campos críticos después de otra transacción falla con conflicto. Marcador Rejected arbitrado antes de completar SQL. No se añadió ETag al contrato HTTP; la versión pertenece al payload durable interno.
+- **CONFIRMADO/REPRODUCIDO:** UnsupportedAction quedaba Pending tras reinicios. Se clasifica payload inválido; con identidad válida, worker sella rechazo en Firestore antes de completar SQL. Applied previo gana; red/timeout/permisos no se convierten en rechazo. Identidad corrupta sigue bloqueada para revisión administrativa, no force-unlock.
+- **CONFIRMADO/REPRODUCIDO:** Down nuevo no tenía `END;`; corregido y scripts regenerados. No se tocaron migraciones históricas ni esquema real.
+- **CONFIRMADO por implementación relacionada:** worker nuevo no participaba en TenantLifecycleLock que ya mantenían middleware y Outbox. Ahora verifica workspace existente/no Deleting bajo la misma guarda; límite de intento 30 s. No se retiró la guarda del middleware para simular ausencia de SQL durante IO. Worker confirma SQL también ante resultado funcional Rejected; la API sigue devolviendo errores. Una integración local comprueba que esa finalización no vuelve a rollback por lanzar el error después de guardarla.
+- Repetición de baja ya completada no crea nuevo epoch ni invalida otra vez el catálogo. Sede ya ausente retorna éxito sin escritura. Reintento de intención todavía Pending conserva ID/versión; un intento antiguo no desactiva un servicio reactivado con fence nuevo.
+- Casos de recuperación añadidos: fallos antes/después de commit de intención SQL, ACK Firestore perdido, SQL falla antes/después de completar, caída antes de Firestore, otro worker/objetos sobre estado compartido, duplicados, cancelación del host, recursos/workspaces independientes y web/bot concurrentes. Se comprueba estado final e inexistencia de negocio duplicado.
+
+### Garantías y pendientes P0/P1
+
+**P0:** captura SQL antes de leer Firestore, validación dentro del Serializable con locks Location→Service, intención durable monotónica, fence terminal atómico con negocio, CAS de finalización y recuperación independiente de página siguen implementados. Las dos caracterizaciones originales ya transformadas en 16efe69 conservan sus aserciones de rechazo de baja y datos intactos; no se eliminaron ni debilitaron. Nuevos tests cubren reserva con lectura obsoleta, dos coordinadores, restart lógico, ACK perdido y ediciones críticas/inocuas. No se afirma atomicidad entre bases ni garantía distribuida probada por los fakes.
+
+**Limitación J explícita:** los row locks de recursos no abarcan Firestore. Sin embargo, el protocolo de borrado de tenant preexistente usa una transacción/advisory lock compartido durante la petición, y ahora también durante el intento de recuperación. Suprimirla abriría un bypass frente al borrado nuclear. Se preserva justificadamente, con IO del worker limitado a 30 s; conexión ocupada/contención y el caso combinado de borrado, limpieza parcial y ACK incierto requieren validación/decisión de integración. No se rediseñó el borrado de tenants. No se declara cumplida la ausencia total de SQL durante IO remoto.
+
+**P1 CORREGIDO localmente:** índice único parcial con `Status <> 'Cancelled'`, coherente con Confirmed/Pending/Completed ocupantes. Pruebas ejecutan dos cancelaciones históricas y una vigente con misma clave, rechazo de otra vigente, unicidad independiente SourceMessageId incluso tras cancelar y reagendamiento a clave ocupada sin reescribir datos. ModelSnapshot/Designer del commit parcial permanecen sincronizados y sin cambios en esta recuperación. Up/Down exportados; no migración aplicada.
+
+Down exige ambas tablas bajo ACCESS EXCLUSIVE, rechaza si existen epochs (incluso Ready) o historial duplicado y no modifica reservas. Solo suprime entrada EF history si las guardas pasan. Rollback seguro de aplicación mantiene el esquema y requiere binario compatible con fences/UpdateTime; no volver a API preprotocolo con escrituras. Después de uso normal Down se rechazará: no borrar metadatos/historia para forzarlo. Rollout mixto con API antigua no es seguro; detener escrituras/drenar procesos antes de activar.
+
+Snapshots históricos de nombres, reconciliación independiente de notificaciones agotadas y evidencias operacionales del incidente siguen fuera de alcance. No se tocaron frontend, IA, n8n, PDF, secretos, AGENTS ni plan.
+
+### Validación real
+
+| Comando / evidencia | Resultado |
+|---|---|
+| Build inmediato recuperado y build final: `dotnet build backend/backend.slnx --no-restore` | Correctos, **0 errores**. Recompilación con **3 warnings preexistentes**: CS8981 x2 y CS8602 x1 (línea desplazada a 228); incremental final **0 warnings**. Ningún error de compilación/DI/constructor encontrado; no restauraciones ni dependencias nuevas. |
+| Suite inmediata `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore` | **628 aprobadas, 0 fallidas, 0 omitidas** antes de modificar. |
+| Tres reproducciones nuevas antes del parche | **0 aprobadas, 3 fallidas**, por nombre perdido, intención inválida y terminador Down. No eran fallos de herramientas/dependencias. |
+| Suite final explícita, mismo comando | **669 aprobadas, 0 fallidas, 0 omitidas**: baseline 628 conservado + **41 casos nuevos** en esta recuperación. Incluye RC-1/RC-1.1 y RC-3 Sprints 0–4, Outbox y PDF/callback previos. |
+| Dirigida intermedia `FullyQualifiedName~Rc3Sprint41\|FullyQualifiedName~ReservationsRepositoryTests` | **46 aprobadas, 0 fallidas, 0 omitidas**, antes de sumar los dos casos finales de repetición de baja y el de identidad corrupta (incluidos luego en los 669). |
+| `dotnet ef migrations script 20261008050017_TrackWorkspaceWhatsAppConnections 20261019170831_CoordinateReservationResourcesAndReuseCancelledSlots --no-build --project backend/NexFlow.Infrastructure --startup-project backend/NexFlow.Infrastructure --output backend/NexFlow.Infrastructure/Migrations/Sql/20261019170831_Up.sql -- --offline` | Exit 0, SQL generado y revisado; ninguna conexión ni aplicación. |
+| Mismo comando invirtiendo migraciones, output `20261019170831_Down.sql` | Exit 0, guardas/sintaxis revisadas estáticamente; no ejecutado por PostgreSQL. |
+| `dotnet ef migrations has-pending-model-changes --no-build --project backend/NexFlow.Infrastructure --startup-project backend/NexFlow.Infrastructure -- --offline` | Exit 0: **sin cambios pendientes del modelo**. Aviso herramienta EF 10.0.10/runtime 10.0.11; no actualización. |
+
+El test nuevo sobre Down se precisó para permitir DELETE de `__EFMigrationsHistory` generado por EF, manteniendo prohibición de DML sobre reservas. La revisión final agregó validación de identidad también al camino de sellado: una identidad corrupta permanece bloqueada y solo se retoma al restaurar en la fixture la intención original revisada, sin bajar epoch ni borrar datos. No se debilitaron pruebas históricas. No se ejecutaron build/lint/frontend porque no se modificó frontend.
+
+Límites de pruebas: Firestore SDK sobre transporte RPC en memoria; coordinador SQL de producción sobre SQLite con adaptador que elimina FOR UPDATE, quita CAST jsonb y sustituye advisory lock por SELECT 1. Se ejercen filtros/CAS/orden/guardas/commit EF, no locks PG ni SSI/40001/jsonb reales. Semáforos existen únicamente en fake de tests. Restart local = nuevos objetos/contextos con almacenamiento compartido de fixture, no caída OS/proceso ni dos procesos PostgreSQL reales.
+
+Documento nuevo `NexFlow_RC3_SPRINT4_1_CONSISTENCIA.md`: arquitectura, máquina de estados, secuencia, ventanas de ACK, locks, límites, migración, rollout/rollback y matriz futura con dos conexiones/procesos en PostgreSQL y Firestore aislados. No se ejecutó esa matriz externa ni se certificó staging/producción.
+
+### Archivos de esta recuperación (respecto de 16efe69)
+
+- Backend contratos/implementación: `backend/NexFlow.Application/Features/Reservations/IReservationResourceCoordinator.cs`; `backend/NexFlow.Infrastructure/Persistence/Firestore/FirestoreCatalogRepository.cs`; `backend/NexFlow.Infrastructure/Persistence/Firestore/FirestoreLocationRepository.cs`; `backend/NexFlow.Infrastructure/Persistence/Firestore/ReservationResourceFence.cs`; `backend/NexFlow.Infrastructure/Persistence/PostgreSQL/Repositories/ReservationResourceCoordinator.cs`; `backend/NexFlow.Infrastructure/Workers/ReservationResourceRecoveryWorker.cs`.
+- Migración/SQL: corrección del Down en `backend/NexFlow.Infrastructure/Migrations/20261019170831_CoordinateReservationResourcesAndReuseCancelledSlots.cs`; nuevos `backend/NexFlow.Infrastructure/Migrations/Sql/20261019170831_Up.sql` y `20261019170831_Down.sql`. Designer/snapshot existentes no modificados.
+- Tests: `backend/NexFlow.Tests/Fakes/InMemoryReservationResourceCoordinator.cs`; `backend/NexFlow.Tests/ReservationsRepositoryTests.cs`; nuevos `backend/NexFlow.Tests/Rc3Sprint41RecoveryTests.cs` y `backend/NexFlow.Tests/Rc3Sprint41SqlBoundaryTests.cs`.
+- Documentación: nuevo `NexFlow_RC3_SPRINT4_1_CONSISTENCIA.md` y este registro. Historial 0–4 preservado.
+- Frontend, secretos, .env, infraestructura, Docker, datos reales, AGENTS y plan maestro: **sin cambios**.
+
+Diff final revisado respecto de 16efe69, incluidos archivos nuevos, scripts y documentación; comprobación de whitespace sin errores tras quitar únicamente líneas vacías finales de los SQL exportados. Sin cambios ajenos al alcance.
+
+**SPRINT 4.1 NO APROBABLE como certificación distribuida completa.** Parches locales completos y verdes; P0 requiere la matriz real y decisión sobre el criterio de ciclo de vida/SQL durante IO antes de GO. P1 listo para revisión local, no aplicado. No hay bloqueo de compilación ni pruebas fallidas. Sin commit, push, despliegue o instalaciones. **Detenido para revisión; Sprint 5 NO AUTORIZADO.**

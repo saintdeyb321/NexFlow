@@ -6,7 +6,7 @@ public enum ReservationResourceKind { Location, Service }
 public sealed record ReservationResourceKey(Guid WorkspaceId, ReservationResourceKind Kind, string Id);
 public sealed record ReservationResourceStamp(ReservationResourceKey Key, long Version, Guid? PendingOperationId);
 public sealed record ReservationResourceChange(string Action, ServiceDto? Service = null, bool IsCreate = false,
-    bool BlocksAllFuture = true, string[]? RetainedLocations = null);
+    bool BlocksAllFuture = true, string[]? RetainedLocations = null, DateTime? ExpectedUpdatedAtUtc = null);
 public sealed record ReservationResourceMutation(ReservationResourceKey Key, long Version, Guid OperationId, string PayloadJson);
 
 public interface IReservationResourceCoordinator
@@ -18,4 +18,6 @@ public interface IReservationResourceCoordinator
     Task ValidateAsync(IReadOnlyList<ReservationResourceStamp> observed, CancellationToken ct);
     Task CompleteAsync(ReservationResourceMutation mutation, CancellationToken ct);
     Task<IReadOnlyList<ReservationResourceMutation>> ClaimPendingAsync(CancellationToken ct);
+    // Recovery must obey the existing tenant-deletion lifecycle fence as API requests do.
+    Task ExecuteRecoveryAsync(Guid workspaceId, Func<Task> apply, CancellationToken ct);
 }

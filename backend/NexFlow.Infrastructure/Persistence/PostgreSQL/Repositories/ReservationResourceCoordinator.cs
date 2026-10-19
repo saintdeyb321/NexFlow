@@ -107,4 +107,17 @@ public sealed class ReservationResourceCoordinator(NexFlowDbContext db, IClock c
 
     private static ReservationResourceMutation Mutation(ReservationResourceState row) => new(
         new(row.WorkspaceId, Enum.Parse<ReservationResourceKind>(row.Kind), row.ResourceId), row.Version, row.PendingOperationId!.Value, row.PayloadJson!);
+
+    public async Task ExecuteRecoveryAsync(Guid workspaceId, Func<Task> apply, CancellationToken ct)
+    {
+        // Preserve the tenant deletion protocol already enforced by API middleware
+        // and OutboxProcessorWorker. This is a tenant lifecycle lock, not a resource
+        // row lock. Removing it requires a separate durable tenant deletion protocol.
+        await using var lifecycle = await db.Database.BeginTransactionAsync(ct);
+        await TenantLifecycleLock.AcquireAsync(db, workspaceId, false, ct);
+        if (!await db.Workspaces.AsNoTracking().AnyAsync(w => w.Id == workspaceId && w.Status != WorkspaceStatus.Deleting, ct))
+            throw new ConcurrencyException("El workspace no está disponible para recuperar esta operación.");
+        await apply();
+        await lifecycle.CommitAsync(ct);
+    }
 }
