@@ -28,6 +28,8 @@ axiosClient.defaults.adapter = async config => {
     if (behavior.getTimeout) throw timeout('ETIMEDOUT');
     if (behavior.getError) throw new ApiError(503, 'Dependency.Unavailable', 'No se pudo confirmar el estado del folleto.');
   } else if (path.endsWith('/generate')) {
+    if (behavior.outcome === 'reuse' && artifact.status === 'CURRENT')
+      return { data: structuredClone(artifact), status: 200, statusText: 'OK', config, headers: {} };
     if (behavior.outcome === 'timeout-rejected') throw timeout('ETIMEDOUT');
     if (artifact.status === 'GENERATING') throw new ApiError(409, 'Resource.Conflict', 'Generación en curso.');
     if ((quota.get(workspace) ?? 0) >= 3) throw new ApiError(429, 'RateLimit.Exceeded', 'Cuota diaria agotada.');

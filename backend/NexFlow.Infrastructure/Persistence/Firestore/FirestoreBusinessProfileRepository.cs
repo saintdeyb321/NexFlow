@@ -53,7 +53,11 @@ public class FirestoreBusinessProfileRepository : IBusinessProfileRepository
             Description = profile.Description,
             TimeZone = profile.TimeZone 
         };
-        await docRef.SetAsync(data, SetOptions.MergeAll, cancellationToken);
+        await _firestoreDb.RunTransactionAsync(async tx =>
+        {
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, docRef.Parent.Parent!, null, cancellationToken);
+            tx.Set(docRef, data, SetOptions.MergeAll);
+        }, cancellationToken: cancellationToken);
     }
 
     [FirestoreData]

@@ -15,6 +15,30 @@ public class FirestoreCatalogArtifactRepository : ICatalogArtifactRepository, IC
 
     public FirestoreCatalogArtifactRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
 
+    // Called inside the source mutation's transaction, after all other reads.
+    // Read every target before writing: Firestore forbids reads after writes.
+    internal static async Task InvalidateForMutationAsync(Transaction tx, DocumentReference workspace, string? scope, CancellationToken ct)
+    {
+        var targets = scope is "PRODUCT" or "SERVICE" ? new[] { scope } : new[] { "PRODUCT", "SERVICE" };
+        var snapshots = new List<DocumentSnapshot>();
+        foreach (var target in targets)
+            snapshots.Add(await tx.GetSnapshotAsync(workspace.Collection("catalogArtifacts").Document($"current_{target.ToLowerInvariant()}"), ct));
+        foreach (var snapshot in snapshots.Where(s => s.Exists))
+        {
+            var data = new Dictionary<string, object> { ["PersistenceVersion"] = Guid.NewGuid().ToString("N") };
+            if (snapshot.GetValue<string>("Status") == nameof(CatalogArtifactStatus.Current))
+                data["Status"] = nameof(CatalogArtifactStatus.Stale);
+            // Fence callbacks even while Generating. A manual upload may not
+            // publish a hash resolved before this source mutation either.
+            if (snapshot.TryGetValue<string>("PendingUploadId", out var upload) && upload != null)
+            {
+                data["PendingUploadId"] = FieldValue.Delete;
+                data["UploadLeaseExpiresAt"] = FieldValue.Delete;
+            }
+            tx.Update(snapshot.Reference, data);
+        }
+    }
+
     // ==========================================
     // ARTEFACTOS (PDFs)
     // ==========================================

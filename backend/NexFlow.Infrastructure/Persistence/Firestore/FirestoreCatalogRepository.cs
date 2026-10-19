@@ -76,6 +76,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
             if (references.Documents.Select(MapToItemDto).Any(i =>
                 (i.IsActive && !category.IsActive) || (category.Scope != "SHARED" && category.Scope != i.Type)))
                 throw new DomainException("La categoría tiene offerings activos o de un tipo incompatible con el cambio.");
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, workspace, category.Scope, cancellationToken);
             tx.Set(docRef, data, SetOptions.MergeAll);
             tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
         }, cancellationToken: cancellationToken);
@@ -88,8 +89,10 @@ public class FirestoreCatalogRepository : ICatalogRepository
         await _firestoreDb.RunTransactionAsync(async tx =>
         {
             await tx.GetSnapshotAsync(workspace, cancellationToken);
+            var category = await tx.GetSnapshotAsync(docRef, cancellationToken);
             var references = await tx.GetSnapshotAsync(workspace.Collection("catalogItems").WhereEqualTo("CategoryId", categoryId).Limit(1), cancellationToken);
             if (references.Count > 0) throw new DomainException("La categoría sigue siendo utilizada por productos o servicios.");
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, workspace, category.Exists ? MapToCategoryDto(category).Scope : null, cancellationToken);
             tx.Delete(docRef);
             tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
         }, cancellationToken: cancellationToken);
@@ -209,6 +212,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
                     throw new DomainException("La categoría está inactiva o tiene un scope incompatible.");
             }
             // Full replacement also removes legacy location references.
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, workspace, item.Type, cancellationToken);
             tx.Set(docRef, data);
             tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
         }, cancellationToken: cancellationToken);
@@ -217,7 +221,13 @@ public class FirestoreCatalogRepository : ICatalogRepository
     public async Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(itemId);
-        await docRef.UpdateAsync(new Dictionary<string, object> { ["IsActive"] = false }, cancellationToken: cancellationToken);
+        await _firestoreDb.RunTransactionAsync(async tx =>
+        {
+            var item = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            if (!item.Exists) throw new KeyNotFoundException("Offering no encontrado.");
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, docRef.Parent.Parent!, MapToItemDto(item).Type, cancellationToken);
+            tx.Update(docRef, new Dictionary<string, object> { ["IsActive"] = false });
+        }, cancellationToken: cancellationToken);
     }
 
     // =========================================================

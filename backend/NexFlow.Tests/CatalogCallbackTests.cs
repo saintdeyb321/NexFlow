@@ -127,7 +127,7 @@ public sealed class CatalogCallbackTests
         Assert.Equal(previous.PdfUrl, current.PdfUrl);
     }
 
-    private static async Task<IActionResult> Callback(CatalogFixture f, Workspace workspace, string generationId, string hash, bool invalidSignature = false, string scope = "PRODUCT")
+    internal static async Task<IActionResult> Callback(CatalogFixture f, Workspace workspace, string generationId, string hash, bool invalidSignature = false, string scope = "PRODUCT", string pdfUrl = "https://storage.example.test/generated.pdf")
     {
         // A test-only relational database supplies the existing lifecycle transaction and workspace check.
         // Advisory functions are no-ops here; this does not exercise or alter a PostgreSQL schema.
@@ -142,7 +142,7 @@ public sealed class CatalogCallbackTests
         const string secret = "unit-test-secret";
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["N8n:WebhookSecret"] = secret }).Build();
         var controller = new N8nWebhookController(f.Artifacts, config) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
-        var body = JsonSerializer.Serialize(new CatalogReadyPayload { WorkspaceId = workspace.Id, Scope = scope, GenerationId = generationId, SourceHash = hash, PdfUrl = "https://storage.example.test/generated.pdf" });
+        var body = JsonSerializer.Serialize(new CatalogReadyPayload { WorkspaceId = workspace.Id, Scope = scope, GenerationId = generationId, SourceHash = hash, PdfUrl = pdfUrl });
         controller.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         var signature = Convert.ToBase64String(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"{timestamp}.{body}")));

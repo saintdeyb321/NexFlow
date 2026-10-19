@@ -72,9 +72,9 @@ const WorkspaceArtifactGenerator = ({ scope, title, workspaceId }: ArtifactGener
   const generateMutation = useSessionMutation({
     mutationFn: generateArtifact,
     retry: false,
-    onSuccess: async () => {
+    onSuccess: async result => {
       setCreationMode(null);
-      toast.info('Estamos creando tu nuevo folleto.');
+      toast.info(result.status === 'CURRENT' ? 'El folleto vigente no necesita regenerarse.' : 'Estamos creando tu nuevo folleto.');
       await confirmState();
     },
     onError: async (error: unknown) => {

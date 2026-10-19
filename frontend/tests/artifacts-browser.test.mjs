@@ -274,3 +274,13 @@ test('la desconexión de red mantiene NETWORK_ERROR y su mensaje, distinto del t
   assert.equal(error.message,'Sin conexión al servidor. Verifica tu internet.');
   assert.notEqual(error.message,timeoutMessage);
 });
+
+test('CURRENT reutilizado no anuncia una generación nueva ni consume cuota', async () => {
+  await reset({ product: { status: 'CURRENT', pdfUrl: 'https://storage.example.test/current.pdf' } });
+  await evaluate("window.artifactAudit.fixture.outcome='reuse'");
+  await panelClick('PRODUCT', 'Crear nueva versión');
+  await click('Generar folleto'); await click('Sí, crear nueva versión');
+  await until("document.body.textContent.includes('El folleto vigente no necesita regenerarse.')", 'Reused current artifact was presented as a new job.');
+  assert.equal(await evaluate("window.artifactAudit.quota.get('pdf-workspace') ?? 0"), 0);
+  assert.equal(await evaluate(`${panel('PRODUCT')}.textContent.includes('Cancelar generación')`), false);
+});

@@ -116,20 +116,27 @@ public class CatalogGenerationService : ICatalogGenerationService
     public async Task<CatalogArtifact?> GetArtifactAsync(Guid workspaceId, string scope, CancellationToken ct)
     {
         scope = ValidateScope(scope);
-        var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
-        if (artifact == null) return null;
-        if (IsGenerationExpired(artifact))
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            await TryFailGenerationAsync(workspaceId, scope, artifact.GenerationId, "Catalog.GenerationTimeout", ct);
-            artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+            var artifact = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
             if (artifact == null) return null;
+            if (IsGenerationExpired(artifact))
+            {
+                await TryFailGenerationAsync(workspaceId, scope, artifact.GenerationId, "Catalog.GenerationTimeout", ct);
+                continue;
+            }
+            if (artifact.Status is not (CatalogArtifactStatus.Current or CatalogArtifactStatus.Stale)) return artifact;
+            var hash = await GetCurrentSourceHashAsync(workspaceId, scope, ct);
+            // Source mutations atomically fence this version, including during hash reads.
+            var latest = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+            if (latest?.PersistenceVersion != artifact.PersistenceVersion || latest == null) continue;
+            var previousStatus = artifact.Status;
+            artifact.ValidateSourceHash(hash);
+            if (artifact.Status == previousStatus) return artifact;
+            try { await _artifactRepository.SaveArtifactAsync(artifact, ct); return artifact; }
+            catch (ConcurrencyException) when (attempt < 2) { /* Revalidate; never restore a superseded PDF. */ }
         }
-        if (artifact.Status == CatalogArtifactStatus.Current && artifact.SourceHash != await GetCurrentSourceHashAsync(workspaceId, scope, ct))
-        {
-            artifact.MarkAsStale();
-            await _artifactRepository.SaveArtifactAsync(artifact, ct);
-        }
-        return artifact;
+        throw new ConcurrencyException("El catálogo cambió durante la consulta. Actualiza el estado del folleto.");
     }
 
     public bool IsGenerationExpired(CatalogArtifact artifact) => artifact.Status == CatalogArtifactStatus.Generating
@@ -202,6 +209,15 @@ public class CatalogGenerationService : ICatalogGenerationService
         artifact.EnsureCanReplace(replaceCurrent);
         var content = await GetContentAsync(workspaceId, scope, ct);
         var hash = _hashService.ComputeContentHash(new { content.BusinessData, content.CatalogData, content.Locations });
+        if (artifact.Status == CatalogArtifactStatus.Current && artifact.Origin == CatalogArtifactOrigin.Generated
+            && artifact.SourceHash == hash && artifact.VisualStyle == design.VisualStyle && artifact.Palette == design.Palette
+            && artifact.Creativity == design.Creativity)
+        {
+            var latest = await _artifactRepository.GetCurrentArtifactAsync(workspaceId, scope, ct);
+            if (latest == null || latest.PersistenceVersion != artifact.PersistenceVersion)
+                throw new ConcurrencyException("El catálogo cambió durante la solicitud. Consulta el estado del folleto.");
+            return artifact;
+        }
         var generationId = Guid.NewGuid().ToString("N");
         artifact.MarkAsGenerating(hash, generationId, design, UtcNow);
         artifact = await _usageRepository.ReserveGenerationAsync(artifact, UtcNow.Date, ct);

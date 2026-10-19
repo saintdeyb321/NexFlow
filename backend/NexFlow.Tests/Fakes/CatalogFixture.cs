@@ -32,7 +32,7 @@ public sealed class CatalogFixture
     public DateTime Now { get; set; } = DateTime.UtcNow;
     public Mock<IClock> Clock { get; } = new();
 
-    public CatalogFixture(int timeoutMinutes = 5)
+    public CatalogFixture(int timeoutMinutes = 5, bool useRealSources = false)
     {
         Artifacts = new(Firestore.Db);
         Uploads = new(Firestore.Db);
@@ -46,7 +46,9 @@ public sealed class CatalogFixture
             .ReturnsAsync((Stream _, string name, string folder, CancellationToken _) => new StoredPdfAsset($"https://storage.example.test/{folder}/{name}", $"{folder}/{name}"));
         Storage.Setup(r => r.DeletePdfAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         Clock.SetupGet(c => c.UtcNow).Returns(() => Now);
-        Service = new(Catalog.Object, Artifacts, Artifacts, new CatalogHashService(), Profiles.Object, Locations.Object,
+        Service = new(useRealSources ? new FirestoreCatalogRepository(Firestore.Db) : Catalog.Object, Artifacts, Artifacts, new CatalogHashService(),
+            useRealSources ? new FirestoreBusinessProfileRepository(Firestore.Db) : Profiles.Object,
+            useRealSources ? new FirestoreLocationRepository(Firestore.Db) : Locations.Object,
             Storage.Object, Uploads, Outbox.Object, UnitOfWork.Object, NullLogger<CatalogGenerationService>.Instance,
             Options.Create(new CatalogGenerationOptions { TimeoutMinutes = timeoutMinutes }), Clock.Object);
     }

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business;
 using NexFlow.Domain.Entities.Catalog;
+using NexFlow.Domain.Exceptions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -98,7 +99,14 @@ public class N8nWebhookController : ControllerBase
                 return Ok(new { message = "La generación expiró; callback ignorado." });
             }
             artifact.CompleteGeneration(payload.PdfUrl);
-            await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken);
+            try { await _artifactRepository.SaveArtifactAsync(artifact, cancellationToken); }
+            catch (ConcurrencyException)
+            {
+                var latest = await generationService.GetArtifactAsync(payload.WorkspaceId, scope, cancellationToken);
+                if (latest == null || latest.GenerationId != payload.GenerationId || latest.Status != CatalogArtifactStatus.Generating)
+                    return Ok(new { message = "Callback duplicado o reemplazado; se conserva el estado vigente." });
+                throw; // Source fence changed while still active; require a fresh validation, never publish blindly.
+            }
 
             return Ok(new { message = "Artefacto enlazado y asegurado con éxito." });
         }

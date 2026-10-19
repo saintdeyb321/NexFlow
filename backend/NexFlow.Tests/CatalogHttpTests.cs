@@ -89,6 +89,6 @@ public sealed class CatalogHttpTests
         context.SetupGet(c => c.CurrentWorkspaceId).Returns(workspace);
         var entitlements = new Mock<IEntitlementService>();
         entitlements.Setup(s => s.GetAvailableModuleCodesAsync(workspace, It.IsAny<CancellationToken>())).ReturnsAsync(modules);
-        return (new CatalogController(Mock.Of<ICatalogRepository>(), context.Object, entitlements.Object, Mock.Of<IBackgroundTaskQueue>()), workspace, entitlements);
+        return (new CatalogController(Mock.Of<ICatalogRepository>(), context.Object, entitlements.Object), workspace, entitlements);
     }
 }

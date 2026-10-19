@@ -38,6 +38,7 @@ public class FirestoreLocationRepository : ILocationRepository
                 return Result.Failure(new Error("Location.Conflict", "El enlace de mapa ya pertenece a otra sede."));
 
             var mainId = location.IsMain ? id : locations.Where(l => l.IsMain).OrderBy(l => l.Id, StringComparer.Ordinal).Select(l => l.Id).FirstOrDefault() ?? id;
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, workspace, null, cancellationToken);
             foreach (var doc in snapshot.Documents.Where(d => d.Id != id))
                 tx.Update(doc.Reference, new Dictionary<string, object> { ["IsMain"] = doc.Id == mainId });
             tx.Set(workspace.Collection("locations").Document(id), new FirestoreLocation
@@ -68,6 +69,7 @@ public class FirestoreLocationRepository : ILocationRepository
             var hours = await tx.GetSnapshotAsync(workspace.Collection("hours").Document(locationId).Collection("schedule"), cancellationToken);
             var remaining = locations.Documents.Where(d => d.Id != locationId).OrderBy(d => d.Id, StringComparer.Ordinal).ToList();
             var main = remaining.FirstOrDefault(d => d.ConvertTo<FirestoreLocation>().IsMain) ?? remaining.FirstOrDefault();
+            await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, workspace, null, cancellationToken);
             foreach (var doc in remaining)
                 tx.Update(doc.Reference, new Dictionary<string, object> { ["IsMain"] = doc.Id == main?.Id });
             foreach (var hour in hours.Documents) tx.Delete(hour.Reference);

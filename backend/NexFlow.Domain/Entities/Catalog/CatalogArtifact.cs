@@ -141,6 +141,15 @@ public class CatalogArtifact : Entity
         }
     }
 
+    public void ValidateSourceHash(string currentHash)
+    {
+        if (Status is not (CatalogArtifactStatus.Current or CatalogArtifactStatus.Stale)) return;
+        if (SourceHash != currentHash) MarkAsStale();
+        else if (!string.IsNullOrWhiteSpace(PdfUrl)) Status = CatalogArtifactStatus.Current;
+        // Same content (including a reverted edit) needs no new PDF or quota.
+        // Keep Origin, URL, design, generation identity and publication time.
+    }
+
     public void MarkAsFailed(string? failureCode = null)
     {
         Status = CatalogArtifactStatus.Failed;
