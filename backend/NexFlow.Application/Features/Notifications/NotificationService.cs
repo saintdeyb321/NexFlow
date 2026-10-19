@@ -5,6 +5,7 @@ namespace NexFlow.Application.Features.Notifications;
 public interface INotificationService
 {
     Task NotifyAsync(Guid workspaceId, string moduleCode, NotificationType type, string title, string message, string? actionUrl, CancellationToken ct);
+    Task NotifyOnceAsync(Guid workspaceId, string moduleCode, NotificationType type, string businessId, string title, string message, string? actionUrl, CancellationToken ct);
     Task NotifyCatalogUnavailableAsync(Guid workspaceId, string scope, CancellationToken ct);
 }
 
@@ -31,6 +32,20 @@ public class NotificationService : INotificationService
         };
 
         await _repository.CreateAsync(workspaceId, notification, ct);
+    }
+
+    public Task NotifyOnceAsync(Guid workspaceId, string moduleCode, NotificationType type, string businessId,
+        string title, string message, string? actionUrl, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(businessId);
+        moduleCode = moduleCode.ToUpperInvariant();
+        var identity = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            $"business-notification:{workspaceId:N}:{moduleCode}:{type}:{businessId}"));
+        return _repository.CreateAsync(workspaceId, new NotificationRecord
+        {
+            Id = new Guid(identity.AsSpan(0, 16)).ToString(), ModuleCode = moduleCode, Type = type,
+            Title = title, Message = message, ActionUrl = actionUrl, CreatedAt = DateTime.UtcNow
+        }, ct);
     }
 
     public async Task NotifyCatalogUnavailableAsync(Guid workspaceId, string scope, CancellationToken ct)

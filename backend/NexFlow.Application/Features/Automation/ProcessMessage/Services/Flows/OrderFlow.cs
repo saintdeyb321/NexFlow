@@ -61,7 +61,6 @@ public class OrderFlow : IOrderFlow
         {
             if (context.OrderDraftItems.Count == 0) return "Tu pedido está vacío. ¿Qué producto deseas agregar?";
             var orderId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));
-            var persisted = await _orderRepository.GetOrderByIdAsync(workspaceId, orderId, ct);
             var order = new OrderRecord
             {
                 Id = orderId,
@@ -82,9 +81,9 @@ public class OrderFlow : IOrderFlow
             }
             catch (ArgumentException ex) { return ex.Message + " Corrige o quita el producto antes de enviar."; }
 
-            CloseDraft(context);
-            if (persisted == null) await _notificationService.NotifyAsync(workspaceId, "ORDERS", NotificationType.NewCommercialRequest,
+            await _notificationService.NotifyOnceAsync(workspaceId, "ORDERS", NotificationType.NewCommercialRequest, order.Id,
                 "Pedido recibido", $"{order.ConsumerName} envió una solicitud con {order.Items.Count} ítems para revisión.", "/orders", ct);
+            CloseDraft(context);
             return $"Tu solicitud de pedido fue enviada. El negocio la revisará. Código: {order.Id[..6]}.";
         }
 

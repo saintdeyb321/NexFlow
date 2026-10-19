@@ -39,6 +39,12 @@ public class ReservationRepository : IReservationRepository
         _context.Reservations.AnyAsync(r => r.WorkspaceId == workspaceId && r.LocationId == locationId
             && r.Status == ReservationStatus.Confirmed && r.StartTime >= _clock.UtcNow, cancellationToken);
 
+    public async Task<IReadOnlyList<string>> GetFutureConfirmedServiceLocationsAsync(Guid workspaceId, string serviceId, CancellationToken cancellationToken) =>
+        await _context.Reservations.AsNoTracking()
+            .Where(r => r.WorkspaceId == workspaceId && r.ServiceId == serviceId
+                && r.Status == ReservationStatus.Confirmed && r.StartTime >= _clock.UtcNow)
+            .Select(r => r.LocationId).Distinct().ToListAsync(cancellationToken);
+
     public async Task<Reservation?> GetByIdAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
         return await _context.Reservations

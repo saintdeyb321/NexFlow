@@ -1,4 +1,3 @@
-using Grpc.Core;
 using NexFlow.Domain.Exceptions;
 using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions.Repositories;
@@ -74,12 +73,26 @@ public class FirestoreOrderRepository : IOrderRepository
             }
         };
 
-        try { await docRef.CreateAsync(data, cancellationToken); }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists)
+        return await _firestoreDb.RunTransactionAsync(async tx =>
         {
-            return ValidateReplay(MapToOrderRecord(await docRef.GetSnapshotAsync(cancellationToken)), order);
-        }
-        return order;
+            var current = await tx.GetSnapshotAsync(docRef, cancellationToken);
+            if (current.Exists) return ValidateReplay(MapToOrderRecord(current), order);
+            // Fence the authorized snapshots against catalog edits in the same
+            // Firestore transaction as creation. A changed price needs a fresh request,
+            // never a silent recalculation of an existing order.
+            foreach (var item in order.Items)
+            {
+                var product = await tx.GetSnapshotAsync(docRef.Parent.Parent!.Collection("catalogItems").Document(item.ProductId), cancellationToken);
+                if (!product.Exists || product.GetValue<string>("Type") != "PRODUCT" || !product.GetValue<bool>("IsActive"))
+                    throw new ArgumentException("Un producto del pedido ya no está disponible en el catálogo.");
+                if (product.GetValue<string>("Name") != item.ProductName
+                    || product.GetValue<long>("PriceMinorUnits") != item.UnitPriceMinorUnits
+                    || product.GetValue<string>("Currency") != item.Currency)
+                    throw new ConcurrencyException("El catálogo cambió al enviar el pedido. Revisa sus precios y vuelve a enviarlo.");
+            }
+            tx.Create(docRef, data);
+            return order;
+        }, cancellationToken: cancellationToken);
     }
 
     private static OrderRecord ValidateReplay(OrderRecord existing, OrderRecord requested)

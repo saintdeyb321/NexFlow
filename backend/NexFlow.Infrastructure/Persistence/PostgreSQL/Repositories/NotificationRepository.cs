@@ -20,17 +20,27 @@ public class NotificationRepository : INotificationRepository
 
     public async Task CreateAsync(Guid workspaceId, NotificationRecord record, CancellationToken ct)
     {
+        var id = Guid.Parse(record.Id);
+        if (await _context.Notifications.AsNoTracking().AnyAsync(n => n.Id == id && n.WorkspaceId == workspaceId, ct)) return;
         var notification = Notification.Create(
             workspaceId,
             record.ModuleCode,
             record.Type.ToString(),
             record.Title,
             record.Message,
-            record.ActionUrl
+            record.ActionUrl,
+            id
         );
 
         _context.Notifications.Add(notification);
-        await _context.SaveChangesAsync(ct);
+        try { await _context.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505", ConstraintName: "PK_Notifications" })
+        {
+            // A concurrent retry can win the same deterministic primary key. Never
+            // swallow a different constraint failure or a different tenant's row.
+            _context.Entry(notification).State = EntityState.Detached;
+            if (!await _context.Notifications.AsNoTracking().AnyAsync(n => n.Id == id && n.WorkspaceId == workspaceId, ct)) throw;
+        }
     }
 
     public async Task<bool> TryCreateWithCooldownAsync(Guid workspaceId, NotificationRecord record, TimeSpan cooldown, CancellationToken ct)

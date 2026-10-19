@@ -29,7 +29,8 @@ public class RequestService : IRequestService
             var latestRequest = await _requestRepo.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, ct);
             if (latestRequest != null)
             {
-                return latestRequest.Id; // Ya existía, devolvemos el ID en silencio
+                await NotifyAsync(workspaceId, latestRequest, ct);
+                return latestRequest.Id;
             }
         }
 
@@ -49,21 +50,24 @@ public class RequestService : IRequestService
         };
 
         var persisted = await _requestRepo.CreateRequestAsync(workspaceId, newRequest, ct);
-        if (!persisted.Created) return persisted.Request.Id;
+        await NotifyAsync(workspaceId, persisted.Request, ct);
+        return persisted.Request.Id;
+    }
 
-        var notificationType = type == RequestType.CommercialInquiry
+    private Task NotifyAsync(Guid workspaceId, RequestRecord request, CancellationToken ct)
+    {
+        var notificationType = request.Type == RequestType.CommercialInquiry
             ? NotificationType.NewCommercialRequest
             : NotificationType.SystemAlert;
 
-        await _notificationService.NotifyAsync(
+        return _notificationService.NotifyOnceAsync(
             workspaceId,
             "REQUESTS",
             notificationType,
-            title,
-            $"El cliente {phone} ha generado una nueva solicitud. Descripción: {description}",
+            request.Id,
+            request.Title,
+            $"El cliente {request.ConsumerPhone} ha generado una nueva solicitud. Descripción: {request.Description}",
             "/requests",
             ct);
-
-        return newRequest.Id;
     }
 }

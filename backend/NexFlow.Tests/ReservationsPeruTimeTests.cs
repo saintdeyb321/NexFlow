@@ -154,6 +154,26 @@ public sealed class ReservationsPeruTimeTests
         f.VerifyNoWrites();
     }
 
+    [Theory]
+    [InlineData("reschedule")] [InlineData("cancel")] [InlineData("cancel-active")] [InlineData("complete")]
+    public async Task Lost_xmin_write_discards_both_mutation_and_its_event_before_other_saves(string operation)
+    {
+        var f = new EngineFixture(); var row = f.Existing(); f.EnableWrites(create: false);
+        f.AvailableAt(Time("2030-07-02T15:00:00Z"), row.Id);
+        f.UnitOfWork.Setup(u => u.SaveChangesAsync(default)).ThrowsAsync(new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("stale xmin"));
+        f.UnitOfWork.Setup(u => u.DiscardChanges(It.IsAny<object[]>()));
+        f.Reservations.Setup(r => r.GetActiveReservationByPhoneAsync(f.Workspace, "customer", default)).ReturnsAsync(row);
+        var failed = operation switch
+        {
+            "reschedule" => (await f.Engine.EditReservationAsync(f.Workspace, row.Id, Time("2030-07-02T15:00:00Z"), default)).IsFailure,
+            "cancel" => (await f.Engine.CancelReservationAsync(f.Workspace, row.Id, default)).IsFailure,
+            "cancel-active" => (await f.Engine.CancelActiveReservationAsync(f.Workspace, "customer", default)).IsFailure,
+            _ => (await f.Engine.CompleteReservationAsync(f.Workspace, row.Id, default)).IsFailure
+        };
+        Assert.True(failed);
+        f.UnitOfWork.Verify(u => u.DiscardChanges(It.Is<object[]>(entities => entities.Contains(row) && entities.OfType<OutboxMessage>().Count() == 1)), Times.Once);
+    }
+
     private static DateTime Time(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
     private sealed class EngineFixture
@@ -166,7 +186,7 @@ public sealed class ReservationsPeruTimeTests
         private Mock<IBusinessHoursRepository> Hours { get; } = new(MockBehavior.Strict);
         private Mock<IBusinessProfileRepository> Profiles { get; } = new(MockBehavior.Strict);
         private Mock<ILocationRepository> Locations { get; } = new(MockBehavior.Strict);
-        private Mock<IUnitOfWork> UnitOfWork { get; } = new(MockBehavior.Strict);
+        public Mock<IUnitOfWork> UnitOfWork { get; } = new(MockBehavior.Strict);
         private Mock<ILocationAvailabilityService> LocationAvailability { get; } = new(MockBehavior.Strict);
         private Mock<IClock> Clock { get; } = new(MockBehavior.Strict);
         private Mock<IOutboxRepository> Outbox { get; } = new(MockBehavior.Strict);

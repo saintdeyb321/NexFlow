@@ -14,11 +14,11 @@ public class Notification
 
     private Notification() { } // Para EF Core
 
-    public static Notification Create(Guid workspaceId, string moduleCode, string type, string title, string message, string? actionUrl)
+    public static Notification Create(Guid workspaceId, string moduleCode, string type, string title, string message, string? actionUrl, Guid? id = null)
     {
         return new Notification
         {
-            Id = Guid.NewGuid(),
+            Id = id ?? Guid.NewGuid(),
             WorkspaceId = workspaceId,
             ModuleCode = moduleCode,
             Type = type,

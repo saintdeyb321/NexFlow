@@ -80,6 +80,13 @@ public sealed class InMemoryFirestore : CallInvoker
                     }
                     foreach (var write in commit.Writes)
                     {
+                        var path = write.OperationCase == Write.OperationOneofCase.Delete ? write.Delete : write.Update.Name;
+                        if (write.CurrentDocument?.ConditionTypeCase == Google.Cloud.Firestore.V1.Precondition.ConditionTypeOneofCase.Exists
+                            && _documents.ContainsKey(path) != write.CurrentDocument.Exists)
+                            throw new RpcException(new Status(write.CurrentDocument.Exists ? StatusCode.NotFound : StatusCode.AlreadyExists, "Write precondition failed"));
+                    }
+                    foreach (var write in commit.Writes)
+                    {
                         if (write.OperationCase == Write.OperationOneofCase.Delete)
                         {
                             _documents.Remove(write.Delete);
@@ -174,6 +181,7 @@ public sealed class InMemoryFirestore : CallInvoker
         return field.Op switch
         {
             StructuredQuery.Types.FieldFilter.Types.Operator.Equal => cmp == 0,
+            StructuredQuery.Types.FieldFilter.Types.Operator.ArrayContains => Field(doc, field.Field.FieldPath).ArrayValue?.Values.Any(v => Compare(v, field.Value) == 0) == true,
             StructuredQuery.Types.FieldFilter.Types.Operator.LessThan => cmp < 0,
             StructuredQuery.Types.FieldFilter.Types.Operator.LessThanOrEqual => cmp <= 0,
             StructuredQuery.Types.FieldFilter.Types.Operator.GreaterThan => cmp > 0,

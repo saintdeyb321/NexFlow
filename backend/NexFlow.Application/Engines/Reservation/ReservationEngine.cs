@@ -82,6 +82,8 @@ public class ReservationEngine : IReservationEngine
 
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
     {
+        var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
+        if (!locations.Any(l => l.Id == locationId)) return [];
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
 
         // 🔥 SPRINT 07: Optimizamos la consulta para no traer TODO el catálogo.
@@ -221,6 +223,10 @@ public class ReservationEngine : IReservationEngine
         if (reservation.Status != Domain.Enums.ReservationStatus.Confirmed)
             return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", "Solo se pueden reagendar reservas confirmadas."));
 
+        var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
+        if (!locations.Any(l => l.Id == reservation.LocationId))
+            return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe."));
+
         var workspaceZone = await GetWorkspaceTimeZoneAsync(workspaceId, cancellationToken);
         if (!TryResolveReservationTime(newDateTime, workspaceZone, out var localDateTime, out var newStartTimeUtc))
             return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTime", "Envía una hora local válida y no ambigua."));
@@ -250,6 +256,7 @@ public class ReservationEngine : IReservationEngine
         if (timeOnly < openTime || localEndTime.Date != localDateTime.Date || localEndTime.TimeOfDay > closeTime)
             return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "Fuera del horario comercial."));
 
+        OutboxMessage? pendingEvent = null;
         try
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
@@ -263,6 +270,7 @@ public class ReservationEngine : IReservationEngine
                 var dto = ToDto(reservation);
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_RESCHEDULED", Guid.NewGuid().ToString(), $"res_upd_{reservation.Id}", DateTime.UtcNow, dto);
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_RESCHEDULED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+                pendingEvent = outboxMessage;
 
                 await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -273,12 +281,15 @@ public class ReservationEngine : IReservationEngine
         }
         catch (Exception ex) when (IsConcurrencyConflict(ex))
         {
+            _unitOfWork.DiscardChanges(pendingEvent == null ? [reservation] : [reservation, pendingEvent]);
             return Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "El horario acaba de ser tomado por otro cliente."));
         }
     }
 
     public async Task<Result> CancelReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
+        Domain.Entities.Reservation? changed = null;
+        OutboxMessage? pendingEvent = null;
         try
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
@@ -287,9 +298,11 @@ public class ReservationEngine : IReservationEngine
                 if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
     
                 reservation.Cancel();
+                changed = reservation;
     
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+                pendingEvent = outboxMessage;
     
                 await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -304,12 +317,15 @@ public class ReservationEngine : IReservationEngine
         }
         catch (Exception ex) when (IsConcurrencyConflict(ex))
         {
+            if (changed != null) _unitOfWork.DiscardChanges(pendingEvent == null ? [changed] : [changed, pendingEvent]);
             return Result.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
 
     public async Task<Result<Domain.Entities.Reservation>> CancelActiveReservationAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken)
     {
+        Domain.Entities.Reservation? changed = null;
+        OutboxMessage? pendingEvent = null;
         try
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
@@ -318,9 +334,11 @@ public class ReservationEngine : IReservationEngine
                 if (reservation == null) return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.NotFound", "No tienes ninguna reserva activa."));
     
                 reservation.Cancel();
+                changed = reservation;
     
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_CANCELLED", Guid.NewGuid().ToString(), $"res_can_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "CANCELLED" });
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_CANCELLED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+                pendingEvent = outboxMessage;
     
                 await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -335,12 +353,15 @@ public class ReservationEngine : IReservationEngine
         }
         catch (Exception ex) when (IsConcurrencyConflict(ex))
         {
+            if (changed != null) _unitOfWork.DiscardChanges(pendingEvent == null ? [changed] : [changed, pendingEvent]);
             return Result<Domain.Entities.Reservation>.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
 
     public async Task<Result> CompleteReservationAsync(Guid workspaceId, Guid reservationId, CancellationToken cancellationToken)
     {
+        Domain.Entities.Reservation? changed = null;
+        OutboxMessage? pendingEvent = null;
         try
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
@@ -349,9 +370,11 @@ public class ReservationEngine : IReservationEngine
                 if (reservation == null) return Result.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
     
                 reservation.Complete();
+                changed = reservation;
     
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_COMPLETED", Guid.NewGuid().ToString(), $"res_comp_{reservation.Id}", DateTime.UtcNow, new { ReservationId = reservation.Id, Status = "COMPLETED" });
                 var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_COMPLETED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+                pendingEvent = outboxMessage;
     
                 await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -366,6 +389,7 @@ public class ReservationEngine : IReservationEngine
         }
         catch (Exception ex) when (IsConcurrencyConflict(ex))
         {
+            if (changed != null) _unitOfWork.DiscardChanges(pendingEvent == null ? [changed] : [changed, pendingEvent]);
             return Result.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }

@@ -8,6 +8,7 @@ public interface IReservationRepository
     void Add(Reservation reservation);
     Task<Reservation?> GetBySourceMessageIdAsync(Guid workspaceId, string sourceMessageId, CancellationToken cancellationToken);
     Task<bool> HasFutureConfirmedAtLocationAsync(Guid workspaceId, string locationId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<string>> GetFutureConfirmedServiceLocationsAsync(Guid workspaceId, string serviceId, CancellationToken cancellationToken);
 
     Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken);
 

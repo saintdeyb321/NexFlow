@@ -14,15 +14,18 @@ public class ServicesController : ControllerBase
     private readonly ICatalogRepository _catalogRepository;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+    private readonly IReservationRepository _reservations;
 
     public ServicesController(
         ICatalogRepository catalogRepository,
         IWorkspaceContext workspaceContext,
-        IEntitlementService entitlementService)
+        IEntitlementService entitlementService,
+        IReservationRepository reservations)
     {
         _catalogRepository = catalogRepository;
         _workspaceContext = workspaceContext;
         _entitlementService = entitlementService;
+        _reservations = reservations;
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -72,6 +75,16 @@ public class ServicesController : ControllerBase
         if (!await HasAccessToServices(cancellationToken)) return StatusCode(403, "Módulo SERVICES no contratado.");
         if (service.Type != "SERVICE") return BadRequest(new { message = "Tipo de offering inválido." });
         service.Id = serviceId;
+        var existing = await _catalogRepository.GetItemByIdAsync(WorkspaceId, serviceId, cancellationToken);
+        if (existing == null) return NotFound(new { message = "Servicio no encontrado." });
+        if (existing is not ServiceDto previous) return StatusCode(403, "Este endpoint solo permite actualizar servicios.");
+        var reservedLocations = await _reservations.GetFutureConfirmedServiceLocationsAsync(WorkspaceId, serviceId, cancellationToken);
+        var scope = service.LocationScope?.Trim().ToUpperInvariant();
+        var retainedLocations = (service.LocationIds ?? []).Select(id => id?.Trim()).ToHashSet(StringComparer.Ordinal);
+        if (reservedLocations.Count > 0 && (!service.IsActive || !service.RequiresReservation
+            || service.DurationInMinutes != previous.DurationInMinutes
+            || (scope != "ALL" && reservedLocations.Any(id => !retainedLocations.Contains(id)))))
+            return Conflict(new { code = "Service.FutureReservations", message = "No puedes modificar la disponibilidad o duración de un servicio con reservas futuras confirmadas." });
         try { await _catalogRepository.SaveItemAsync(WorkspaceId, service, false, cancellationToken); }
         catch (NexFlow.Domain.Exceptions.DomainException ex) { return BadRequest(new { message = ex.Message }); }
         return Ok(service);
@@ -87,6 +100,10 @@ public class ServicesController : ControllerBase
             return StatusCode(403, "Este endpoint solo permite eliminar servicios.");
         if (item != null)
         {
+            // This guard protects committed reservations. It is not a cross-store transaction;
+            // a booking already validating in Firestore can still commit concurrently in SQL.
+            if ((await _reservations.GetFutureConfirmedServiceLocationsAsync(WorkspaceId, serviceId, cancellationToken)).Count > 0)
+                return Conflict(new { code = "Service.FutureReservations", message = "No puedes desactivar un servicio con reservas futuras confirmadas." });
             await _catalogRepository.DeleteItemAsync(WorkspaceId, serviceId, cancellationToken);
         }
 

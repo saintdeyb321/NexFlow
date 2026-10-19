@@ -113,6 +113,59 @@ public sealed class ReservationsRepositoryTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.Repository.GetReservationsForDateAsync(f.Workspace, null, start, start.AddDays(7), cancellation.Token));
     }
 
+    [Fact]
+    public async Task Future_service_and_location_guards_filter_status_time_and_workspace_in_sql()
+    {
+        await using var f = await DbFixture.CreateAsync();
+        var now = Utc("2030-07-01T12:00:00Z"); f.Clock.SetupGet(c => c.UtcNow).Returns(now);
+        f.Add(f.Workspace, "future", "service", now, ReservationStatus.Confirmed, 1);
+        f.Add(f.Workspace, "past", "service", now.AddMinutes(-1), ReservationStatus.Confirmed, 2);
+        f.Add(f.Workspace, "cancelled", "service", now.AddDays(1), ReservationStatus.Cancelled, 3);
+        f.Add(f.Workspace, "completed", "service", now.AddDays(1), ReservationStatus.Completed, 4);
+        f.Add(Guid.NewGuid(), "foreign", "service", now.AddDays(1), ReservationStatus.Confirmed, 5);
+        f.Add(f.Workspace, "different", "other-service", now.AddDays(1), ReservationStatus.Confirmed, 6);
+        await f.SeedAsync();
+        Assert.Equal(new[] { "future" }, await f.Repository.GetFutureConfirmedServiceLocationsAsync(f.Workspace, "service", default));
+        Assert.True(await f.Repository.HasFutureConfirmedAtLocationAsync(f.Workspace, "future", default));
+        Assert.False(await f.Repository.HasFutureConfirmedAtLocationAsync(f.Workspace, "cancelled", default));
+        Assert.False(await f.Repository.HasFutureConfirmedAtLocationAsync(f.Workspace, "foreign", default));
+        Assert.Contains("\"ServiceId\" =", f.Sql.Commands[0]);
+        Assert.Empty(f.Db.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    public async Task Stale_reschedule_cannot_overwrite_concurrent_cancellation_using_mapped_xmin_predicate()
+    {
+        await using var f = await DbFixture.CreateAsync();
+        var start = Utc("2030-07-01T12:00:00Z");
+        f.Add(f.Workspace, "location", "service", start, ReservationStatus.Confirmed, 1); await f.SeedAsync();
+        var stale = (await f.Repository.GetByIdAsync(f.Workspace, Id(1), default))!;
+        // SQLite does not generate xmin. Simulate the database's next version in
+        // a second context; this tests EF's concurrency predicate, not PostgreSQL locks.
+        await using var winner = new ReservationDb(f.Options);
+        var current = (await winner.Reservations.SingleAsync())!; current.Cancel();
+        winner.Entry(current).Property(r => r.RowVersion).CurrentValue = 1;
+        await winner.SaveChangesAsync();
+        stale.Reschedule(start.AddHours(1), start.AddHours(1.5));
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => f.Db.SaveChangesAsync());
+        f.Db.ChangeTracker.Clear();
+        var persisted = (await f.Repository.GetByIdAsync(f.Workspace, Id(1), default))!;
+        Assert.Equal(ReservationStatus.Cancelled, persisted.Status); Assert.Equal(start, persisted.StartTime);
+        Assert.Equal("service", persisted.ServiceId); Assert.Equal("location", persisted.LocationId);
+    }
+
+    [Fact]
+    public async Task Characterization_existing_unique_index_also_blocks_rebooking_an_exact_cancelled_slot()
+    {
+        await using var f = await DbFixture.CreateAsync(); var start = Utc("2030-07-01T12:00:00Z");
+        f.Add(f.Workspace, "location", "service", start, ReservationStatus.Cancelled, 1); await f.SeedAsync();
+        Assert.True(await f.Repository.IsTimeSlotAvailableAsync(f.Workspace, "location", start, start.AddMinutes(30)));
+        f.Repository.Add(Reservation.Create(f.Workspace, "location", "service", "other", "Other", start, start.AddMinutes(30)));
+        await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+        // Real uniqueness enforcement by SQLite reproduces the unfiltered index
+        // definition. Changing the PostgreSQL index requires migration approval.
+    }
+
     private static DateTime Utc(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
     private static Guid Id(int value) => Guid.Parse($"00000000-0000-0000-0000-{value:D12}");
 
@@ -121,6 +174,7 @@ public sealed class ReservationsRepositoryTests
         private readonly SqliteConnection _connection = new("Data Source=:memory:");
         public Guid Workspace { get; } = Guid.NewGuid();
         public ReservationDb Db { get; private set; } = null!;
+        public DbContextOptions<NexFlowDbContext> Options { get; private set; } = null!;
         public ReservationRepository Repository { get; private set; } = null!;
         public Mock<IClock> Clock { get; } = new(MockBehavior.Strict);
         public SqlCapture Sql { get; } = new();
@@ -128,7 +182,8 @@ public sealed class ReservationsRepositoryTests
         public static async Task<DbFixture> CreateAsync()
         {
             var fixture = new DbFixture(); await fixture._connection.OpenAsync();
-            fixture.Db = new(new DbContextOptionsBuilder<NexFlowDbContext>().UseSqlite(fixture._connection).AddInterceptors(fixture.Sql).Options);
+            fixture.Options = new DbContextOptionsBuilder<NexFlowDbContext>().UseSqlite(fixture._connection).AddInterceptors(fixture.Sql).Options;
+            fixture.Db = new(fixture.Options);
             await fixture.Db.Database.EnsureCreatedAsync();
             fixture.Repository = new(fixture.Db, fixture.Clock.Object);
             fixture.Sql.Commands.Clear();
