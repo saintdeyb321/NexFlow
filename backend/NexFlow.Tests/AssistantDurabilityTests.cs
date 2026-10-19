@@ -64,13 +64,13 @@ public sealed class AssistantDurabilityTests
     }
 
     [Fact]
-    public async Task Consumer_ai_limit_does_not_spam_recovery_messages_or_spend_more_ai()
+    public async Task Consumer_ai_limit_replies_to_each_distinct_inbound_without_spending_more_ai()
     {
         var f = new AssistantConversationTests.Fixture();
         // Successful, factual interpretation resets clarification but still consumes the AI budget.
         for (var i = 0; i < 10; i++)
         { f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProductQuery, SearchTerm = "Producto real" }); await f.Turn("precio del Producto real"); }
-        Assert.Equal(6, f.AiCalls); Assert.Equal(7, f.Sent.Count); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+        Assert.Equal(6, f.AiCalls); Assert.Equal(10, f.Sent.Count); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }
 
     [Fact]

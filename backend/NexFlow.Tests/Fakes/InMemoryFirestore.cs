@@ -22,6 +22,7 @@ public sealed class InMemoryFirestore : CallInvoker
     public int AbortedCommits { get; private set; }
     public Func<CommitRequest, Exception?>? BeforeCommit { get; set; }
     public Func<CommitRequest, Exception?>? AfterCommit { get; set; }
+    public Exception? ReadFailure { get; set; }
     public FirestoreDb Db { get; }
 
     public InMemoryFirestore() => Db = FirestoreDb.Create("pdf-unit-tests", new FirestoreClientBuilder { CallInvoker = this }.Build());
@@ -111,6 +112,7 @@ public sealed class InMemoryFirestore : CallInvoker
 
     private (IReadOnlyList<object> Responses, Task Gate) Stream(object request)
     {
+        if (ReadFailure != null) throw ReadFailure;
         lock (_sync)
         {
             var results = new List<object>();

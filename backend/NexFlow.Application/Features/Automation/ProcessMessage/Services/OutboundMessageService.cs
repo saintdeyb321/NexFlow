@@ -47,6 +47,7 @@ public class OutboundMessageService : IOutboundMessageService
         {
             var existing = await _conversationRepo.GetOutboundAsync(workspaceId, GetId(key), ct);
             if (!existing.HasValue) continue;
+            Trace("PersistedResponseResumed", workspaceId, existing.Value.Message);
             if (existing.Value.Message.Status is MessageStatus.Sent or MessageStatus.Failed)
             {
                 if (existing.Value.Message.Kind == MessageKind.Document && existing.Value.Message.Status == MessageStatus.Failed
@@ -91,6 +92,7 @@ public class OutboundMessageService : IOutboundMessageService
             IsHandoffAcknowledgement = handoffAcknowledgement,
             Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
         }, ct);
+        Trace("ResponsePersisted", workspaceId, prepared.Message);
         return await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
     }
 
@@ -111,6 +113,7 @@ public class OutboundMessageService : IOutboundMessageService
             Kind = MessageKind.Document, MediaUrl = mediaUrl, FileName = fileName,
             Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
         }, ct);
+        Trace("ResponsePersisted", workspaceId, prepared.Message);
         var result = await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
         if (result.Status == MessageStatus.Failed && result.LastError != HumanTakeoverReason)
             await SendDocumentFallbackAsync(workspaceId, conversationId, phone, sourceInboundMessageId, ct);
@@ -140,6 +143,7 @@ public class OutboundMessageService : IOutboundMessageService
                 if (!await _conversationRepo.StartOutboundAsync(workspaceId, id, token))
                     throw new TransportAlreadyClaimedException();
                 transportStarted = true;
+                Trace("TransportAttempted", workspaceId, message);
             }
             externalId = message.Kind switch
             {
@@ -152,6 +156,7 @@ public class OutboundMessageService : IOutboundMessageService
             };
             if (string.IsNullOrWhiteSpace(externalId))
                 throw new InvalidOperationException("Evolution did not return a provider message ID.");
+            Trace("ProviderAcceptedNotDelivered", workspaceId, message);
             using var confirmationTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             await _conversationRepo.ConfirmOutboundAsync(workspaceId, id, externalId, confirmationTimeout.Token);
             return await GetPersistedAsync(workspaceId, id);
@@ -184,7 +189,7 @@ public class OutboundMessageService : IOutboundMessageService
                 await ReportDeliveryProblemAsync(workspaceId, persisted, ex);
                 return persisted; // Durable outcome; safely finish this inbound.
             }
-            _logger.LogError(ex, "Outbound {MessageId} in workspace {WorkspaceId} failed before POST; prepared response remains retryable.", id, workspaceId);
+            Trace("BeforeTransportFailureRetryable", workspaceId, persisted, ex.GetType().Name);
             throw;
         }
     }
@@ -193,7 +198,9 @@ public class OutboundMessageService : IOutboundMessageService
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var existing = await _conversationRepo.GetOutboundAsync(workspaceId, id, timeout.Token);
-        return existing?.Message ?? throw new KeyNotFoundException("Persisted outbound not found.");
+        var persisted = existing?.Message ?? throw new KeyNotFoundException("Persisted outbound not found.");
+        Trace("DurableOutcomeReadNotDeliveryReceipt", workspaceId, persisted);
+        return persisted;
     }
 
     private async Task<MessageRecord> FinalizeUnconfirmedAsync(Guid workspaceId, MessageRecord message)
@@ -210,7 +217,7 @@ public class OutboundMessageService : IOutboundMessageService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Provider confirmation for outbound {MessageId} could not be persisted.", message.Id);
+                Trace("ProviderConfirmationPersistenceFailed", workspaceId, message, ex.GetType().Name);
             }
         }
         if (message.Status == MessageStatus.Attempting)
@@ -224,8 +231,8 @@ public class OutboundMessageService : IOutboundMessageService
 
     private async Task ReportDeliveryProblemAsync(Guid workspaceId, MessageRecord message, Exception? error = null)
     {
-        _logger.LogError(error, "Outbound {MessageId} in workspace {WorkspaceId}: {Status}. Provider evidence={ProviderId}. Automatic resend disabled. Reason={Reason}",
-            message.Id, workspaceId, message.Status, message.ProviderConfirmationId, message.LastError);
+        Trace("TerminalWithoutAutomaticResend", workspaceId, message,
+            error is HttpRequestException { StatusCode: { } code } ? $"HTTP.{(int)code}" : error?.GetType().Name);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try
         {
@@ -236,8 +243,20 @@ public class OutboundMessageService : IOutboundMessageService
         }
         catch (Exception notificationError)
         {
-            _logger.LogError(notificationError, "Could not notify workspace {WorkspaceId} about outbound {MessageId}; its durable outcome is preserved.", workspaceId, message.Id);
+            Trace("OutcomeAlertUnavailable", workspaceId, message, notificationError.GetType().Name);
         }
+    }
+
+    private void Trace(string stage, Guid workspaceId, MessageRecord message, string? exceptionType = null)
+    {
+        try
+        {
+            var level = exceptionType != null || message.Status is MessageStatus.Failed or MessageStatus.UnknownDelivery ? LogLevel.Error : LogLevel.Information;
+            _logger.Log(level, "OutboundStage={Stage} WorkspaceId={WorkspaceId} OutboundId={OutboundId} Status={Status} Kind={Kind} HandoffAcknowledgement={HandoffAcknowledgement} HumanSuppressed={HumanSuppressed} FailureKind={FailureKind}",
+                stage, workspaceId, message.Id, message.Status, message.Kind, message.IsHandoffAcknowledgement,
+                message.LastError == HumanTakeoverReason, exceptionType);
+        }
+        catch { /* A logging failure must never change transport or durable state. */ }
     }
 
     private sealed class TransportAlreadyClaimedException : Exception { }

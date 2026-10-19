@@ -1,5 +1,6 @@
 ﻿using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
+using Grpc.Core;
 using NexFlow.Application.Features.Business;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
@@ -11,8 +12,21 @@ public class FirestoreBusinessProfileRepository : IBusinessProfileRepository
 
     public async Task<BusinessProfileDto?> GetProfileAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("business").Document("profile");
-        var snapshot = await docRef.GetSnapshotAsync(cancellationToken);
+        DocumentSnapshot snapshot;
+        try { snapshot = await docRef.GetSnapshotAsync(cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (RpcException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch (RpcException ex) when (!cancellationToken.IsCancellationRequested &&
+            ex.StatusCode is StatusCode.Unavailable or StatusCode.DeadlineExceeded or StatusCode.ResourceExhausted)
+        {
+            throw new BusinessProfileUnavailableException(ex.StatusCode == StatusCode.DeadlineExceeded, ex);
+        }
 
         if (!snapshot.Exists) return null;
         var data = snapshot.ConvertTo<FirestoreBusinessProfile>();

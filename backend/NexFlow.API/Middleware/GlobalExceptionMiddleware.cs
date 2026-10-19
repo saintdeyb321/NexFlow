@@ -38,6 +38,7 @@ public class GlobalExceptionMiddleware
         {
             CatalogQuotaExceededException => 429,
             ArtifactDependencyException => 503,
+            NexFlow.Application.Abstractions.BusinessProfileUnavailableException => 503,
             DomainException or ArgumentException => 400,
             UnauthorizedAccessException => context.User.Identity?.IsAuthenticated == true ? 403 : 401,
             KeyNotFoundException => 404,

@@ -54,12 +54,23 @@ public class AiInterpreter : IAiInterpreter
 
     public async Task<AiInterpretation> InterpretAsync(Guid workspaceId, string userMessage, string currentGoal, string? currentStep, HashSet<string> activeModules, CancellationToken ct)
     {
-        var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
+        NexFlow.Application.Features.Business.BusinessProfileDto? profile;
+        try { profile = await _profileRepo.GetProfileAsync(workspaceId, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is BusinessProfileUnavailableException or TimeoutException or OperationCanceledException)
+        {
+            ct.ThrowIfCancellationRequested();
+            var failure = ex is BusinessProfileUnavailableException { TimedOut: false }
+                ? AiFailureKind.Unavailable : AiFailureKind.Timeout;
+            try { _logger.LogWarning("Profile unavailable before interpretation. WorkspaceId={WorkspaceId} Failure={Failure}", workspaceId, failure); }
+            catch { /* Diagnostics cannot turn a controlled outage into another failure. */ }
+            return new() { Intent = ConversationIntent.ProviderUnavailable, Failure = failure };
+        }
+        ct.ThrowIfCancellationRequested();
         var tzId = string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone;
 
-        TimeZoneInfo workspaceZone;
-        try { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById(tzId); }
-        catch { workspaceZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        // Invalid configured zones must surface as configuration errors, not invented business time.
+        var workspaceZone = TimeZoneInfo.FindSystemTimeZoneById(tzId);
 
         var localBusinessTime = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
         var activeModulesList = string.Join(", ", activeModules);

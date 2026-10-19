@@ -69,7 +69,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (_recovery != null && !await _recovery.AcquireAiAsync(workspaceId, normalizedPhone, request.MessageId, cancellationToken))
                 return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone,
                     "Hemos alcanzado el límite temporal de consultas. Espera un minuto o escribe asesor para recibir ayuda humana.", SenderType.AI,
-                    $"assistant-limit:{conversation.Id}:{normalizedPhone}:{_clock?.UtcNow ?? DateTime.UtcNow:yyyyMMddHHmm}", cancellationToken);
+                    request.MessageId, cancellationToken);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(20));
             try { interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", context.CurrentStep, activeModules, deadline.Token); }

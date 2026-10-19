@@ -73,3 +73,27 @@ Los cuatro eventos de Outbox PDF no son la cola de inbounds ni los outbound Fire
 NF-04 (UI) y NF-05 (parser) corresponden a **Sprint 2**, no al parche backend de Sprint 1.
 Las pruebas están etiquetadas por sprint cuando aplica. No declarar G1/global verde mientras permanezcan reproducciones pendientes.
 G0 permanece parcial por falta de evidencia del servidor; G1 no pasa por las expectativas nuevas rojas. GO solamente para continuar diagnóstico y proponer revisión; no desplegar.
+
+## Adenda — Sprint 1 autorizado, 2026-10-19
+
+La propuesta anterior describe el cierre histórico del Sprint 0. El usuario aprobó Sprint 0 y autorizó exclusivamente NF-01/02/03/06 sobre HEAD local `7c7f6d071378d7c38f224208c6172abf1892a7f5` (árbol inicialmente limpio).
+
+| Hallazgo | Evidencia nueva / resultado |
+|---|---|
+| NF-03 CORREGIDO | Reproducción original verde: ocho IDs distintos producen ocho respuestas con seis llamadas IA; replay no duplica. La prueba histórica de cuota ahora exige diez respuestas a diez inbounds, sin elevar las seis llamadas IA. |
+| NF-02 CORREGIDO | Fallo RPC del repositorio real simulado → clasificación tipada → ProviderUnavailable, sin IA. Unavailable/ResourceExhausted y DeadlineExceeded cubiertos, recuperación posterior con hora real de Lima/UTC. Permisos/conflictos/configuración crítica no se convierten en indisponibilidad; cancelación del solicitante se conserva. Borrador y opciones licenciadas permanecen. Dos pruebas aseguran conservar HTTP 503 al normalizar excepciones. |
+| NF-01 OBSERVABLE, FIFO CONSERVADO | Diagnóstico read-only muestra cabeza demorada y siguiente inbound bloqueado por tenant, sin teléfono/payload. Muestreo 50/min, timeout 3 s, umbral 5 min; alerta con cooldown SQL existente de 1 h, fuera de la transacción principal. Pruebas verifican Failed→DeadLetter al quinto fallo, avance del siguiente, lease expirado/reinicio y rechazo de finalización con lease antiguo. Logging/alertas fallidos no alteran estado ni claims. |
+| NF-06 TRAZABLE LOCALMENTE | Worker/handler/outbound correlacionados por WorkspaceId e InboundId interno mediante scopes. Pruebas con handler, repositorio Firestore y outbound reales, límite SQL simulado: preparación, intento, aceptación (no entrega), Sent/Failed/UnknownDelivery y modo Human; no PII/secretos en logs. Replay de resultado terminal conserva un solo transporte. Fallo de logging no altera aceptación durable. |
+
+Se añadió solo una excepción de frontera de persistencia para evitar dependencia gRPC en Application, una proyección diagnóstica sin tabla y logging sobre los componentes existentes. No se sustituyeron mecanismos estables. Lista completa de archivos en `NexFlow_RC3_PROGRESS.md`.
+
+Validación real:
+
+- Build requerido `dotnet build backend/backend.slnx --no-restore`: correcto, 0 errores; último incremental sin advertencias. Recompilación previa con tres advertencias conocidas, fuera de alcance.
+- Suite explícita `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore`: **530 aprobadas / 1 fallida / 0 omitidas, total 531**. Fallo exclusivamente NF-05 (`Assert.NotNull` en la selección por frase). Exit 1 esperado y reportado.
+- Regresión dirigida: **354 aprobadas / 0 fallidas / 0 omitidas**, filtro `FullyQualifiedName~Rc3Sprint1|FullyQualifiedName~AssistantRc1|FullyQualifiedName~AssistantConversationTests|FullyQualifiedName~AssistantDurabilityTests|FullyQualifiedName~AiResilienceTests|FullyQualifiedName~AssistantRedisRecoveryTests|FullyQualifiedName~Evolution|FullyQualifiedName~NF01|FullyQualifiedName~NF02|FullyQualifiedName~NF03|FullyQualifiedName~Incident_sequence` sobre el mismo proyecto, `--no-restore`.
+- Navegador Sprint 0, `node --test tests/rc3-inbox-browser.test.mjs` en frontend: **1 aprobada / 2 fallidas NF-04 / 0 omitidas**. Caches mantienen una conversación/un mensaje; vista sana aún se oculta tras fallo parcial. Sin cambios de frontend ni parser; expectativas Sprint 2 intactas.
+
+**Límites:** SQLite no valida locks PostgreSQL ni dos workers reales. El test de trazabilidad simula la frontera SQL; el test de lease recrea el repositorio sobre almacenamiento SQLite conservado. No equivale a detener procesos reales. La observabilidad es best effort y la notificación usa su fila SQL como cooldown durable; no es una nueva garantía de entrega de alertas. Verificar scopes en el colector y costo del diagnóstico bajo carga real.
+
+**SPRINT 1 APROBABLE localmente.** La evidencia operacional de Oracle sigue pendiente y no existe causa única demostrada del incidente. NF-04/05 permanecen para Sprint 2, todavía NO autorizado. No se ejecutaron servicios externos, commit, push, despliegue, migraciones ni operaciones sobre datos reales.

@@ -43,14 +43,18 @@ public class ProcessIncomingMessageCommandHandler
     public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
         var guardResult = await _guard.CheckMessageAsync(request, cancellationToken);
-        if (!guardResult.IsValid) return Result.Success();
+        if (!guardResult.IsValid) { Trace("GuardRejected", guardResult.WorkspaceId); return Result.Success(); }
         // Reactions/key/protocol events are durable input, not consumer questions or human takeovers.
-        if (request.Kind == IncomingMessageKind.Control) return Result.Success();
+        if (request.Kind == IncomingMessageKind.Control) { Trace("ControlEvent", guardResult.WorkspaceId); return Result.Success(); }
 
         if (!request.FromMe && await _outboundMessageService.TryResumeResponseAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken))
+        {
+            Trace("ExistingDurableResponse", guardResult.WorkspaceId);
             return Result.Success();
+        }
 
         var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
+        Trace(stateResult.Record.Mode == ConversationMode.Human ? "HumanControl" : stateResult.ShouldAiRespond ? "AutomaticResponseRequired" : "NoAutomaticResponse", guardResult.WorkspaceId);
 
         if (stateResult.FastReply != null)
         {
@@ -71,6 +75,12 @@ public class ProcessIncomingMessageCommandHandler
         }
 
         return Result.Success(); // El Worker de DB marcará esto como Processed.
+    }
+
+    private void Trace(string outcome, Guid? workspaceId)
+    {
+        try { _logger.LogInformation("HandlerOutcome={Outcome} WorkspaceId={WorkspaceId}", outcome, workspaceId); }
+        catch { /* Do not change a business outcome when diagnostics are unavailable. */ }
     }
 
     private async Task<bool> TryHandleZeroTokenKnowledgeAsync(Guid workspaceId, string phone, string message, string sourceMessageId, ConversationRecord conversation, CancellationToken ct)
@@ -107,7 +117,7 @@ public class ProcessIncomingMessageCommandHandler
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Knowledge location lookup failed for workspace {WorkspaceId}.", workspaceId);
+                Trace("KnowledgeUnavailable:" + ex.GetType().Name, workspaceId);
                 result = new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value };
             }
 

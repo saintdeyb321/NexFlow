@@ -1,5 +1,6 @@
 using NexFlow.Application.Abstractions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities.System;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
@@ -11,10 +12,12 @@ public class InboundMessageRepository : IInboundMessageRepository
     private readonly NexFlowDbContext _context;
 
     private readonly IInstanceResolver _instanceResolver;
-    public InboundMessageRepository(NexFlowDbContext context, IInstanceResolver instanceResolver)
+    private readonly ILogger<InboundMessageRepository>? _logger;
+    public InboundMessageRepository(NexFlowDbContext context, IInstanceResolver instanceResolver, ILogger<InboundMessageRepository>? logger = null)
     {
         _context = context;
         _instanceResolver = instanceResolver;
+        _logger = logger;
     }
 
     public async Task AddAsync(InboundMessage message, CancellationToken cancellationToken)
@@ -42,6 +45,33 @@ public class InboundMessageRepository : IInboundMessageRepository
                 throw new InvalidOperationException("Inbound identity belongs to another workspace.");
         }
         await transaction.CommitAsync(cancellationToken);
+        if (inserted > 0) Trace("ReceivedDurably", message);
+    }
+
+    public async Task<IReadOnlyList<InboundQueueDiagnostic>> GetStalledAsync(DateTime receivedBefore, int limit, CancellationToken cancellationToken)
+    {
+        if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+        // Read-only observation of the same FIFO boundary as the selector. It does
+        // not claim, renew leases, bypass predecessors or load message content.
+        return await _context.Database.SqlQueryRaw<InboundQueueDiagnostic>(@"
+            SELECT m.""Id"", m.""WorkspaceId"", m.""Status"", m.""Attempts"", m.""ReceivedAt"", m.""NextRetryAt"",
+              (SELECT following.""Id"" FROM ""InboundMessages"" following
+               WHERE following.""Status"" IN (0, 1, 3)
+                 AND ((m.""WorkspaceId"" IS NOT NULL AND following.""WorkspaceId"" = m.""WorkspaceId"")
+                   OR following.""InstanceName"" = m.""InstanceName"")
+                 AND regexp_replace(following.""Phone"", '[^0-9]', '', 'g') = regexp_replace(m.""Phone"", '[^0-9]', '', 'g')
+                 AND (following.""ReceivedAt"", following.""Id"") > (m.""ReceivedAt"", m.""Id"")
+               ORDER BY following.""ReceivedAt"", following.""Id"" LIMIT 1) AS ""BlockedInboundId""
+            FROM ""InboundMessages"" m
+            WHERE m.""Status"" IN (1, 3) AND m.""ReceivedAt"" <= {0}
+              AND NOT EXISTS (
+                SELECT 1 FROM ""InboundMessages"" predecessor
+                WHERE predecessor.""Status"" IN (0, 1, 3)
+                  AND ((m.""WorkspaceId"" IS NOT NULL AND predecessor.""WorkspaceId"" = m.""WorkspaceId"")
+                    OR predecessor.""InstanceName"" = m.""InstanceName"")
+                  AND regexp_replace(predecessor.""Phone"", '[^0-9]', '', 'g') = regexp_replace(m.""Phone"", '[^0-9]', '', 'g')
+                  AND (predecessor.""ReceivedAt"", predecessor.""Id"") < (m.""ReceivedAt"", m.""Id""))
+            ORDER BY m.""ReceivedAt"", m.""Id"" LIMIT {1}", receivedBefore, limit).ToListAsync(cancellationToken);
     }
     public async Task<IEnumerable<InboundMessage>> GetAndLockNextMessagesAsync(int limit, CancellationToken cancellationToken)
     {
@@ -104,7 +134,10 @@ public class InboundMessageRepository : IInboundMessageRepository
             var current = rows.SingleOrDefault();
             if (current == null || current.Status != InboundMessageStatus.Processing ||
                 current.ProcessingStartedAt != claim.ProcessingStartedAt)
+            {
+                Trace("SupersededClaimIgnored", claim);
                 return;
+            }
 
             var workspaceId = await _instanceResolver.ResolveInstanceAsync(current.InstanceName, cancellationToken);
             if (!workspaceId.HasValue || workspaceId == Guid.Empty ||
@@ -116,6 +149,7 @@ public class InboundMessageRepository : IInboundMessageRepository
             await process();
             await CompleteMessageAsync(claim.Id, claim.ProcessingStartedAt!.Value, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            Trace("TurnProcessedNotDelivery", current);
         }
         finally
         {
@@ -155,6 +189,19 @@ public class InboundMessageRepository : IInboundMessageRepository
             }
 
             await _context.SaveChangesAsync(cancellationToken);
+            Trace(msg.Status == InboundMessageStatus.DeadLetter ? "DeadLetter" : "RetryScheduled", msg);
         }
+    }
+
+    private void Trace(string stage, InboundMessage message)
+    {
+        try
+        {
+            var level = message.Status == InboundMessageStatus.DeadLetter ? LogLevel.Error
+                : message.Status == InboundMessageStatus.Failed ? LogLevel.Warning : LogLevel.Information;
+            _logger?.Log(level, "InboundStage={Stage} WorkspaceId={WorkspaceId} InboundId={InboundId} Status={Status} Attempts={Attempts} NextRetryAt={NextRetryAt}",
+                stage, message.WorkspaceId, message.Id, message.Status, message.Attempts, message.NextRetryAt);
+        }
+        catch { /* Observability must never change a durable processing outcome. */ }
     }
 }

@@ -15,6 +15,8 @@ using NexFlow.Domain.Entities.System;
 using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
+using NexFlow.Infrastructure.Persistence.Firestore;
+using NexFlow.Tests.Fakes;
 using Xunit;
 
 namespace NexFlow.Tests;
@@ -61,10 +63,12 @@ public sealed class Rc3Sprint0IncidentTests
     [Trait("RC3", "Sprint1Pending")]
     public async Task NF02_transient_profile_failure_before_ai_must_have_a_defined_unavailable_interpretation()
     {
-        var profiles = new Mock<IBusinessProfileRepository>(MockBehavior.Strict); var workspace = Guid.NewGuid();
-        profiles.Setup(p => p.GetProfileAsync(workspace, default)).ThrowsAsync(new RpcException(new Status(StatusCode.Unavailable, "Simulated profile outage")));
+        // Exercise the actual persistence boundary, including its transient-error
+        // classification, rather than leaking an infrastructure exception from a mock.
+        var firestore = new InMemoryFirestore { ReadFailure = new RpcException(new Status(StatusCode.Unavailable, "Simulated profile outage")) };
+        var profiles = new FirestoreBusinessProfileRepository(firestore.Db); var workspace = Guid.NewGuid();
         var router = new Mock<IAiRouter>(MockBehavior.Strict);
-        var interpreter = new AiInterpreter(router.Object, Mock.Of<IClock>(), profiles.Object, NullLogger<AiInterpreter>.Instance);
+        var interpreter = new AiInterpreter(router.Object, Mock.Of<IClock>(), profiles, NullLogger<AiInterpreter>.Instance);
         var result = await interpreter.InterpretAsync(workspace, "Como puedo hacer una reserva?", "", null, new() { "RESERVATIONS", "SERVICES" }, default);
         Assert.Equal(ConversationIntent.ProviderUnavailable, result.Intent); router.VerifyNoOtherCalls();
     }
