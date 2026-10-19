@@ -5,10 +5,10 @@ Antes de cada sesión leer `AGENTS.md`, `NexFlow_PLAN_MAESTRO_CORRECCION_MVP_RC3
 
 ## Estado
 
-- Sprint actual: **4.1, recuperación**, completados los parches y pruebas locales; certificación distribuida pendiente. Se conserva el historial de Sprints 0–4 abajo.
-- HEAD recuperado: `16efe690278cb8bbab82ee2a3b6e9c2001147d5c`, árbol limpio al recibir la instrucción de recuperación; anterior `4d1d0fb8fb2e8c5c9ef521253f9f0c0dadee54a1`. Cambios de esta recuperación sin commit/push.
-- Autorización: exclusivamente Sprint 4.1, coordinación de recursos e índice de horarios cancelados. **Próximo sprint autorizado: ninguno. Sprint 5 NO autorizado.**
-- Veredicto: **SPRINT 4.1 NO APROBABLE como certificación integral**. P1 corregido localmente; P0 implementado y probado en límites locales, sin certificar locks/SSI/ACK reales. La guarda de ciclo de vida del tenant conserva SQL durante IO remoto; se documenta su justificación y la validación pendiente. No constituye GO de despliegue.
+- Sprint actual: **4.2**, matriz de integración y CI manual preparados; ejecución distribuida pendiente. Se conserva el historial de Sprints 0–4.1 abajo.
+- HEAD de referencia: `e1af63324409ce7b6c2b0fe141403569069f11e3`, árbol inicialmente limpio. Cambios de Sprint 4.2 sin commit/push.
+- Autorización: exclusivamente certificación PostgreSQL/Firestore aislada y workflow manual. **Próximo sprint autorizado: ninguno. Sprint 5 NO autorizado.**
+- Veredicto: **IMPLEMENTACIÓN DE PRUEBAS COMPLETA — CERTIFICACIÓN PENDIENTE / NO-GO**. 677 pruebas locales aprobadas (669 anteriores + 8 guardas), 24 integraciones no ejecutadas. La guarda de tenant conserva SQL durante Firestore; no hay métricas reales ni prueba cloud. Ver `NexFlow_RC3_SPRINT4_2_INTEGRACION.md`.
 
 ## Evidencia y decisiones del Sprint 0 (histórico)
 
@@ -360,3 +360,46 @@ Documento nuevo `NexFlow_RC3_SPRINT4_1_CONSISTENCIA.md`: arquitectura, máquina 
 Diff final revisado respecto de 16efe69, incluidos archivos nuevos, scripts y documentación; comprobación de whitespace sin errores tras quitar únicamente líneas vacías finales de los SQL exportados. Sin cambios ajenos al alcance.
 
 **SPRINT 4.1 NO APROBABLE como certificación distribuida completa.** Parches locales completos y verdes; P0 requiere la matriz real y decisión sobre el criterio de ciclo de vida/SQL durante IO antes de GO. P1 listo para revisión local, no aplicado. No hay bloqueo de compilación ni pruebas fallidas. Sin commit, push, despliegue o instalaciones. **Detenido para revisión; Sprint 5 NO AUTORIZADO.**
+
+## Adenda — Sprint 4.2 autorizado, 2026-10-19
+
+Referencia local verificada `e1af63324409ce7b6c2b0fe141403569069f11e3`, coincide con la autorización; status/diff inicial limpios. Leídos AGENTS, plan maestro, progreso, consistencia 4.1 e incidente. No se reconstruyeron los sprints anteriores.
+
+### Hallazgos y decisiones
+
+- Revisión dirigida confirma captura de epochs antes de Firestore, validación SQL Serializable con FOR UPDATE, orden Location→Service, intención monotónica, fence terminal y CAS. No se confirmó un defecto nuevo que justifique modificar producción. Los escritores de alta/reagendamiento siguen en ReservationEngine.
+- Excepción de ciclo de vida preservada: middleware/worker mantienen guarda compartida durante IO; scheduler/borrado usan exclusiva. Quitarla sin alternativa demostrada abriría un bypass. Worker tiene deadline 30 s; eliminación existente 5 min. No hay métricas reales todavía ni certificación de commit servidor posterior al purge.
+- No existía `.github/workflows/`. Se añadió uno separado exclusivamente manual, permisos contents read, runner temporal, PostgreSQL 15.10 y Firestore Emulator demo. Sin secretos del SaaS, login cloud, despliegue ni ejecución/push del workflow.
+- Herramientas adicionales documentadas ANTES de preparar CI: SDK 10.0.401, Node 22.14.0, Temurin 21.0.8+9, Firebase CLI 14.12.0; instalación solo en runner. Coste limitado a minutos/almacenamiento de Actions según plan, no servicios de negocio. Ninguna dependencia NuGet nueva o instalación local.
+
+### Nuevas pruebas y evidencia real
+
+24 Facts de integración, Category=Integration, compilados/descubiertos y **no ejecutados**. PostgreSQL Npgsql real sin interceptores de reescritura: locks, dos conexiones, Serializable 40001, 23505, xmin, orden/deadlock 40P01, reserva/Outbox atómicos, rollback/replay y tenant independiente. Firestore SDK Emulator: negocio+fence, conflicto, epochs, ACK postcommit simulado, recuperación con worker nuevo, terminal inválido, edición inocua ganadora, historia/tenant. Migración Up/Down reales preparados en bases UUID descartables; Down rechazado por epochs/historia incompatible sin pérdida de datos. TenantDeletionWorker real preparado frente a guarda compartida, deadline acelerado, ACK tardío de commit observado y recuperación bloqueada tras borrar; pool/cancelación/liberación con observación SQL.
+
+Ocho pruebas de seguridad del harness **ejecutadas y aprobadas**: solo config sintética explícita; rechazo de host/base/usuario/password ajenos y emulador/proyecto ausentes o cloud. Opt-in ausente muestra integración omitida; opt-in activado con servicios caídos falla, no hace skip. CI exige TRX con todas las integraciones ejecutadas y aprobadas.
+
+| Comando / evidencia | Resultado real |
+|---|---|
+| `dotnet build backend/backend.slnx --no-restore`, inicial | 0 errores; 3 warnings preexistentes CS8981 x2 y CS8602 x1. MSBuild no completó primera invocación bajo sandbox; reejecución autorizada normal exitosa. |
+| Mismo build final incremental | **0 errores, 0 warnings**. |
+| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore`, baseline | **669 aprobadas / 0 fallidas / 0 omitidas**. |
+| Mismo test final con `--logger "console;verbosity=quiet"` | **677 aprobadas / 0 fallidas / 24 omitidas / 701 total**, 8 s. 669 anteriores intactas + 8 unitarias nuevas; omitidas son exclusivamente integraciones pendientes. |
+| `dotnet ef migrations has-pending-model-changes --no-build --project backend/NexFlow.Infrastructure --startup-project backend/NexFlow.Infrastructure -- --offline` | Exit 0, sin cambios del modelo; aviso EF tools 10.0.10/runtime 10.0.11, sin actualización. |
+| YAML/JSON | Parseo local correcto con parser ya instalado; activación solo manual/contents read/sin referencias a secrets. No valida descarga/ejecución remota de Actions. |
+
+En el harness se corrigieron errores iniciales de compilación IClock/ValueTask y warnings nuevos de aserciones antes de la suite final; ningún test existente fue debilitado. No restore local, builds de frontend ni suites frontend: frontend intacto.
+
+### Archivos de Sprint 4.2
+
+- `backend/NexFlow.Tests/Integration/`: nuevos `IsolatedStores.cs`, `IntegrationSafetyTests.cs`, `IntegrationCollection.cs`, `PostgresResourceIntegrationTests.cs`, `FirestoreResourceIntegrationTests.cs`, `ReservationMigrationIntegrationTests.cs`, `TenantLifecycleIntegrationTests.cs`; `emulator/firebase.json` y `emulator/firestore.rules` exclusivos de tests.
+- `.github/workflows/rc3-reservation-integration.yml` nuevo (workflow separado autorizado).
+- `NexFlow_RC3_SPRINT4_2_INTEGRACION.md` nuevo; este registro actualizado preservando historial 0–4.1.
+- Código productivo, migraciones/snapshot/SQL, frontend, infraestructura de despliegue, Docker, secretos/.env, AGENTS y plan maestro intactos.
+
+### Pendientes y veredicto
+
+**IMPLEMENTACIÓN DE PRUEBAS COMPLETA — CERTIFICACIÓN PENDIENTE. NO-GO de certificación distribuida.** No hay PostgreSQL/Java en PATH; no se instalaron ni ejecutaron servicios en Windows. Ninguno de los 24 casos constituye evidencia verde de motor/emulador. Workflow escrito y parseado, **no ejecutado**; resultados/times reales pendientes. No se aplicó Up/Down a ninguna base en esta sesión.
+
+El informe 4.2 contiene matriz, comandos manuales seguros, diferencias Emulator/Cloud, límites de deadline/ACK/reinicio, rollout sin escrituras mixtas y rollback solo compatible conservando epochs/fences/historia. La medición pendiente no prueba rendimiento ni ausencia de huérfanos con commit servidor aún en vuelo tras purge; no retirar lock ni afirmar integridad cloud con esos límites.
+
+Siguiente acción permitida tras revisión: propietario publica revisión aprobada mediante autorización aparte y ejecuta el workflow manual aislado; evaluar TRX (24/24 sin skips), tiempos, locks/pool y ventana de tenant antes de certificar. Sin Oracle, Firestore Cloud, GitHub remoto, servicios de negocio, commit/push, despliegue ni credenciales reales. **Detenido después de Sprint 4.2. Próximo sprint autorizado: ninguno; Sprint 5 NO AUTORIZADO.**

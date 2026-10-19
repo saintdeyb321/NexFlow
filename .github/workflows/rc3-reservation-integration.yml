@@ -1,0 +1,88 @@
+name: RC3 disposable reservation integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc3-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  isolated-stores:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:15.10
+        env:
+          POSTGRES_USER: nexflow_rc3
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: nexflow_rc3_admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexflow_rc3 -d nexflow_rc3_admin"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      GCLOUD_PROJECT: demo-nexflow-rc3
+      FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+      NEXFLOW_RC3_POSTGRES: Host=127.0.0.1;Port=5432;Database=nexflow_rc3_admin;Username=nexflow_rc3;Password=local-test-only
+      JAVA_TOOL_OPTIONS: -Xmx1024m
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: 10.0.401
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22.14.0
+      - uses: actions/setup-java@v4.7.1
+        with:
+          distribution: temurin
+          java-version: 21.0.8+9
+      - name: Install controlled emulator tooling (runner only)
+        run: |
+          npm install --global firebase-tools@14.12.0
+          firebase setup:emulators:firestore
+      - name: Restore and build
+        run: |
+          dotnet restore backend/backend.slnx
+          dotnet restore backend/NexFlow.Tests/NexFlow.Tests.csproj
+          dotnet build backend/backend.slnx --no-restore
+          dotnet build backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore
+      - name: Preserve baseline and local safety regressions
+        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter 'Category!=Integration' --logger 'trx;LogFileName=unit.trx' --results-directory artifacts/rc3
+      - name: Real PostgreSQL plus Firestore Emulator matrix
+        env:
+          NEXFLOW_RC3_INTEGRATION: '1'
+        run: >-
+          firebase emulators:exec --only firestore --project demo-nexflow-rc3
+          --config backend/NexFlow.Tests/Integration/emulator/firebase.json
+          'dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter Category=Integration --logger "trx;LogFileName=integration.trx" --results-directory artifacts/rc3'
+      - name: Reject missing or skipped integration evidence
+        if: success()
+        shell: python
+        run: |
+          import xml.etree.ElementTree as ET
+          root = ET.parse('artifacts/rc3/integration.trx').getroot()
+          counters = root.find('.//{*}Counters')
+          assert counters is not None
+          assert int(counters.attrib['total']) >= 24, 'Integration tests were not discovered'
+          assert counters.attrib['total'] == counters.attrib['executed'] == counters.attrib['passed'], 'No skipped/failed integration is certifiable'
+      - name: Upload synthetic test results only
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: rc3-isolated-test-results
+          path: artifacts/rc3/*.trx
+          if-no-files-found: warn
+          retention-days: 7
+# No SaaS secrets, environment/deployment permissions or cloud login. The
+# service container and emulator terminate with the disposable job/exec scope.
