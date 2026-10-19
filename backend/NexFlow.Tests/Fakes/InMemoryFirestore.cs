@@ -138,11 +138,13 @@ public sealed class InMemoryFirestore : CallInvoker
             {
                 var structured = query.StructuredQuery;
                 var prefix = query.Parent + "/" + structured.From[0].CollectionId + "/";
-                var filter = structured.Where?.FieldFilter;
                 var docs = _documents.Values.Where(d => d.Name.StartsWith(prefix, StringComparison.Ordinal)
                     && !d.Name[prefix.Length..].Contains('/'));
-                if (filter != null) docs = docs.Where(d => d.Fields.TryGetValue(filter.Field.FieldPath, out var value)
-                    && value.TimestampValue != null && value.TimestampValue.ToDateTime() <= filter.Value.TimestampValue.ToDateTime());
+                if (structured.Where != null) docs = docs.Where(d => Matches(d, structured.Where));
+                var ordered = docs.ToList();
+                ordered.Sort((a, b) => CompareDocuments(a, b, structured.OrderBy));
+                docs = ordered;
+                if (structured.StartAt != null) docs = docs.Where(d => CompareCursor(d, structured.StartAt, structured.OrderBy) >= (structured.StartAt.Before ? 0 : 1));
                 if (structured.Limit != null) docs = docs.Take(structured.Limit.Value);
                 results.AddRange(docs.Select(d => (object)new RunQueryResponse { Document = d.Clone(), ReadTime = Now() }));
                 if (results.Count == 0) results.Add(new RunQueryResponse { ReadTime = Now() });
@@ -150,6 +152,52 @@ public sealed class InMemoryFirestore : CallInvoker
             else throw new NotSupportedException(request.GetType().Name);
             return (results, gate);
         }
+    }
+
+    private static Value Field(Document doc, string name) => name == "__name__" ? new Value { ReferenceValue = doc.Name }
+        : doc.Fields.TryGetValue(name, out var value) ? value : new Value();
+    private static int Compare(Value a, Value b) => a.ValueTypeCase switch
+    {
+        Value.ValueTypeOneofCase.TimestampValue => a.TimestampValue.ToDateTime().CompareTo(b.TimestampValue.ToDateTime()),
+        Value.ValueTypeOneofCase.ReferenceValue => StringComparer.Ordinal.Compare(a.ReferenceValue, b.ReferenceValue),
+        Value.ValueTypeOneofCase.StringValue => StringComparer.Ordinal.Compare(a.StringValue, b.StringValue),
+        Value.ValueTypeOneofCase.IntegerValue => a.IntegerValue.CompareTo(b.IntegerValue),
+        _ => a.BooleanValue.CompareTo(b.BooleanValue)
+    };
+    private static bool Matches(Document doc, StructuredQuery.Types.Filter filter)
+    {
+        if (filter.CompositeFilter != null) return filter.CompositeFilter.Op == StructuredQuery.Types.CompositeFilter.Types.Operator.Or
+            ? filter.CompositeFilter.Filters.Any(f => Matches(doc, f)) : filter.CompositeFilter.Filters.All(f => Matches(doc, f));
+        var field = filter.FieldFilter ?? throw new NotSupportedException("Unsupported local query filter");
+        if (!doc.Fields.ContainsKey(field.Field.FieldPath)) return false;
+        var cmp = Compare(Field(doc, field.Field.FieldPath), field.Value);
+        return field.Op switch
+        {
+            StructuredQuery.Types.FieldFilter.Types.Operator.Equal => cmp == 0,
+            StructuredQuery.Types.FieldFilter.Types.Operator.LessThan => cmp < 0,
+            StructuredQuery.Types.FieldFilter.Types.Operator.LessThanOrEqual => cmp <= 0,
+            StructuredQuery.Types.FieldFilter.Types.Operator.GreaterThan => cmp > 0,
+            StructuredQuery.Types.FieldFilter.Types.Operator.GreaterThanOrEqual => cmp >= 0,
+            _ => throw new NotSupportedException("Unsupported local query operator")
+        };
+    }
+    private static int CompareDocuments(Document a, Document b, IEnumerable<StructuredQuery.Types.Order> order)
+    {
+        foreach (var item in order)
+        {
+            var cmp = Compare(Field(a, item.Field.FieldPath), Field(b, item.Field.FieldPath));
+            if (cmp != 0) return item.Direction == StructuredQuery.Types.Direction.Descending ? -cmp : cmp;
+        }
+        return StringComparer.Ordinal.Compare(a.Name, b.Name);
+    }
+    private static int CompareCursor(Document doc, Cursor cursor, IEnumerable<StructuredQuery.Types.Order> order)
+    {
+        foreach (var (item, value) in order.Zip(cursor.Values))
+        {
+            var cmp = Compare(Field(doc, item.Field.FieldPath), value);
+            if (cmp != 0) return item.Direction == StructuredQuery.Types.Direction.Descending ? -cmp : cmp;
+        }
+        return 0;
     }
 
     public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(Method<TRequest, TResponse> method, string? host, CallOptions options, TRequest request)

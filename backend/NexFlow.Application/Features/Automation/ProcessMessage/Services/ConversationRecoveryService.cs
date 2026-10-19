@@ -102,7 +102,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (context.RecoveryOptionsContext == Fingerprint(context) && context.RecoveryHasMore) context.RecoveryOptionsOffset += 5;
             return await Menu("Estas son las opciones disponibles:");
         }
-        var index = text switch { "la primera" or "primera" => 1, "la segunda" or "segunda" => 2, "la tercera" or "tercera" => 3, "la cuarta" or "cuarta" => 4, "la quinta" or "quinta" => 5, _ => int.TryParse(text, out var n) ? n : 0 };
+        var index = SelectionIndex(text);
         if (index == 0 && context.RecoveryOptionsContext == Fingerprint(context))
         {
             var matches = context.RecoveryOptions.Select((o, i) => (Option: o, Index: i + 1)).Where(o => Normalize(o.Option.Label) == text).ToArray();
@@ -112,6 +112,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (text is "la otra" or "otra" or "esa otra") index = -1;
         if (index != 0)
         {
+            if (context.LastUpdated < clock.UtcNow.AddHours(-Limits.ContextExpiryHours))
+                return await Menu("La lista anterior ha caducado. Elige una opción vigente:");
             if (context.RecoveryOptionsContext != Fingerprint(context) || index < 1 || index > context.RecoveryOptions.Count)
                 return await ClarifyAsync(workspace, phone, request.MessageId, context, modules,
                     context.RecoveryOptions.Count == 0 ? "Necesito una respuesta concreta para el paso actual." : "Necesito que elijas una opción de la lista actual.", ct);
@@ -140,6 +142,23 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             var response = await PrepareOptionsAsync(workspace, context, modules, intro, ct);
             return await Remember(response);
         }
+    }
+
+    private static int SelectionIndex(string text)
+    {
+        // Match the whole utterance. Quantities, identifiers, dates, times and
+        // mixed requests must never be extracted as a menu index.
+        var match = Regex.Match(text,
+            @"^(?:(?:escojo|elijo|selecciono) (?:la )?(?:(?:opcion|numero) )?|quiero la opcion |(?:la )?(?:(?:opcion|numero) )?)([0-9]{1,2}|uno|dos|tres|cuatro|cinco|primera|segunda|tercera|cuarta|quinta)$",
+            RegexOptions.CultureInvariant);
+        if (!match.Success) return 0;
+        var index = match.Groups[1].Value switch
+        {
+            "uno" or "primera" => 1, "dos" or "segunda" => 2, "tres" or "tercera" => 3,
+            "cuatro" or "cuarta" => 4, "cinco" or "quinta" => 5,
+            var number => int.Parse(number, CultureInfo.InvariantCulture)
+        };
+        return index == 0 ? -1 : index;
     }
 
     public async Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct)

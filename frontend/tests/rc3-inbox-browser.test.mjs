@@ -85,3 +85,99 @@ for (const panel of ['messages', 'conversations']) test(`NF04: fallo parcial de 
   assert.equal(await evaluate(`document.body.textContent.includes(${JSON.stringify(unaffected)})`), true,
     'NF04: cached data exists but InboxPage removes the healthy panel after a partial query failure');
 });
+
+const click = label => evaluate(`document.querySelector('button[aria-label="${label}"]').click()`);
+for (const panel of ['messages', 'conversations']) test(`NF04: recuperar ${panel} conserva ambos paneles y reintenta solo la consulta afectada`, async () => {
+  await healthyPage(); await evaluate(`window.rc3Inbox.fail('${panel}')`);
+  await until("document.body.textContent.includes('Los datos pueden estar desactualizados')");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado') && document.body.textContent.includes('Bandeja de Entrada')"), true);
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Asumir Control')).disabled"), true);
+  await evaluate("window.rc3Inbox.configure({fail:'none'}); window.rc3Inbox.calls.splice(0)");
+  await click(panel === 'messages' ? 'Reintentar mensajes' : 'Reintentar conversaciones');
+  await until("!document.body.textContent.includes('Los datos pueden estar desactualizados')");
+  assert.deepEqual(await evaluate('window.rc3Inbox.calls.map(c => c.path)'), [panel === 'messages' ? '/conversations/chat-rc3/messages' : '/conversations']);
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado')"), true);
+});
+
+test('NF04: ambos errores conservan caché útil y permiten recuperaciones independientes', async () => {
+  await healthyPage(); await evaluate("(async () => { window.rc3Inbox.configure({fail:'both'}); await Promise.all([window.rc3Inbox.refetch('messages'),window.rc3Inbox.refetch('conversations')]); })()");
+  await until("document.querySelectorAll('button[aria-label^=Reintentar]').length === 2");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado') && document.body.textContent.includes('Bandeja de Entrada')"), true);
+  await evaluate("window.rc3Inbox.configure({fail:'messages'})"); await click('Reintentar conversaciones');
+  await until("!document.querySelector('button[aria-label=\"Reintentar conversaciones\"]')");
+  assert.equal(await evaluate("Boolean(document.querySelector('button[aria-label=\"Reintentar mensajes\"]'))"), true);
+});
+
+test('NF04: sin caché muestra errores localizados y recupera la bandeja', async () => {
+  await send('Page.navigate', { url: `${preview.url}?emptyFailure=1` });
+  await until("document.querySelectorAll('button[aria-label^=Reintentar]').length === 2");
+  assert.equal(await evaluate("document.body.textContent.includes('Conversaciones no disponibles')"), true);
+  await evaluate("window.rc3Inbox.configure({fail:'none'})"); await click('Reintentar conversaciones'); await click('Reintentar mensajes');
+  await until("document.body.textContent.includes('Historial ficticio conservado')");
+});
+
+for (const status of [0, 500, 503]) test(`NF04: error transitorio ${status} mantiene historial sin habilitar operaciones`, async () => {
+  await healthyPage(); await evaluate(`(async () => { window.rc3Inbox.configure({status:${status}}); await window.rc3Inbox.fail('messages'); })()`);
+  await until("document.body.textContent.includes('Los datos pueden estar desactualizados')");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado')"), true);
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Asumir Control')).disabled"), true);
+});
+
+for (const status of [401, 403]) test(`NF04: ${status} oculta caché y exige revalidar ambas consultas antes de mostrarla`, async () => {
+  await healthyPage(); await evaluate(`(async () => { window.rc3Inbox.configure({status:${status}}); await window.rc3Inbox.fail('conversations'); })()`);
+  await until("document.body.textContent.includes('No se mostrará información almacenada')");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado') || document.body.textContent.includes('Bandeja de Entrada')"), false);
+  await evaluate("window.rc3Inbox.configure({fail:'none',hold:'messages'}); Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Reintentar').click()");
+  await until("window.rc3Inbox.snapshot().listStatus === 'success'");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado')"), false);
+  await evaluate('window.rc3Inbox.release()');
+  await until("document.body.textContent.includes('Historial ficticio conservado')");
+});
+
+test('NF04: cambiar de chat durante error de lista conserva selección y navegación', async () => {
+  await healthyPage(); await evaluate("(async () => { window.rc3Inbox.configure({extraChat:true}); await window.rc3Inbox.refetch('conversations'); await window.rc3Inbox.fail('conversations'); })()");
+  await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('51888888888')).click()");
+  await until("document.body.textContent.includes('Historial segundo chat')");
+  assert.equal(await evaluate("document.body.textContent.includes('Los datos pueden estar desactualizados')"), true);
+});
+
+test('NF04: workspace nuevo y respuesta tardía no reutilizan historial anterior', async () => {
+  await healthyPage(); await evaluate("window.rc3Inbox.configure({hold:'messages'}); void window.rc3Inbox.refetch('messages')");
+  await until("typeof window.rc3Inbox.configure === 'function'");
+  await evaluate("window.rc3Inbox.configure({hold:null}); window.rc3Inbox.identity('workspace-b')");
+  await until("document.body.textContent.includes('Historial exclusivo workspace B')");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado')"), false);
+  await evaluate('window.rc3Inbox.release()');
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado')"), false);
+});
+
+test('NF04: revocar READ en metadatos oculta datos del mismo workspace', async () => {
+  await healthyPage(); await evaluate("window.rc3Inbox.identity('workspace-a','local-user',false)");
+  await until("document.body.textContent.includes('Acceso no disponible')");
+  assert.equal(await evaluate("document.body.textContent.includes('Historial ficticio conservado')"), false);
+});
+
+test('NF04: conserva los cinco estados outbound sin afirmar entrega ni reenviar', async () => {
+  await healthyPage(); await evaluate("(async () => { window.rc3Inbox.configure({showStatuses:true}); await window.rc3Inbox.refetch('messages'); })()");
+  await until("document.body.textContent.includes('Estado UnknownDelivery')");
+  for (const label of ['Pendiente', 'Enviando', 'Enviado', 'Error de envío', 'Entrega sin confirmar'])
+    assert.equal(await evaluate(`document.body.textContent.includes('${label}')`), true);
+  assert.equal(await evaluate("document.body.textContent.includes('Entregado') || document.body.textContent.includes('Leído')"), false);
+});
+
+test('NF04: móvil permite volver a la lista y mantiene el historial tras error parcial', async () => {
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  try {
+    await healthyPage(); await evaluate("window.rc3Inbox.fail('messages')");
+    await click('Volver a conversaciones');
+    await until("Array.from(document.querySelectorAll('h2')).some(el => el.textContent.includes('Bandeja') && el.getBoundingClientRect().width > 0)");
+    await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('51999999999')).click()");
+    await until("Array.from(document.querySelectorAll('p')).some(el => el.textContent === 'Historial ficticio conservado' && el.getBoundingClientRect().width > 0)");
+  } finally { await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false }); }
+});
+
+test('NF04: pestaña oculta pausa el polling de ambas consultas', async () => {
+  await healthyPage(); await evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'}); document.dispatchEvent(new Event('visibilitychange')); window.rc3Inbox.calls.splice(0)");
+  await wait(16_000);
+  assert.deepEqual(await evaluate('window.rc3Inbox.calls'), []);
+});

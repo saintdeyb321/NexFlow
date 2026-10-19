@@ -37,9 +37,9 @@ public sealed class Rc3Sprint0IncidentTests
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProductQuery, QueryKind = OfferingQueryKind.Broad });
         await f.Turn("Que productos tienen", "incident-4");
         Assert.Equal(draft, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
-        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.General });
         await f.Turn("Escojo la opción 1", "incident-5");
-        Assert.Equal(5, f.Sent.Count); Assert.Equal(3, f.AiCalls);
+        // Strict selection now clarifies the absent/current picker deterministically.
+        Assert.Equal(5, f.Sent.Count); Assert.Equal(2, f.AiCalls);
         Assert.All(f.Sent.Values, response => { Assert.Equal(MessageStatus.Sent, response.Status); Assert.False(string.IsNullOrWhiteSpace(response.Content)); });
         Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }

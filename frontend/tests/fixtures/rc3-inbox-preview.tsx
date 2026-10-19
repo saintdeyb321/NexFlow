@@ -6,6 +6,7 @@ import { queryKeys } from '../../src/core/query/queryKeys';
 import { InboxPage } from '../../src/features/conversations/pages/InboxPage';
 import { ToastProvider } from '../../src/components/ui/Toast';
 import { fixture, calls } from './rc3-inbox-api';
+import { changeIdentity } from './rc3-inbox-store';
 import '../../src/index.css';
 
 queryClient.setDefaultOptions({ queries: { retry: false, refetchOnWindowFocus: false } });
@@ -13,6 +14,10 @@ const listKey = queryKeys.conversations.list('workspace-a');
 const messagesKey = queryKeys.messages.list('workspace-a', 'chat-rc3');
 Object.assign(window, { rc3Inbox: {
   calls,
+  configure: (settings: Partial<typeof fixture>) => Object.assign(fixture, settings),
+  release: () => { fixture.hold = null; fixture.release?.(); },
+  identity: changeIdentity,
+  refetch: async (panel: 'messages' | 'conversations') => queryClient.refetchQueries({ queryKey: panel === 'messages' ? messagesKey : listKey, exact: true }),
   fail: async (panel: typeof fixture.fail) => {
     fixture.fail = panel;
     await queryClient.refetchQueries({ queryKey: panel === 'messages' ? messagesKey : listKey, exact: true });

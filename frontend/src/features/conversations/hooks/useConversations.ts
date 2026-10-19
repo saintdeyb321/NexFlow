@@ -1,5 +1,5 @@
 import { useToast } from '../../../components/ui/useToast';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSessionMutation } from '../../../core/query/useSessionMutation';
 import { queryKeys } from '../../../core/query/queryKeys';
@@ -14,15 +14,22 @@ import { ApiError } from '../../../core/api/axiosClient';
 
 // Backend echoes can reconcile for 10 minutes; allow 2 minutes for transport and observation delay.
 const RECONCILIATION_WINDOW_MS = 12 * 60 * 1000;
+const isAccessError = (error: unknown) => error instanceof ApiError && (error.status === 401 || error.status === 403);
 
 export const useConversations = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const workspaceId = useAuthStore((state) => state.me?.workspace?.id);
+  const userId = useAuthStore((state) => state.me?.user.id);
+  const identityKey = `${userId}:${workspaceId}`;
+  const [authorizationRefresh, setAuthorizationRefresh] = useState<{ identity: string; pending: boolean } | null>(null);
+  const reauthorizing = authorizationRefresh?.identity === identityKey && authorizationRefresh.pending;
   const { can } = usePermissions();
+  const canRead = can('CONVERSATIONS', 'READ');
   const visible = usePageVisible();
   const requireCapability = (capability: string) => {
     if (!can('CONVERSATIONS', capability)) throw new ApiError(403, 'Security.CapabilityDenied', 'No tienes permiso para esta operación.');
+    if (!canInteract) throw new ApiError(503, 'Dependency.Unavailable', 'Actualiza la conversación antes de realizar esta operación.');
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const urlConversationId = searchParams.get('conversation');
@@ -31,31 +38,34 @@ export const useConversations = () => {
   const compareConversations = (a: Conversation, b: Conversation) => compareTimestamps(b.lastMessageAt, a.lastMessageAt) || a.id.localeCompare(b.id);
   const compareMessages = (a: Message, b: Message) => compareTimestamps(a.timestamp, b.timestamp) || a.id.localeCompare(b.id);
 
-  const { data: conversations = [], isLoading: isLoadingConversations, isError: isErrorConversations, refetch: refetchConversations } = useQuery({
+  const conversationsQuery = useQuery({
     ...queryPolicies.inbox,
     queryKey: conversationsKey,
     queryFn: async ({ signal }) => {
       const current = queryClient.getQueryData<Conversation[]>(conversationsKey);
-      const after = !queryClient.getQueryState(conversationsKey)?.isInvalidated && current?.[0]?.lastMessageAt || undefined;
+      const state = queryClient.getQueryState(conversationsKey);
+      const after = !state?.isInvalidated && !isAccessError(state?.error) && current?.[0]?.lastMessageAt || undefined;
       const delta = await fetchIncremental((cursor, afterId) => getConversations(50, cursor, signal, afterId), record => record.lastMessageAt, after);
       return mergeById(after ? queryClient.getQueryData<Conversation[]>(conversationsKey) ?? [] : [], delta, compareConversations).slice(0, 50);
     },
-    enabled: !!workspaceId && can('CONVERSATIONS', 'READ'),
-    refetchInterval: visible ? 15000 : false,
+    enabled: !!workspaceId && canRead,
+    refetchInterval: query => visible && !isAccessError(query.state.error) ? 15000 : false,
   });
+  const conversations = canRead ? conversationsQuery.data ?? [] : [];
 
   // URL owns explicit selection, including browser history and external navigation.
   const selectedConversationId = urlConversationId || conversations[0]?.id || null;
   const messagesKey = queryKeys.messages.list(workspaceId, selectedConversationId);
   const selectedChat = conversations.find(c => c.id === selectedConversationId) || null;
 
-  const { data: messages = [], isLoading: isLoadingMessages, isError: isErrorMessages, refetch: refetchMessages } = useQuery({
+  const messagesQuery = useQuery({
     ...queryPolicies.inbox,
     queryKey: messagesKey,
     queryFn: async ({ signal }) => {
       const current = queryClient.getQueryData<Message[]>(messagesKey);
       const newest = current?.[current.length - 1]?.timestamp;
-      const after = !queryClient.getQueryState(messagesKey)?.isInvalidated && newest || undefined;
+      const state = queryClient.getQueryState(messagesKey);
+      const after = !state?.isInvalidated && !isAccessError(state?.error) && newest || undefined;
       const delta = await fetchIncremental((cursor, afterId) => getMessages(selectedConversationId!, 50, cursor, signal, afterId), record => record.timestamp, after);
       const merged = mergeById(after ? queryClient.getQueryData<Message[]>(messagesKey) ?? [] : [], delta, compareMessages);
       if (!after) return merged;
@@ -79,9 +89,13 @@ export const useConversations = () => {
       reconciliationCursor.current = { conversationId: selectedConversationId, lastId: ids[ids.length - 1] };
       return mergeById(merged, statuses, compareMessages);
     },
-    enabled: !!workspaceId && !!selectedConversationId && can('CONVERSATIONS', 'READ'),
-    refetchInterval: visible ? 15000 : false,
+    enabled: !!workspaceId && !!selectedConversationId && canRead,
+    refetchInterval: query => visible && !isAccessError(query.state.error) ? 15000 : false,
   });
+  const accessDenied = !canRead || reauthorizing || isAccessError(conversationsQuery.error) || isAccessError(messagesQuery.error);
+  const canInteract = !accessDenied && !!selectedChat && !conversationsQuery.isError && !messagesQuery.isError
+    && !conversationsQuery.isFetching && !messagesQuery.isFetching;
+  const messages = accessDenied ? [] : messagesQuery.data ?? [];
 
   const handleSelectChat = (id: string | null) => setSearchParams(previous => {
     const next = new URLSearchParams(previous);
@@ -137,7 +151,8 @@ export const useConversations = () => {
         void queryClient.invalidateQueries({ queryKey: messageFamily });
       queryClient.setQueriesData<Conversation[]>({ queryKey: queryKeys.conversations.lists(variables.workspaceId) }, current =>
         current?.map<Conversation>(conversation => conversation.id === variables.conversationId
-          ? { ...conversation, lastMessageAt: result.message.timestamp, mode: 'Human', handoffReason: 'ManualIntervention' } : conversation).sort(compareConversations));
+          ? { ...conversation, lastMessageAt: compareTimestamps(result.message.timestamp, conversation.lastMessageAt) > 0 ? result.message.timestamp : conversation.lastMessageAt,
+            mode: 'Human', handoffReason: 'ManualIntervention' } : conversation).sort(compareConversations));
     }
   });
 
@@ -158,12 +173,28 @@ export const useConversations = () => {
   });
 
   return {
-    conversations,
-    selectedChat,
+    conversations: accessDenied ? [] : conversations,
+    selectedChat: accessDenied ? null : selectedChat,
+    identityKey,
     messages,
-    isLoading: isLoadingConversations || isLoadingMessages,
-    isError: isErrorConversations || isErrorMessages,
-    retry: () => { void refetchConversations(); if (selectedConversationId) void refetchMessages(); },
+    accessDenied,
+    sessionExpired: conversationsQuery.error instanceof ApiError && conversationsQuery.error.status === 401
+      || messagesQuery.error instanceof ApiError && messagesQuery.error.status === 401,
+    canInteract,
+    isLoadingConversations: conversationsQuery.isLoading,
+    isLoadingMessages: messagesQuery.isLoading,
+    isErrorConversations: conversationsQuery.isError,
+    isErrorMessages: messagesQuery.isError,
+    isFetchingConversations: conversationsQuery.isFetching,
+    isFetchingMessages: messagesQuery.isFetching,
+    retryConversations: () => { if (canRead) void conversationsQuery.refetch(); },
+    retryMessages: () => { if (canRead && selectedConversationId) void messagesQuery.refetch(); },
+    retryAuthorization: () => {
+      if (!canRead || reauthorizing) return;
+      setAuthorizationRefresh({ identity: identityKey, pending: true });
+      void Promise.all([conversationsQuery.refetch(), ...(selectedConversationId ? [messagesQuery.refetch()] : [])])
+        .finally(() => setAuthorizationRefresh(current => current?.identity === identityKey ? { ...current, pending: false } : current));
+    },
     isChangingMode: takeOverMutation.isPending || releaseMutation.isPending,
     isSending: sendMessageMutation.isPending,
     isDeleting: deleteMutation.isPending,

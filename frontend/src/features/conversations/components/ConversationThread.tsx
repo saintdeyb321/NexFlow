@@ -13,13 +13,14 @@ interface ConversationThreadProps {
   messages: Message[];
   isChangingMode: boolean;
   isSending: boolean;
+  readOnly?: boolean;
   onTakeOver: () => void;
   onRelease: () => void;
   onSendMessage: (content: string) => Promise<ManualMessageResult>;
 }
 
 export const ConversationThread = ({
-  chat, messages, isChangingMode, isSending, onTakeOver, onRelease, onSendMessage
+  chat, messages, isChangingMode, isSending, readOnly = false, onTakeOver, onRelease, onSendMessage
 }: ConversationThreadProps) => {
   const { can } = usePermissions();
   const toast = useToast();
@@ -42,7 +43,7 @@ export const ConversationThread = ({
     messagesEndRef.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
   }, [messages]);
   const handleSend = async () => {
-    if (!newMessage.trim()) return;
+    if (readOnly || isSending || isChangingMode || !newMessage.trim() || !can('CONVERSATIONS', 'SEND_MESSAGE')) return;
     try {
       const result = await onSendMessage(newMessage.trim());
       setNewMessage('');
@@ -64,12 +65,12 @@ export const ConversationThread = ({
         </div>
         <div>
           {chat.mode === 'Automatic' ? (
-            <Button variant="secondary" isLoading={isChangingMode} onClick={onTakeOver} disabled={isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="shrink-0">
+            <Button variant="secondary" isLoading={isChangingMode} onClick={onTakeOver} disabled={readOnly || isChangingMode || !can('CONVERSATIONS', 'TAKEOVER')} className="shrink-0">
               {!isChangingMode && <User aria-hidden="true" className="w-4 h-4 mr-2" />}
               {isChangingMode ? 'Procesando...' : 'Asumir Control'}
             </Button>
           ) : (
-            <Button variant="secondary" isLoading={isChangingMode} onClick={onRelease} disabled={isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="shrink-0">
+            <Button variant="secondary" isLoading={isChangingMode} onClick={onRelease} disabled={readOnly || isChangingMode || !can('CONVERSATIONS', 'RELEASE')} className="shrink-0">
               {!isChangingMode && <Bot aria-hidden="true" className="w-4 h-4 mr-2" />}
               {isChangingMode ? 'Procesando...' : 'Reactivar IA'}
             </Button>
@@ -148,12 +149,12 @@ export const ConversationThread = ({
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder={chat.mode === 'Automatic' ? 'Bloqueado. Asume el control manual para enviar un mensaje...' : 'Escribe un mensaje al cliente...'}
-            disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !can('CONVERSATIONS', 'SEND_MESSAGE')}
+            disabled={readOnly || chat.mode === 'Automatic' || isSending || isChangingMode || !can('CONVERSATIONS', 'SEND_MESSAGE')}
             className="flex-1 min-w-0"
           />
           <IconButton variant="primary" label="Enviar mensaje"
             isLoading={isSending} onClick={handleSend}
-            disabled={chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim() || !can('CONVERSATIONS', 'SEND_MESSAGE')}
+            disabled={readOnly || chat.mode === 'Automatic' || isSending || isChangingMode || !newMessage.trim() || !can('CONVERSATIONS', 'SEND_MESSAGE')}
             className="shrink-0"
           >
             <Send aria-hidden="true" className="w-5 h-5" />

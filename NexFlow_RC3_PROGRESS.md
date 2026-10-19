@@ -5,10 +5,10 @@ Antes de cada sesión leer `AGENTS.md`, `NexFlow_PLAN_MAESTRO_CORRECCION_MVP_RC3
 
 ## Estado
 
-- Sprint actual: **1**, implementado y verificado localmente; detenido para revisión. Sprint 0 aprobado por el usuario.
-- HEAD local al iniciar Sprint 1: `7c7f6d071378d7c38f224208c6172abf1892a7f5`; árbol limpio, conservado. Base de aplicación: `67016bdb37c054711e57e0ac3c048b9999eedae6`. Sin consulta a GitHub.
-- Autorización: exclusivamente NF-01/02/03/06. **Próximo sprint autorizado: ninguno. Sprint 2 NO autorizado.**
-- Veredicto: **SPRINT 1 APROBABLE**. No constituye GO de despliegue: NF-04/05 y evidencia operacional pendientes.
+- Sprint actual: **2**, implementado y verificado localmente; detenido para revisión. Sprint 1 aprobado por el usuario.
+- HEAD local al iniciar Sprint 2: `785a4f3c481b23033b76da0fc7f58aba2965aafc`; árbol limpio, conservado. Sin consulta a GitHub.
+- Autorización: exclusivamente NF-04/05/07. **Próximo sprint autorizado: ninguno. Sprint 3 NO autorizado.**
+- Veredicto: **SPRINT 2 APROBABLE**. No constituye GO de despliegue; la evidencia operacional del incidente continúa pendiente.
 
 ## Evidencia y decisiones del Sprint 0 (histórico)
 
@@ -74,7 +74,7 @@ Backend (rutas relativas a `backend/`):
 
 Registros: `NexFlow_RC3_PROGRESS.md`, `INCIDENTE_CAUSA_RAIZ.md`. Frontend: ninguno.
 
-## Validación Sprint 1 y pendientes
+## Validación Sprint 1 y pendientes (histórico)
 
 - `dotnet build backend/backend.slnx --no-restore`: correcto. Último build incremental: cero errores/advertencias; recompilación previa mostró los tres warnings preexistentes CS8981 x2 / CS8602 x1.
 - `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore`: **531 totales, 530 aprobadas, 1 fallida, 0 omitidas**. Única roja: NF-05, Sprint 2. NF-02/03 y control del incidente verdes.
@@ -82,4 +82,52 @@ Registros: `NexFlow_RC3_PROGRESS.md`, `INCIDENTE_CAUSA_RAIZ.md`. Frontend: ningu
 - `node --test tests/rc3-inbox-browser.test.mjs` desde frontend: **3 totales, 1 aprobada, 2 fallidas NF-04, 0 omitidas**; respuestas HTTP simuladas, sin modificar frontend ni debilitar/omitir las pruebas.
 - SQLite ejecuta los predicados reales con adaptación exclusivamente del sufijo de locks; **no certifica concurrencia de dos workers ni SKIP LOCKED PostgreSQL**. Se mantienen sin cambio NOT EXISTS, locks y single-claim. Recuperación de operaciones comerciales/replay/handoff y transporte concurrente cubierta con los fakes existentes.
 - Pendiente en Oracle: imagen activa, trazas/estados del incidente y evidencia del proveedor. Verificar que el colector conserve scopes WorkspaceId/InboundId; validar costo del diagnóstico con volumen real. No se ejecutó nada en servidores ni servicios externos.
-- No autorizar Sprint 2 ni despliegue automáticamente. Causa operacional única: **PENDIENTE DE EVIDENCIA**.
+- Al cerrar Sprint 1, Sprint 2 aún no estaba autorizado. La autorización posterior y resultados se registran debajo. Causa operacional única: **PENDIENTE DE EVIDENCIA**.
+
+## Sprint 2 — criterios y decisiones
+
+- **NF-05 OK:** el parser existente reconoce frases completas de selección con cardinales/ordinales. Se conserva fingerprint, índice/página, revalidación de datos y módulos; menú caducado se actualiza, selección inválida aclara. No extrae índices de DNI, teléfonos, cantidades, fechas, horas o instrucciones mixtas. No confirma operaciones comerciales. Borradores/replay/interrupciones y cuotas existentes conservados.
+- La secuencia del incidente sigue generando cinco respuestas, sin pedidos/reservas. Ahora usa **dos llamadas IA en lugar de tres**: selección sin picker válido se aclara determinísticamente. Se actualizó únicamente ese conteo del control; las aserciones de aceptación NF-05 y las dos NF-04 no se cambiaron.
+- **NF-04 OK:** errores/reintentos independientes por panel; caché autorizada sigue visible con aviso de desactualización ante 500/503/network. Acciones bloqueadas durante error/revalidación; 401/403 o READ revocado ocultan datos. Recuperación tras denegación espera ambas consultas. Estado de servidor permanece en TanStack Query; el único estado nuevo es el envío de la recuperación conjunta, ligado a identidad. Borrador de texto/dialogo ligado a usuario/workspace/chat. Polling continúa en 15 s y se pausa en pestaña oculta, sin reenvíos.
+- **NF-07 OK:** AddMessage escribe mensaje y máximo de actividad en una transacción; conserva timestamp original y TTL de 90 días. Confirmación outbound compara contra el snapshot que ya leía, sin lectura extra. CreateConversation también conserva el máximo en caso de reescritura; GetOrCreate genera un documento nuevo. Handoff/cierre/fallos no escriben lastMessageAt. Actualización optimista frontend tampoco retrocede la actividad.
+- Costo: una lectura de conversación por AddMessage, necesaria para comparar bajo concurrencia, manteniendo las dos escrituras; reintentos de conflicto pueden repetir lecturas. CreateConversation añade una lectura para impedir el bypass por upsert. Sin listener, colección, índice, campo o contrato nuevo.
+- Fake Firestore ampliado para ejecutar filtros, orden y cursores reales del contrato usado por las pruebas; no equivale a certificar el motor ni sus índices/cuotas reales.
+
+## Archivos de Sprint 2
+
+Backend:
+
+- `backend/NexFlow.Application/Features/Automation/ProcessMessage/Services/ConversationRecoveryService.cs`
+- `backend/NexFlow.Infrastructure/Persistence/Firestore/FirestoreConversationRepository.cs`
+- `backend/NexFlow.Tests/Fakes/InMemoryFirestore.cs`
+- `backend/NexFlow.Tests/Rc3Sprint0IncidentTests.cs`
+- `backend/NexFlow.Tests/Rc3Sprint2MenuTests.cs` (nuevo)
+- `backend/NexFlow.Tests/Rc3Sprint2ActivityTests.cs` (nuevo)
+
+Frontend:
+
+- `frontend/src/features/conversations/hooks/useConversations.ts`
+- `frontend/src/features/conversations/pages/InboxPage.tsx`
+- `frontend/src/features/conversations/components/ConversationThread.tsx`
+- `frontend/tests/rc3-inbox-browser.test.mjs`
+- `frontend/tests/rc3-inbox-preview.server.mjs`
+- `frontend/tests/fixtures/rc3-inbox-api.ts`
+- `frontend/tests/fixtures/rc3-inbox-preview.tsx`
+- `frontend/tests/fixtures/rc3-inbox-store.ts` (nuevo; no modifica fixtures de otros módulos)
+
+Registros: `NexFlow_RC3_PROGRESS.md`, `INCIDENTE_CAUSA_RAIZ.md`.
+
+## Validación Sprint 2 y pendientes
+
+| Comando | Resultado real final |
+|---|---|
+| `dotnet build backend/backend.slnx --no-restore` | Correcto, 0 errores; 3 warnings preexistentes: CS8981 x2, CS8602 x1. |
+| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore` | **565 aprobadas, 0 fallidas, 0 omitidas**: 531 previas + 34 nuevas. Incluye controles Sprint 1, reservas/pedidos/handoff, Redis, UnknownDelivery y secuencia del incidente. |
+| `npm run build` desde frontend | Correcto; `dist` generado. Warning conocido de chunk JS >500 kB (710,65 kB). |
+| `npm run lint` desde frontend | Correcto, exit 0. |
+| `node --test tests/rc3-inbox-browser.test.mjs` desde frontend | **18 aprobadas, 0 fallidas, 0 omitidas**: tres originales + quince nuevas. Incluye recuperación independiente/conjunta, sin caché, 0/500/503, 401/403 con GET pendiente, revocación READ, selección, workspace/respuesta tardía, cinco estados outbound, móvil y pausa real de polling 16 s. |
+| `node --test tests/workspace-navigation.test.ts tests/whatsapp-state.test.ts tests/navigation-browser.test.mjs tests/evolution-navigation-browser.test.mjs` desde frontend | **41 aprobadas, 0 fallidas, 0 omitidas**. Error React deliberado de la fixture de error boundary contenido correctamente; no error de aplicación real. |
+
+Las tres rojas anteriores (NF-05 + dos NF-04) están verdes, sin skips ni debilitamiento de esas aserciones. Revisión del diff limitada al sprint; sin cambios de contratos, infraestructura, dependencias, configuración, secretos, plan maestro, AGENTS, PDF, n8n o Evolution.
+
+Pendiente: validación con Firestore/PostgreSQL reales, índices/cuotas/latencias bajo carga y evidencia operacional de Oracle. Los fakes verifican intercalados/serialización/lógica, no certifican disponibilidad, límites Spark ni locks PostgreSQL. Nuevas transacciones pueden reintentar bajo contención. Nada ejecutado en servicios externos; sin commit, push, migraciones ni despliegue. **Sprint 3 NO autorizado.**

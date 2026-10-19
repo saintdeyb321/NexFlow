@@ -8,7 +8,7 @@ export const startPreview = async () => {
   const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false, plugins: [
     { name: 'rc3-inbox-local-boundaries', enforce: 'pre', resolveId(id) {
       if (id.endsWith('/api/axiosClient')) return fixture('rc3-inbox-api.ts');
-      if (id.endsWith('/store/useAuthStore')) return fixture('evolution-navigation-store.ts');
+      if (id.endsWith('/store/useAuthStore')) return fixture('rc3-inbox-store.ts');
     } }, react(), tailwindcss(),
   ], server: { host: '127.0.0.1', port: 0 } });
   await server.listen(); return { server, url: `${server.resolvedUrls.local[0]}tests/fixtures/rc3-inbox-preview.html` };

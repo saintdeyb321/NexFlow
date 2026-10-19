@@ -27,6 +27,10 @@ public class FirestoreConversationRepository : IConversationRepository
     private static readonly TimeSpan TransportLease = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan EchoWindow = TimeSpan.FromMinutes(10);
 
+    private static DateTime LatestActivity(DocumentSnapshot conversation, DateTime candidate)
+        => conversation.TryGetValue<Timestamp>("lastMessageAt", out var current) && current.ToDateTime() > candidate
+            ? current.ToDateTime() : candidate;
+
     private static MessageRecord NormalizeAttempt(DocumentSnapshot snapshot)
     {
         var message = MapMessage(snapshot);
@@ -158,7 +162,7 @@ public class FirestoreConversationRepository : IConversationRepository
             ["externalMessageId"] = externalMessageId, ["phone"] = phone
         });
         if (conversation.Exists)
-            transaction.Update(conversationRef, new Dictionary<string, object> { ["lastMessageAt"] = DateTime.UtcNow });
+            transaction.Update(conversationRef, new Dictionary<string, object> { ["lastMessageAt"] = LatestActivity(conversation, DateTime.UtcNow) });
         return persistedOrigin;
     }
 
@@ -372,7 +376,13 @@ public class FirestoreConversationRepository : IConversationRepository
             { "startedAt", DateTime.SpecifyKind(conversation.StartedAt, DateTimeKind.Utc) },
             { "lastMessageAt", DateTime.SpecifyKind(conversation.LastMessageAt, DateTimeKind.Utc) }, { "expiresAt", expiresAt }
         };
-        await GetCollection(workspaceId).Document(conversation.Id).SetAsync(data, cancellationToken: cancellationToken);
+        var conversationRef = GetCollection(workspaceId).Document(conversation.Id);
+        await _db.RunTransactionAsync(async transaction =>
+        {
+            var existing = await transaction.GetSnapshotAsync(conversationRef, cancellationToken);
+            if (existing.Exists) data["lastMessageAt"] = LatestActivity(existing, DateTime.SpecifyKind(conversation.LastMessageAt, DateTimeKind.Utc));
+            transaction.Set(conversationRef, data);
+        }, cancellationToken: cancellationToken);
     }
 
     public async Task SetHandoffAsync(Guid workspaceId, string conversationId, string phone, ConversationMode mode, HandoffReason reason, CancellationToken cancellationToken)
@@ -418,8 +428,18 @@ public class FirestoreConversationRepository : IConversationRepository
         if (message.LastError != null) data["lastError"] = message.LastError;
         if (!string.IsNullOrEmpty(message.ExternalMessageId)) data["externalMessageId"] = message.ExternalMessageId;
 
-        await GetCollection(workspaceId).Document(conversationId).Collection("messages").Document(message.Id).SetAsync(data, cancellationToken: cancellationToken);
-        await GetCollection(workspaceId).Document(conversationId).UpdateAsync(new Dictionary<string, object> { { "lastMessageAt", DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc) }, { "expiresAt", expiresAt } }, cancellationToken: cancellationToken);
+        var conversationRef = GetCollection(workspaceId).Document(conversationId);
+        await _db.RunTransactionAsync(async transaction =>
+        {
+            var conversation = await transaction.GetSnapshotAsync(conversationRef, cancellationToken);
+            if (!conversation.Exists) throw new KeyNotFoundException("Conversation not found.");
+            transaction.Set(conversationRef.Collection("messages").Document(message.Id), data);
+            transaction.Update(conversationRef, new Dictionary<string, object>
+            {
+                ["lastMessageAt"] = LatestActivity(conversation, DateTime.SpecifyKind(message.Timestamp, DateTimeKind.Utc)),
+                ["expiresAt"] = expiresAt
+            });
+        }, cancellationToken: cancellationToken);
     }
 
     public async Task<(int Conversations, int? Handoffs)> CountForPeriodAsync(Guid workspaceId, DateTime start, DateTime end, CancellationToken ct)
