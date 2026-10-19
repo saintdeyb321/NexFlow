@@ -18,6 +18,7 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
             .HasFilter("\"SourceMessageId\" IS NOT NULL");
 
         // RESTRICCIÓN DE HIERRO (Nivel BD): Evita doble reserva exacta al mismo tiempo
-        builder.HasIndex(r => new { r.WorkspaceId, r.LocationId, r.ServiceId, r.StartTime }).IsUnique();
+        builder.HasIndex(r => new { r.WorkspaceId, r.LocationId, r.ServiceId, r.StartTime }).IsUnique()
+            .HasFilter("\"Status\" <> 'Cancelled'");
     }
 }

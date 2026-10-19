@@ -106,7 +106,7 @@ public sealed class AssistantRc11Tests
             _reservations.Setup(r => r.Add(It.IsAny<Reservation>())).Callback<Reservation>(Created.Add);
             var uow = new Mock<IUnitOfWork>(MockBehavior.Strict); uow.Setup(u => u.SaveChangesAsync(default)).ReturnsAsync(1);
             var outbox = new Mock<IOutboxRepository>(MockBehavior.Strict); outbox.Setup(o => o.AddAsync(It.IsAny<OutboxMessage>(), default)).Returns(Task.CompletedTask);
-            _engine = new(_reservations.Object, catalog.Object, hours.Object, _profiles.Object, locations.Object, uow.Object, availability.Object, clock.Object, outbox.Object);
+            _engine = new(_reservations.Object, catalog.Object, hours.Object, _profiles.Object, locations.Object, uow.Object, availability.Object, clock.Object, outbox.Object, new NexFlow.Tests.Fakes.InMemoryReservationResourceCoordinator());
             var entitlements = new Mock<IEntitlementService>(); entitlements.Setup(e => e.GetAvailableModuleCodesAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), default)).ReturnsAsync(_modules);
             _booking = new(_offerings.Object, new LocationResolverService(locations.Object), _engine, locations.Object, hours.Object, entitlements.Object, _contexts, _reservations.Object, _profiles.Object, Mock.Of<IKnowledgeService>(MockBehavior.Strict));
             _recovery = new(_contexts, states, _offerings.Object, locations.Object, hours.Object, _engine, clock.Object, Options.Create(new AssistantRecoveryOptions()), _profiles.Object);

@@ -39,7 +39,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
     [InlineData(false)] [InlineData(true)]
     public async Task Shared_category_edit_or_delete_atomically_invalidates_both_scopes(bool delete)
     {
-        var f = await Create(); var repo = new FirestoreCatalogRepository(f.Firestore.Db);
+        var f = await Create(); var repo = new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources);
         var category = new BusinessCategoryDto { Id = "shared", Name = "Shared", Scope = "SHARED", IsActive = true };
         await repo.SaveCategoryAsync(f.WorkspaceId, category, true, default);
         await Seed(f, "PRODUCT"); await Seed(f, "SERVICE");
@@ -59,7 +59,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
         f.Firestore.BeforeCommit = _ => new IOException("Simulated Firestore outage");
         await Assert.ThrowsAsync<IOException>(() => Edit(f, "PRODUCT", "Not committed"));
         f.Firestore.BeforeCommit = null;
-        Assert.Equal("Original", (await new FirestoreCatalogRepository(f.Firestore.Db).GetItemByIdAsync(f.WorkspaceId, "product", default))!.Name);
+        Assert.Equal("Original", (await new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources).GetItemByIdAsync(f.WorkspaceId, "product", default))!.Name);
         Assert.Equal(CatalogArtifactStatus.Current, (await f.Artifacts.GetCurrentArtifactAsync(f.WorkspaceId, "PRODUCT", default))!.Status);
         f.Firestore.AfterCommit = _ => new IOException("Simulated crash after commit");
         await Assert.ThrowsAsync<IOException>(() => Edit(f, "PRODUCT", "Committed"));
@@ -120,7 +120,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
     public async Task Simultaneous_mutations_in_two_workspaces_keep_their_sources_and_artifacts_isolated()
     {
         var f = await Create(); var b = Guid.NewGuid(); await Profile(f, b);
-        var repo = new FirestoreCatalogRepository(f.Firestore.Db);
+        var repo = new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources);
         await repo.SaveItemAsync(b, Product("Original"), true, default); await Seed(f, "PRODUCT"); await Seed(f, "PRODUCT", workspace: b);
         await Task.WhenAll(Edit(f, "PRODUCT", "Workspace A"), repo.SaveItemAsync(b, Product("Workspace B"), false, default));
         Assert.Equal("Workspace A", (await repo.GetItemByIdAsync(f.WorkspaceId, "product", default))!.Name);
@@ -151,8 +151,8 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
     {
         var f = await Create(); await Seed(f, "PRODUCT"); await Seed(f, "SERVICE");
         if (mutation == "profile") await new FirestoreBusinessProfileRepository(f.Firestore.Db).SaveProfileAsync(f.WorkspaceId, new("New name", "", "", "", ""), default);
-        else if (mutation == "location") await new FirestoreLocationRepository(f.Firestore.Db).SaveLocationAsync(f.WorkspaceId, new("new-location", "Main", "Address", null, null, true), true, 10, default);
-        else await new FirestoreCatalogRepository(f.Firestore.Db).DeleteItemAsync(f.WorkspaceId, "product", default);
+        else if (mutation == "location") await new FirestoreLocationRepository(f.Firestore.Db, f.Firestore.Resources).SaveLocationAsync(f.WorkspaceId, new("new-location", "Main", "Address", null, null, true), true, 10, default);
+        else await new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources).DeleteItemAsync(f.WorkspaceId, "product", default);
         Assert.Equal(CatalogArtifactStatus.Stale, (await f.Service.GetArtifactAsync(f.WorkspaceId, "PRODUCT", default))!.Status);
         Assert.Equal(mutation == "delete" ? CatalogArtifactStatus.Current : CatalogArtifactStatus.Stale,
             (await f.Service.GetArtifactAsync(f.WorkspaceId, "SERVICE", default))!.Status);
@@ -168,9 +168,9 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
         Assert.IsType<OkObjectResult>(await CatalogCallbackTests.Callback(f, workspace, active.GenerationId!, active.SourceHash, pdfUrl: "https://storage.example.test/duplicate.pdf"));
         var duplicate = (await f.Artifacts.GetCurrentArtifactAsync(workspace.Id, "PRODUCT", default))!;
         Assert.Equal(current.PersistenceVersion, duplicate.PersistenceVersion); Assert.Equal(current.PdfUrl, duplicate.PdfUrl);
-        await new FirestoreCatalogRepository(f.Firestore.Db).SaveItemAsync(workspace.Id, Product("New source"), true, default);
+        await new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources).SaveItemAsync(workspace.Id, Product("New source"), true, default);
         var newer = await f.Generate(workspace: workspace.Id);
-        await new FirestoreCatalogRepository(f.Firestore.Db).SaveItemAsync(workspace.Id, Product("Changed again"), false, default);
+        await new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources).SaveItemAsync(workspace.Id, Product("Changed again"), false, default);
         Assert.IsType<OkObjectResult>(await CatalogCallbackTests.Callback(f, workspace, newer.GenerationId!, newer.SourceHash));
         var rejected = (await f.Artifacts.GetCurrentArtifactAsync(workspace.Id, "PRODUCT", default))!;
         Assert.Equal(CatalogArtifactStatus.Failed, rejected.Status); Assert.Equal(current.PdfUrl, rejected.PdfUrl);
@@ -196,7 +196,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
         var workspace = Mock.Of<IWorkspaceContext>(c => c.CurrentWorkspaceId == f.WorkspaceId);
         var entitlements = new Mock<IEntitlementService>();
         entitlements.Setup(e => e.GetAvailableModuleCodesAsync(f.WorkspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { "CATALOG", "SERVICES" });
-        var controller = new CatalogController(new FirestoreCatalogRepository(f.Firestore.Db), workspace, entitlements.Object);
+        var controller = new CatalogController(new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources), workspace, entitlements.Object);
         var result = Assert.IsType<OkObjectResult>(await controller.GetArtifactStatus(scope, f.Service, default));
         var dto = Assert.IsType<ArtifactStatusDto>(result.Value); Assert.Equal("STALE", dto.Status); Assert.Equal(previous.PdfUrl, dto.PdfUrl);
     }
@@ -205,7 +205,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
     [InlineData("PRODUCT")] [InlineData("SERVICE")]
     public async Task Read_rechecks_the_source_fence_even_when_an_interleaved_edit_happened_after_items_were_read(string scope)
     {
-        var f = await Create(); await Seed(f, scope); var repo = new FirestoreCatalogRepository(f.Firestore.Db);
+        var f = await Create(); await Seed(f, scope); var repo = new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources);
         var interleaved = false; var source = new Mock<ICatalogRepository>(MockBehavior.Strict);
         source.Setup(c => c.GetActiveCategoriesAsync(f.WorkspaceId, It.IsAny<CancellationToken>()))
             .Returns((Guid w, CancellationToken ct) => repo.GetActiveCategoriesAsync(w, ct));
@@ -223,7 +223,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
     [Fact]
     public async Task Reuse_path_also_checks_the_fence_after_its_second_source_read_without_spending_quota()
     {
-        var f = await Create(); await Seed(f, "PRODUCT"); var repo = new FirestoreCatalogRepository(f.Firestore.Db);
+        var f = await Create(); await Seed(f, "PRODUCT"); var repo = new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources);
         var reads = 0; var source = new Mock<ICatalogRepository>(MockBehavior.Strict);
         source.Setup(c => c.GetActiveCategoriesAsync(f.WorkspaceId, It.IsAny<CancellationToken>()))
             .Returns((Guid w, CancellationToken ct) => repo.GetActiveCategoriesAsync(w, ct));
@@ -242,14 +242,14 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
     private static async Task<CatalogFixture> Create()
     {
         var f = new CatalogFixture(useRealSources: true); await Profile(f, f.WorkspaceId);
-        var repo = new FirestoreCatalogRepository(f.Firestore.Db);
+        var repo = new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources);
         await repo.SaveItemAsync(f.WorkspaceId, Product("Original"), true, default);
         await repo.SaveItemAsync(f.WorkspaceId, Service("Original"), true, default); return f;
     }
     private static Task Profile(CatalogFixture f, Guid w) => new FirestoreBusinessProfileRepository(f.Firestore.Db).SaveProfileAsync(w, new("Business", "", "", "", ""), default);
     private static ProductDto Product(string name) => new() { Id = "product", Name = name, Currency = "PEN", LocationScope = "ALL", IsActive = true, PriceMinorUnits = 100 };
     private static ServiceDto Service(string name) => new() { Id = "service", Name = name, Currency = "PEN", LocationScope = "ALL", IsActive = true, DurationInMinutes = 30, RequiresReservation = true };
-    private static Task Edit(CatalogFixture f, string scope, string name) => new FirestoreCatalogRepository(f.Firestore.Db).SaveItemAsync(f.WorkspaceId, scope == "PRODUCT" ? Product(name) : Service(name), false, default);
+    private static Task Edit(CatalogFixture f, string scope, string name) => new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources).SaveItemAsync(f.WorkspaceId, scope == "PRODUCT" ? Product(name) : Service(name), false, default);
     private static async Task<CatalogArtifact> Seed(CatalogFixture f, string scope, bool uploaded = false, Guid? workspace = null)
     {
         var artifact = CatalogArtifact.Initialize(workspace ?? f.WorkspaceId, scope);
@@ -258,7 +258,7 @@ public sealed class Rc3Sprint3ArtifactConsistencyTests
         else { artifact.MarkAsGenerating(hash, Guid.NewGuid().ToString("N"), CatalogFixture.Design); artifact.CompleteGeneration("https://storage.example.test/previous.pdf"); }
         await f.Artifacts.SaveArtifactAsync(artifact, default); return artifact;
     }
-    private static CatalogGenerationService Restart(CatalogFixture f, ICatalogRepository? source = null) => new(source ?? new FirestoreCatalogRepository(f.Firestore.Db), new FirestoreCatalogArtifactRepository(f.Firestore.Db),
-        new FirestoreCatalogArtifactRepository(f.Firestore.Db), new CatalogHashService(), new FirestoreBusinessProfileRepository(f.Firestore.Db), new FirestoreLocationRepository(f.Firestore.Db),
+    private static CatalogGenerationService Restart(CatalogFixture f, ICatalogRepository? source = null) => new(source ?? new FirestoreCatalogRepository(f.Firestore.Db, f.Firestore.Resources), new FirestoreCatalogArtifactRepository(f.Firestore.Db),
+        new FirestoreCatalogArtifactRepository(f.Firestore.Db), new CatalogHashService(), new FirestoreBusinessProfileRepository(f.Firestore.Db), new FirestoreLocationRepository(f.Firestore.Db, f.Firestore.Resources),
         f.Storage.Object, new FirestoreCatalogUploadRepository(f.Firestore.Db), f.Outbox.Object, f.UnitOfWork.Object, NullLogger<CatalogGenerationService>.Instance);
 }

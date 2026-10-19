@@ -46,9 +46,9 @@ public sealed class CatalogFixture
             .ReturnsAsync((Stream _, string name, string folder, CancellationToken _) => new StoredPdfAsset($"https://storage.example.test/{folder}/{name}", $"{folder}/{name}"));
         Storage.Setup(r => r.DeletePdfAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         Clock.SetupGet(c => c.UtcNow).Returns(() => Now);
-        Service = new(useRealSources ? new FirestoreCatalogRepository(Firestore.Db) : Catalog.Object, Artifacts, Artifacts, new CatalogHashService(),
+        Service = new(useRealSources ? new FirestoreCatalogRepository(Firestore.Db, Firestore.Resources) : Catalog.Object, Artifacts, Artifacts, new CatalogHashService(),
             useRealSources ? new FirestoreBusinessProfileRepository(Firestore.Db) : Profiles.Object,
-            useRealSources ? new FirestoreLocationRepository(Firestore.Db) : Locations.Object,
+            useRealSources ? new FirestoreLocationRepository(Firestore.Db, Firestore.Resources) : Locations.Object,
             Storage.Object, Uploads, Outbox.Object, UnitOfWork.Object, NullLogger<CatalogGenerationService>.Instance,
             Options.Create(new CatalogGenerationOptions { TimeoutMinutes = timeoutMinutes }), Clock.Object);
     }

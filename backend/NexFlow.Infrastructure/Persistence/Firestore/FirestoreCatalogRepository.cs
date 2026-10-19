@@ -4,14 +4,18 @@ using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
 using NexFlow.Domain.Exceptions;
+using NexFlow.Application.Features.Reservations;
+using NexFlow.Application.Common;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreCatalogRepository : ICatalogRepository
 {
     private readonly FirestoreDb _firestoreDb;
+    private readonly IReservationResourceCoordinator _resources;
 
-    public FirestoreCatalogRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
+    public FirestoreCatalogRepository(FirestoreDb firestoreDb, IReservationResourceCoordinator resources)
+    { _firestoreDb = firestoreDb; _resources = resources; }
 
     // =========================================================
     // CATEGORÍAS
@@ -140,7 +144,10 @@ public class FirestoreCatalogRepository : ICatalogRepository
         return snapshot.Documents.Select(MapToItemDto);
     }
 
-    public async Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, CancellationToken cancellationToken)
+    public Task SaveItemAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, CancellationToken cancellationToken) =>
+        SaveItemCoreAsync(workspaceId, item, isCreate, null, cancellationToken);
+
+    private async Task SaveItemCoreAsync(Guid workspaceId, BusinessOfferingDto item, bool isCreate, ReservationResourceMutation? operation, CancellationToken cancellationToken)
     {
         item.Name = item.Name?.Trim() ?? "";
         item.Currency = item.Currency?.Trim().ToUpperInvariant() ?? "";
@@ -168,6 +175,21 @@ public class FirestoreCatalogRepository : ICatalogRepository
         var docId = string.IsNullOrEmpty(item.Id) ? Guid.NewGuid().ToString() : item.Id;
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(docId);
 
+        if (item is ServiceDto requested && operation == null)
+        {
+            requested.Id = docId;
+            var stamp = await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Service, docId), cancellationToken);
+            var previous = await GetItemByIdAsync(workspaceId, docId, cancellationToken) as ServiceDto;
+            if (CriticalChange(previous, requested))
+            {
+                var change = new ReservationResourceChange("SaveService", requested, isCreate,
+                    !requested.IsActive || !requested.RequiresReservation || requested.DurationInMinutes != previous?.DurationInMinutes,
+                    requested.LocationScope == "ALL" ? null : requested.LocationIds.ToArray());
+                await ReconcileMutationAsync(await _resources.BeginAsync(stamp, change, cancellationToken), cancellationToken);
+                return;
+            }
+        }
+
         var serviceData = item as ServiceDto;
 
         var data = new FirestoreCatalogItem
@@ -190,7 +212,7 @@ public class FirestoreCatalogRepository : ICatalogRepository
         };
 
         var workspace = docRef.Parent.Parent!;
-        await _firestoreDb.RunTransactionAsync(async tx =>
+        async Task<Result> Write(Transaction tx)
         {
             await tx.GetSnapshotAsync(workspace, cancellationToken);
             var existing = await tx.GetSnapshotAsync(docRef, cancellationToken);
@@ -198,6 +220,8 @@ public class FirestoreCatalogRepository : ICatalogRepository
             if (!isCreate && !existing.Exists) throw new KeyNotFoundException("Offering no encontrado.");
             if (existing.Exists && MapToItemDto(existing).Type != item.Type)
                 throw new DomainException("No se puede cambiar el tipo del offering.");
+            if (item is ServiceDto currentService && operation == null && CriticalChange(existing.Exists ? MapToItemDto(existing) as ServiceDto : null, currentService))
+                throw new ConcurrencyException("La disponibilidad del servicio cambió. Vuelve a consultar antes de editar.");
             foreach (var locationId in item.LocationIds)
             {
                 var location = await tx.GetSnapshotAsync(workspace.Collection("locations").Document(locationId), cancellationToken);
@@ -215,20 +239,62 @@ public class FirestoreCatalogRepository : ICatalogRepository
             await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, workspace, item.Type, cancellationToken);
             tx.Set(docRef, data);
             tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
-        }, cancellationToken: cancellationToken);
+            return Result.Success();
+        }
+        var result = operation == null
+            ? await _firestoreDb.RunTransactionAsync(Write, cancellationToken: cancellationToken)
+            : await new ReservationResourceFence(_firestoreDb, _resources).ApplyAsync(operation, Write, cancellationToken);
+        if (result.Error.Code == "Resource.Conflict") throw new ConcurrencyException(result.Error.Description);
+        if (result.IsFailure) throw new DomainException(result.Error.Description);
     }
 
-    public async Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken)
+    public Task DeleteItemAsync(Guid workspaceId, string itemId, CancellationToken cancellationToken) =>
+        DeleteItemCoreAsync(workspaceId, itemId, null, cancellationToken);
+
+    private async Task DeleteItemCoreAsync(Guid workspaceId, string itemId, ReservationResourceMutation? operation, CancellationToken cancellationToken)
     {
         var docRef = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString()).Collection("catalogItems").Document(itemId);
-        await _firestoreDb.RunTransactionAsync(async tx =>
+        if (operation == null)
+        {
+            var existing = await GetItemByIdAsync(workspaceId, itemId, cancellationToken);
+            if (existing is ServiceDto)
+            {
+                var stamp = await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Service, itemId), cancellationToken);
+                await ReconcileMutationAsync(await _resources.BeginAsync(stamp, new("DeactivateService"), cancellationToken), cancellationToken);
+                return;
+            }
+        }
+        async Task<Result> Write(Transaction tx)
         {
             var item = await tx.GetSnapshotAsync(docRef, cancellationToken);
             if (!item.Exists) throw new KeyNotFoundException("Offering no encontrado.");
+            if (MapToItemDto(item) is ServiceDto && operation == null)
+                throw new ConcurrencyException("La baja del servicio requiere coordinación.");
             await FirestoreCatalogArtifactRepository.InvalidateForMutationAsync(tx, docRef.Parent.Parent!, MapToItemDto(item).Type, cancellationToken);
             tx.Update(docRef, new Dictionary<string, object> { ["IsActive"] = false });
-        }, cancellationToken: cancellationToken);
+            return Result.Success();
+        }
+        var result = operation == null ? await _firestoreDb.RunTransactionAsync(Write, cancellationToken: cancellationToken)
+            : await new ReservationResourceFence(_firestoreDb, _resources).ApplyAsync(operation, Write, cancellationToken);
+        if (result.IsFailure) throw new DomainException(result.Error.Description);
     }
+
+    public Task ReconcileMutationAsync(ReservationResourceMutation operation, CancellationToken ct)
+    {
+        var change = ReservationResourceFence.Decode(operation);
+        if (operation.Key.Kind != ReservationResourceKind.Service) throw new InvalidOperationException("Wrong resource kind.");
+        return change.Action switch
+        {
+            "SaveService" when change.Service?.Id == operation.Key.Id => SaveItemCoreAsync(operation.Key.WorkspaceId, change.Service, change.IsCreate, operation, ct),
+            "DeactivateService" => DeleteItemCoreAsync(operation.Key.WorkspaceId, operation.Key.Id, operation, ct),
+            _ => throw new InvalidOperationException("Invalid service mutation.")
+        };
+    }
+
+    private static bool CriticalChange(ServiceDto? previous, ServiceDto requested) => previous == null
+        || previous.IsActive != requested.IsActive || previous.RequiresReservation != requested.RequiresReservation
+        || previous.DurationInMinutes != requested.DurationInMinutes || !previous.LocationScope.Equals(requested.LocationScope, StringComparison.OrdinalIgnoreCase)
+        || (requested.LocationScope == "SPECIFIC" && !previous.LocationIds.ToHashSet(StringComparer.Ordinal).SetEquals(requested.LocationIds));
 
     // =========================================================
     // MAPPERS Y CLASES INTERNAS FIRESTORE

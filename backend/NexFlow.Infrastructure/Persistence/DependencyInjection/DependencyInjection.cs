@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<IMembershipRepository, MembershipRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IReservationRepository, ReservationRepository>();
+        services.AddScoped<NexFlow.Application.Features.Reservations.IReservationResourceCoordinator, ReservationResourceCoordinator>();
         services.AddScoped<ISystemAdministratorRepository, SystemAdministratorRepository>();
         services.AddScoped<IModuleRepository, ModuleRepository>();
 
@@ -52,10 +53,12 @@ public static class DependencyInjection
         {
             services.AddSingleton(FirestoreDb.Create(firebaseProjectId));
             services.AddScoped<IBusinessProfileRepository, FirestoreBusinessProfileRepository>();
-            services.AddScoped<ILocationRepository, FirestoreLocationRepository>();
+            services.AddScoped<FirestoreLocationRepository>();
+            services.AddScoped<ILocationRepository>(p => p.GetRequiredService<FirestoreLocationRepository>());
             services.AddScoped<IBusinessHoursRepository, FirestoreBusinessHoursRepository>();
             services.AddScoped<IFaqRepository, FirestoreFaqRepository>();
-            services.AddScoped<ICatalogRepository, FirestoreCatalogRepository>();
+            services.AddScoped<FirestoreCatalogRepository>();
+            services.AddScoped<ICatalogRepository>(p => p.GetRequiredService<FirestoreCatalogRepository>());
             services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
             services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
             services.AddScoped<IConversationStateRepository, FirestoreConversationStateRepository>();
@@ -80,6 +83,7 @@ public static class DependencyInjection
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();
+        services.AddHostedService<ReservationResourceRecoveryWorker>();
         services.AddHostedService<CatalogUploadCleanupWorker>();
         services.AddOptions<CatalogGenerationOptions>().Configure(options =>
         {

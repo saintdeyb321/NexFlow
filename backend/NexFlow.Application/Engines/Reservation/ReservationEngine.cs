@@ -26,6 +26,7 @@ public class ReservationEngine : IReservationEngine
     private readonly ILocationAvailabilityService _locationAvailabilityService;
     private readonly IClock _clock;
     private readonly IOutboxRepository _outboxRepository;
+    private readonly IReservationResourceCoordinator _resources;
 
     public ReservationEngine(
         IReservationRepository reservationRepository,
@@ -36,7 +37,8 @@ public class ReservationEngine : IReservationEngine
         IUnitOfWork unitOfWork,
         ILocationAvailabilityService locationAvailabilityService,
         IClock clock,
-        IOutboxRepository outboxRepository)
+        IOutboxRepository outboxRepository,
+        IReservationResourceCoordinator resources)
     {
         _reservationRepository = reservationRepository;
         _catalogRepository = catalogRepository;
@@ -47,6 +49,7 @@ public class ReservationEngine : IReservationEngine
         _locationAvailabilityService = locationAvailabilityService;
         _clock = clock;
         _outboxRepository = outboxRepository;
+        _resources = resources;
     }
 
     private async Task<TimeZoneInfo> GetWorkspaceTimeZoneAsync(Guid workspaceId, CancellationToken ct)
@@ -138,6 +141,7 @@ public class ReservationEngine : IReservationEngine
             var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, cancellationToken);
             if (existing != null) return Result<ReservationDto>.Success(ToDto(existing));
         }
+        var resourceVersions = await CaptureResourcesAsync(workspaceId, locationId, serviceId, cancellationToken);
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (locations == null || !locations.Any(l => l.Id == locationId))
             return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe."));
@@ -182,6 +186,7 @@ public class ReservationEngine : IReservationEngine
                     var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, cancellationToken);
                     if (existing != null) return Result<ReservationDto>.Success(ToDto(existing));
                 }
+                await _resources.ValidateAsync(resourceVersions, cancellationToken);
                 var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, locationId, startTimeUtc, endTimeUtc, null, cancellationToken);
                 if (!isAvailable) throw new ConcurrencyException("El horario ya fue tomado por otro cliente.");
 
@@ -223,6 +228,7 @@ public class ReservationEngine : IReservationEngine
         if (reservation.Status != Domain.Enums.ReservationStatus.Confirmed)
             return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", "Solo se pueden reagendar reservas confirmadas."));
 
+        var resourceVersions = await CaptureResourcesAsync(workspaceId, reservation.LocationId, reservation.ServiceId, cancellationToken);
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (!locations.Any(l => l.Id == reservation.LocationId))
             return Result<ReservationDto>.Failure(new Error("Location.NotFound", "La sede seleccionada no existe."));
@@ -261,6 +267,7 @@ public class ReservationEngine : IReservationEngine
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
             {
+                await _resources.ValidateAsync(resourceVersions, cancellationToken);
                 var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
                 if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado."));
 
@@ -279,7 +286,7 @@ public class ReservationEngine : IReservationEngine
                 return Result<ReservationDto>.Success(dto);
             }
         }
-        catch (Exception ex) when (IsConcurrencyConflict(ex))
+        catch (Exception ex) when (ex is ConcurrencyException || IsConcurrencyConflict(ex))
         {
             _unitOfWork.DiscardChanges(pendingEvent == null ? [reservation] : [reservation, pendingEvent]);
             return Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "El horario acaba de ser tomado por otro cliente."));
@@ -396,6 +403,12 @@ public class ReservationEngine : IReservationEngine
     private static ReservationDto ToDto(Domain.Entities.Reservation reservation) => new(
         reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
         reservation.CustomerName, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString());
+
+    private async Task<IReadOnlyList<ReservationResourceStamp>> CaptureResourcesAsync(Guid workspaceId, string locationId, string serviceId, CancellationToken ct) =>
+    [
+        await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Location, locationId), ct),
+        await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Service, serviceId), ct)
+    ];
 
     private static bool IsConcurrencyConflict(Exception exception)
     {

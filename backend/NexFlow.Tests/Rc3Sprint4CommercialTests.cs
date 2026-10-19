@@ -221,7 +221,7 @@ public sealed class Rc3Sprint4CommercialTests
     {
         public InMemoryFirestore Db { get; } = new(); public Guid Workspace { get; } = Guid.NewGuid();
         public FirestoreCatalogRepository Catalog { get; } public FirestoreOrderRepository Repository { get; }
-        private Orders() { Catalog = new(Db.Db); Repository = new(Db.Db, new OfferingService(Catalog)); }
+        private Orders() { Catalog = new(Db.Db, Db.Resources); Repository = new(Db.Db, new OfferingService(Catalog)); }
         public static async Task<Orders> Create()
         { var f = new Orders(); await f.Catalog.SaveItemAsync(f.Workspace, Product(), true, default); return f; }
         public static ProductDto Product() => new() { Id = "product", Name = "Product", Currency = "PEN", PriceMinorUnits = 250, IsActive = true, LocationScope = "ALL" };

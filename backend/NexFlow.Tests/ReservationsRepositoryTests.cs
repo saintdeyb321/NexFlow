@@ -155,15 +155,21 @@ public sealed class ReservationsRepositoryTests
     }
 
     [Fact]
-    public async Task Characterization_existing_unique_index_also_blocks_rebooking_an_exact_cancelled_slot()
+    public async Task Cancelled_history_does_not_block_rebooking_but_active_rows_remain_unique()
     {
         await using var f = await DbFixture.CreateAsync(); var start = Utc("2030-07-01T12:00:00Z");
         f.Add(f.Workspace, "location", "service", start, ReservationStatus.Cancelled, 1); await f.SeedAsync();
         Assert.True(await f.Repository.IsTimeSlotAvailableAsync(f.Workspace, "location", start, start.AddMinutes(30)));
         f.Repository.Add(Reservation.Create(f.Workspace, "location", "service", "other", "Other", start, start.AddMinutes(30)));
+        await f.Db.SaveChangesAsync(); f.Db.ChangeTracker.Clear();
+        var active = (await f.Db.Reservations.SingleAsync(r => r.Status == ReservationStatus.Confirmed)); active.Cancel();
+        await f.Db.SaveChangesAsync(); f.Db.ChangeTracker.Clear();
+        f.Repository.Add(Reservation.Create(f.Workspace, "location", "service", "third", "Third", start, start.AddMinutes(30)));
+        await f.Db.SaveChangesAsync(); f.Db.ChangeTracker.Clear();
+        Assert.Equal(2, await f.Db.Reservations.CountAsync(r => r.Status == ReservationStatus.Cancelled));
+        Assert.Single(await f.Db.Reservations.Where(r => r.Status == ReservationStatus.Confirmed).ToListAsync());
+        f.Repository.Add(Reservation.Create(f.Workspace, "location", "service", "fourth", "Fourth", start, start.AddMinutes(30)));
         await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
-        // Real uniqueness enforcement by SQLite reproduces the unfiltered index
-        // definition. Changing the PostgreSQL index requires migration approval.
     }
 
     private static DateTime Utc(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);

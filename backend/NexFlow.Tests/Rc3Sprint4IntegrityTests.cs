@@ -113,7 +113,7 @@ public sealed class Rc3Sprint4IntegrityTests
     {
         var f = await Fixture.Create(); var booked = await f.Book(); Assert.True(booked.IsSuccess);
         // Model an already committed deletion/legacy orphan, without pretending to pass its SQL guard.
-        Assert.True((await f.Locations.DeleteLocationAsync(f.Workspace, "location", default)).IsSuccess);
+        await f.Db.Db.Collection("workspaces").Document(f.Workspace.ToString()).Collection("locations").Document("location").DeleteAsync();
         Assert.Empty(await f.Engine.GetAvailabilityAsync(f.Workspace, "location", "service", Fixture.Day, default));
         Assert.Equal("Location.NotFound", (await f.Book()).Error.Code);
         Assert.Equal("Location.NotFound", (await f.Engine.EditReservationAsync(f.Workspace, booked.Value.Id, Fixture.Day.AddHours(16), default)).Error.Code);
@@ -128,6 +128,7 @@ public sealed class Rc3Sprint4IntegrityTests
         Assert.Equal(2, (await f.Locations.GetLocationsAsync(f.Workspace, default)).Count());
         var service = Fixture.Service(); service.LocationScope = "SPECIFIC"; service.LocationIds = ["location"];
         await f.Catalog.SaveItemAsync(f.Workspace, service, false, default);
+        f.Rows.Clear(); // Future SQL guard already asserted above; now exercise Firestore references independently.
         Assert.True((await f.Locations.DeleteLocationAsync(f.Workspace, "location", default)).IsFailure);
         service.LocationScope = "ALL"; await f.Catalog.SaveItemAsync(f.Workspace, service, false, default);
         var schedule = $"workspaces/{f.Workspace}/hours/location/schedule/tuesday";
@@ -140,7 +141,7 @@ public sealed class Rc3Sprint4IntegrityTests
 
     [Theory]
     [InlineData(false)] [InlineData(true)]
-    public async Task Characterization_cross_store_guard_has_a_residual_race_not_a_distributed_transaction(bool deleteLocation)
+    public async Task Cross_store_guard_cannot_delete_after_a_concurrent_booking_commits(bool deleteLocation)
     {
         var f = await Fixture.Create();
         var checkedSql = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -155,12 +156,10 @@ public sealed class Rc3Sprint4IntegrityTests
             : f.Services.DeleteService("service", default);
         await checkedSql.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await f.Book()).IsSuccess); // Booking commits after SQL check and before Firestore write.
-        resume.SetResult(); Assert.IsType<NoContentResult>(await mutation);
+        resume.SetResult(); await Assert.ThrowsAsync<NexFlow.Domain.Exceptions.ConcurrencyException>(() => mutation);
         Assert.Single(f.Rows);
-        if (deleteLocation) Assert.DoesNotContain(await f.Locations.GetLocationsAsync(f.Workspace, default), l => l.Id == "location");
-        else Assert.False((await f.Catalog.GetItemByIdAsync(f.Workspace, "service", default))!.IsActive);
-        // This green characterization explicitly records the unresolved window for approval;
-        // it is not evidence that the business race is solved by these local fakes.
+        Assert.Contains(await f.Locations.GetLocationsAsync(f.Workspace, default), l => l.Id == "location");
+        Assert.True((await f.Catalog.GetItemByIdAsync(f.Workspace, "service", default))!.IsActive);
     }
 
     [Fact]
@@ -180,7 +179,7 @@ public sealed class Rc3Sprint4IntegrityTests
         // requires an approved nullable historical snapshot, not an invented backfill.
     }
 
-    private sealed class Fixture
+    internal sealed class Fixture
     {
         public static readonly DateTime Day = new(2030, 7, 2, 0, 0, 0, DateTimeKind.Utc);
         public Guid Workspace { get; } = Guid.NewGuid();
@@ -196,7 +195,11 @@ public sealed class Rc3Sprint4IntegrityTests
         public ReservationEngine Engine { get; }
         private Fixture()
         {
-            Catalog = new(Db.Db); Locations = new(Db.Db);
+            Catalog = new(Db.Db, Db.Resources); Locations = new(Db.Db, Db.Resources);
+            Db.Resources.Durable.HasFuture = (key, change) => Rows.Any(r => r.WorkspaceId == key.WorkspaceId
+                && r.Status == NexFlow.Domain.Enums.ReservationStatus.Confirmed && r.StartTime >= Day.AddDays(-1)
+                && (key.Kind == NexFlow.Application.Features.Reservations.ReservationResourceKind.Location ? r.LocationId == key.Id
+                    : r.ServiceId == key.Id && (change.BlocksAllFuture || change.RetainedLocations?.Contains(r.LocationId) == false)));
             var workspace = Mock.Of<IWorkspaceContext>(w => w.CurrentWorkspaceId == Workspace);
             Entitlements.Setup(e => e.GetAvailableModuleCodesAsync(Workspace, default)).ReturnsAsync(new[] { "SERVICES", "LOCATIONS", "RESERVATIONS" });
             Reservations.Setup(r => r.GetFutureConfirmedServiceLocationsAsync(Workspace, "service", default)).ReturnsAsync(() => FutureLocations);
@@ -212,7 +215,7 @@ public sealed class Rc3Sprint4IntegrityTests
             var uow = new Mock<IUnitOfWork>(); uow.Setup(u => u.SaveChangesAsync(default)).ReturnsAsync(1);
             var clock = Mock.Of<IClock>(c => c.UtcNow == Day.AddDays(-1));
             Engine = new(Reservations.Object, Catalog, hours.Object, profiles.Object, Locations, uow.Object,
-                new LocationAvailabilityService(Catalog, Locations), clock, Mock.Of<IOutboxRepository>());
+                new LocationAvailabilityService(Catalog, Locations), clock, Mock.Of<IOutboxRepository>(), Db.Resources);
             Services = new(Catalog, workspace, Entitlements.Object, Reservations.Object);
             Business = new(profiles.Object, Catalog, Mock.Of<IFaqRepository>(), Locations, hours.Object, workspace,
                 Mock.Of<IWorkspaceRepository>(), uow.Object, Entitlements.Object);

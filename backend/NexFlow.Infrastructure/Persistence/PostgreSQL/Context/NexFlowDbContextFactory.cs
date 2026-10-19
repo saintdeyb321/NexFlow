@@ -9,6 +9,12 @@ public class NexFlowDbContextFactory : IDesignTimeDbContextFactory<NexFlowDbCont
 {
     public NexFlowDbContext CreateDbContext(string[] args)
     {
+        // Model/migration generation without loading runtime configuration or
+        // credentials. This context does not open a database connection.
+        if (args.Contains("--offline", StringComparer.Ordinal))
+            return new NexFlowDbContext(new DbContextOptionsBuilder<NexFlowDbContext>()
+                .UseNpgsql("Host=localhost;Database=nexflow_design;Username=design")
+                .Options);
         // Entity Framework ya se posiciona en la carpeta del startup-project
         var basePath = Directory.GetCurrentDirectory();
 

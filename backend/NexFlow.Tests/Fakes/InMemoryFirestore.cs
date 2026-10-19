@@ -24,6 +24,7 @@ public sealed class InMemoryFirestore : CallInvoker
     public Func<CommitRequest, Exception?>? AfterCommit { get; set; }
     public Exception? ReadFailure { get; set; }
     public FirestoreDb Db { get; }
+    public InMemoryReservationResourceCoordinator Resources { get; } = new();
 
     public InMemoryFirestore() => Db = FirestoreDb.Create("pdf-unit-tests", new FirestoreClientBuilder { CallInvoker = this }.Build());
 

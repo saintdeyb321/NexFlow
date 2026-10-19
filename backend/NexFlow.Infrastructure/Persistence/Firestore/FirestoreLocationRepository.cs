@@ -2,13 +2,16 @@ using Google.Cloud.Firestore;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Reservations;
 
 namespace NexFlow.Infrastructure.Persistence.Firestore;
 
 public class FirestoreLocationRepository : ILocationRepository
 {
     private readonly FirestoreDb _firestoreDb;
-    public FirestoreLocationRepository(FirestoreDb firestoreDb) => _firestoreDb = firestoreDb;
+    private readonly IReservationResourceCoordinator _resources;
+    public FirestoreLocationRepository(FirestoreDb firestoreDb, IReservationResourceCoordinator resources)
+    { _firestoreDb = firestoreDb; _resources = resources; }
 
     public async Task<IEnumerable<LocationDto>> GetLocationsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
@@ -55,8 +58,18 @@ public class FirestoreLocationRepository : ILocationRepository
     {
         if (string.IsNullOrWhiteSpace(locationId) || locationId.Contains('/'))
             return Result.Failure(new Error("Location.Invalid", "ID de sede inválido."));
+        var stamp = await _resources.ReadAsync(new(workspaceId, ReservationResourceKind.Location, locationId), cancellationToken);
+        var operation = await _resources.BeginAsync(stamp, new("DeleteLocation"), cancellationToken);
+        return await ReconcileMutationAsync(operation, cancellationToken);
+    }
+
+    public async Task<Result> ReconcileMutationAsync(ReservationResourceMutation operation, CancellationToken cancellationToken)
+    {
+        if (operation.Key.Kind != ReservationResourceKind.Location || ReservationResourceFence.Decode(operation).Action != "DeleteLocation")
+            throw new InvalidOperationException("Invalid location mutation.");
+        var workspaceId = operation.Key.WorkspaceId; var locationId = operation.Key.Id;
         var workspace = _firestoreDb.Collection("workspaces").Document(workspaceId.ToString());
-        return await _firestoreDb.RunTransactionAsync(async tx =>
+        return await new ReservationResourceFence(_firestoreDb, _resources).ApplyAsync(operation, async tx =>
         {
             await tx.GetSnapshotAsync(workspace, cancellationToken);
             var locations = await tx.GetSnapshotAsync(workspace.Collection("locations"), cancellationToken);
@@ -76,7 +89,7 @@ public class FirestoreLocationRepository : ILocationRepository
             tx.Delete(target.Reference);
             tx.Set(workspace, new Dictionary<string, object> { ["businessRevision"] = Guid.NewGuid().ToString() }, SetOptions.MergeAll);
             return Result.Success();
-        }, cancellationToken: cancellationToken);
+        }, cancellationToken);
     }
 
     private static LocationDto Map(DocumentSnapshot doc)

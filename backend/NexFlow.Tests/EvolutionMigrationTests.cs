@@ -27,14 +27,15 @@ public sealed class EvolutionMigrationTests
         foreach (var field in new[] { "WorkspaceId", "PersistenceVersion", "Status", "LogoutPending" })
             Assert.False(connection.FindProperty(field)!.IsNullable);
         var migrations = db.GetService<IMigrationsAssembly>().Migrations.Keys.ToArray();
-        Assert.EndsWith("_TrackWorkspaceWhatsAppConnections", migrations[^1]);
-        var script = db.GetService<IMigrator>().GenerateScript(migrations[^2], migrations[^1]);
+        var target = Array.FindIndex(migrations, m => m.EndsWith("_TrackWorkspaceWhatsAppConnections", StringComparison.Ordinal));
+        Assert.True(target > 0);
+        var script = db.GetService<IMigrator>().GenerateScript(migrations[target - 1], migrations[target]);
         Assert.Contains("CREATE TABLE \"WhatsAppConnections\"", script);
         Assert.Contains("UPDATE \"Workspaces\"", script);
         Assert.Contains("IS NULL OR btrim(\"EvolutionInstanceName\") = ''", script);
         Assert.DoesNotContain("ALTER TABLE", script);
         Assert.DoesNotContain("DELETE FROM", script);
-        var down = db.GetService<IMigrator>().GenerateScript(migrations[^1], migrations[^2]);
+        var down = db.GetService<IMigrator>().GenerateScript(migrations[target], migrations[target - 1]);
         Assert.Contains("DROP TABLE \"WhatsAppConnections\"", down);
         Assert.DoesNotContain("UPDATE \"Workspaces\"", down);
         Assert.Equal(ConnectionState.Closed, db.Database.GetDbConnection().State);

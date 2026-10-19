@@ -257,7 +257,8 @@ namespace NexFlow.Infrastructure.Migrations
                         .HasFilter("\"SourceMessageId\" IS NOT NULL");
 
                     b.HasIndex("WorkspaceId", "LocationId", "ServiceId", "StartTime")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"Status\" <> 'Cancelled'");
 
                     b.HasIndex("WorkspaceId", "LocationId", "Status", "StartTime", "EndTime")
                         .HasDatabaseName("IX_Reservations_TimeRangeOverlap");
@@ -406,6 +407,38 @@ namespace NexFlow.Infrastructure.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("OutboxMessages");
+                });
+
+            modelBuilder.Entity("NexFlow.Domain.Entities.System.ReservationResourceState", b =>
+                {
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("ResourceId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("PendingOperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("WorkspaceId", "Kind", "ResourceId");
+
+                    b.HasIndex("NextAttemptAt")
+                        .HasFilter("\"PendingOperationId\" IS NOT NULL");
+
+                    b.ToTable("ReservationResourceStates", (string)null);
                 });
 
             modelBuilder.Entity("NexFlow.Domain.Entities.System.TenantDeletionJob", b =>
@@ -675,6 +708,15 @@ namespace NexFlow.Infrastructure.Migrations
                     b.HasOne("NexFlow.Domain.Entities.Module", null)
                         .WithMany("Capabilities")
                         .HasForeignKey("ModuleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexFlow.Domain.Entities.System.ReservationResourceState", b =>
+                {
+                    b.HasOne("NexFlow.Domain.Entities.Workspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

@@ -207,7 +207,7 @@ public sealed class ReservationsPeruTimeTests
             Clock.SetupGet(c => c.UtcNow).Returns(Time("2030-07-01T23:00:00Z"));
             HoursFor((int)DayOfWeek.Tuesday, "09:00", "18:00");
             Engine = new(Reservations.Object, Catalog.Object, Hours.Object, Profiles.Object, Locations.Object,
-                UnitOfWork.Object, LocationAvailability.Object, Clock.Object, Outbox.Object);
+                UnitOfWork.Object, LocationAvailability.Object, Clock.Object, Outbox.Object, new NexFlow.Tests.Fakes.InMemoryReservationResourceCoordinator());
         }
 
         public void HoursFor(int day, string open, string close) => Hours
