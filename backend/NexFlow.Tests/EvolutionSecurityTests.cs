@@ -104,6 +104,22 @@ public sealed class EvolutionSecurityTests
         Assert.Empty(f.Transport.Calls);
     }
 
+    [Theory]
+    [InlineData(null)] [InlineData("true")]
+    public async Task Legacy_transition_keeps_existing_instances_until_explicit_retirement(string? setting)
+    {
+        await using var f = await EvolutionFixture.CreateAsync(); f.Config["Evolution:AllowLegacyWebhookKey"] = setting;
+        var payload = new EvolutionWebhookController.EvolutionWebhookPayload { Instance = f.Workspace.EvolutionInstanceName!, Event = "connection.update", Data = new() { State = "open" } };
+        var resolver = new DefaultInstanceResolver(f.Db);
+        Assert.IsType<OkResult>(await Webhook("unit-test-webhook").ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        var scoped = EvolutionConnectionService.InstanceWebhookKey("unit-test-webhook", payload.Instance);
+        Assert.IsType<OkResult>(await Webhook(scoped).ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        f.Config["Evolution:AllowLegacyWebhookKey"] = "false";
+        Assert.IsType<UnauthorizedObjectResult>(await Webhook("unit-test-webhook").ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        Assert.IsType<OkResult>(await Webhook(scoped).ReceiveMessage(payload, f.Config, Mock.Of<IInboundMessageRepository>(), resolver, f.Service));
+        Assert.Empty(f.Transport.Calls);
+    }
+
     [Fact]
     public async Task Conflicting_instance_in_message_event_never_reaches_durable_inbound_repository()
     {

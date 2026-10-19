@@ -107,6 +107,12 @@ public class FirestoreConversationRepository : IConversationRepository
             }
             if (!conversation.Exists || conversation.GetValue<string>("consumerPhone") != snapshot.GetValue<string>("phone"))
                 throw new KeyNotFoundException("Outbound conversation not found.");
+            if (message.Sender == SenderType.AI && !message.IsHandoffAcknowledgement && conversation.TryGetValue<string>("mode", out var mode) && mode == "Human")
+            {
+                WriteMessageState(transaction, snapshot, conversation, message with { Status = MessageStatus.Failed,
+                    LastError = OutboundMessageService.HumanTakeoverReason });
+                return false;
+            }
             var startedAt = DateTime.UtcNow;
             message = message with { Status = MessageStatus.Attempting, TransportStartedAt = startedAt,
                 TransportLeaseUntil = startedAt.Add(TransportLease), LastError = null };
@@ -283,6 +289,7 @@ public class FirestoreConversationRepository : IConversationRepository
         if (message.ProviderConfirmationId != null) data["providerConfirmationId"] = message.ProviderConfirmationId;
         if (message.IdempotencyKey != null) data["idempotencyKey"] = message.IdempotencyKey;
         if (message.LastError != null) data["lastError"] = message.LastError;
+        if (message.IsHandoffAcknowledgement) data["handoffAcknowledgement"] = true;
         if (message.Origin.HasValue) data["origin"] = message.Origin.Value.ToString();
         if (message.TransportStartedAt.HasValue) data["transportStartedAt"] = message.TransportStartedAt.Value;
         if (message.TransportLeaseUntil.HasValue) data["transportLeaseUntil"] = message.TransportLeaseUntil.Value;
@@ -302,6 +309,7 @@ public class FirestoreConversationRepository : IConversationRepository
         ExternalMessageId = doc.TryGetValue("externalMessageId", out string externalId) ? externalId : null,
         ProviderConfirmationId = doc.TryGetValue("providerConfirmationId", out string confirmationId) ? confirmationId : null,
         LastError = doc.TryGetValue("lastError", out string lastError) ? lastError : null,
+        IsHandoffAcknowledgement = doc.TryGetValue<bool>("handoffAcknowledgement", out var acknowledgement) && acknowledgement,
         IdempotencyKey = doc.TryGetValue("idempotencyKey", out string key) ? key : null,
         Origin = doc.TryGetValue("origin", out string origin) ? Enum.Parse<MessageOrigin>(origin) : null,
         TransportStartedAt = doc.TryGetValue("transportStartedAt", out Timestamp startedAt) ? startedAt.ToDateTime()

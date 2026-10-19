@@ -6,6 +6,7 @@ using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Engines.AI;
 using System.Text.RegularExpressions;
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -47,6 +48,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     public async Task<MessageRecord> RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
     {
         var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+        if (context.Mode == "Human" || conversation.Mode == ConversationMode.Human)
+            throw new ConcurrencyException("Conversation is under human control; reload its state before processing.");
         var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (activeModules.Contains("RESERVATIONS") && activeModules.Contains("SERVICES"))
@@ -74,17 +77,26 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = AiFailureKind.Timeout }; }
         }
         var normalized = ConversationRecoveryService.Normalize(request.MessageText);
+        // A manual takeover while the provider was running invalidates this turn.
+        var latest = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+        if (latest.Mode == "Human" || latest.StateVersion != context.StateVersion)
+            throw new ConcurrencyException("Conversation changed during interpretation; reload before processing.");
         interpretation.Confirmed = context.CurrentStep == "CONFIRM" && normalized is "si" or "si confirmo" or "confirmo" or "confirmar" or "de acuerdo";
-        if (context.PendingRecoveryAction != null && interpretation.Directive == ConversationDirective.None
-            && interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Support or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited))
+        if (context.PendingRecoveryAction != null && interpretation.Intent != ConversationIntent.Support
+            && (interpretation.Directive != ConversationDirective.None
+                || interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)))
             return await SendText("Antes de continuar, confirma la decisión pendiente: responde sí o no, o escribe asesor para recibir ayuda.");
+
+        if (context.CurrentGoal is "BOOKING" or "RESERVATION" && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Request
+            || context.CurrentGoal == "ORDER" && interpretation.Intent is ConversationIntent.Reservation or ConversationIntent.Request)
+            return await SendText("Tu borrador sigue guardado. Completa el proceso actual o escribe cancelar para descartarlo con confirmación antes de iniciar otro.");
 
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && _recovery != null)
         {
             var confirmation = await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request with { MessageText = "cancelar" }, context, activeModules, cancellationToken);
             return await SendText(confirmation!.Response!);
         }
-        if (_recovery != null && (interpretation.Intent is ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited
+        if (_recovery != null && (interpretation.RequiresClarification || interpretation.Intent is ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited
             || recovery?.Interpretation == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
                 || (interpretation.Intent == ConversationIntent.Order && !Regex.IsMatch(normalized, @"\b(compr|pedid|pedir|llevar|orden)"))
                 || (interpretation.Intent == ConversationIntent.Request && !Regex.IsMatch(normalized, @"\b(solicit|reclamo|queja|cotiz|registr|tramite|soporte)")))))
@@ -170,6 +182,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             }
         }
 
+        if (interpretation.Intent is ConversationIntent.Support or ConversationIntent.Request && (await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken)).Mode == "Human")
+            return await _outboundMessageService.SendHandoffAcknowledgementAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, request.MessageId, cancellationToken);
         return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, SenderType.AI, request.MessageId, cancellationToken);
         Task<MessageRecord> SendText(string response) => _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone, response, SenderType.AI, request.MessageId, cancellationToken);
     }

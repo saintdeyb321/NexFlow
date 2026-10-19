@@ -82,10 +82,11 @@ public class ProcessIncomingMessageCommandHandler
 
         KnowledgeTopic? topic = null;
         var locationKeywords = new[] { "donde estan", "ubicacion", "direccion", "sedes", "sucursal", "como llego", "donde atienden" };
-        var hoursKeywords = new[] { "horario", "a que hora", "dias de atencion", "cuando abren", "hasta que hora", "cuando cierran" };
+        var hoursKeywords = new[] { "horario", "horarios", "que horario tienen", "que horarios tienen", "dias de atencion", "cuando abren", "hasta que hora", "cuando cierran" };
 
-        if (locationKeywords.Any(k => normalizedText.Contains(k))) topic = KnowledgeTopic.Locations;
-        else if (hoursKeywords.Any(k => normalizedText.Contains(k))) topic = KnowledgeTopic.BusinessHours;
+        // Only unambiguous complete shortcuts bypass recovery/handoff interpretation.
+        if (locationKeywords.Contains(normalizedText)) topic = KnowledgeTopic.Locations;
+        else if (hoursKeywords.Contains(normalizedText)) topic = KnowledgeTopic.BusinessHours;
 
         if (topic.HasValue)
         {

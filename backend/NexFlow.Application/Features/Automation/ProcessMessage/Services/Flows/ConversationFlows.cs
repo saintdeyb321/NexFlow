@@ -60,7 +60,7 @@ public class BookingFlow : IBookingFlow
         var existing = await _reservationRepository.GetBySourceMessageIdAsync(workspaceId, sourceMessageId, ct);
         if (existing == null) return null;
         if (existing.CustomerIdentifier != phone) throw new InvalidOperationException("Reservation inbound recipient mismatch.");
-        if (context.CurrentGoal is "BOOKING" or "RESERVATION")
+        if (context.CurrentGoal is "BOOKING" or "RESERVATION" && context.ReservationCommitSourceMessageId == sourceMessageId)
         {
             ClearDraft(context);
             await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
@@ -73,6 +73,7 @@ public class BookingFlow : IBookingFlow
         context.CurrentGoal = null; context.CurrentStep = null;
         context.SelectedLocationId = null; context.SelectedServiceId = null;
         context.ReservationServiceOffset = 0;
+        context.ReservationCommitSourceMessageId = null;
         context.TargetDate = null; context.TargetTime = null;
         context.MissingFields.Clear(); context.LastQuestion = null;
     }
@@ -241,6 +242,8 @@ public class BookingFlow : IBookingFlow
         }
         if (!interpretation.Confirmed)
             return $"Reserva por confirmar: {service.Name}, {selectedTime:dd/MM/yyyy} a las {selectedTime:HH:mm}. ¿Confirmas? Responde sí o no.";
+        context.ReservationCommitSourceMessageId = sourceMessageId;
+        await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, service.Id,
             phone, context.RealCustomerName!, DateTime.SpecifyKind(selectedTime, DateTimeKind.Unspecified), ct, sourceMessageId);
         if (result.IsSuccess)

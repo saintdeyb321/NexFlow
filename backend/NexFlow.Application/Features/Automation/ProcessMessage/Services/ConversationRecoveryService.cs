@@ -70,6 +70,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             {
                 context.CurrentGoal = null; context.CurrentStep = null; context.SelectedServiceId = null; context.SelectedLocationId = null;
                 context.TargetDate = null; context.TargetTime = null; context.OrderDraftItems.Clear(); context.MissingFields.Clear(); context.LastQuestion = null;
+                context.ReservationCommitSourceMessageId = null; context.RecoveryOptionsOffset = 0; context.RecoveryOptionsContext = null;
                 context.PendingRecoveryAction = null; context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
                 return await Remember("He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.");
             }
@@ -94,12 +95,21 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return string.IsNullOrEmpty(context.CurrentGoal) ? await Menu("¡Hola! Puedo ayudarte con estas opciones:") : await Remember("¡Hola! " + Continuation(context));
         if (text is "adios" or "chau" or "hasta luego" or "gracias" or "muchas gracias")
             return await Remember("¡Gracias por escribirnos! " + (string.IsNullOrEmpty(context.CurrentGoal) ? "Aquí estaremos cuando necesites información del negocio." : Continuation(context)));
-        if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones") return await Menu("Estas son las opciones disponibles:");
-        if (text is "ver mas" or "mas opciones" or "otros servicios") { context.RecoveryOptionsOffset += 5; return await Menu("Estas son las opciones disponibles:"); }
+        if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones")
+        { context.RecoveryOptionsOffset = 0; return await Menu("Estas son las opciones disponibles:"); }
+        if (text is "ver mas" or "mas opciones" or "otros servicios")
+        {
+            if (context.RecoveryOptionsContext == Fingerprint(context) && context.RecoveryHasMore) context.RecoveryOptionsOffset += 5;
+            return await Menu("Estas son las opciones disponibles:");
+        }
         var index = text switch { "la primera" or "primera" => 1, "la segunda" or "segunda" => 2, "la tercera" or "tercera" => 3, "la cuarta" or "cuarta" => 4, "la quinta" or "quinta" => 5, _ => int.TryParse(text, out var n) ? n : 0 };
         if (index == 0 && context.RecoveryOptionsContext == Fingerprint(context))
-            index = context.RecoveryOptions.FindIndex(o => Normalize(o.Label) == text) + 1;
+        {
+            var matches = context.RecoveryOptions.Select((o, i) => (Option: o, Index: i + 1)).Where(o => Normalize(o.Option.Label) == text).ToArray();
+            index = matches.Length > 1 ? -1 : matches.Length == 1 ? matches[0].Index : 0;
+        }
         if (text is "esa opcion" or "esa" || Yes(text)) index = context.RecoveryOptions.Count == 1 ? 1 : -1;
+        if (text is "la otra" or "otra" or "esa otra") index = -1;
         if (index != 0)
         {
             if (context.RecoveryOptionsContext != Fingerprint(context) || index < 1 || index > context.RecoveryOptions.Count)
@@ -141,6 +151,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
 
     public async Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct)
     {
+        // Replace the flow's unnumbered picker with one authoritative numbered list.
+        if (response.Split('\n').Any(line => line.TrimStart().StartsWith("• ", StringComparison.Ordinal)))
+            response = string.Join('\n', response.Split('\n').TakeWhile(line => !line.TrimStart().StartsWith("• ", StringComparison.Ordinal))).TrimEnd();
         var decorated = await PrepareOptionsAsync(workspace, context, modules, response, ct);
         await contexts.SaveContextAsync(workspace, phone, context, ct);
         return decorated;
@@ -148,6 +161,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
 
     private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct)
     {
+        if (context.RecoveryOptionsContext != Fingerprint(context)) context.RecoveryOptionsOffset = 0;
         context.RecoveryOptions = await BuildOptions(workspace, context, modules, ct);
         context.RecoveryOptionsContext = Fingerprint(context);
         var noOptions = context.CurrentStep is "COLLECT_CUSTOMERNAME" or "COLLECT_DATE" or "CONFIRM" ? Continuation(context)
@@ -155,6 +169,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return response + (context.RecoveryOptions.Count == 0 ? "\n" + noOptions
             : "\n" + string.Join("\n", context.RecoveryOptions.Select((o, i) => $"{i + 1}. {o.Label}"))
                 + (context.RecoveryHasMore ? "\nHay más opciones disponibles: escribe ver más. Para solicitar ayuda humana escribe asesor." : "")
+                + (context.RecoveryOptionsOffset > 0 ? "\nPara volver al inicio escribe menú." : "")
                 + "\n¿Cuál opción eliges? Escribe su número.");
     }
 
@@ -186,8 +201,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (modules.Contains("REQUESTS")) result.Add(new("Request", "Registrar una solicitud", "Action"));
             result.Add(new("Support", "Hablar con un asesor", "Action"));
         }
-        if (context.RecoveryOptionsOffset >= result.Count) context.RecoveryOptionsOffset = 0;
-        context.RecoveryHasMore = context.RecoveryOptionsOffset > 0 || result.Count > 5;
+        context.RecoveryOptionsOffset = Math.Clamp(context.RecoveryOptionsOffset, 0, result.Count == 0 ? 0 : (result.Count - 1) / 5 * 5);
+        context.RecoveryHasMore = context.RecoveryOptionsOffset + 5 < result.Count;
         return result.Skip(context.RecoveryOptionsOffset).Take(5).ToList();
     }
 

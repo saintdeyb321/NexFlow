@@ -13,11 +13,13 @@ public interface IOutboundMessageService
 {
     Task<bool> TryResumeResponseAsync(Guid workspaceId, string sourceInboundMessageId, CancellationToken ct);
     Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content, SenderType sender, string sourceInboundMessageId, CancellationToken ct);
+    Task<MessageRecord> SendHandoffAcknowledgementAsync(Guid workspaceId, string conversationId, string phone, string content, string sourceInboundMessageId, CancellationToken ct);
     Task<MessageRecord> SendDocumentAsync(Guid workspaceId, string conversationId, string phone, string caption, string mediaUrl, string fileName, string scope, string sourceInboundMessageId, CancellationToken ct);
 }
 
 public class OutboundMessageService : IOutboundMessageService
 {
+    public const string HumanTakeoverReason = "Automatic response suppressed by human takeover before transport.";
     private readonly IConversationRepository _conversationRepo;
     private readonly IMessageGateway _messageGateway;
     private readonly INotificationService _notifications;
@@ -47,7 +49,8 @@ public class OutboundMessageService : IOutboundMessageService
             if (!existing.HasValue) continue;
             if (existing.Value.Message.Status is MessageStatus.Sent or MessageStatus.Failed)
             {
-                if (existing.Value.Message.Kind == MessageKind.Document && existing.Value.Message.Status == MessageStatus.Failed)
+                if (existing.Value.Message.Kind == MessageKind.Document && existing.Value.Message.Status == MessageStatus.Failed
+                    && existing.Value.Message.LastError != HumanTakeoverReason)
                     await SendDocumentFallbackAsync(workspaceId, existing.Value.ConversationId, existing.Value.Phone, sourceInboundMessageId, ct);
                 return true;
             }
@@ -64,8 +67,16 @@ public class OutboundMessageService : IOutboundMessageService
         return false;
     }
 
-    public async Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content,
+    public Task<MessageRecord> SendMessageAsync(Guid workspaceId, string conversationId, string phone, string content,
         SenderType sender, string sourceInboundMessageId, CancellationToken ct)
+        => PrepareTextAsync(workspaceId, conversationId, phone, content, sender, sourceInboundMessageId, false, ct);
+
+    public Task<MessageRecord> SendHandoffAcknowledgementAsync(Guid workspaceId, string conversationId, string phone, string content,
+        string sourceInboundMessageId, CancellationToken ct)
+        => PrepareTextAsync(workspaceId, conversationId, phone, content, SenderType.AI, sourceInboundMessageId, true, ct);
+
+    private async Task<MessageRecord> PrepareTextAsync(Guid workspaceId, string conversationId, string phone, string content,
+        SenderType sender, string sourceInboundMessageId, bool handoffAcknowledgement, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(content)) throw new ArgumentException("Message content is required.", nameof(content));
         if (sender is not (SenderType.AI or SenderType.BusinessUser)) throw new ArgumentException("Invalid outbound sender.", nameof(sender));
@@ -77,6 +88,7 @@ public class OutboundMessageService : IOutboundMessageService
             Id = id, IdempotencyKey = key,
             Origin = sender == SenderType.AI ? MessageOrigin.NexFlowAI : MessageOrigin.NexFlowHuman,
             Direction = "outbound", Sender = sender, Content = content,
+            IsHandoffAcknowledgement = handoffAcknowledgement,
             Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
         }, ct);
         return await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
@@ -100,7 +112,7 @@ public class OutboundMessageService : IOutboundMessageService
             Status = MessageStatus.Pending, Timestamp = DateTime.UtcNow
         }, ct);
         var result = await SendPreparedAsync(workspaceId, phone, prepared.Message, ct);
-        if (result.Status == MessageStatus.Failed)
+        if (result.Status == MessageStatus.Failed && result.LastError != HumanTakeoverReason)
             await SendDocumentFallbackAsync(workspaceId, conversationId, phone, sourceInboundMessageId, ct);
         return result;
     }

@@ -225,14 +225,16 @@ public sealed class AssistantConversationTests
         public Dictionary<string, Reservation> Bookings { get; } = new(); public Dictionary<string, OrderRecord> Orders { get; } = new();
         public Dictionary<string, MessageRecord> Sent { get; } = new(); public List<(Guid Workspace, KnowledgeTopic Topic)> FactualQueries { get; } = new();
         public int AiCalls { get; private set; } public int Handoffs { get; private set; }
+        public Func<Task>? DuringInterpretation { get; set; }
         private readonly AiResponseOrchestrator _orchestrator; private int _turn;
-        public Fixture()
+        public Fixture(int serviceCount = 2)
         {
             var cache = new Mock<IConversationCache>();
             var clock = new Mock<IClock>(); clock.SetupGet(c => c.UtcNow).Returns(() => Now);
             Contexts = new ContextRecoveryService(cache.Object, new FirestoreConversationStateRepository(Firestore.Db), clock.Object);
             var offerings = new Mock<IOfferingService>(MockBehavior.Strict);
-            var services = new[] { new ServiceDto { Id = "service-a", Name = "Servicio A", RequiresReservation = true, DurationInMinutes = 30 }, new ServiceDto { Id = "service-b", Name = "Servicio B", RequiresReservation = true, DurationInMinutes = 30 } };
+            var services = new[] { new ServiceDto { Id = "service-a", Name = "Servicio A", RequiresReservation = true, DurationInMinutes = 30 }, new ServiceDto { Id = "service-b", Name = "Servicio B", RequiresReservation = true, DurationInMinutes = 30 } }
+                .Concat(Enumerable.Range(2, serviceCount - 2).Select(i => new ServiceDto { Id = $"service-{i}", Name = $"Servicio {i}", RequiresReservation = true, DurationInMinutes = 30 })).ToArray();
             offerings.Setup(o => o.GetProductsAsync(Workspace, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { new ProductDto { Id = "product-a", Name = "Producto real", PriceMinorUnits = 2500 } });
             offerings.Setup(o => o.GetServicesAsync(Workspace, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(services);
             offerings.Setup(o => o.GetProductByIdAsync(Workspace, "product-a", It.IsAny<CancellationToken>())).ReturnsAsync(new ProductDto { Id = "product-a", Name = "Producto real", PriceMinorUnits = 2500 });
@@ -262,11 +264,13 @@ public sealed class AssistantConversationTests
             orderRepo.Setup(o => o.CreateOrderAsync(Workspace, It.IsAny<OrderRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, OrderRecord r, CancellationToken _) => { Orders.TryAdd(r.Id, r); return Orders[r.Id]; });
             var order = new OrderFlow(orderRepo.Object, notifications, Contexts, offerings.Object);
             var interpreter = new Mock<IAiInterpreter>(MockBehavior.Strict);
-            interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => { AiCalls++; return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
+            interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).Returns(async () => { AiCalls++; if (DuringInterpretation != null) await DuringInterpretation(); return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
             var outbound = new Mock<IOutboundMessageService>(MockBehavior.Strict);
             outbound.Setup(o => o.SendMessageAsync(Workspace, "chat", Phone, It.IsAny<string>(), SenderType.AI, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, string _, string content, SenderType _, string source, CancellationToken _) => {
                 if (!Sent.TryGetValue(source, out var r)) { r = new MessageRecord { Id = source, Status = MessageStatus.Sent, Content = content }; Sent.Add(source, r); } return r; });
             var support = new Mock<ISupportFlow>(MockBehavior.Strict);
+            outbound.Setup(o => o.SendHandoffAcknowledgementAsync(Workspace, "chat", Phone, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid w, string chatId, string phone, string content, string source, CancellationToken ct) => outbound.Object.SendMessageAsync(w, chatId, phone, content, SenderType.AI, source, ct));
             support.Setup(s => s.ProcessAsync(Workspace, "chat", It.IsAny<CancellationToken>())).Returns(async () => { Handoffs++; var c = await Context(); c.Mode = "Human"; await Contexts.SaveContextAsync(Workspace, Phone, c, default); return "Un asesor continuará la conversación."; });
             var chat = new ChatFlow(knowledge.Object, entitlements.Object, new LocationResolverService(locations.Object), NullLogger<ChatFlow>.Instance, Mock.Of<ICatalogGenerationService>(), notifications);
             Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()));

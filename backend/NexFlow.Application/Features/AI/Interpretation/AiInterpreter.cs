@@ -29,6 +29,7 @@ public class AiInterpretation
     public string? SearchTerm { get; set; }
     public ConversationDirective Directive { get; set; }
     public OfferingQueryKind QueryKind { get; set; } = OfferingQueryKind.Specific;
+    public bool RequiresClarification { get; set; }
 }
 
 public interface IAiInterpreter
@@ -84,6 +85,7 @@ PASO ACTUAL: {currentStep ?? "NINGUNO"}
 - Directive: 'None', 'ChangeLocation', 'ChangeService', 'ShowOptions', 'CancelCurrentFlow'. Extrae sólo comandos explícitos del consumidor.
 - QueryKind: 'Broad' para consultas amplias de productos/servicios ('qué productos tienen', 'qué servicios ofrecen', 'muéstrame el catálogo', 'pásame sus productos', 'lista de servicios' y equivalentes). SearchTerm = null en estas consultas.
 - QueryKind: 'Specific' si pregunta sobre una offering concreta, su precio, duración o existencia; SearchTerm contiene únicamente su nombre. No conviertas una consulta específica en Broad.
+- RequiresClarification: true si hay acciones contradictorias, varias operaciones distintas o una referencia sin contexto inequívoco. Usa General sin entidades ni directivas y pide una sola aclaración; nunca elijas arbitrariamente una de las acciones.
 
 El objetivo activo NO reemplaza la intención de una pregunta informativa. Si pregunta explícitamente horarios, Intent = BusinessHours; si pregunta ubicación o dirección, Intent = Location; si pregunta un dato frecuente, Intent = Faq. En estas interrupciones no extraigas cambios del draft ni nombres, fechas u horas como respuestas al paso actual.
 Si dice 'quiero cambiar de sede', 'puedo cambiar de sede', 'otra sede': Directive = ChangeLocation. No lo confundas con una consulta de dirección.
@@ -108,6 +110,9 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
             using var json = JsonDocument.Parse(cleanJson);
             if (json.RootElement.ValueKind != JsonValueKind.Object || json.RootElement.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != json.RootElement.EnumerateObject().Count())
                 throw new JsonException("Invalid interpretation object.");
+            if (json.RootElement.EnumerateObject().Any(p => p.Name.Equals("Confirmed", StringComparison.OrdinalIgnoreCase)
+                || p.Name.Equals("DeniedResponse", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Failure", StringComparison.OrdinalIgnoreCase)))
+                throw new JsonException("Interpretation contains server-owned fields.");
             var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, Converters = { new JsonStringEnumConverter(allowIntegerValues: false) } })
                    ?? throw new JsonException("Interpretation was null.");
 
@@ -124,6 +129,8 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
                 || interpretation.Directive == ConversationDirective.ChangeLocation && !normalizedInput.Contains("cambi") && !normalizedInput.Contains("otra sede")
                 || interpretation.Directive == ConversationDirective.ChangeService && !normalizedInput.Contains("cambi") && !normalizedInput.Contains("otro servicio"))
                 throw new JsonException("Entities or directives were not supplied by the consumer.");
+            if (interpretation.RequiresClarification)
+                return new AiInterpretation { Intent = ConversationIntent.General, RequiresClarification = true };
             if (interpretation.Intent is ConversationIntent.General or ConversationIntent.Support or ConversationIntent.BusinessHours or ConversationIntent.Faq
                 || interpretation.Intent == ConversationIntent.Location)
             { interpretation.Service = null; interpretation.Date = null; interpretation.Time = null; interpretation.CustomerName = null; interpretation.Directive = ConversationDirective.None; }

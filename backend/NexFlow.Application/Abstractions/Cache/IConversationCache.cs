@@ -25,6 +25,7 @@ public class ConversationContextDto
     public string? SelectedServiceId { get; set; }
     public string? SelectedLocationId { get; set; }
     public int ReservationServiceOffset { get; set; }
+    public string? ReservationCommitSourceMessageId { get; set; }
     public string? TargetDate { get; set; }
     public string? TargetTime { get; set; }
     public string? RealCustomerName { get; set; }

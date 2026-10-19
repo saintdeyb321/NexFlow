@@ -71,7 +71,9 @@ public class FirestoreConversationStateRepository : IConversationStateRepository
         {
             var snapshot = await tx.GetSnapshotAsync(reference, ct);
             var budget = snapshot.Exists ? JsonSerializer.Deserialize<AiBudget>(snapshot.GetValue<string>("budgetJson"))! : new AiBudget();
-            if (budget.Window != window) budget = new() { Window = window };
+            // An older in-flight request must never roll back a newer quota window.
+            if (budget.Window > window) return false;
+            if (budget.Window < window) budget = new() { Window = window };
             if (budget.Sources.Contains(source)) return true;
             var count = budget.Clients.GetValueOrDefault(client);
             if (budget.Sources.Count >= workspaceLimit || count >= clientLimit) return false;

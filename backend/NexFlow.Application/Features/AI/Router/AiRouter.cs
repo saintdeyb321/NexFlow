@@ -32,10 +32,6 @@ public class AiRouter : IAiRouter
             ? GetProvider(AiProviderType.Groq)
             : GetProvider(AiProviderType.Gemini);
 
-        IAiProvider fallbackProvider = taskType == AiTaskType.IntentExtraction
-            ? GetProvider(AiProviderType.Gemini)
-            : GetProvider(AiProviderType.Groq);
-
         try
         {
             _logger.LogDebug("Intentando ejecutar tarea {TaskType} con {Provider}", taskType, primaryProvider.ProviderType);
@@ -44,6 +40,7 @@ public class AiRouter : IAiRouter
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) when (IsTransientError(ex))
         {
+            var fallbackProvider = GetProvider(taskType == AiTaskType.IntentExtraction ? AiProviderType.Gemini : AiProviderType.Groq);
             // 🔥 SPRINT 10: Solo ejecutamos Fallback si el error es transitorio (caída temporal)
             _logger.LogWarning("Fallo transitorio {FailureType} en {Provider}; fallback a {FallbackProvider}.", ex.GetType().Name, primaryProvider.ProviderType, fallbackProvider.ProviderType);
 

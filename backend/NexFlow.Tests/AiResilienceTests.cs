@@ -113,6 +113,9 @@ public sealed class AiResilienceTests
 
     [Theory]
     [InlineData("{}")]
+    [InlineData("{\"Intent\":\"Order\",\"RequiresClarification\":\"false\"}")]
+    [InlineData("{\"Intent\":\"Order\",\"Confirmed\":true}")]
+    [InlineData("{\"Intent\":\"Request\",\"DeniedResponse\":null}")]
     [InlineData("{\"Intent\":1}")]
     [InlineData("{\"Intent\":\"ProviderUnavailable\"}")]
     [InlineData("{\"Intent\":\"Order\",\"WorkspaceId\":\"foreign\"}")]
@@ -148,6 +151,15 @@ public sealed class AiResilienceTests
         using var transport = new Transport(0, ""); using var http = new HttpClient(transport);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Provider(provider, http, Config()).GenerateTextAsync("system", "user", true));
         Assert.Equal(1, transport.Calls);
+    }
+
+    [Fact]
+    public async Task A_healthy_primary_does_not_require_an_unused_fallback_registration()
+    {
+        var primary = new Mock<IAiProvider>(); primary.SetupGet(p => p.ProviderType).Returns(AiProviderType.Groq);
+        primary.Setup(p => p.GenerateTextAsync("system", "user", true, It.IsAny<CancellationToken>())).ReturnsAsync("{\"Intent\":\"General\"}");
+        var router = new AiRouter(new[] { primary.Object }, NullLogger<AiRouter>.Instance);
+        Assert.Equal("{\"Intent\":\"General\"}", await router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "system", "user", true, default));
     }
 
     private static AiInterpreter Interpreter(IAiRouter router)

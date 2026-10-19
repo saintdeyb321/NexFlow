@@ -43,6 +43,8 @@ public record MessageRecord
     public string? ProviderConfirmationId { get; init; }
     public string? IdempotencyKey { get; init; }
     public string? LastError { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsHandoffAcknowledgement { get; init; }
     public MessageOrigin? Origin { get; init; }
     public DateTime? TransportStartedAt { get; init; }
     public DateTime? TransportLeaseUntil { get; init; }
