@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexFlow.Application.Abstractions;
+using NexFlow.API.Uploads;
 
 namespace NexFlow.API.Controllers;
 
@@ -21,6 +22,8 @@ public class StorageController : ControllerBase
     }
 
     [HttpPost("upload")]
+    [RequestSizeLimit(ValidatedImage.MaxBytes + 64 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = ValidatedImage.MaxBytes)]
     public async Task<IActionResult> UploadImage(IFormFile file, CancellationToken cancellationToken)
     {
         if (file == null || file.Length == 0)
@@ -33,26 +36,28 @@ public class StorageController : ControllerBase
             return BadRequest(new { message = "La imagen supera el límite de 5MB." });
         }
 
-        var allowedTypes = new[] { "image/jpeg", "image/png", "image/webp" };
-        if (!allowedTypes.Contains(file.ContentType.ToLowerInvariant()))
-        {
-            return BadRequest(new { message = "Formato no permitido. Solo JPG, PNG o WebP." });
-        }
+        if (_workspaceContext.CurrentWorkspaceId == Guid.Empty) return Forbid();
 
         try
         {
-            using var stream = file.OpenReadStream();
+            var validated = await ValidatedImage.ReadAsync(file, cancellationToken);
+            using var stream = new MemoryStream(validated.Bytes, writable: false);
             var folderPath = $"nexflow/workspaces/{_workspaceContext.CurrentWorkspaceId}/catalog";
-            var safeFileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
+            var safeFileName = $"{Guid.NewGuid():N}{validated.Extension}";
 
             var secureUrl = await _fileStorage.UploadImageAsync(stream, safeFileName, folderPath, cancellationToken);
 
             return Ok(new { secureUrl });
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (InvalidDataException)
+        {
+            return BadRequest(new { message = "Imagen inválida, incompleta o excesiva. Usa JPG, PNG o WebP estático de hasta 5 MB y 16 megapíxeles." });
+        }
         catch (Exception ex)
         {
-            // 🔥 CORRECCIÓN: Ahora logueamos el error exacto en la consola de C#
-            _logger.LogError(ex, "Fallo crítico subiendo imagen a Cloudinary para el Workspace {WorkspaceId}", _workspaceContext.CurrentWorkspaceId);
+            // Provider exceptions can contain credentials or untrusted metadata.
+            _logger.LogError("Image upload failed for {WorkspaceId}: {FailureType}", _workspaceContext.CurrentWorkspaceId, ex.GetType().Name);
             return StatusCode(500, new { message = "Error interno al procesar la imagen." });
         }
     }

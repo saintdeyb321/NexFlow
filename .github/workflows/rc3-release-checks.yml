@@ -1,0 +1,65 @@
+name: RC3 local-equivalent release checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    # Existing browser suites use installed Windows Chromium; no SaaS credentials.
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: 10.0.401
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 24.18.1
+      - name: Restore and compile backend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          dotnet restore backend/backend.slnx
+          dotnet restore backend/NexFlow.Tests/NexFlow.Tests.csproj
+          dotnet build backend/backend.slnx --no-restore
+          dotnet publish backend/NexFlow.API/NexFlow.API.csproj --no-restore --configuration Release --output backend/NexFlow.API/bin/rc3-publish
+      - name: Execute explicit backend suite (24 external integrations excluded here)
+        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --filter 'Category!=Integration' --logger 'trx;LogFileName=rc3-unit.trx' --results-directory backend/NexFlow.Tests/TestResults
+      - name: Require complete local regression evidence
+        run: |
+          [xml]$result = Get-Content backend/NexFlow.Tests/TestResults/rc3-unit.trx
+          $counts = $result.SelectSingleNode("//*[local-name()='Counters']")
+          if (!$counts -or [int]$counts.passed -lt 702 -or $counts.total -ne $counts.executed -or $counts.total -ne $counts.passed) {
+            throw 'Expected at least 702 successful local tests, without omissions.'
+          }
+      - name: Frontend locked dependencies, build and lint
+        working-directory: frontend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm ci
+          npm run build
+          npm run lint
+      - name: Frontend TypeScript and browser regression suites
+        working-directory: frontend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          node --import ./tests/reservations-loader.mjs --test tests/*.test.ts
+          node --test --test-concurrency=1 tests/*.test.mjs
+      - name: Upload synthetic backend evidence
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: rc3-release-unit-results
+          path: backend/NexFlow.Tests/TestResults/rc3-unit.trx
+          retention-days: 7
+          if-no-files-found: warn
+# Does not certify PostgreSQL/Firestore. Use the separate approved integration
+# workflow with independent authorization; neither workflow deploys anything.

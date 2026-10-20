@@ -18,6 +18,10 @@ public sealed class InMemoryFirestore : CallInvoker
     private readonly Dictionary<ByteString, Dictionary<string, long>> _transactions = new();
     private readonly Dictionary<string, long> _versions = new();
     private long _revision;
+    private long _readRpcCalls;
+    private long _commitRpcCalls;
+    public long ReadRpcCalls => Interlocked.Read(ref _readRpcCalls);
+    public long CommitRpcCalls => Interlocked.Read(ref _commitRpcCalls);
     private (string Path, int Remaining, TaskCompletionSource Gate)? _readBarrier;
     public int AbortedCommits { get; private set; }
     public Func<CommitRequest, Exception?>? BeforeCommit { get; set; }
@@ -71,6 +75,7 @@ public sealed class InMemoryFirestore : CallInvoker
                     _transactions.Remove(rollback.Transaction);
                     return new Empty();
                 case CommitRequest commit:
+                    Interlocked.Increment(ref _commitRpcCalls);
                     var failure = BeforeCommit?.Invoke(commit);
                     if (failure != null) throw failure;
                     if (!commit.Transaction.IsEmpty && _transactions.TryGetValue(commit.Transaction, out var reads)
@@ -216,6 +221,8 @@ public sealed class InMemoryFirestore : CallInvoker
     }
     public override AsyncServerStreamingCall<TResponse> AsyncServerStreamingCall<TRequest, TResponse>(Method<TRequest, TResponse> method, string? host, CallOptions options, TRequest request)
     {
+        if (request is BatchGetDocumentsRequest or RunQueryRequest or RunAggregationQueryRequest)
+            Interlocked.Increment(ref _readRpcCalls);
         var (responses, gate) = Stream(request!);
         return new(new Reader<TResponse>(responses, gate), Task.FromResult(new Metadata()), () => Status.DefaultSuccess, () => new Metadata(), () => { });
     }

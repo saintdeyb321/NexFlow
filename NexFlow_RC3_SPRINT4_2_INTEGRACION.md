@@ -147,3 +147,58 @@ No ejecutar estos comandos en Oracle. Windows actual no tiene los requisitos; no
 3. Investigar cualquier fallo antes de certificar: no modificar expectativas para ocultar diferencias de motor/emulador.
 4. Evaluar resultados de tenant/pool/locks y la ventana explícita de commit servidor tardío; fijar límites operativos con evidencia, no estimaciones.
 5. Emitir nueva decisión de certificación solo con esa evidencia; despliegue requiere autorización aparte. **Detenido al cerrar Sprint 4.2; no iniciar Sprint 5.**
+
+## Adenda — autorización de primera ejecución: prevuelo bloqueado
+
+Fecha: 2026-10-19. Referencia autorizada: `8af3419658f1e29b8b80145638d5f58fa3030820`.
+
+**CERTIFICACIÓN PENDIENTE. No se inició ninguna corrida en esta sesión.** El usuario autorizó exactamente una ejecución sobre main si conservaba ese SHA, con obligación de detenerse si no había CLI/autenticación/permisos verificables. Se aplicó esa condición; no se usaron credenciales alternativas, conectores ni navegador para eludirla. No se instaló software.
+
+### Controles y evidencia
+
+| Control | Resultado de esta sesión |
+|---|---|
+| HEAD/rama/status local | SHA autorizado exacto, rama main, árbol inicialmente limpio. |
+| Workflow local | Solo workflow_dispatch; contents read; runner Ubuntu temporal con PostgreSQL service y Firestore Emulator demo; sin comandos de despliegue, Oracle ni referencias a secretos SaaS. Credencial PostgreSQL explícita es ficticia de tests. |
+| Identidad local del workflow | Blob Git `0582500ff0349816bcc59d3567acc532b44281f0`, obtenido de HEAD. No equivale a verificación remota. |
+| GitHub CLI | `Get-Command gh` no lo encuentra. Tampoco existe gh.exe en Program Files/GitHub CLI, Program Files (x86)/GitHub CLI, Local/Programs/GitHub CLI ni WinGet/Links comprobados. Esto demuestra indisponibilidad en PATH/rutas comprobadas, no ausencia en toda la máquina. |
+| Autenticación / permisos Actions | No verificables sin CLI disponible; no se buscaron ni leyeron tokens. |
+| SHA remoto / workflow publicado / ejecución activa equivalente | **PENDIENTES**, sin consulta remota completada. El SHA remoto auditado fue aportado por el usuario; aquí solo se verificó el local. No se afirma ausencia de corridas de otros usuarios. |
+| Decisión de dispatch | **NO EJECUTAR**: prevuelo incompleto. Cero dispatch y cero reintentos en esta sesión. |
+
+### Resultado por suite y evidencia solicitada
+
+| Elemento | Resultado verificable |
+|---|---|
+| Run ID / URL de ejecución / SHA ejecutado | No disponibles: ninguna ejecución iniciada por esta sesión. |
+| Estado/conclusión/jobs/pasos/duraciones de Actions | No recuperados; no existe resultado nuevo que evaluar aquí. |
+| Unitarias | Referencia histórica local conservada: 677 aprobadas, 0 fallidas; **no reejecutadas en esta sesión**, no acreditadas en Actions. |
+| Integraciones | 24 previstas; **0 ejecutadas por esta sesión**, sin conteos remotos de aprobadas/fallidas/omitidas. Las 24 omisiones históricas locales no son un resultado de Actions. |
+| TRX | Ningún artefacto nuevo recuperado. |
+| Up/Down, FOR UPDATE, Serializable, xmin, SQLSTATE | Sin nueva evidencia PostgreSQL; validación real pendiente. |
+| Firestore, fencing, recuperación, tenant isolation | Sin nueva evidencia del emulador. |
+| Advisory lock/pool/borrado | Sin mediciones nuevas; no se inventan milisegundos, conexiones ni resultados. |
+
+### Clasificación de bloqueos (sin atribuirlos al producto)
+
+| Categoría / responsable | Evidencia y causa | Severidad / riesgo / corrección mínima |
+|---|---|---|
+| **B. Herramienta local**; paso de prevuelo de GitHub CLI, sin archivo/método productivo responsable | gh no resoluble ni presente en las cuatro rutas comprobadas. No se pudo probar autenticación ni permiso Actions. | BLOQUEANTE de ejecución, no defecto comercial demostrado. Usar la interfaz autenticada de GitHub según los pasos siguientes, o disponer después de una CLI instalada/autenticada por el propietario. No improvisar tokens. |
+| **F. Evidencia insuficiente**, controles remotos de prevuelo | No se verificaron SHA remoto, contenido publicado ni corridas activas. | BLOQUEANTE del dispatch: riesgo de ejecutar otra revisión o duplicar corrida si se omiten controles. Confirmarlos antes de usar la autorización de una sola ejecución. |
+| **F. Evidencia insuficiente**, evaluación de certificación | No Run ID, TRX ni resultados de servicios. | BLOQUEANTE de certificación; no demuestra fallo del harness, producción o consistencia. Evaluar una corrida real antes de proponer parches. |
+
+No se clasifican defectos A/C/D/E sin ejecución o evidencia. No se cambió código, workflow, aserciones, migraciones ni dependencias. Solo se actualizaron este informe y el progreso.
+
+### Ruta manual segura desde GitHub (no ejecutada aquí)
+
+1. Con la cuenta autorizada, abrir [main](https://github.com/saintdeyb321/NexFlow/commits/main/) y comprobar que su HEAD continúa siendo **8af3419658f1e29b8b80145638d5f58fa3030820**. Si cambió, detenerse y pedir nueva revisión; no ejecutar otra revisión.
+2. Abrir [el workflow aprobado](https://github.com/saintdeyb321/NexFlow/actions/workflows/rc3-reservation-integration.yml). Confirmar el contenido publicado contra esta revisión y que no existe una corrida equivalente queued/in_progress; no duplicar una corrida ya iniciada.
+3. Si todos esos controles pasan y no se ha consumido la autorización, pulsar **Run workflow → Branch: main → Run workflow**, **una sola vez**. No reintentar ni usar Re-run jobs si falla.
+4. Conservar URL/Run ID, head SHA efectivo, conclusión, pasos y artefacto `rc3-isolated-test-results`. Confirmar que el SHA ejecutado es el autorizado antes de atribuirle resultados.
+5. Evaluar unitarias **677**, integraciones **24 ejecutadas/24 aprobadas/0 fallidas/0 omitidas**, Up/Down y salidas de métricas. Toda ausencia de artefacto o ejecución inconclusa permanece pendiente. No introducir cambios por un workflow fallido antes de clasificar la evidencia.
+
+### Riesgo residual y recomendación
+
+La ventana de commit remoto todavía en vuelo después del purge sigue **no cubierta**, incluso si una futura corrida resulta verde. El test de ACK tardío existente parte de un commit ya observado; no certifica todos los comportamientos Firestore Cloud. Persisten la transacción SQL durante IO y la necesidad de medir locks/pool. No hay GO de Oracle ni producción.
+
+**CERTIFICACIÓN PENDIENTE; mantener Sprint 5 sin autorizar.** Detenido en el prevuelo por herramienta y evidencia remota faltantes, sin consumir una ejecución manual. Se conserva íntegro el historial anterior.

@@ -41,7 +41,9 @@ public class N8nWebhookController : ControllerBase
         if (!long.TryParse(timestampString, out long timestamp))
             return Unauthorized(new { message = "Timestamp inválido." });
 
-        var requestTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
+        DateTime requestTime;
+        try { requestTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime; }
+        catch (ArgumentOutOfRangeException) { return Unauthorized(new { message = "Timestamp inválido." }); }
         if (Math.Abs((DateTime.UtcNow - requestTime).TotalMinutes) > 5)
             return Unauthorized(new { message = "Request expirado. Posible ataque de repetición (Replay Attack) bloqueado." });
 

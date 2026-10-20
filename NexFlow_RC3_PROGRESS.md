@@ -5,10 +5,10 @@ Antes de cada sesión leer `AGENTS.md`, `NexFlow_PLAN_MAESTRO_CORRECCION_MVP_RC3
 
 ## Estado
 
-- Sprint actual: **4.2**, matriz de integración y CI manual preparados; ejecución distribuida pendiente. Se conserva el historial de Sprints 0–4.1 abajo.
-- HEAD de referencia: `e1af63324409ce7b6c2b0fe141403569069f11e3`, árbol inicialmente limpio. Cambios de Sprint 4.2 sin commit/push.
-- Autorización: exclusivamente certificación PostgreSQL/Firestore aislada y workflow manual. **Próximo sprint autorizado: ninguno. Sprint 5 NO autorizado.**
-- Veredicto: **IMPLEMENTACIÓN DE PRUEBAS COMPLETA — CERTIFICACIÓN PENDIENTE / NO-GO**. 677 pruebas locales aprobadas (669 anteriores + 8 guardas), 24 integraciones no ejecutadas. La guarda de tenant conserva SQL durante Firestore; no hay métricas reales ni prueba cloud. Ver `NexFlow_RC3_SPRINT4_2_INTEGRACION.md`.
+- Sprint actual: **5, 6 y 7 completados localmente** bajo autorización integral. Se conserva historial y pendientes externos, sin reinterpretarlos como defectos locales.
+- HEAD local de referencia: `8af3419658f1e29b8b80145638d5f58fa3030820`, rama main. Se preservaron los dos documentos pendientes previos; nuevos cambios de seguridad, pruebas, CI e higiene sin commit/push. Caché Firebase retirada solo del índice, archivo local conservado.
+- Autorización actual: desarrollo/pruebas locales **Sprints 5 → 6 → 7**, sin aprobaciones intermedias. No ejecutar workflows, Oracle, migraciones productivas, commit/push ni despliegue. La autorización anterior de dispatch no se utiliza en este encargo.
+- Veredicto final: **CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** 702 backend aprobadas/24 integraciones omitidas; 222 frontend aprobadas. Borrado nuclear deshabilitado; runbook/checklist preparados. No autorización de despliegue ni de más sprints.
 
 ## Evidencia y decisiones del Sprint 0 (histórico)
 
@@ -403,3 +403,91 @@ En el harness se corrigieron errores iniciales de compilación IClock/ValueTask 
 El informe 4.2 contiene matriz, comandos manuales seguros, diferencias Emulator/Cloud, límites de deadline/ACK/reinicio, rollout sin escrituras mixtas y rollback solo compatible conservando epochs/fences/historia. La medición pendiente no prueba rendimiento ni ausencia de huérfanos con commit servidor aún en vuelo tras purge; no retirar lock ni afirmar integridad cloud con esos límites.
 
 Siguiente acción permitida tras revisión: propietario publica revisión aprobada mediante autorización aparte y ejecuta el workflow manual aislado; evaluar TRX (24/24 sin skips), tiempos, locks/pool y ventana de tenant antes de certificar. Sin Oracle, Firestore Cloud, GitHub remoto, servicios de negocio, commit/push, despliegue ni credenciales reales. **Detenido después de Sprint 4.2. Próximo sprint autorizado: ninguno; Sprint 5 NO AUTORIZADO.**
+
+## Adenda — Sprint 4.2 primera ejecución: prevuelo bloqueado, 2026-10-19
+
+Usuario autorizó exactamente una corrida manual del workflow aprobado en `8af3419658f1e29b8b80145638d5f58fa3030820`, condicionada a main remoto inalterado y prevuelo completo; sin reintentos, cambios de producto ni Sprint 5.
+
+- HEAD local exacto/rama main verificados, status inicial limpio. Workflow local: manual exclusivo, contents read, servicios sintéticos en runner temporal, sin secretos SaaS/deploy/Oracle. Blob Git local del workflow `0582500ff0349816bcc59d3567acc532b44281f0`.
+- **B / BLOQUEANTE de ejecución:** `Get-Command gh` no lo encuentra; cuatro rutas convencionales de gh.exe comprobadas sin resultado. CLI/autenticación/permisos Actions no verificables. No se instaló nada ni buscaron tokens o credenciales alternativas.
+- **F / BLOQUEANTE de prevuelo:** SHA remoto, workflow publicado y ausencia de una corrida equivalente activa no se verificaron; no se afirma que main remoto coincida ni que no haya ejecuciones de otros usuarios.
+- **F / certificación pendiente:** cero workflows iniciados por esta sesión, sin Run ID/enlace de ejecución/SHA ejecutado/jobs/conclusión/TRX. 24 integraciones no ejecutadas por esta sesión; no hay evidencia nueva de Up/Down, SQLSTATE, xmin, locks, pool o Firestore. No se atribuye defecto al producto/harness sin resultados.
+- Referencia histórica: 677 unitarias aprobadas y 24 integraciones omitidas en la preparación. No se repitieron build/tests locales porque esta sesión modifica exclusivamente documentación; no se presentan números anteriores como nueva ejecución.
+- Persisten riesgo del commit servidor todavía en vuelo después del purge, guarda SQL durante Firestore y diferencias Emulator/Cloud. No hay GO de Oracle/producción ni aprobación de Sprint 5.
+
+Actualizados únicamente `NexFlow_RC3_SPRINT4_2_INTEGRACION.md` (controles, clasificación, tabla sin resultados inventados y pasos manuales de UI) y este registro. Historial preservado; código/backend/frontend/workflow/migraciones/secretos intactos.
+
+**CERTIFICACIÓN PENDIENTE.** Próxima acción: propietario verifica main remoto y ausencia de corrida activa, abre Actions → RC3 disposable reservation integration → Run workflow/main una vez si conserva el SHA autorizado; conserva Run ID, SHA, conclusión y TRX. Si main cambió, solicitar nueva revisión. No reintentar fallo ni iniciar Sprint 5. Detenido sin consumir un dispatch en esta sesión; sin commit/push/deploy/Oracle/servicios productivos.
+
+## Autorización integral Sprints 5–7 — Sprint 5, 2026-10-19
+
+Nuevo encargo autoriza secuencia local completa sin aprobaciones intermedias, conservando límites externos como VALIDACIÓN FINAL PENDIENTE. Base `8af3419658f1e29b8b80145638d5f58fa3030820`; dos documentos modificados previamente (`NexFlow_RC3_PROGRESS.md`, `NexFlow_RC3_SPRINT4_2_INTEGRACION.md`) preservados. AGENTS/plan/progreso/consistencia/integración/incidente revisados; plan y AGENTS no modificados.
+
+**Sprint 5 OK localmente.** Reproducciones iniciales: seis fallos (4 uploads truncados/falsos aceptados; handler y registro del borrado nuclear habilitados). Se conservaron aserciones. Nuevas reproducciones detectaron timestamp n8n long fuera de rango → excepción, corregida a 401 antes de tocar almacenes. El harness de lectura se ajustó para capturar posición al Dispose (no consultar stream cerrado), manteniendo límite real de lectura.
+
+- NF-10: API limita cuerpo multipart y archivo a 5 MB; lectura manual de 8192 bytes acotada incluso con Length falso; MIME/extensión/envelope concordantes y decodificación completa JPG/PNG/WebP, solo estáticos hasta 16 MP. Hasta dos decodificaciones simultáneas por proceso; se suben únicamente píxeles recodificados sin metadata, nombre UUID/extensión canónica y ruta workspace autenticado. Cancelación se propaga; logs solo tipo de error y WorkspaceId.
+- Decoder: **SkiaSharp + NativeAssets.Linux.NoDependencies 4.153.1** fijados, licencia MIT; paquete incluye linux-arm64, verificado localmente. No se modifican Docker/Cloudinary. Se consultaron fuentes oficiales NuGet porque no existía codec suficiente en el repo. Se descartó ImageSharp 4.1.3 tras comprobar que Release exige una clave de licencia; no se eludió esa condición ni se fijó una versión vulnerable. Se restauraron dependencias tras cada cambio necesario; ImageSharp ya no está referenciado.
+- NF-11 mitigado mediante producto: `TenantDeletionSafety` deshabilita borrado definitivo sin flag/override administrativo. Handler devuelve Workspace.DeletionUnavailable (HTTP 503), scheduler también lo rechaza antes de SQL y el worker nuclear no se registra en el host. Trabajos/tenants existentes no se modifican. Implementación del worker se conserva para harness aislado y futura certificación; no está habilitada para producción. Suspensión permanece disponible. Ventana remota y limpieza externa no se presentan como resueltas.
+- Evolution HMAC derivado por instancia, comparación constante, validación de dueño/evento, fromMe, idempotencia, retiro legacy y UnknownDelivery ya existen; pruebas reutilizadas. No se cambian banderas/secretos. n8n mantiene firma/timestamp/scope/workspace/generación/hash y callbacks tardíos; solo se corrigió el timestamp fuera del rango representable.
+- Notificaciones: pruebas Request/Order con ACK perdido, error posterior al negocio y replay conservan ID y un único registro comercial/notificación. Identidad por workspace/módulo/operación ya existe. No se añadió segundo Outbox ni reenvío de UnknownDelivery. Al agotarse inbox/outbox se conserva terminal durable para reconciliación operacional; no se afirma entrega de aviso que falló.
+- Caché/sesiones: QueryPersistence existente separa usuario/workspace, fingerprint de permisos, generación de sesión y purga; no se duplicó. Chromium comprueba 401/403/READ revocado, cambio de workspace y respuestas tardías; no se alteró autorización frontend/backend.
+
+Validación Sprint 5: backend dirigido `Rc3Sprint5SecurityTests|Evolution|CatalogCallbackTests|CatalogRecoveryHttpTests|Rc3Sprint4CommercialTests`: **191 aprobadas, 0 fallidas, 0 omitidas**, 6 s. Nuevas pruebas de seguridad: 22 casos (incluidos controles válidos de tres formatos, pixel stream truncado, tamaños, workspace, cancelación y protección nuclear). `node --test tests/rc3-inbox-browser.test.mjs tests/evolution-navigation-browser.test.mjs`: **25 aprobadas/0 fallidas/0 omitidas**, 29,63 s; console.error sintético esperado del ErrorBoundary, sin exposición en UI. Compilación de proyectos afectados correcta durante tests; build completo requerido se ejecutará en validación final. Diff revisado: únicamente seguridad/codec/tests/docs del alcance, sin migraciones ni datos externos.
+
+Archivos fase 5: nuevos `backend/NexFlow.API/Uploads/ValidatedImage.cs`, `backend/NexFlow.Application/Abstractions/TenantDeletionSafety.cs`, `backend/NexFlow.Tests/Rc3Sprint5SecurityTests.cs`; modificados `StorageController.cs`, `Controllers/Webhooks/N8nWebhookController.cs`, `Controllers/SuperAdmin/ClientsController.cs`, `NexFlow.API.csproj`, `DeleteClientCommandHandler.cs`, `TenantDeletionScheduler.cs`, registro DI Infrastructure y este progreso. Continúa automáticamente Sprint 6: resiliencia/medición local, sin workflows externos.
+
+## Sprint 6 — resiliencia y operabilidad local
+
+**OK local / PENDIENTE OPERACIONAL.** Se reutilizó circuito actual de cola SQL/FIFO/leases/retries y diagnósticos, contexto Firestore autoritativo, cache Redis prescindible, notificaciones idempotentes, proveedores tipados, deadline PDF y outbound UnknownDelivery. No se añadieron servicios, métricas con contenido ni cachés alternativos. Logs de cola ya exponen edad/estado/IDs y aviso con cooldown; las pruebas Sprint 1/RC-1/Redis comprueban caída de logging sin alterar negocio.
+
+Comando dirigido: filtro `AiResilience|AssistantRedisRecovery|AssistantDurability|AssistantRc1|Rc3Sprint1Queue|Rc3Sprint1Trace|Rc3Sprint1Profile|CatalogRecovery|Rc3Sprint6|Rc3Sprint4Commercial|Rc3Sprint0Incident` sobre csproj explícito, --no-restore, TRX local ignorado `backend/NexFlow.Tests/TestResults/rc3-sprint6.trx`. **206 aprobadas / 0 fallidas / 0 omitidas**, 2 s. Casos existentes cubren proveedores IA fallidos/timeout/fallback, Redis obsoleto/caído/recuperado, Firestore transitorio, Evolution rechazado/desconectado/entrega incierta, n8n 404/503/timeout, workflow aceptado sin callback (incluye indisponibilidad de Gotenberg detrás de n8n), reinicio lógico/leases, dead letters, handoff, replay de reservas/pedidos y workspaces. No se fingió llamada directa a Gotenberg: no existe ese cliente en el backend.
+
+Medición nueva `Rc3Sprint6LocalMeasurementTests`: 32 lotes de dos workspaces (64 turnos) con orquestador real, SDK/RPC en memoria y proveedores simulados; warmup excluido. Resultado capturado del TRX: **p50 0,6664 ms / p95 2,1877 ms / p99 6,1303 ms por lote**, **128 read RPC attempts / 64 commit RPC attempts**, cero llamadas de proveedor y efectos comerciales. Contadores añadidos exclusivamente a InMemoryFirestore; no datos sensibles ni cambios al runtime. No son latencia de red, lecturas facturables Cloud, carga concurrente comercial ni SLO demostrado; cada workspace tiene fixture separada y el aislamiento compartido se demuestra en las regresiones existentes.
+
+No se optimizaron lecturas sin evidencia de presión: contexto durable debe seguir venciendo a Redis. Timeout por defecto inspeccionado en código: Groq 5 s, Gemini 12 s (configurables 1–60), n8n HTTP 30 s; generación asíncrona 5 min separada. El runbook fijará medidas/umbrales provisionales para aceptación operacional. CPU/RAM ARM64, backlog real, cuotas/modelos IA, Firestore Count/índices/coste, proveedores y entrega móvil siguen pendientes; no bloquean preparación local ni autorizan despliegue.
+
+Archivos fase 6: nuevo `backend/NexFlow.Tests/Rc3Sprint6LocalMeasurementTests.cs`; contadores nuevos en `backend/NexFlow.Tests/Fakes/InMemoryFirestore.cs`; progreso actualizado. Diff de estas ediciones revisado; no parche productivo adicional al no demostrarse otro defecto. Continúa automáticamente Sprint 7 (higiene, builds completos, suites existentes y documentos de release).
+
+## Sprint 7 — preparación final y cierre de Sprints 5–7
+
+**OK local; validación externa pendiente, sin detener trabajo independiente.** No se rehicieron Sprints 0–4.2 ni otro harness de integración. No llamadas a Oracle/Firebase/Firestore Cloud/proveedores de negocio ni ejecución de workflows. Se consultaron NuGet/docs oficiales para elegir un decoder actual y comprobar licencia/API al faltar uno en código local; pruebas siempre con fakes.
+
+Higiene: único artefacto generado versionado encontrado fue `frontend/.firebase/hosting.ZGlzdA.cache`. Añadido ignore `frontend/.firebase/`; `git rm --cached -- frontend/.firebase/hosting.ZGlzdA.cache` deja **solo esa eliminación staged** y mantiene el archivo en disco (Test-Path True). No reset/clean/commit/push; migraciones y entidades intactas. Se conservaron configs Hosting equivalentes y se fijó comando explícito con firebase.nexflow.json en runbook. No bin/obj/node_modules/dist trackeados.
+
+Automatización: nuevo `.github/workflows/rc3-release-checks.yml`, manual, contents read, runner Windows 2025 para Chromium instalado, SDK 10.0.401/Node 24.18.1. Restore/build backend, publish Release, **test csproj explícito** excluyendo Category=Integration, TRX con mínimo 702 aprobadas sin skips, npm ci/build/lint, 83 TS y browsers existentes. Native commands fail-fast mediante PowerShell. Artefactos solo TRX sintéticos 7 días. YAML parseado localmente, sin referencias a secrets; **NO ejecutado**, ni se modificó workflow 4.2 aprobado.
+
+Se añadieron dos pruebas finales de la restricción nuclear (endpoint 503 con política SuperAdmin intacta, scheduler directo denegado incluso sin proveedor SQL), sin modificar ninguna prueba existente. Suite de seguridad nueva queda en 24 casos; medición Sprint 6 añade uno: **25 nuevas** sobre baseline 677.
+
+### Resultados finales reales
+
+| Validación | Resultado |
+|---|---|
+| `dotnet build backend/backend.slnx --no-restore` | Exit 0, **0 errores/0 warnings** en incremental final al cerrar seguridad/resiliencia. |
+| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --logger "console;verbosity=quiet"` | **702 aprobadas, 0 fallidas, 24 omitidas, 726 total**, 9 s. 677 previas conservadas; las 24 omitidas son exclusivamente PG/Emulator no disponibles, no aprobadas. |
+| Publish Release linux-arm64, self-contained false, UseAppHost=false | Exit 0, restore RID requerido; **3 warnings históricos** CS8981 x2 y CS8602 x1. libSkiaSharp.so exportado con ELF 7F454C46 / machine **183 (AArch64)**. No ejecución nativa ARM64 ni Docker. |
+| `npm run build` | Exit 0; dist correcto. JS 710,71 kB (>500 kB warning conocido), CSS 50,73 kB. |
+| `npm run lint` | Exit 0. |
+| `node --import ./tests/reservations-loader.mjs --test tests/*.test.ts` | **83/83**, 0 fallidas/omitidas, 1,54 s. |
+| `node --test --test-concurrency=1 tests/*.test.mjs` | **139/139**, 0 fallidas/omitidas, 146,70 s. Todos los browsers/Hosting existentes: artifacts, categories, evolution-navigation, hours, navigation, rc3-inbox, reservations, settings y Hosting. |
+
+Frontend total distinto **222**; no sumar las 25 dirigidas de Sprint 5 otra vez. Includes validación real de timeouts HTTP 20/15 s, permisos/caché/identidad, borradores/revalidación, fechas, categorías, sedes, horarios, PDFs PRODUCT/SERVICE y estado WhatsApp. ErrorBoundary imprime error sintético esperado en consola; no falla ni expone detalles en UI. Pedidos/solicitudes se validan por suites backend; no hay un browser dedicado de pedidos. Login/usuarios/proveedores reales se señalan explícitamente como pendientes, no como pruebas ejecutadas.
+
+Checklist `NexFlow_RC3_RELEASE_CHECKLIST.md`: matriz funcional local vs real, resultados, prioridades y CODE COMPLETE separado de RELEASE. Runbook `NexFlow_RC3_DEPLOY_RUNBOOK.md`: Oracle ARM64/config efectiva y overrides/Caddy; servicios compartidos; build limpio por SHA/digests; backup y restauración aislada; migrator y ReservationResourceStates; drenar escritores antiguos; health por HTTPS/cuerpo; pruebas autorizadas; retiro legacy separado; cuatro Outbox históricos sin replay; rollback solo compatible con epochs/fences/historia; secretos/volúmenes intactos. Es preparación, **ninguno de sus comandos externos fue ejecutado**.
+
+### Inventario final del encargo (además de cambios previos preservados)
+
+- Backend API: `backend/NexFlow.API/Controllers/StorageController.cs`, `Controllers/SuperAdmin/ClientsController.cs`, `Controllers/Webhooks/N8nWebhookController.cs`, `NexFlow.API.csproj`; nuevo `Uploads/ValidatedImage.cs`.
+- Backend Application: `backend/NexFlow.Application/Features/SuperAdmin/Workspaces/DeleteClientCommandHandler.cs`; nuevo `Abstractions/TenantDeletionSafety.cs`.
+- Backend Infrastructure: `backend/NexFlow.Infrastructure/Persistence/DependencyInjection/DependencyInjection.cs`, `Persistence/PostgreSQL/Repositories/TenantDeletionScheduler.cs`.
+- Tests: nuevos `backend/NexFlow.Tests/Rc3Sprint5SecurityTests.cs`, `Rc3Sprint6LocalMeasurementTests.cs`; contadores en `Fakes/InMemoryFirestore.cs`.
+- CI/higiene: nuevo `.github/workflows/rc3-release-checks.yml`; `.gitignore`; eliminación del caché Firebase solo del índice. Frontend de aplicación/contratos/dependencias npm **sin modificaciones**.
+- Docs: nuevos `NexFlow_RC3_RELEASE_CHECKLIST.md`, `NexFlow_RC3_DEPLOY_RUNBOOK.md`; este progreso. `NexFlow_RC3_SPRINT4_2_INTEGRACION.md` mantiene las ediciones previas de prevuelo, sin reconstrucción ni nuevas ediciones en este encargo.
+- Sin migraciones nuevas/cambios de esquema, Docker/infra de despliegue, .env/secretos/credenciales, AGENTS o plan maestro.
+
+### Riesgos y decisión final
+
+P0 potencial de borrado tardío **mitigado**: nuclear deshabilitado por producto/scheduler/host, sin bypass administrativo ni alteración de jobs/datos. No se declara segura su implementación retenida ni limpieza externa certificada. P1 RELEASE: 24 integraciones/Up-Down/PG reales pendientes, runtime ARM64 del codec/proveedores reales, configuración Oracle/health, permisos/cuentas reales, respaldo/restauración/rollback y retiro legacy coordinado. P2: métricas/costos/colas en carga real, revisión de estados terminales sin replay ciego, tres warnings C# históricos y bundle grande.
+
+Notificaciones preservan identidad estable y negocio no duplicado; agotamiento permanece terminal durable para reconciliación por operación, no reenvío automático. Reservas conservan motor, epochs/fences/UTC/SourceMessageId y coordinación; no se prometen garantías distribuidas basadas en fakes. No se identificó un P0 local sin mitigación en funciones habilitadas, sin certificar ausencia universal de defectos.
+
+**CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** No falta una autorización intermedia para otro sprint: fases locales 5–7 terminadas; siguientes pasos son revisión de diff, publicación por propietario y validaciones externas/operacionales autorizadas por separado. Sin ejecución de workflows/Oracle/deploy/commit/push. Detenido al concluir las tres fases.

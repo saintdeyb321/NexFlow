@@ -92,7 +92,8 @@ public static class DependencyInjection
         }).Validate(options => options.TimeoutMinutes is >= 1 and <= 30, "CatalogGeneration:TimeoutMinutes debe estar entre 1 y 30.").ValidateOnStart();
         services.AddHostedService<CatalogGenerationRecoveryWorker>();
         services.AddScoped<ITenantDeletionScheduler, TenantDeletionScheduler>();
-        services.AddHostedService<TenantDeletionWorker>();
+        // Hold existing jobs untouched while remote commits/cleanup are uncertified.
+        if (TenantDeletionSafety.IsEnabled) services.AddHostedService<TenantDeletionWorker>();
 
         services.AddScoped<IInboundMessageRepository, InboundMessageRepository>();
         services.AddHostedService<InboundMessageWorker>();

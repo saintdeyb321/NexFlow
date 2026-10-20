@@ -49,3 +49,6 @@ Thumbs.db
 
 **/.env
 .aider*
+
+# Firebase local deployment cache is generated, not release source.
+frontend/.firebase/

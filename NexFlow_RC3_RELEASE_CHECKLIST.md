@@ -1,0 +1,79 @@
+# NexFlow RC-3 — candidato de release
+
+Fecha: 2026-10-19. Base local `8af3419658f1e29b8b80145638d5f58fa3030820` + diff de Sprints 5–7 aún sin commit. No existe todavía un SHA/digest publicado que identifique ese diff. Cambios previos de progreso/informe 4.2 preservados.
+
+**CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** Esta decisión concluye desarrollo local autorizado; no aprueba Oracle, migraciones, servicios reales ni despliegue.
+
+## Resultados por fase
+
+| Fase | Resultado |
+|---|---|
+| Sprint 5 | NF-10 corregido con decodificación/normalización real; NF-11 mitigado bloqueando borrado nuclear; timestamp n8n fuera de rango corregido. 191 pruebas backend dirigidas + 25 Chromium aprobadas. |
+| Sprint 6 | 206 pruebas dirigidas de resiliencia aprobadas. Medición local de orquestador/RPC fake sin información sensible; mecanismos durables y observabilidad existentes conservados. |
+| Sprint 7 | Builds, publish ARM64, lint, 702 pruebas backend y 222 frontend aprobadas. Caché generada fuera del índice; CI manual adicional, checklist y runbook preparados. CI no ejecutado. |
+
+Las ejecuciones dirigidas se solapan con las suites finales: **no sumar esos conteos para inflar cobertura**.
+
+## Validación real
+
+| Comando | Resultado |
+|---|---|
+| `dotnet build backend/backend.slnx --no-restore` | Exit 0, 0 errores/0 warnings en incremental final. |
+| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --logger "console;verbosity=quiet"` | **702 aprobadas, 0 fallidas, 24 omitidas, 726 total**, 9 s. 677 anteriores + 25 nuevas; omitidas exclusivamente las integraciones opt-in 4.2. |
+| `dotnet publish backend/NexFlow.API/NexFlow.API.csproj --configuration Release --runtime linux-arm64 --self-contained false /p:UseAppHost=false --output backend/NexFlow.API/bin/rc3-linux-arm64` | Exit 0; restore de RID requerido, 3 warnings históricos (CS8981 x2, CS8602 x1). Binario libSkiaSharp.so ELF con machine **183 (AArch64)**. No ejecutado en ARM64/Docker. |
+| `npm run build` | Exit 0, `frontend/dist` generado. Bundle JS 710,71 kB, advertencia conocida >500 kB. |
+| `npm run lint` | Exit 0. |
+| `node --import ./tests/reservations-loader.mjs --test tests/*.test.ts` (frontend) | **83 aprobadas, 0 fallidas/omitidas**, 1,54 s. |
+| `node --test --test-concurrency=1 tests/*.test.mjs` (frontend) | **139 aprobadas, 0 fallidas/omitidas**, 146,70 s. Incluye Hosting y todos los browsers existentes. |
+| Workflow `.github/workflows/rc3-release-checks.yml` | YAML parseado; manual, contents read, sin secrets, test project explícito, Release publish, build/lint y suites frontend. **No ejecutado**. Se mantiene separado del harness PG/Firestore aprobado. |
+
+El console.error del fixture `PRIVATE_INTERNAL_ERROR_MUST_NOT_BE_SHOWN` es deliberado: prueba contención del ErrorBoundary y ausencia del detalle en UI. No es una regresión productiva. No se suprimieron advertencias ni debilitaron pruebas.
+
+## Checklist funcional: evidencia local vs pruebas reales
+
+| Área | Comprobado localmente | Antes de release (PENDIENTE OPERACIONAL) |
+|---|---|---|
+| Login/licencias | Contratos/permisos simulados, 401/403, entitlements, cambios de cuenta/licencia y cache identity en suites existentes. | Firebase Auth real, expiración/renovación, licencias activas y retiro en dos sesiones. No se simuló una certificación de identidad real. |
+| Workspaces/usuarios | Aislamiento API/Firestore, navegación por metadatos, permisos y respuestas tardías. Borrado nuclear bloqueado sin override. | Aprovisionar dos workspaces/cuentas autorizadas; roles/membresías, suspensión/reactivación y acceso de usuarios reales. No existe una suite browser integral de administración de usuarios. |
+| Productos/servicios/categorías | Repositorios/integridad, precio histórico de pedidos, soft delete, modales PRODUCT/SERVICE/SHARED, permisos y caché. | CRUD con roles reales, índices/cuotas Firestore, referencias y cambios simultáneos. |
+| Sedes/horarios | 83 unitarias frontend + browsers de horarios/reservas; preservación de borradores, sin escrituras automáticas y cambio de sede/tenant. | Persistencia real y dos sesiones con permisos distintos. |
+| Reservas manual/WhatsApp | Motor común, fechas/UTC, replay, xmin configurado, validadores, transiciones y Outbox en pruebas locales. | **24 integraciones PG/Emulator**, FOR UPDATE/SSI/xmin reales y funcional móvil autorizado. No confundir SQLite con PostgreSQL. |
+| Pedidos/solicitudes | Assistant/Rc3Sprint4Commercial: IDs/precios históricos, negocio único, ACK perdido, notificación idempotente y recuperación por replay controlado. | Confirmar pedidos/solicitudes reales y avisos; no hay browser dedicado de pedidos. No reenviar un turno entero para reparar solo una notificación. |
+| Conversaciones/takeover | Inbox conserva panel sano; fromMe/duplicados/handoff/supresión de IA, reconocimiento una vez, UnknownDelivery sin reenvío. | Webhook→inbox SQL→contexto→outbound→móvil→web con cuentas autorizadas. |
+| Recuperación | Redis no manda sobre Firestore; leases/restart lógico, dead letters, timeouts y errores de proveedores simulados. | Pool/latencia/recursos/colas reales; recuperación y alertas tras caídas autorizadas en staging. |
+| PDFs PRODUCT/SERVICE | Generación/cuota/cancelación/FAILED, callbacks HMAC, deadline y PDF anterior conservado; invalidación durable. | n8n/Gotenberg/Cloudinary reales, PDFs válidos separados y callback dentro del plazo. No reinyectar 4 Outbox antiguos. |
+| Notificaciones | Identidad estable workspace+módulo+operación, una inserción ante ACK perdido, fallo de aviso no duplica negocio. | Agotamiento queda terminal durable para revisión; medir alertas. Reparación administrativa de aviso por ID solo tras comprobar negocio y deduplicación, sin replay ciego. No se promete entrega universal. |
+| Webhooks | Evolution firma derivada por instancia/owner/fromMe/dedup; n8n timestamp/HMAC/scope/WorkspaceId/GenerationId/SourceHash y late callbacks. | Transición legacy: demostrar key por instancia en cada conexión y **después**, por operación separada, desactivar legacy. Nunca cambiar antes de verificar proveedor. |
+| Uploads | JPG/PNG/WebP reales, MIME/extensión/envelope, decoder, corrupción/truncado, límite declarado y stream, workspace y cancelación. | Smoke Linux ARM64 del decoder y upload de imágenes/PDF con Cloudinary real; medir recursos. |
+
+## Cambios y garantías
+
+- Imagen: máximo 5 MB de entrada y salida normalizada, 16 MP, estática, 2 decodificaciones simultáneas/proceso. Lectura en bloques 8192, nunca confiar solo en Length. Se rechazan discrepancias y sufijos fuera del envelope; se suben píxeles recodificados sin metadatos ni nombre original. `secureUrl` y flujo Cloudinary conservados. No se garantiza preservar animación, EXIF/GPS o calidad binaria original: su exclusión es parte de la frontera segura. Cancelaciones legítimas propagadas.
+- Decoder final: [SkiaSharp 4.153.1](https://www.nuget.org/packages/SkiaSharp/4.153.1) y [Linux NoDependencies 4.153.1](https://www.nuget.org/packages/SkiaSharp.NativeAssets.Linux.NoDependencies/4.153.1), licencia MIT, sin instalaciones de SO/Docker. Conservar atribuciones al redistribuir. Se descartó ImageSharp al detectar exigencia de clave Release; no permanece referenciado ni se omitió su control de licencia.
+- Borrado nuclear: `TenantDeletionSafety.IsEnabled` devuelve false sin bandera ni excepción administrativa. Handler/endpoint devuelve Workspace.DeletionUnavailable (503), scheduler rechaza antes de SQL, worker no registrado en host. Las intenciones antiguas se **retienen**, no se completan ni borran. Workspaces ya Deleting permanecen protegidos; no reactivarlos automáticamente.
+- Recursos externos: PostgreSQL/Redis/Firestore/Evolution/Cloudinary/n8n/Gotenberg son servicios compartidos. Instancia Evolution reservada y prefijo de assets por workspace son identidades exclusivas, pero URLs/importaciones y dependencias no justifican purgas generales. No borrar recursos externos hasta tener inventario, ownership y limpieza durable certificada. Redis sigue cache únicamente; sus datos no autorizan recuperar un tenant eliminado.
+- Migración nueva: **ninguna** en 5–7. Sigue pendiente la existente `20261019170831_CoordinateReservationResourcesAndReuseCancelledSlots`; no aplicada aquí.
+- Higiene: no se encontraron bin/obj/node_modules/dist versionados. `frontend/.firebase/hosting.ZGlzdA.cache` retirado solo del índice (eliminación staged), **archivo local conservado**; añadido ignore. Dos configs Hosting idénticos se conservan por compatibilidad/tests; comando canónico explícito en runbook. No se borraron migraciones/entidades.
+
+## Medición y límites
+
+TRX local de Sprint 6 (ignorado por Git): 32 lotes/64 turnos después de warmup, orquestador real y SDK con RPC en memoria, dos fixtures de workspace/proveedores fake. p50/p95/p99 **0,6664/2,1877/6,1303 ms por lote de dos turnos**; 128 read RPC attempts y 64 commit RPC attempts; cero llamadas pagadas, reservas o pedidos. No son lecturas facturadas, rendimiento Firestore, capacidad de concurrencia o SLO de Oracle.
+
+No se optimizó contexto a costa de autoridad durable. Timeouts inspeccionados por defecto: Groq 5 s, Gemini 12 s, n8n HTTP 30 s, trabajo PDF 5 min. Umbral de cola demorada existente: 5 min, diagnóstico acotado/cooldown de aviso 1 h. El runbook incluye objetivos provisionales a contrastar, no valores prometidos.
+
+## Riesgos y puertas de release
+
+| Prio. | Estado / acción requerida |
+|---|---|
+| P0 potencial, **mitigado en candidato** | Commit remoto en vuelo tras purge no certificado; borrado nuclear deshabilitado. Si alguien elimina la restricción, vuelve a ser bloqueante de integridad; no habilitarlo con un workflow verde. |
+| P1, bloqueante RELEASE | 24 integraciones reales no ejecutadas: migración, locks/SSI/xmin, fencing y tenant/pool requieren evidencia. No duplicar harness ni presentarlas como verdes. |
+| P1, bloqueante RELEASE | Imagen/configuración efectiva Oracle, backup/restauración, rollback compatible y proveedores/credenciales/health reales no verificados. |
+| P1, bloqueante RELEASE | Funcionales autorizadas de dos tenants, webhook por instancia antes de retiro legacy, PDF y transporte real; Linux ARM64 debe cargar el codec. |
+| P2 | Terminales Failed/DeadLetter/UnknownDelivery requieren revisión; sin reenvío indiscriminado. Medir backlog, alertas y costes bajo carga. |
+| P2 | Advertencias históricas C# y bundle 710,71 kB, sin errores de build; no se hicieron refactors para ocultarlas. |
+
+No se identificó un P0 local conocido sin mitigación en la funcionalidad habilitada. Eso **no** certifica ausencia global de defectos ni resuelve la causa operacional histórica del incidente.
+
+Antes de cambiar RELEASE a GO: aprobar diff, generar SHA exacto limpio/digests, ejecutar las 24 integraciones sin skips, aplicar runbook en staging aislado autorizado, verificar respaldo/restauración y rollback compatible, funcionales reales y revisión del riesgo residual. No ejecutar workflows/Oracle/migraciones/deploy por este documento: requieren autorización independiente.
+
+Inventario exacto de archivos, decisiones por sprint y resultados: `NexFlow_RC3_PROGRESS.md`. Procedimiento: `NexFlow_RC3_DEPLOY_RUNBOOK.md`.

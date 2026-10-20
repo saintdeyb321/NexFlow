@@ -89,6 +89,8 @@ public class ClientsController : ControllerBase
         [FromServices] DeleteClientCommandHandler handler, CancellationToken cancellationToken)
     {
         var result = await handler.Handle(new DeleteClientCommand(request.WorkspaceId), cancellationToken);
+        if (result.Error.Code == "Workspace.DeletionUnavailable")
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { code = result.Error.Code, message = result.Error.Description });
         if (result.IsFailure) return NotFound(new { code = result.Error.Code, message = result.Error.Description });
         return Accepted(new { code = "Workspace.DeletionScheduled", message = "Eliminación durable solicitada." });
     }

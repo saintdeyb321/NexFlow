@@ -9,6 +9,9 @@ public class TenantDeletionScheduler(NexFlowDbContext db, IEntitlementService en
 {
     public async Task<Result> RequestAsync(Guid workspaceId, Guid requestedBy, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        if (!TenantDeletionSafety.IsEnabled)
+            throw new NexFlow.Domain.Exceptions.ConcurrencyException(TenantDeletionSafety.Unavailable.Description);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await TenantLifecycleLock.AcquireAsync(db, workspaceId, true, ct);
         var workspace = (await db.Workspaces.FromSqlInterpolated($"SELECT * FROM \"Workspaces\" WHERE \"Id\" = {workspaceId} FOR UPDATE").ToListAsync(ct)).FirstOrDefault();
