@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Common;
+using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Application.Features.Knowledge;
@@ -13,6 +14,7 @@ public class ProcessIncomingMessageCommandHandler
 {
     private readonly IContextRecoveryService _contextRecovery;
     private readonly ILocationRepository _locationRepo;
+    private readonly IEntitlementService _entitlementService;
     private readonly IIncomingMessageGuard _guard;
     private readonly IConversationStateService _stateService;
     private readonly IAiResponseOrchestrator _aiOrchestrator;
@@ -28,7 +30,8 @@ public class ProcessIncomingMessageCommandHandler
         IOutboundMessageService outboundMessageService,
         ILogger<ProcessIncomingMessageCommandHandler> logger,
         IContextRecoveryService contextRecovery,
-        ILocationRepository locationRepo)
+        ILocationRepository locationRepo,
+        IEntitlementService entitlementService)
     {
         _guard = guard;
         _stateService = stateService;
@@ -38,6 +41,7 @@ public class ProcessIncomingMessageCommandHandler
         _logger = logger;
         _contextRecovery = contextRecovery;
         _locationRepo = locationRepo;
+        _entitlementService = entitlementService;
     }
 
     public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
@@ -102,6 +106,16 @@ public class ProcessIncomingMessageCommandHandler
         {
             var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, phone, ct);
             if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return false;
+            var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var intent = topic == KnowledgeTopic.Locations ? ConversationIntent.Location : ConversationIntent.BusinessHours;
+            var denied = AiIntentAccess.GetDeniedResponse(intent, modules);
+            if (denied != null)
+            {
+                var response = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone,
+                    denied, SenderType.AI, sourceMessageId, ct);
+                EnsureOutboundFinalized(response);
+                return true;
+            }
             KnowledgeResult result;
             try
             {

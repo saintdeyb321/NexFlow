@@ -105,7 +105,7 @@ public sealed class EvolutionInboundTests
         Assert.Equal(IncomingMessageKind.Control, command.Kind);
         var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);
         guard.Setup(g => g.CheckMessageAsync(command, It.IsAny<CancellationToken>())).ReturnsAsync((true, f.WorkspaceA, command.CustomerPhone));
-        var handler = new ProcessIncomingMessageCommandHandler(guard.Object, Mock.Of<IConversationStateService>(MockBehavior.Strict), Mock.Of<IAiResponseOrchestrator>(MockBehavior.Strict), Mock.Of<IKnowledgeService>(MockBehavior.Strict), Mock.Of<IOutboundMessageService>(MockBehavior.Strict), NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Mock.Of<IContextRecoveryService>(MockBehavior.Strict), Mock.Of<ILocationRepository>(MockBehavior.Strict));
+        var handler = new ProcessIncomingMessageCommandHandler(guard.Object, Mock.Of<IConversationStateService>(MockBehavior.Strict), Mock.Of<IAiResponseOrchestrator>(MockBehavior.Strict), Mock.Of<IKnowledgeService>(MockBehavior.Strict), Mock.Of<IOutboundMessageService>(MockBehavior.Strict), NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Mock.Of<IContextRecoveryService>(MockBehavior.Strict), Mock.Of<ILocationRepository>(MockBehavior.Strict), Mock.Of<IEntitlementService>(MockBehavior.Strict));
         await handler.Handle(command, default);
     }
 
@@ -182,7 +182,7 @@ public sealed class EvolutionInboundTests
         outbound.Setup(o => o.TryResumeResponseAsync(workspace, command.MessageId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         if (automatic) outbound.Setup(o => o.SendMessageAsync(workspace, "chat", phone, It.Is<string>(s => s.Contains("No puedo interpretar") && s.Contains("texto")), SenderType.AI, command.MessageId, It.IsAny<CancellationToken>())).ReturnsAsync(new MessageRecord { Status = MessageStatus.Sent });
         var ai = new Mock<IAiResponseOrchestrator>(MockBehavior.Strict);
-        var handler = new ProcessIncomingMessageCommandHandler(guard.Object, states, ai.Object, Mock.Of<IKnowledgeService>(MockBehavior.Strict), outbound.Object, NullLogger<ProcessIncomingMessageCommandHandler>.Instance, contexts.Object, Mock.Of<ILocationRepository>(MockBehavior.Strict));
+        var handler = new ProcessIncomingMessageCommandHandler(guard.Object, states, ai.Object, Mock.Of<IKnowledgeService>(MockBehavior.Strict), outbound.Object, NullLogger<ProcessIncomingMessageCommandHandler>.Instance, contexts.Object, Mock.Of<ILocationRepository>(MockBehavior.Strict), Mock.Of<IEntitlementService>(MockBehavior.Strict));
         await handler.Handle(command, default);
         Assert.Equal(draft, JsonSerializer.Serialize(context)); ai.VerifyNoOtherCalls();
         outbound.Verify(o => o.SendMessageAsync(workspace, "chat", phone, It.IsAny<string>(), SenderType.AI, command.MessageId, It.IsAny<CancellationToken>()), automatic ? Times.Once() : Times.Never());

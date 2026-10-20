@@ -52,7 +52,7 @@ public sealed class AssistantRc1Tests
         var outbound = new Mock<IOutboundMessageService>(); outbound.Setup(o => o.TryResumeResponseAsync(w, "source", default)).ReturnsAsync(false);
         var knowledge = new Mock<IKnowledgeService>(MockBehavior.Strict);
         var handler = new ProcessIncomingMessageCommandHandler(guard.Object, states.Object, ai.Object, knowledge.Object, outbound.Object,
-            NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Mock.Of<IContextRecoveryService>(MockBehavior.Strict), Mock.Of<ILocationRepository>(MockBehavior.Strict));
+            NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Mock.Of<IContextRecoveryService>(MockBehavior.Strict), Mock.Of<ILocationRepository>(MockBehavior.Strict), Mock.Of<IEntitlementService>(MockBehavior.Strict));
         await handler.Handle(command, default); ai.Verify(a => a.RespondAsync(w, command.CustomerPhone, command, chat, default), Times.Once()); knowledge.VerifyNoOtherCalls();
     }
     [Fact]

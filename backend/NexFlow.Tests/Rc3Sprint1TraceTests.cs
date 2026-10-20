@@ -61,7 +61,7 @@ public sealed class Rc3Sprint1TraceTests
             .AddSingleton(p => new OutboundMessageService(conversationRepo, gateway.Object, Mock.Of<INotificationService>(), p.GetRequiredService<ILogger<OutboundMessageService>>()))
             .AddSingleton(p => new ProcessIncomingMessageCommandHandler(guard.Object, state.Object, Mock.Of<IAiResponseOrchestrator>(MockBehavior.Strict),
                 Mock.Of<IKnowledgeService>(MockBehavior.Strict), p.GetRequiredService<OutboundMessageService>(), p.GetRequiredService<ILogger<ProcessIncomingMessageCommandHandler>>(),
-                Mock.Of<IContextRecoveryService>(MockBehavior.Strict), Mock.Of<ILocationRepository>(MockBehavior.Strict)))
+                Mock.Of<IContextRecoveryService>(MockBehavior.Strict), Mock.Of<ILocationRepository>(MockBehavior.Strict), Mock.Of<IEntitlementService>(MockBehavior.Strict)))
             .BuildServiceProvider();
         using var worker = new InboundMessageWorker(services, services.GetRequiredService<ILogger<InboundMessageWorker>>());
         await worker.StartAsync(default); await completed.Task.WaitAsync(TimeSpan.FromSeconds(5)); await worker.StopAsync(default);
