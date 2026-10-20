@@ -22,7 +22,7 @@ public sealed class AssistantDurabilityTests
     {
         var db = new InMemoryFirestore(); var repo = new FirestoreConversationStateRepository(db.Db);
         var workspace = Guid.NewGuid(); var now = DateTime.UtcNow;
-        db.SynchronizeReads($"workspaces/{workspace}/conversationStates/__ai_budget__");
+        db.SynchronizeReads($"workspaces/{workspace}/conversationStates/ai-budget");
         var admitted = await Task.WhenAll(repo.TryConsumeAiBudgetAsync(workspace, "+51911111111", "a", now, 1, 2, default), repo.TryConsumeAiBudgetAsync(workspace, "+51911111111", "b", now, 1, 2, default));
         Assert.Single(admitted, x => x);
         var duplicate = admitted[0] ? "a" : "b";
@@ -30,6 +30,7 @@ public sealed class AssistantDurabilityTests
         Assert.True(await repo.TryConsumeAiBudgetAsync(workspace, "+51922222222", "c", now, 1, 2, default));
         Assert.False(await repo.TryConsumeAiBudgetAsync(workspace, "+51933333333", "d", now, 1, 2, default));
         Assert.True(await repo.TryConsumeAiBudgetAsync(workspace, "+51911111111", "new", now.AddMinutes(1), 1, 2, default));
+        Assert.False(await repo.TryConsumeAiBudgetAsync(workspace, "+51911111111", "stale", now, 1, 2, default));
         Assert.True(await repo.TryConsumeAiBudgetAsync(Guid.NewGuid(), "+51911111111", "new", now, 1, 2, default));
     }
 

@@ -220,7 +220,8 @@ public sealed class AssistantConversationTests
         public InMemoryFirestore Firestore { get; } = new();
         public IContextRecoveryService Contexts { get; }
         public ConversationRecoveryService Recovery { get; }
-        public HashSet<string> Modules { get; } = new(["CATALOG", "SERVICES", "RESERVATIONS", "ORDERS", "REQUESTS"], StringComparer.OrdinalIgnoreCase);
+        public IBookingFlow Booking { get; }
+        public HashSet<string> Modules { get; } = new(["CATALOG", "SERVICES", "RESERVATIONS", "ORDERS", "REQUESTS", "LOCATIONS", "BUSINESS_HOURS"], StringComparer.OrdinalIgnoreCase);
         public Queue<AiInterpretation> Interpretations { get; } = new();
         public Dictionary<string, Reservation> Bookings { get; } = new(); public Dictionary<string, OrderRecord> Orders { get; } = new();
         public Dictionary<string, MessageRecord> Sent { get; } = new(); public List<(Guid Workspace, KnowledgeTopic Topic)> FactualQueries { get; } = new();
@@ -259,6 +260,7 @@ public sealed class AssistantConversationTests
                 FactualQueries.Add((w, q.Topic)); return new KnowledgeResult { Status = KnowledgeStatus.Found, Source = q.Topic, Facts = "Dato real autorizado del negocio: S/ 25.00, sede y horario registrados." }; });
             var notifications = Mock.Of<INotificationService>();
             var booking = new BookingFlow(offerings.Object, new LocationResolverService(locations.Object), engine.Object, locations.Object, hours.Object, entitlements.Object, Contexts, reservationRepo.Object, profiles.Object, knowledge.Object);
+            Booking = booking;
             var orderRepo = new Mock<IOrderRepository>(MockBehavior.Strict);
             orderRepo.Setup(o => o.GetOrderByIdAsync(Workspace, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string id, CancellationToken _) => Orders.GetValueOrDefault(id));
             orderRepo.Setup(o => o.CreateOrderAsync(Workspace, It.IsAny<OrderRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, OrderRecord r, CancellationToken _) => { Orders.TryAdd(r.Id, r); return Orders[r.Id]; });

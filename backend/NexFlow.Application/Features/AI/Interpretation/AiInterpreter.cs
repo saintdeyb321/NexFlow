@@ -187,6 +187,8 @@ internal static class AiIntentAccess
             ConversationIntent.Order when !Has("ORDERS") => "Este negocio no tiene habilitados los pedidos.",
             ConversationIntent.Order when !Has("CATALOG") => ProductsUnavailable,
             ConversationIntent.Request when !Has("REQUESTS") => "Este negocio no tiene habilitado el registro de solicitudes.",
+            ConversationIntent.Location when !Has("LOCATIONS") => "No hay información de ubicaciones disponible en este momento.",
+            ConversationIntent.BusinessHours when !Has("BUSINESS_HOURS") => "No hay información de horarios disponible en este momento.",
             _ => null
         };
     }

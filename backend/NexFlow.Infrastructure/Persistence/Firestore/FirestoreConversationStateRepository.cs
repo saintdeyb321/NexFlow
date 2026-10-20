@@ -63,7 +63,7 @@ public class FirestoreConversationStateRepository : IConversationStateRepository
     {
         if (workspaceId == Guid.Empty || string.IsNullOrWhiteSpace(phone) || string.IsNullOrWhiteSpace(sourceMessageId)
             || clientLimit < 1 || workspaceLimit < 1) throw new ArgumentException("Invalid assistant budget identity.");
-        var reference = GetDocRef(workspaceId, "__ai_budget__");
+        var reference = GetDocRef(workspaceId, "ai-budget");
         var client = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(phone)));
         var source = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{phone}:{sourceMessageId}")));
         var window = now.Ticks / TimeSpan.TicksPerMinute;

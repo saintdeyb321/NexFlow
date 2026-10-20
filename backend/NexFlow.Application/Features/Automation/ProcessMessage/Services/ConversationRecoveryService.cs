@@ -238,8 +238,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (services.Count != 0) result.Add(new("ServiceQuery", "Consultar servicios", "Action"));
             if (modules.Contains("RESERVATIONS") && services.Any(s => s.RequiresReservation && s.DurationInMinutes >= 5)) result.Add(new("Reservation", "Reservar un servicio", "Action"));
             if (modules.Contains("ORDERS") && products) result.Add(new("Order", "Preparar un pedido", "Action"));
-            if ((await locations.GetLocationsAsync(workspace, ct)).Any()) result.Add(new("Location", "Consultar ubicaciones", "Action"));
-            if ((await hours.GetBusinessHoursAsync(workspace, null, ct)).Any()) result.Add(new("BusinessHours", "Consultar horarios", "Action"));
+            if (modules.Contains("LOCATIONS") && (await locations.GetLocationsAsync(workspace, ct)).Any()) result.Add(new("Location", "Consultar ubicaciones", "Action"));
+            if (modules.Contains("BUSINESS_HOURS") && (await hours.GetBusinessHoursAsync(workspace, null, ct)).Any()) result.Add(new("BusinessHours", "Consultar horarios", "Action"));
             if (modules.Contains("REQUESTS")) result.Add(new("Request", "Registrar una solicitud", "Action"));
             result.Add(new("Support", "Hablar con un asesor", "Action"));
         }

@@ -145,6 +145,8 @@ public class BookingFlow : IBookingFlow
             }
             else if (interpretation.Intent is ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq)
             {
+                var denied = AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
+                if (denied != null) return denied;
                 string answer;
                 if (interpretation.Intent == ConversationIntent.BusinessHours)
                 {
