@@ -46,7 +46,7 @@ jobs:
       - uses: actions/setup-java@v4.7.1
         with:
           distribution: temurin
-          java-version: 21.0.8+9
+          java-version: '21'
       - name: Install controlled emulator tooling (runner only)
         run: |
           npm install --global firebase-tools@14.12.0
