@@ -1,10 +1,10 @@
 # NexFlow RC-3 — candidato de release
 
-Fecha: 2026-10-19. Base local `8af3419658f1e29b8b80145638d5f58fa3030820` + diff de Sprints 5–7 aún sin commit. No existe todavía un SHA/digest publicado que identifique ese diff. Cambios previos de progreso/informe 4.2 preservados.
+Fecha: 2026-10-20. HEAD local/main verificado `df5cfac0159bdf65ad915f9197927303b6df69cd` (publicado según autorización del propietario). `88db9e0` solo retiró caché y `df5cfac` incluye Sprints 5–7. Estado inicial limpio. El cierre actual añade un **diff local sin commit**: ese SHA NO identifica las nuevas correcciones admin/uploads, tests, smoke y ajustes CI. La release exige publicar/revisar después un SHA final limpio y fijar digests; no se verificó GitHub remoto en esta ejecución.
 
 **CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** Esta decisión concluye desarrollo local autorizado; no aprueba Oracle, migraciones, servicios reales ni despliegue.
 
-## Resultados por fase
+## Resultados históricos de Sprints 5–7 (preservados)
 
 | Fase | Resultado |
 |---|---|
@@ -14,18 +14,25 @@ Fecha: 2026-10-19. Base local `8af3419658f1e29b8b80145638d5f58fa3030820` + diff 
 
 Las ejecuciones dirigidas se solapan con las suites finales: **no sumar esos conteos para inflar cobertura**.
 
-## Validación real
+## Validación nueva de recuperación final (2026-10-20)
 
-| Comando | Resultado |
+| Comando / evidencia | Resultado real |
 |---|---|
-| `dotnet build backend/backend.slnx --no-restore` | Exit 0, 0 errores/0 warnings en incremental final. |
-| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --logger "console;verbosity=quiet"` | **702 aprobadas, 0 fallidas, 24 omitidas, 726 total**, 9 s. 677 anteriores + 25 nuevas; omitidas exclusivamente las integraciones opt-in 4.2. |
-| `dotnet publish backend/NexFlow.API/NexFlow.API.csproj --configuration Release --runtime linux-arm64 --self-contained false /p:UseAppHost=false --output backend/NexFlow.API/bin/rc3-linux-arm64` | Exit 0; restore de RID requerido, 3 warnings históricos (CS8981 x2, CS8602 x1). Binario libSkiaSharp.so ELF con machine **183 (AArch64)**. No ejecutado en ARM64/Docker. |
-| `npm run build` | Exit 0, `frontend/dist` generado. Bundle JS 710,71 kB, advertencia conocida >500 kB. |
+| `dotnet restore backend/backend.slnx` | Exit 0, paquetes fijados. |
+| `dotnet build backend/backend.slnx --no-restore` | Inicial: 0 errores/3 warnings históricos (CS8981 x2, CS8602 x1). Final incremental: 0 errores/0 warnings. |
+| `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore` | **708 aprobadas / 0 fallidas / 24 omitidas / 732 total**, 17 s. Baseline 702 intacto + 6 nuevas. TRX local ignorado rc3-final-recovery.trx. |
+| Publish Release API `linux-arm64`, self-contained false, UseAppHost=false | Exit 0, 3 warnings históricos. No se ejecutó la API ni su imagen ARM64. |
+| Publish Release Migrator `linux-arm64`, self-contained false, UseAppHost=false | Exit 0; artefacto generado, NO ejecutado, sin migraciones. |
+| `dotnet build backend/tools/CodecSmoke/NexFlow.CodecSmoke.csproj --configuration Release -p:ApiPublishDir=<publish API>` | Exit 0, sin paquetes nuevos. Contra el SkiaSharp del API aprobado. |
+| Smoke usando deps/runtimeconfig del API local | **PNG/JPEG/WebP encode/decode/normalize aprobados Windows X64**. `--require-arm64` rechaza Windows con exit 1 esperado. No es certificación Linux ARM64. Procedimiento de contenedor real en runbook. |
+| `npm ci` | Exit 0, lockfile intacto. **4 vulnerabilidades altas** transitivas y avisos de scripts pendientes (ver riesgos); sin npm audit fix. |
+| `npm run build` | Exit 0, dist generado; JS 710,37 kB, aviso >500 kB conocido. |
 | `npm run lint` | Exit 0. |
-| `node --import ./tests/reservations-loader.mjs --test tests/*.test.ts` (frontend) | **83 aprobadas, 0 fallidas/omitidas**, 1,54 s. |
-| `node --test --test-concurrency=1 tests/*.test.mjs` (frontend) | **139 aprobadas, 0 fallidas/omitidas**, 146,70 s. Incluye Hosting y todos los browsers existentes. |
-| Workflow `.github/workflows/rc3-release-checks.yml` | YAML parseado; manual, contents read, sin secrets, test project explícito, Release publish, build/lint y suites frontend. **No ejecutado**. Se mantiene separado del harness PG/Firestore aprobado. |
+| `node --import ./tests/reservations-loader.mjs --test tests/*.test.ts` | **83/83**, 0 fallidas/omitidas, 4,68 s. Repetición técnica JUnit 83/83, no sumar. |
+| `node --test --test-concurrency=1 tests/*.test.mjs` | **145/145**, 0 fallidas/omitidas, 192,95 s. Seis nuevas regresiones admin/uploads; total distinto frontend **228**. |
+| CI manual (ambos workflows existentes) | YAML/controles revisados localmente; csproj explícito, TRX mínimo 708 locales y 24 integraciones sin omisiones; Chromium requerido; JUnit frontend con descubrimiento/skip/fallo. **NO ejecutado: sin Run ID ni CI verde.** |
+
+Las reproducciones rojas incluyeron borrado ejecutable y upload tardío aplicado (2 fallos browser); suspensión sin Reason exigido por HTTP; dos casos Reactivate dejando la licencia suspendida. Se corrigieron causas, sin cambiar expectativas. Restricción nuclear y permisos permanecen.
 
 El console.error del fixture `PRIVATE_INTERNAL_ERROR_MUST_NOT_BE_SHOWN` es deliberado: prueba contención del ErrorBoundary y ausencia del detalle en UI. No es una regresión productiva. No se suprimieron advertencias ni debilitaron pruebas.
 
@@ -34,7 +41,7 @@ El console.error del fixture `PRIVATE_INTERNAL_ERROR_MUST_NOT_BE_SHOWN` es delib
 | Área | Comprobado localmente | Antes de release (PENDIENTE OPERACIONAL) |
 |---|---|---|
 | Login/licencias | Contratos/permisos simulados, 401/403, entitlements, cambios de cuenta/licencia y cache identity en suites existentes. | Firebase Auth real, expiración/renovación, licencias activas y retiro en dos sesiones. No se simuló una certificación de identidad real. |
-| Workspaces/usuarios | Aislamiento API/Firestore, navegación por metadatos, permisos y respuestas tardías. Borrado nuclear bloqueado sin override. | Aprovisionar dos workspaces/cuentas autorizadas; roles/membresías, suspensión/reactivación y acceso de usuarios reales. No existe una suite browser integral de administración de usuarios. |
+| Workspaces/usuarios | Aislamiento API/Firestore; browser de provisión, renovación, asignación, suspensión/reactivación, 503 y sesión tardía. Reactivación restaura licencia suspendida sin ampliar vigencia; vencida sigue inválida. Miembros consultados por WorkspaceId autenticado. Borrado nuclear bloqueado backend y sin acción ejecutable UI. | Aprovisionar dos workspaces/cuentas autorizadas; roles/membresías, suspensión/reactivación y acceso de usuarios reales. No existe una suite browser integral de administración de usuarios. |
 | Productos/servicios/categorías | Repositorios/integridad, precio histórico de pedidos, soft delete, modales PRODUCT/SERVICE/SHARED, permisos y caché. | CRUD con roles reales, índices/cuotas Firestore, referencias y cambios simultáneos. |
 | Sedes/horarios | 83 unitarias frontend + browsers de horarios/reservas; preservación de borradores, sin escrituras automáticas y cambio de sede/tenant. | Persistencia real y dos sesiones con permisos distintos. |
 | Reservas manual/WhatsApp | Motor común, fechas/UTC, replay, xmin configurado, validadores, transiciones y Outbox en pruebas locales. | **24 integraciones PG/Emulator**, FOR UPDATE/SSI/xmin reales y funcional móvil autorizado. No confundir SQLite con PostgreSQL. |
@@ -53,7 +60,7 @@ El console.error del fixture `PRIVATE_INTERNAL_ERROR_MUST_NOT_BE_SHOWN` es delib
 - Borrado nuclear: `TenantDeletionSafety.IsEnabled` devuelve false sin bandera ni excepción administrativa. Handler/endpoint devuelve Workspace.DeletionUnavailable (503), scheduler rechaza antes de SQL, worker no registrado en host. Las intenciones antiguas se **retienen**, no se completan ni borran. Workspaces ya Deleting permanecen protegidos; no reactivarlos automáticamente.
 - Recursos externos: PostgreSQL/Redis/Firestore/Evolution/Cloudinary/n8n/Gotenberg son servicios compartidos. Instancia Evolution reservada y prefijo de assets por workspace son identidades exclusivas, pero URLs/importaciones y dependencias no justifican purgas generales. No borrar recursos externos hasta tener inventario, ownership y limpieza durable certificada. Redis sigue cache únicamente; sus datos no autorizan recuperar un tenant eliminado.
 - Migración nueva: **ninguna** en 5–7. Sigue pendiente la existente `20261019170831_CoordinateReservationResourcesAndReuseCancelledSlots`; no aplicada aquí.
-- Higiene: no se encontraron bin/obj/node_modules/dist versionados. `frontend/.firebase/hosting.ZGlzdA.cache` retirado solo del índice (eliminación staged), **archivo local conservado**; añadido ignore. Dos configs Hosting idénticos se conservan por compatibilidad/tests; comando canónico explícito en runbook. No se borraron migraciones/entidades.
+- Higiene: no se encontraron bin/obj/node_modules/dist versionados. `frontend/.firebase/hosting.ZGlzdA.cache` retirado del índice en `88db9e0`, con ignore publicado en `df5cfac`; caché local ignorada; añadido ignore. Dos configs Hosting idénticos se conservan por compatibilidad/tests; comando canónico explícito en runbook. No se borraron migraciones/entidades.
 
 ## Medición y límites
 
@@ -70,7 +77,8 @@ No se optimizó contexto a costa de autoridad durable. Timeouts inspeccionados p
 | P1, bloqueante RELEASE | Imagen/configuración efectiva Oracle, backup/restauración, rollback compatible y proveedores/credenciales/health reales no verificados. |
 | P1, bloqueante RELEASE | Funcionales autorizadas de dos tenants, webhook por instancia antes de retiro legacy, PDF y transporte real; Linux ARM64 debe cargar el codec. |
 | P2 | Terminales Failed/DeadLetter/UnknownDelivery requieren revisión; sin reenvío indiscriminado. Medir backlog, alertas y costes bajo carga. |
-| P2 | Advertencias históricas C# y bundle 710,71 kB, sin errores de build; no se hicieron refactors para ocultarlas. |
+| P2, dependencia por revisar | npm audit: 4 altas en cadena firebase → firestore → grpc-js <=1.13.5 (GHSA-m9gg-hp2v-232j; GHSA-f596-whhp-79r4). Frontend usa app/auth, no Firestore/grpc Node; bundle sin getAuthContext/grpc-js. No hay exposición runtime demostrada; requiere revisión/aceptación de dependencia. La solución automática propone downgrade mayor Firebase 9.14.0 y no se aplicó. No declarar cero vulnerabilidades. |
+| P2 | Advertencias históricas C# y bundle 710,37 kB, sin errores de build; no se hicieron refactors para ocultarlas. |
 
 No se identificó un P0 local conocido sin mitigación en la funcionalidad habilitada. Eso **no** certifica ausencia global de defectos ni resuelve la causa operacional histórica del incidente.
 

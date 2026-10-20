@@ -111,6 +111,11 @@ public class License : Entity
     }
 
     public void Suspend() => Status = LicenseStatus.Suspended;
+    public void Resume()
+    {
+        // Restores only an administrative suspension; validity dates remain authoritative.
+        if (Status == LicenseStatus.Suspended) Status = LicenseStatus.Active;
+    }
     public void UpdateMaxLocations(int newMaxLocations)
     {
         if (newMaxLocations < 1) throw new DomainException("La licencia debe permitir al menos 1 sede operativa.");

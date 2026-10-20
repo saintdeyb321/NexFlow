@@ -1,5 +1,6 @@
 import { usePermissions } from '../../core/auth/permissions';
-import { useId, useState, useRef } from 'react';
+import { useEffect, useId, useState, useRef } from 'react';
+import { getQuerySession, isCurrentQuerySession } from '../../core/query/queryPersistence';
 import { UploadCloud, Loader2, X } from 'lucide-react';
 import { axiosClient } from '../../core/api/axiosClient';
 import { Button, IconButton } from './Button';
@@ -23,10 +24,12 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingUpload = useRef<AbortController | null>(null);
+  useEffect(() => () => { pendingUpload.current?.abort(); }, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !canUpload) return;
+    if (!file || !canUpload || pendingUpload.current) return;
 
     setErrorMsg(null);
 
@@ -39,6 +42,10 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
       return;
     }
 
+    const controller = new AbortController();
+    pendingUpload.current = controller;
+    const session = getQuerySession();
+    const isCurrent = () => !controller.signal.aborted && isCurrentQuerySession(session);
     setIsUploading(true);
     if (onUploadingContext) onUploadingContext(true);
 
@@ -48,14 +55,18 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
     try {
       const { data } = await axiosClient.post<{ secureUrl: string }>('/storage/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        signal: controller.signal,
       });
-      onChange(data.secureUrl);
+      if (isCurrent()) onChange(data.secureUrl);
     } catch (error: unknown) {
-      toast.toastApiError(error);
+      if (isCurrent()) toast.toastApiError(error);
     } finally {
-      setIsUploading(false);
-      if (onUploadingContext) onUploadingContext(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (isCurrent()) {
+        setIsUploading(false);
+        onUploadingContext?.(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+      if (pendingUpload.current === controller) pendingUpload.current = null;
     }
   };
 

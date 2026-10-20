@@ -13,11 +13,16 @@ public class ReactivateClientCommandHandler
 {
     private readonly IWorkspaceRepository _workspaceRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ILicenseRepository _licenseRepository;
+    private readonly IEntitlementService _entitlements;
 
-    public ReactivateClientCommandHandler(IWorkspaceRepository workspaceRepository, IUnitOfWork unitOfWork)
+    public ReactivateClientCommandHandler(IWorkspaceRepository workspaceRepository, IUnitOfWork unitOfWork,
+        ILicenseRepository licenseRepository, IEntitlementService entitlements)
     {
         _workspaceRepository = workspaceRepository;
         _unitOfWork = unitOfWork;
+        _licenseRepository = licenseRepository;
+        _entitlements = entitlements;
     }
 
     public async Task<Result> Handle(ReactivateClientCommand request, CancellationToken cancellationToken)
@@ -29,8 +34,11 @@ public class ReactivateClientCommandHandler
 
         // Cambiamos el estado
         workspace.Activate();
+        var license = await _licenseRepository.GetByWorkspaceIdAsync(request.WorkspaceId, cancellationToken);
+        license?.Resume();
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _entitlements.InvalidateWorkspaceCache(request.WorkspaceId);
         return Result.Success();
     }
 }

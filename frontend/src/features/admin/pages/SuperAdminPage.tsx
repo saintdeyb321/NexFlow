@@ -1,9 +1,8 @@
 import { PageHeader } from '../../../components/ui/Layout';
 import { Button } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { FormField, Input } from '../../../components/ui/Form';
 import { Alert, LoadingState, EmptyState } from '../../../components/ui/Feedback';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { ShieldAlert, Plus, Server } from 'lucide-react';
 import { useAuthStore } from '../../../core/store/useAuthStore';
@@ -22,21 +21,20 @@ export const SuperAdminPage = () => {
   const [workspaceToRenew, setWorkspaceToRenew] = useState<WorkspaceSummaryDto | null>(null);
   const [workspaceToModule, setWorkspaceToModule] = useState<WorkspaceSummaryDto | null>(null);
 
-  const { workspaces, isLoading, isProvisioning, errorMessage, handleProvision, handleToggleStatus, handleDelete } = useSuperAdmin();
-  const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'status'; workspace: WorkspaceSummaryDto } | null>(null);
-  const [confirmation, setConfirmation] = useState('');
+  const { workspaces, isLoading, isProvisioning, errorMessage, handleProvision, handleToggleStatus } = useSuperAdmin();
+  const [pendingAction, setPendingAction] = useState<{ workspace: WorkspaceSummaryDto } | null>(null);
+  const actionInFlight = useRef(false);
   const [isActing, setIsActing] = useState(false);
   const executeAction = async () => {
-    if (!pendingAction || (pendingAction.kind === 'delete' && confirmation !== 'ELIMINAR')) return;
+    if (!pendingAction || actionInFlight.current) return;
     const workspace = workspaces.find(item => item.id === pendingAction.workspace.id);
     if (!workspace || workspace.status === 5) return;
+    actionInFlight.current = true;
     setIsActing(true);
     try {
-      if (pendingAction.kind === 'delete') await handleDelete(workspace);
-      else await handleToggleStatus(workspace);
+      await handleToggleStatus(workspace);
       setPendingAction(null);
-      setConfirmation('');
-    } finally { setIsActing(false); }
+    } finally { actionInFlight.current = false; setIsActing(false); }
   };
 
   if (!isSuperAdmin) {
@@ -54,8 +52,9 @@ export const SuperAdminPage = () => {
   return (
     <div className="nf-page">
       {errorMessage && <Alert tone="error" className="mb-4">{errorMessage}</Alert>}
-      <ConfirmDialog isOpen={Boolean(pendingAction)} onClose={() => { setPendingAction(null); setConfirmation(''); }} title="Confirmar operación" description={pendingAction?.workspace.name} destructive={pendingAction?.kind === 'delete'} isLoading={isActing} confirmDisabled={workspaces.find(item => item.id === pendingAction?.workspace.id)?.status === 5 || (pendingAction?.kind === 'delete' && confirmation !== 'ELIMINAR')} onConfirm={executeAction}>
-        {pendingAction?.kind === 'delete' ? <FormField label="Confirmación" helperText="La eliminación es irreversible. Escribe ELIMINAR para solicitarla."><Input value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={isActing} /></FormField> : <p>¿Confirmas el cambio de estado?</p>}
+      <Alert tone="info" className="mb-4">La eliminación definitiva está temporalmente deshabilitada. Puedes suspender o reactivar el negocio.</Alert>
+      <ConfirmDialog isOpen={Boolean(pendingAction)} onClose={() => setPendingAction(null)} title="Confirmar operación" description={pendingAction?.workspace.name} isLoading={isActing} confirmDisabled={workspaces.find(item => item.id === pendingAction?.workspace.id)?.status === 5} onConfirm={executeAction}>
+        <p>¿Confirmas el cambio de estado?</p>
       </ConfirmDialog>
 
       {/* Cabecera */}
@@ -80,8 +79,7 @@ export const SuperAdminPage = () => {
               <WorkspaceCard
                   key={ws.id}
                   workspace={ws}
-                  onToggleStatus={workspace => setPendingAction({ kind: 'status', workspace })}
-                  onDelete={workspace => { setConfirmation(''); setPendingAction({ kind: 'delete', workspace }); }}
+                  onToggleStatus={workspace => setPendingAction({ workspace })}
                   onRenew={(w) => setWorkspaceToRenew(w)}
                   onAssignModule={(w) => setWorkspaceToModule(w)}
               />

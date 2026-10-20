@@ -31,14 +31,21 @@ jobs:
           dotnet restore backend/NexFlow.Tests/NexFlow.Tests.csproj
           dotnet build backend/backend.slnx --no-restore
           dotnet publish backend/NexFlow.API/NexFlow.API.csproj --no-restore --configuration Release --output backend/NexFlow.API/bin/rc3-publish
+      - name: Compile and exercise codec smoke against API publish (Windows only)
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $apiPublish = (Resolve-Path backend/NexFlow.API/bin/rc3-publish).Path
+          dotnet build backend/tools/CodecSmoke/NexFlow.CodecSmoke.csproj --configuration Release "-p:ApiPublishDir=$apiPublish"
+          Copy-Item -LiteralPath backend/tools/CodecSmoke/bin/Release/net10.0/NexFlow.CodecSmoke.dll -Destination "$apiPublish/NexFlow.CodecSmoke.dll"
+          dotnet exec --runtimeconfig "$apiPublish/NexFlow.API.runtimeconfig.json" --depsfile "$apiPublish/NexFlow.API.deps.json" "$apiPublish/NexFlow.CodecSmoke.dll"
       - name: Execute explicit backend suite (24 external integrations excluded here)
         run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --filter 'Category!=Integration' --logger 'trx;LogFileName=rc3-unit.trx' --results-directory backend/NexFlow.Tests/TestResults
       - name: Require complete local regression evidence
         run: |
           [xml]$result = Get-Content backend/NexFlow.Tests/TestResults/rc3-unit.trx
           $counts = $result.SelectSingleNode("//*[local-name()='Counters']")
-          if (!$counts -or [int]$counts.passed -lt 702 -or $counts.total -ne $counts.executed -or $counts.total -ne $counts.passed) {
-            throw 'Expected at least 702 successful local tests, without omissions.'
+          if (!$counts -or [int]$counts.passed -lt 708 -or $counts.total -ne $counts.executed -or $counts.total -ne $counts.passed) {
+            throw 'Expected at least 708 successful local tests, without omissions.'
           }
       - name: Frontend locked dependencies, build and lint
         working-directory: frontend
@@ -51,15 +58,26 @@ jobs:
         working-directory: frontend
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          node --import ./tests/reservations-loader.mjs --test tests/*.test.ts
-          node --test --test-concurrency=1 tests/*.test.mjs
-      - name: Upload synthetic backend evidence
+          if (!(Test-Path 'C:/Program Files/Google/Chrome/Application/chrome.exe') -and !(Test-Path 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe')) { throw 'Installed Chromium is required.' }
+          New-Item -ItemType Directory -Force node_modules/.tmp | Out-Null
+          node --import ./tests/reservations-loader.mjs --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=node_modules/.tmp/rc3-typescript.xml tests/*.test.ts
+          node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=node_modules/.tmp/rc3-browser.xml tests/*.test.mjs
+          foreach ($suite in @(@('typescript',83), @('browser',145))) {
+            [xml]$result = Get-Content "node_modules/.tmp/rc3-$($suite[0]).xml"
+            if ($result.SelectNodes('//testcase').Count -lt $suite[1] -or $result.SelectNodes('//failure|//error|//skipped').Count -ne 0) { throw 'Incomplete frontend test evidence.' }
+          }
+      - name: Upload synthetic regression evidence
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
           name: rc3-release-unit-results
-          path: backend/NexFlow.Tests/TestResults/rc3-unit.trx
+          path: |
+            backend/NexFlow.Tests/TestResults/rc3-unit.trx
+            frontend/node_modules/.tmp/rc3-typescript.xml
+            frontend/node_modules/.tmp/rc3-browser.xml
           retention-days: 7
           if-no-files-found: warn
+          # Only the three explicit synthetic XML paths above, never env/cache trees.
+          include-hidden-files: true
 # Does not certify PostgreSQL/Firestore. Use the separate approved integration
 # workflow with independent authorization; neither workflow deploys anything.

@@ -21,7 +21,7 @@ export const provisionNewWorkspace = async (request: ProvisionWorkspaceRequest):
 };
 
 export const suspendWorkspace = async (workspaceId: string): Promise<void> => {
-  await axiosClient.post('/superadmin/clients/suspend', { workspaceId });
+  await axiosClient.post('/superadmin/clients/suspend', { workspaceId, reason: 'Suspensión explícita desde la consola SuperAdmin.' });
 };
 
 export const reactivateWorkspace = async (workspaceId: string): Promise<void> => {

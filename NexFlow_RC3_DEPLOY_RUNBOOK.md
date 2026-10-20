@@ -4,7 +4,7 @@
 
 ## 1. Identidad y condiciones previas
 
-Base de desarrollo `8af3419658f1e29b8b80145638d5f58fa3030820` + cambios locales aún sin commit. Ese SHA base **no contiene** los parches 5–7. Tras revisión/publicación independiente del propietario, fijar RELEASE_SHA del commit aprobado y árbol limpio; nunca etiquetar el árbol sucio como el SHA base. Mantener candidato anterior **compatible con epochs/fences/UpdateTime** y su digest, o escoger pausa de escrituras/corrección hacia delante. No inventar un artefacto de rollback.
+Referencia publicada según propietario y HEAD local verificado: `df5cfac0159bdf65ad915f9197927303b6df69cd`, main, más **diff local de recuperación final sin commit** (2026-10-20). Sprints 5–7 están en ese commit; las correcciones finales admin/uploads, tests, smoke y CI todavía no. Tras revisión/publicación independiente del propietario, fijar RELEASE_SHA del commit final aprobado y árbol limpio. No construir/etiquetar el diff actual como si fuera el SHA publicado. Mantener candidato anterior **compatible con epochs/fences/UpdateTime** y digest, o pausa de escrituras/corrección hacia delante. No inventar rollback.
 
 Requisitos de autorización antes de la ventana:
 
@@ -34,9 +34,14 @@ Construir COMPOSE_ARGS como array Bash con cada `-f` real verificado y su `-p` s
 
 Consultar por HTTPS a través del Caddy actual, preservando forwarded headers/HTTPS. Inspeccionar HTTP **y cuerpo** de `/health/live`, `/health/ready`; PostgreSQL y Firestore Healthy; Redis cache degradado no demuestra salud completa aunque readiness responda 200. Redirección HTTP interna 307 no implica fallo de aplicación. Probar workers/canal aparte: Healthy no acredita entrega WhatsApp.
 
+Config privada requerida (solo nombres, NO copiar valores): ConnectionStrings__DefaultConnection, ConnectionStrings__Redis; Firebase__ProjectId y GOOGLE_APPLICATION_CREDENTIALS montado en ruta absoluta legible por usuario no root; Gemini/Groq ApiKey+Model; Evolution BaseUrl/ApiKey/WebhookKey/WebhookUrl/TimeoutSeconds; N8n BaseUrl/EventsWebhookId/WebhookSecret/TimeoutSeconds; Cloudinary CloudName/ApiKey/ApiSecret; Cors__AllowedOrigins y ReverseProxy__KnownNetworks explícitos. Revisar RuntimeConfiguration.cs, sin abrir secretos. No activar FORWARDEDHEADERS_ENABLED genérico ni Development; Production valida antes de crear SDK/worker. Migrator solo requiere su conexión PG privada y no inicia estas integraciones.
+
 SQL agregado solo lectura, en consola privada autorizada y sin payloads/teléfonos:
 
 ```sql
+SELECT "MigrationId", "ProductVersion" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";
+SELECT tablename, indexname, indexdef FROM pg_indexes
+WHERE schemaname = 'public' AND tablename IN ('Reservations', 'ReservationResourceStates');
 SELECT "Status", count(*), min("ReceivedAt"), min("NextRetryAt")
 FROM "InboundMessages" GROUP BY "Status";
 SELECT "EventType", "Status", count(*), min("CreatedAt")
@@ -86,7 +91,46 @@ docker image inspect "nexflow-api:$RELEASE_SHA" --format '{{.Id}} {{.Architectur
 
 El Dockerfile existente tiene contexto **backend**, targets final/migrator, usuario no root y publicación Release. No ejecuta migraciones en el entrypoint API de producción. Las imágenes base `:10.0` son móviles: registrar los digests resueltos/metadatos del build y conservar el artefacto construido; no reconstruir un tag suponiendo identidad. Si se usa registro, fijar image `repositorio@sha256:...` en el override privado autorizado; en host local fijar ID inmutable verificado y no reciclar tags. No publicar una imagen sin revisión de SHA/digest. Guardar digests del migrator y binario compatible anterior.
 
-No asumir que estos comandos se ejecutaron aquí: solo hubo publish Release linux-arm64 local; no Docker, push ni registro remoto.
+No asumir que estos comandos se ejecutaron aquí: hubo publish Release linux-arm64 local de API y Migrator, build del smoke y ejecución Windows; no Docker, push ni registro remoto.
+
+### 5.1 Smoke codec en la imagen API Linux ARM64 (PENDIENTE de ejecución)
+
+Herramienta `backend/tools/CodecSmoke`: consola sin host, configuración SaaS, credenciales ni red. Codifica, decodifica y normaliza tres imágenes sintéticas PNG/JPEG/WebP. Usa **deps/runtimeconfig y librería nativa de la imagen API**; solo se monta su DLL IL, no otros codecs ni librerías del host. No basta con inspeccionar ELF.
+
+En builder aislado con SDK .NET 10 y Docker ya disponibles, revisión final limpia aprobada e imagen inmutable recién construida. Preferir host ARM64; si usa emulación registrar ese hecho (no prueba rendimiento de Oracle). API_IMAGE debe ser ID/digest local aprobado, nunca `latest`. Estos comandos no fueron ejecutados aquí:
+
+```bash
+set -euo pipefail
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+test "$(docker image inspect "$API_IMAGE" --format '{{.Architecture}}')" = arm64
+mkdir -p backend/tools/CodecSmoke/bin/image-reference
+SMOKE_REF_DIR="$(cd backend/tools/CodecSmoke/bin/image-reference && pwd -P)"
+# Contenedor detenido, sin arrancar API/entrypoint ni montar secretos:
+probe_container=$(docker create --platform linux/arm64 --network none "$API_IMAGE")
+trap 'docker rm "$probe_container" >/dev/null' EXIT
+docker cp "$probe_container:/app/SkiaSharp.dll" "$SMOKE_REF_DIR/SkiaSharp.dll"
+docker rm "$probe_container" >/dev/null
+trap - EXIT
+dotnet build backend/tools/CodecSmoke/NexFlow.CodecSmoke.csproj \
+  --configuration Release "-p:ApiPublishDir=$SMOKE_REF_DIR"
+SMOKE_DLL="$(pwd -P)/backend/tools/CodecSmoke/bin/Release/net10.0/NexFlow.CodecSmoke.dll"
+chmod 0444 "$SMOKE_DLL" # Solo artefacto sintético, legible por el usuario no root.
+docker run --rm --pull=never --platform linux/arm64 --network none --read-only \
+  --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 512m --cpus 1 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m -e DOTNET_EnableDiagnostics=0 \
+  --mount "type=bind,source=$SMOKE_DLL,target=/app/NexFlow.CodecSmoke.dll,readonly" \
+  --entrypoint dotnet "$API_IMAGE" exec \
+  --runtimeconfig /app/NexFlow.API.runtimeconfig.json \
+  --depsfile /app/NexFlow.API.deps.json /app/NexFlow.CodecSmoke.dll --require-arm64
+```
+
+Aceptar solo exit 0, plataforma Linux/Arm64 y tres PASS. La herramienta no inicia API/workers ni migraciones. Guardar SHA/digest/plataforma/salida sintética; si falla carga/encode/decode: NO-GO, no cambiar librerías del servidor por ensayo. CodecSmoke no se añade a la imagen de producción ni al startup. Su smoke Windows ya pasó localmente y el modo ARM64 rechazó Windows, como debe.
+
+### 5.2 CI manual y evidencia (NO ejecutado)
+
+No requiere GitHub CLI: propietario publica revisión final aprobada mediante operación separada, verifica HEAD remoto y ausencia de corrida equivalente activa. En `saintdeyb321/NexFlow` → Actions → **RC3 local-equivalent release checks** → Run workflow → main aprobado; repetir procedimiento para **RC3 disposable reservation integration**. Confirmar en cada run el SHA exacto RELEASE_SHA, conservar Run ID/enlace, conclusión y artefactos TRX. No usar solo el título del commit como identidad. Verificar 708 o más locales sin skips y 24 o más integraciones sin skips, más suites frontend (83/145 o más sin omisiones). Si main cambia, no certificar esa ejecución para otra revisión. No hay ejecución real/Run ID de estos workflows en este encargo.
+
+Runner Windows verifica Chromium instalado, lockfile, publish, smoke Windows y JUnit; runner Ubuntu usa PostgreSQL 15.10 y Emulator demo con datos ficticios, timeout 30 min, TRX 7 días. `emulators:exec` y runner efímero terminan procesos/servicios; no comparten SaaS ni credenciales de Oracle. No tercer workflow, no despliegue ni mutaciones de infraestructura compartida.
 
 ## 6. Ventana y migración pendiente
 

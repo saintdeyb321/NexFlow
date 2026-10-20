@@ -6,12 +6,13 @@ import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../../core/store/useAuthStore';
 import { getApiErrorPresentation } from '../../../core/api/axiosClient';
-import { getSystemWorkspaces, provisionNewWorkspace, suspendWorkspace, reactivateWorkspace, deleteWorkspace } from '../services/admin.service';
+import { getSystemWorkspaces, provisionNewWorkspace, suspendWorkspace, reactivateWorkspace } from '../services/admin.service';
 import type { WorkspaceSummaryDto, ProvisionWorkspaceRequest } from '../types/admin.types';
 
 export const useSuperAdmin = () => {
   const isPageVisible = usePageVisible();
   const toast = useToast();
+  const sessionAtRender = getQuerySession();
   const me = useAuthStore(state => state.me);
   const queryClient = useQueryClient();
   const queryKey = queryKeys.system.workspaces(me?.user.id);
@@ -26,7 +27,8 @@ export const useSuperAdmin = () => {
   }, [queryClient, me?.user.id]);
 
   const handleProvision = async (payload: ProvisionWorkspaceRequest, onSuccess: () => void) => {
-    const session = getQuerySession();
+    if (me?.user.isSuperAdmin !== true || !isCurrentQuerySession(sessionAtRender)) return;
+    const session = sessionAtRender;
     setIsProvisioning(true);
     try {
       await provisionNewWorkspace(payload);
@@ -42,7 +44,8 @@ export const useSuperAdmin = () => {
 
   const handleToggleStatus = async (workspace: WorkspaceSummaryDto) => {
     if (workspace.status === 5) return;
-    const session = getQuerySession();
+    if (me?.user.isSuperAdmin !== true || !isCurrentQuerySession(sessionAtRender)) return;
+    const session = sessionAtRender;
     try {
       if (workspace.status === 2) await reactivateWorkspace(workspace.id);
       else await suspendWorkspace(workspace.id);
@@ -54,22 +57,6 @@ export const useSuperAdmin = () => {
     }
   };
 
-  const handleDelete = async (workspace: WorkspaceSummaryDto) => {
-    if (workspace.status === 5) return;
-    const session = getQuerySession();
-    try {
-      await deleteWorkspace(workspace.id);
-      if (!isCurrentQuerySession(session)) return;
-      queryClient.setQueryData<WorkspaceSummaryDto[]>(queryKey, previous =>
-        previous?.map(item => item.id === workspace.id ? { ...item, status: 5 } : item));
-      if (!isCurrentQuerySession(session)) return;
-      await loadWorkspaces();
-      if (isCurrentQuerySession(session)) toast.info('Eliminación del negocio en progreso.');
-    } catch (error: unknown) {
-      if (isCurrentQuerySession(session)) toast.toastApiError(error);
-    }
-  };
-
-  return { workspaces, isLoading, isProvisioning, loadWorkspaces, handleProvision, handleToggleStatus, handleDelete,
+  return { workspaces, isLoading, isProvisioning, loadWorkspaces, handleProvision, handleToggleStatus,
     errorMessage: error ? getApiErrorPresentation(error) : null };
 };

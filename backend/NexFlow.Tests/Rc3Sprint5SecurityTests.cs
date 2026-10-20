@@ -58,6 +58,17 @@ public sealed class Rc3Sprint5SecurityTests
     }
 
     [Fact]
+    public async Task Deletion_hold_still_propagates_caller_cancellation_without_scheduling()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var scheduler = new Mock<ITenantDeletionScheduler>(MockBehavior.Strict);
+        var handler = new DeleteClientCommandHandler(scheduler.Object, Mock.Of<ICurrentUser>());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handler.Handle(new(Guid.NewGuid()), cancellation.Token));
+        scheduler.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task Nuclear_deletion_endpoint_returns_503_and_keeps_the_superadmin_policy()
     {
         var scheduler = new Mock<ITenantDeletionScheduler>(MockBehavior.Strict);

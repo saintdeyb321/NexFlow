@@ -1,14 +1,15 @@
 # NexFlow RC-3 — memoria de progreso
 
-Actualización: 2026-10-19 (America/Lima).
+Actualización: 2026-10-20 (America/Lima). La adenda de recuperación final al pie es el estado vigente; las secciones anteriores conservan evidencia histórica.
 Antes de cada sesión leer `AGENTS.md`, `NexFlow_PLAN_MAESTRO_CORRECCION_MVP_RC3.md` y este registro.
 
 ## Estado
 
-- Sprint actual: **5, 6 y 7 completados localmente** bajo autorización integral. Se conserva historial y pendientes externos, sin reinterpretarlos como defectos locales.
-- HEAD local de referencia: `8af3419658f1e29b8b80145638d5f58fa3030820`, rama main. Se preservaron los dos documentos pendientes previos; nuevos cambios de seguridad, pruebas, CI e higiene sin commit/push. Caché Firebase retirada solo del índice, archivo local conservado.
-- Autorización actual: desarrollo/pruebas locales **Sprints 5 → 6 → 7**, sin aprobaciones intermedias. No ejecutar workflows, Oracle, migraciones productivas, commit/push ni despliegue. La autorización anterior de dispatch no se utiliza en este encargo.
-- Veredicto final: **CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** 702 backend aprobadas/24 integraciones omitidas; 222 frontend aprobadas. Borrado nuclear deshabilitado; runbook/checklist preparados. No autorización de despliegue ni de más sprints.
+- Estado vigente: **recuperación final RC-3, fases 0–8 locales completadas**; detalle/evidencia en adenda final. Historial Sprints 0–7 preservado.
+- HEAD local/main: `df5cfac0159bdf65ad915f9197927303b6df69cd`. Estado inicial limpio; `88db9e0` retira caché y `df5cfac` contiene seguridad/tests/CI/docs 5–7. Nuevas correcciones de recuperación **solo en diff local sin commit**, no incluidas en ese SHA.
+- Autorización: concluir todo el alcance LOCAL de recuperación final; sin Oracle, servicios SaaS, workflows remotos, migraciones productivas, commit/push ni despliegue.
+- Validación vigente: **708 backend aprobadas / 24 integraciones omitidas**, **83 TypeScript + 145 navegador = 228 frontend aprobadas**, builds/lint y publish API/Migrator ARM64 correctos. Smoke codec Windows 3 formatos OK; ARM64 real pendiente.
+- Veredicto: **CODE COMPLETE — LISTO PARA VALIDACIÓN DE PREPRODUCCIÓN — RELEASE PENDIENTE / NO-GO**. No habilitar nuclear, no mezclar escritores antiguos, no avanzar con despliegue sin evidencia/autorización operacional.
 
 ## Evidencia y decisiones del Sprint 0 (histórico)
 
@@ -491,3 +492,70 @@ P0 potencial de borrado tardío **mitigado**: nuclear deshabilitado por producto
 Notificaciones preservan identidad estable y negocio no duplicado; agotamiento permanece terminal durable para reconciliación por operación, no reenvío automático. Reservas conservan motor, epochs/fences/UTC/SourceMessageId y coordinación; no se prometen garantías distribuidas basadas en fakes. No se identificó un P0 local sin mitigación en funciones habilitadas, sin certificar ausencia universal de defectos.
 
 **CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** No falta una autorización intermedia para otro sprint: fases locales 5–7 terminadas; siguientes pasos son revisión de diff, publicación por propietario y validaciones externas/operacionales autorizadas por separado. Sin ejecución de workflows/Oracle/deploy/commit/push. Detenido al concluir las tres fases.
+
+## Recuperación final RC-3 — 2026-10-20
+
+### Fase 0 — completada
+HEAD local/main `df5cfac0159bdf65ad915f9197927303b6df69cd`, status inicial limpio, diff --check sin errores. Log y stats confirman `88db9e0` solo retira caché generada y `df5cfac` contiene Sprints 5–7. No hay implementaciones que fusionar. Documentos obligatorios revisados; se conserva historial, AGENTS y plan maestro. Ninguna operación remota/commit/push.
+
+### Fase 1 — completada; matriz de alcance
+
+| Área | Implementado | Probado | Pendiente | Severidad | Acción |
+|---|---|---|---|---|---|
+| Admin / borrado | Backend rechaza, host sin worker | Tests handler/endpoint/scheduler/DI existentes | UI ofrece Eliminar indebidamente | P1 UX | Retirar acción y diálogo; explicar suspensión |
+| Admin / sesiones | Hook filtra callbacks, App remonta por identidad | Regresiones globales de identidad | Cobertura browser admin específica | P1 | Simular suspensión/reactivación y respuesta tardía |
+| Uploads | Codec real, 5 MB / 16 MP, normalización | 24 casos seguridad (incluye otras guardas) históricos | UI sin guarda propia de respuesta tras desmontar | P1 potencial | Reproducir; corregir solo si se demuestra |
+| Reservas | Epochs/fences/índice parcial | Tests locales publicados | 24 PG/Emulator; Up real; pool | P1 release | Mantener harness y ejecución pendiente |
+| WhatsApp / pedidos / PDF | Durabilidad/idempotencia/cuotas/HMAC | Suites publicadas | Proveedores reales / incidente / 4 PDF históricos | P1 operacional | Regresión local; no replay incierto |
+| ARM64 | Publish y biblioteca AArch64 | Inspección ELF histórica | Carga/ejecución real codec en contenedor | P1 release | Smoke reproducible sin credenciales |
+| CI / release | Dos workflows manuales y runbook | Revisión estática histórica | Sin Run ID; docs SHA antiguos | P1 release | Revisar workflows; actualizar evidencia |
+| Métricas / bundle | Contadores fake y avisos existentes | Medición local histórica | Costes/carga cloud; warnings antiguos | P2 | Registrar, sin refactor |
+
+Próxima acción: Fase 2, reproducción browser y ajustes mínimos de integración. Borrado nuclear permanece bloqueado; no hay autorización operacional de despliegue.
+
+### Fase 2 — completada
+Reproducción Chromium inicial: 2 aprobadas / 2 fallidas. Demostrados Eliminar ejecutable y onChange de upload tardío tras desmontar/cambiar workspace. Tras parche: 4/4 aprobadas, 0 omitidas (9,29 s). UI retira acción/diálogo destructivo, explica restricción y jobs antiguos pausados; conserva suspensión/reactivación. Hook no expone handleDelete y rechaza callbacks iniciados desde sesión obsoleta. Página impide doble confirmación síncrona. Upload aborta al desmontar e ignora éxito/error/finalización de sesión anterior, sin alterar codec ni contrato. Pruebas además cubren 503 sin estado ficticio y permisos admin. Backend reutiliza pruebas de endpoint/handler/scheduler/DI; se agrega cancelación legítima sin scheduler. Archivos frontend: WorkspaceCard, SuperAdminPage, useSuperAdmin, ImageUploader y tres archivos de fixture/browser de navegación. Tests backend: Rc3Sprint5SecurityTests. No otro módulo reimplementado.
+
+### Fase 3 — completada localmente
+Diff publicado Sprint 5 revisado: control WorkspaceMember/carpeta, validación real y límites codec, HMAC/timestamp n8n y restricción nuclear en tres fronteras. Regresiones existentes identificadas para HMAC instancia, idempotencia, UnknownDelivery, caché Redis vs Firestore, epochs/fences, cuotas IA/PDF y notificaciones. No se demostró vulnerabilidad adicional que justifique otro cambio productivo backend. Se conserva semáforo local solo para admisión de decodificación, no como garantía de negocio. Cada stream está acotado; no se afirma límite absoluto de memoria global bajo concurrencia arbitraria. PG/Firestore real, migración, limpieza, incidente, 4 PDF históricos y retiro legacy siguen PENDIENTES OPERACIONALES. Próxima fase: validación completa nueva; cifras anteriores son históricas.
+
+### Fase 4 — completada localmente
+Ejecuciones NUEVAS: restore backend exit 0; build inicial 0 errores/3 warnings históricos, incremental posterior 0 errores/0 warnings. Suite explícita final: **708 aprobadas / 0 fallidas / 24 omitidas / 732 total**, 17 s, TRX local ignorado rc3-final-recovery.trx. Baseline 702 preservado + 6 casos nuevos. Los 24 opt-in PG/Emulator NO son aprobados.
+
+Durante la regresión admin se demostraron otros dos defectos del alcance: frontend omitía Reason obligatorio (confirmado por HTTP local 400 antes del handler); Reactivate activaba workspace pero dejaba licencia Suspended (dos pruebas rojas temporal/permanente). Corregidos enviando razón explícita y restaurando solo suspensión de licencia, sin cambiar fechas ni renovar una vencida, con invalidación de entitlements. Se agregaron pruebas de vigencia expirada, contrato HTTP y lista de miembros por WorkspaceId autenticado. Un error del fixture sin configuration provider y el nombre de rol supuesto Agent se corrigieron a los contratos reales AddInMemoryCollection/Member; no se debilitaron aserciones. Archivos adicionales: admin.service.ts, License.cs, ReactivateClientCommand.cs y Rc3AdminRecoveryTests.cs.
+
+Frontend npm ci exit 0 (lockfile intacto), build exit 0 y dist generado (JS 710,37 kB; aviso >500), lint exit 0. TypeScript **83/83** (4,68 s; segunda ejecución técnica JUnit 83/83, no sumar). Navegador/Hosting **145/145**, 0 fallidas/omitidas, 192,95 s. Total frontend distinto **228**. Incluye seis casos nuevos admin/uploads, doble confirmación, 503, sesiones tardías, contratos provisión/renovación/módulos y job antiguo pausado. ErrorBoundary registra error sintético esperado sin exposición al usuario. No certifica identidad/proveedores reales ni CRUD de usuarios no implementado.
+
+npm ci reportó 4 vulnerabilidades altas y scripts pendientes de @firebase/util/protobufjs. npm audit identifica una cadena transitiva firebase→firestore→grpc-js (GHSA-m9gg-hp2v-232j y GHSA-f596-whhp-79r4); recomendación automática implica downgrade mayor Firebase 9.14.0 y no se aplicó. Código usa Firebase app/auth; no importa Firestore/grpc, y bundle no contiene getAuthContext/grpc-js. No se ha demostrado exposición de esos métodos Node en Hosting estático; se registra riesgo de dependencia para revisión, no se declara auditoría limpia ni se cambia lockfile por fuerza. Próxima fase: smoke ARM64 y artefactos.
+
+### Fase 5 — preparación local completada / ARM64 real PENDIENTE OPERACIONAL
+Dockerfile existente auditado sin modificar: contexto backend, API/Migrator net10.0, Release, final/migrator separados, usuario no root. API Production valida RuntimeConfiguration antes de infraestructura; no migra al iniciar. Migrator es one-shot PG+SystemCatalogSeeder y puede aplicar TODOS los pendientes: exige revisión previa. API y Migrator publican linux-arm64, exit 0 (API 3 warnings antiguos; Migrator sin warnings nuevos). Skia lib exportada ELF AArch64 183; no confundir inspección con ejecución.
+
+Herramienta nueva `backend/tools/CodecSmoke/{NexFlow.CodecSmoke.csproj,Program.cs}` sin paquetes nuevos ni startup de host. Compila contra SkiaSharp.dll del publish aprobado; en runtime usa deps/runtimeconfig/bibliotecas reales de la imagen API. Build local 0 errores/0 warnings. Encode/decode/normalización PNG/JPEG/WebP **3 PASS Windows X64**; modo --require-arm64 rechazó Windows (exit 1 esperado). Runbook 5.1 prepara extracción de referencia desde contenedor detenido y ejecución no root/readonly/red deshabilitada/sin secretos, montando solo DLL del smoke. Docker no disponible, no instalado/ejecutado. Imagen ARM64 y smoke real aún sin digest/evidencia.
+
+### Fase 6 — completada estáticamente / CI remoto PENDIENTE OPERACIONAL
+Ambos workflows existentes revisados y YAML parseado con PyYAML 6.0.3: workflow_dispatch único, contents read, timeout 30 min, sin secrets/deploy. Release Windows conserva Chromium instalado, SDK/Node fijados, npm ci, tests explícitos, publish y agrega smoke Windows; TRX exige al menos 708 locales sin skips. Frontend genera JUnit y rechaza casos faltantes/skipped/fallidos (mínimos 83 y 145). Se comprobó formato real JUnit: no atributos de conteo en raíz, por eso se cuentan nodos testcase/failure/error/skipped. Ejecución técnica TS 83/83 y navegación 19/19 (22,44 s) valida parser/reporters; no sumar a totales distintos. Lint final exit 0.
+
+Integración Ubuntu conserva PostgreSQL temporal 15.10 y Firestore Emulator demo, fixture loopback/sintética, limpieza emulators:exec/runner y TRX 7 días; se agrega guarda 708 locales sin omisiones, además de 24 integraciones. No tercer workflow. No CLI ni dispatch remoto, sin Run ID/SHA ejecutado/conclusión CI; no CI verde declarado. Procedimiento exacto de UI Actions añadido al mismo runbook. Próxima fase: cerrar documentación de release y revisar diff.
+
+### Fase 7 — completada
+Checklist/runbook/progreso corrigen base vigente a `df5cfac` + diff final local SIN COMMIT. No se borran cifras/decisiones históricas. Inventario y resultados vigentes separados de historia; CI sin Run ID, smoke ARM64 no ejecutado, 24 integraciones omitidas y migración no aplicada explícitos. Riesgos P0 mitigado (nuclear bloqueado), P1 operacionales y P2 dependencia npm/warnings/carga registrados sin afirmar salud real. Lint final y navegación JUnit 19/19 verificados; guardas de descubrimiento/omisión usan nodos reales. Runbook contiene nombres de configuración exigidos, no valores ni secretos. El procedimiento Bash del smoke se preparó en artefacto bin ignorado; Bash no disponible, no se ejecutó ni validó su sintaxis con shell. No se instalaron herramientas.
+
+### Fase 8 — preparación local completada / RELEASE NO-GO
+Runbook preparado: SHA final limpio/digests → build ARM64 API+Migrator → smoke contenedor temporal sin red/credenciales → 24 integraciones aisladas → inventario/esquema/history en lectura → backup privado con restauración aislada comprobada → drenar TODOS los escritores antiguos → migrator una vez solo con aprobación operacional → únicamente APIs/workers compatibles → health/canal/funcionales dos tenants y servicios compartidos intactos → Hosting dist/config explícita → rollback solo aplicación compatible. Sin imagen compatible: pausar escrituras y corregir hacia delante. No volver a API preepochs ni borrar fences/filas/historia para forzar Down.
+
+**Pendientes operacionales conservados:** 24 PG/Emulator y evidencia TRX; imagen/digest y smoke ARM64; configuración/health/recursos Oracle, cuentas/canal/proveedores, respaldo/restauración y rollback; causa real incidente y 4 PDF históricos; retiro legacy solo después de probar todas las instancias. Limpieza nuclear no certificada y deshabilitada backend/UI; no basta un CI verde para habilitarla. No se aplicaron migraciones, reenviaron UnknownDelivery ni reinyectaron eventos históricos.
+
+### Inventario final de recuperación (diff respecto de df5cfac)
+- Backend productivo: `backend/NexFlow.Application/Features/SuperAdmin/Workspaces/ReactivateClientCommand.cs`, `backend/NexFlow.Domain/Entities/License.cs`.
+- Backend tests: `backend/NexFlow.Tests/Rc3Sprint5SecurityTests.cs`; nuevo `backend/NexFlow.Tests/Rc3AdminRecoveryTests.cs`.
+- Herramienta offline nueva: `backend/tools/CodecSmoke/NexFlow.CodecSmoke.csproj`, `backend/tools/CodecSmoke/Program.cs` (no integra host/imagen productiva ni añade NuGet).
+- Frontend productivo: `frontend/src/components/ui/ImageUploader.tsx`, `frontend/src/features/admin/components/WorkspaceCard.tsx`, `frontend/src/features/admin/pages/SuperAdminPage.tsx`, `frontend/src/features/admin/hooks/useSuperAdmin.ts`, `frontend/src/features/admin/services/admin.service.ts`.
+- Frontend tests: `frontend/tests/navigation-browser.test.mjs`, `frontend/tests/fixtures/navigation-api.ts`, `frontend/tests/fixtures/navigation-preview.tsx`.
+- CI: `.github/workflows/rc3-release-checks.yml`, `.github/workflows/rc3-reservation-integration.yml` (los dos existentes, sin tercero).
+- Docs: `NexFlow_RC3_RELEASE_CHECKLIST.md`, `NexFlow_RC3_DEPLOY_RUNBOOK.md`, este `NexFlow_RC3_PROGRESS.md`.
+- Sin cambios a AGENTS/plan maestro, Docker, esquemas/migraciones, .env/secretos, lockfiles ni infraestructura de despliegue. Archivos bin/obj/dist/JUnit/TRX generados ignorados por Git.
+
+**CODE COMPLETE — LISTO PARA VALIDACIÓN DE PREPRODUCCIÓN — RELEASE PENDIENTE.** Preparación de staging aislado lista; activación de release/Oracle **NO-GO** hasta cerrar puertas operacionales. Próxima acción exacta: revisión del diff por propietario, publicación independiente de SHA final aprobado, dispatch de ambos workflows por UI con SHA/Run ID/TRX y smoke de imagen ARM64 temporal. No más sprints ni rediseños locales autorizados por este cierre; no commit/push/despliegue ejecutados.
+
+Revisión final: HEAD permanece df5cfac; 16 archivos versionados modificados y 3 nuevos (19 en inventario), sin cambios ajenos. git diff --check exit 0 (solo avisos de conversión LF/CRLF). YAML final de ambos workflows parseado y controles manual/read-only intactos; TRX confirma 708 ejecutadas/aprobadas de 732 descubiertas, con 24 opt-in omitidas según consola. JUnit TS 83 y navegación 19 sin error/fallo/skip; 19 es subconjunto de las 145 browser, no cobertura adicional. No procesos de tests pendientes ni operaciones externas de release. Detenido para auditoría final.

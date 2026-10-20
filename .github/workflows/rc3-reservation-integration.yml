@@ -59,6 +59,13 @@ jobs:
           dotnet build backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore
       - name: Preserve baseline and local safety regressions
         run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter 'Category!=Integration' --logger 'trx;LogFileName=unit.trx' --results-directory artifacts/rc3
+      - name: Reject missing or skipped local regression evidence
+        shell: python
+        run: |
+          import xml.etree.ElementTree as ET
+          counters = ET.parse('artifacts/rc3/unit.trx').getroot().find('.//{*}Counters')
+          assert counters is not None and int(counters.attrib['passed']) >= 708
+          assert counters.attrib['total'] == counters.attrib['executed'] == counters.attrib['passed'], 'No skipped/failed local regression is certifiable'
       - name: Real PostgreSQL plus Firestore Emulator matrix
         env:
           NEXFLOW_RC3_INTEGRATION: '1'

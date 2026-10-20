@@ -32,6 +32,80 @@ const capture = async name => {
   writeFileSync(join('node_modules/.tmp', `ux04-${name}.png`), Buffer.from(image.data, 'base64'));
 };
 const metrics = (width, height = 1000) => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+const adminReset = async () => {
+  await reset();
+  await evaluate("(()=>{const a=window.navigationAudit;Object.assign(a.adminFixture,{delay:0,failure:0,uploadFailure:0});a.adminWorkspaces[0].status=1;a.calls.length=0;a.setIdentity({...structuredClone(a.defaultIdentity),user:{...a.defaultIdentity.user,isSuperAdmin:true}});a.navigate('/admin-test')})()");
+  await until("document.body.textContent.includes('Negocio de prueba')",'Admin not loaded.');
+};
+const selectImage = async () => evaluate("(()=>{const e=document.querySelector('input[type=file]');const d=new DataTransfer();d.items.add(new File([new Uint8Array([1,2,3])],'image.png',{type:'image/png'}));e.files=d.files;e.dispatchEvent(new Event('change',{bubbles:true}))})()");
+
+test('RC3 administración: borrado deshabilitado, suspensión y reactivación operativas', async () => {
+  await adminReset();
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Eliminar'&&!b.disabled)"),false);
+  assert.ok(await evaluate("document.body.textContent.includes('La eliminación definitiva está temporalmente deshabilitada')"));
+  assert.equal(await evaluate("document.body.textContent.includes('irreversible')"),false);
+  await click('Suspender');
+  await evaluate("window.navigationAudit.adminFixture.delay=200;(()=>{const b=[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent.trim()==='Confirmar');b.click();b.click()})()");
+  await until("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Reactivar')",'Suspension failed.');
+  await click('Reactivar'); await click('Confirmar');
+  await until("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Suspender')",'Reactivation failed.');
+  assert.equal(await evaluate("window.navigationAudit.calls.filter(c=>c.path.endsWith('/delete')).length"),0);
+  assert.equal(await evaluate("window.navigationAudit.calls.filter(c=>c.path.endsWith('/suspend')).length"),1);
+});
+test('RC3 administración: 503 conserva estado; sesión nueva ignora respuesta tardía y conserva permisos', async () => {
+  await adminReset(); await evaluate('window.navigationAudit.adminFixture.failure=503');
+  await click('Suspender'); await click('Confirmar');
+  await until("document.body.textContent.includes('No se pudo cambiar el estado.')",'Error missing.');
+  assert.ok(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Suspender')"));
+  await evaluate("Object.assign(window.navigationAudit.adminFixture,{failure:0,delay:650})");
+  if(!await evaluate("Boolean(document.querySelector('[role=dialog]'))")) await click('Suspender');
+  await click('Confirmar');
+  await until("window.navigationAudit.calls.filter(c=>c.path.endsWith('/suspend')).length===2",'Request missing.');
+  await evaluate("(()=>{const a=window.navigationAudit;a.navigate('/');a.setIdentity({...structuredClone(a.defaultIdentity),workspace:{...a.defaultIdentity.workspace,id:'workspace-b'}})})()");
+  await wait(850);
+  assert.equal(await evaluate("document.body.textContent.includes('Negocio suspendido.')"),false);
+  assert.equal(await evaluate("window.navigationAudit.calls.filter(c=>c.path.startsWith('/superadmin/')&&c.workspace==='workspace-b').length"),0);
+  await evaluate("window.navigationAudit.navigate('/admin-test')");
+  await until("document.body.textContent.includes('Acceso Denegado')",'Admin permission not enforced.');
+});
+test('RC3 upload: error binario visible y recuperación con respuesta válida', async () => {
+  await adminReset(); await evaluate("window.navigationAudit.navigate('/upload-test');window.navigationAudit.adminFixture.uploadFailure=400");
+  await until("document.querySelector('input[type=file]')",'Upload missing.'); await selectImage();
+  await until("document.body.textContent.includes('16 megapíxeles')",'Upload error missing.');
+  assert.equal(await evaluate("document.querySelector('input[type=file]').disabled"),false);
+  await evaluate('window.navigationAudit.adminFixture.uploadFailure=0'); await selectImage();
+  await until("document.querySelector('img')",'Valid upload not applied.');
+});
+test('RC3 upload: respuesta tardía tras desmontar/cambiar workspace nunca aplica imagen anterior', async () => {
+  await adminReset(); await evaluate("window.navigationAudit.uploadChanges.length=0;window.navigationAudit.adminFixture.delay=650;window.navigationAudit.navigate('/upload-test')");
+  await until("document.querySelector('input[type=file]')",'Upload missing.'); await selectImage();
+  await until("window.navigationAudit.calls.some(c=>c.path==='/storage/upload')",'Upload not started.');
+  await evaluate("(()=>{const a=window.navigationAudit;a.navigate('/');a.setIdentity({...structuredClone(a.defaultIdentity),workspace:{...a.defaultIdentity.workspace,id:'workspace-b'}})})()");
+  await wait(850); assert.deepEqual(await evaluate('window.navigationAudit.uploadChanges'),[]);
+});
+test('RC3 administración: aprovisionamiento, renovación y asignación conservan contratos', async () => {
+  await adminReset(); await click('Aprovisionar Cliente');
+  await change('Correo del Dueño (Google Auth)', 'synthetic@example.invalid');
+  await until("document.querySelector('option[value=BASIC]')",'Templates missing.');
+  await evaluate("document.querySelector('[role=dialog] form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))");
+  await until("document.body.textContent.includes('Negocio aprovisionado.')&&!document.querySelector('[role=dialog]')",'Provision did not complete.');
+  const provision = await evaluate("window.navigationAudit.calls.find(c=>c.path.endsWith('/provision')).data");
+  assert.equal(provision.email,'synthetic@example.invalid'); assert.equal(provision.templateCode,'BASIC'); assert.equal(provision.maxLocations,1);
+  assert.ok(Number.isFinite(Date.parse(provision.expiresAt)));
+  await click('Renovar licencia'); await click('Confirmar Renovación');
+  await until("document.body.textContent.includes('Licencia renovada.')&&!document.querySelector('[role=dialog]')",'Renew did not complete.');
+  assert.deepEqual(await evaluate("window.navigationAudit.calls.find(c=>c.path.endsWith('/renew')).data"),{workspaceId:'business-a',durationInMonths:1});
+  await click('Módulos'); await until("document.querySelector('option[value=module-catalog]')",'Modules missing.'); await click('Asignar Módulo');
+  await until("document.body.textContent.includes('Módulo asignado.')&&!document.querySelector('[role=dialog]')",'Assign did not complete.');
+  assert.deepEqual(await evaluate("window.navigationAudit.calls.find(c=>c.path.endsWith('/assign-module')).data"),{workspaceId:'business-a',moduleId:'module-catalog'});
+});
+test('RC3 administración: solicitud histórica de borrado permanece pausada y sin acciones', async () => {
+  await adminReset();
+  await evaluate("window.navigationAudit.adminWorkspaces[0].status=5;window.navigationAudit.client.invalidateQueries()");
+  await until("document.body.textContent.includes('Su procesamiento está pausado')",'Paused job warning missing.');
+  assert.ok(await evaluate("[...document.querySelectorAll('article button')].every(b=>b.disabled)"));
+  await evaluate('window.navigationAudit.adminWorkspaces[0].status=1');
+});
 const key = async (value, code, vk, shiftKey = false) => {
   const modifiers = shiftKey ? 8 : 0;
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: value, code, modifiers, windowsVirtualKeyCode: vk, text: value === 'Enter' ? '\r' : undefined });
