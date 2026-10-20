@@ -79,7 +79,13 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             throw new ConcurrencyException("Conversation changed during interpretation; reload before processing.");
         activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (prepared?.Response != null)
-            return await SendText(AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules) ?? prepared.Response);
+        {
+            var denied = AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules);
+            var response = denied ?? prepared.Response;
+            if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal is "BOOKING" or "RESERVATION")
+                response += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
+            return await SendText(response);
+        }
         interpretation.Confirmed = context.CurrentStep == "CONFIRM" && normalized is "si" or "si confirmo" or "confirmo" or "confirmar" or "de acuerdo";
         if (context.PendingRecoveryAction != null && interpretation.Intent != ConversationIntent.Support
             && (interpretation.Directive != ConversationDirective.None
@@ -88,7 +94,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         if (context.CurrentGoal is "BOOKING" or "RESERVATION" && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Request
             || context.CurrentGoal == "ORDER" && interpretation.Intent is ConversationIntent.Reservation or ConversationIntent.Request)
-            return await SendText("Tu borrador sigue guardado. Completa el proceso actual o escribe cancelar para descartarlo con confirmación antes de iniciar otro.");
+            return await SendText("Para iniciar otra operación, primero completa la actual o escribe cancelar; te pediré confirmación antes de descartarla.");
 
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && _recovery != null)
         {
@@ -101,6 +107,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 || (interpretation.Intent == ConversationIntent.Order && !Regex.IsMatch(normalized, @"\b(compr|pedid|pedir|llevar|orden)"))
                 || (interpretation.Intent == ConversationIntent.Request && !Regex.IsMatch(normalized, @"\b(solicit|reclamo|queja|cotiz|registr|tramite|soporte)")))))
         {
+            if (context.CurrentGoal is "BOOKING" or "RESERVATION")
+                return await SendText(AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, activeModules)
+                    ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true));
             var introduction = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes usar estas opciones sin IA:"
                 : interpretation.Intent == ConversationIntent.ProviderUnavailable ? "No pude interpretar tu consulta en este momento. Podemos continuar con opciones verificadas:"
                 : "Necesito precisar qué deseas hacer. Elige una opción o escribe el nombre completo de lo que necesitas:";
@@ -121,7 +130,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             finalResponse = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes intentar en un minuto o solicitar un asesor."
                 : "No pude interpretar tu consulta en este momento. Indica qué información necesitas o solicita un asesor.";
             if (context.CurrentGoal is "BOOKING" or "RESERVATION")
-                finalResponse += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
+                finalResponse = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, activeModules)
+                    ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
         }
         else
         {
@@ -149,10 +159,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 && interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq)
             {
                 var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, context.SelectedLocationId, cancellationToken);
-                var continuation = activeFlowDenied != null ? "Tu borrador sigue guardado. " + activeFlowDenied
+                var continuation = activeFlowDenied != null ? "Conservamos lo que has indicado. " + activeFlowDenied
                     : context.CurrentGoal == "ORDER" ? context.LastQuestion ?? "Tu pedido sigue guardado. Puedes mostrar pedido o continuar agregando productos."
                     : await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
-                if (context.PendingRecoveryAction is "CANCEL" or "EXPIRE") continuation = "Sigue pendiente tu confirmación para descartar el borrador: responde sí o no.";
+                if (context.PendingRecoveryAction is "CANCEL" or "EXPIRE") continuation = context.CurrentGoal is "BOOKING" or "RESERVATION"
+                    ? "¿Deseas dejar esta reserva en preparación? Responde sí o no."
+                    : "Sigue pendiente tu confirmación para descartar el borrador: responde sí o no.";
                 if (!string.IsNullOrWhiteSpace(continuation)) answer = answer with { Text = answer.Text + "\n\n" + continuation };
                 return await SendChatResponseAsync(workspaceId, normalizedPhone, request.MessageId, conversation.Id, answer, cancellationToken);
             }

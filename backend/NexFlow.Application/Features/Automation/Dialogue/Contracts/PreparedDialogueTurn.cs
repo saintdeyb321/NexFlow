@@ -2,7 +2,7 @@ using NexFlow.Application.Features.AI.Interpretation;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
-public enum DialogueAct { Information, OperationInformation, StartOperation, RequestedData, MultipleData, Correction, InformationalInterruption, Confirmation, Cancellation, HumanAssistance, SemanticAmbiguity, ProviderFailure, BusinessUnavailable }
+public enum DialogueAct { Information, OperationInformation, StartOperation, RequestedData, MultipleData, Correction, InformationalInterruption, Confirmation, Cancellation, HumanAssistance, SemanticAmbiguity, ProviderFailure, BusinessUnavailable, DeclineOperation, Resume }
 
 public sealed record PreparedDialogueTurn(DialogueAct Act, AiInterpretation Interpretation, bool UsedAi = false, string? Response = null);
 

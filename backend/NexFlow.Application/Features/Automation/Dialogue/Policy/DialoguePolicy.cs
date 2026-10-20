@@ -11,10 +11,16 @@ public sealed class DialoguePolicy
         var normalized = SpanishTextNormalizer.Normalize(text);
         var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var booking = state.CurrentGoal is "BOOKING" or "RESERVATION";
+        if (normalized is "quiero hablar con una persona" or "quiero hablar con alguien" or "necesito hablar con una persona") return DialogueAct.HumanAssistance;
+        if (normalized is "ya no quiero continuar" or "no quiero continuar" or "no quiero seguir" or "no sigamos") return DialogueAct.Cancellation;
+        if (normalized is "no quiero reservar" or "no deseo reservar" or "no necesito reservar") return DialogueAct.DeclineOperation;
+        if (booking && normalized is "esta bien sigamos" or "sigamos" or "continuemos" or "podemos continuar" or "si" or "de acuerdo" or "esta bien" or "vale" or "ok") return DialogueAct.Resume;
         if (booking && words.Any(w => w is "pedir" or "pedido" or "comprar" or "solicitud" or "reclamo")) return DialogueAct.SemanticAmbiguity;
+        // A negated clause requires semantic scope; extracted nouns must not start an operation.
+        if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
         var reservationMention = words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita");
         var instruction = normalized.Contains("como ", StringComparison.Ordinal) || normalized.Contains("no se", StringComparison.Ordinal)
-            || words.Contains("puedo") || words.Contains("puede");
+            || words.Contains("puedo") || words.Contains("puede") || words.Contains("informacion") || words.Contains("orientacion");
         if (reservationMention && instruction) return DialogueAct.OperationInformation;
         var correction = words.Any(w => w.StartsWith("cambi", StringComparison.Ordinal) || w is "mejor" or "otra" or "otro" or "corregir");
         if (booking && correction) return DialogueAct.Correction;
@@ -41,5 +47,18 @@ public sealed class DialoguePolicy
             state.CurrentGoal == "ORDER" || normalized.Split(' ').Any(w => w is "producto" or "productos" or "catalogo" or "comprar" or "pedido"));
     }
 
-    public static string Instruction => "Para reservar elegimos una sede, un servicio, fecha y hora disponibles; luego completamos tus datos y te pedimos confirmar. ¿Quieres que te ayude a empezar?";
+    public static string ReservationProcess => "Para reservar elegimos una sede, un servicio, fecha y hora disponibles; luego completamos tus datos y te pedimos confirmar.";
+    public static string Instruction => ReservationProcess + " ¿Quieres que te ayude a empezar?";
+
+    public static string NextBookingStep(ConversationContextDto state)
+    {
+        // Question priority only: proposals can supply slots in any order.
+        var slots = new (string Slot, string Step, bool Missing)[] {
+            ("Location", "COLLECT_LOCATION", string.IsNullOrWhiteSpace(state.SelectedLocationId)),
+            ("Service", "COLLECT_SERVICE", string.IsNullOrWhiteSpace(state.SelectedServiceId)),
+            ("Date", "COLLECT_DATE", string.IsNullOrWhiteSpace(state.TargetDate)),
+            ("Time", "COLLECT_TIME", string.IsNullOrWhiteSpace(state.TargetTime)),
+            ("Name", "COLLECT_CUSTOMERNAME", string.IsNullOrWhiteSpace(state.RealCustomerName)) };
+        return slots.FirstOrDefault(s => s.Missing || state.PendingDialogueSlots.Contains(s.Slot)).Step ?? "CONFIRM";
+    }
 }

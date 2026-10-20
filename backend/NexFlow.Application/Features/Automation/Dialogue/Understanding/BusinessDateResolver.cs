@@ -22,6 +22,10 @@ public sealed partial class BusinessDateResolver
         var today = DateOnly.FromDateTime(localBusinessNow.DateTime);
         var dates = new HashSet<DateOnly>();
         var normalized = SpanishTextNormalizer.Normalize(text);
+        if (normalized.Contains("dentro de ", StringComparison.Ordinal) || normalized.Contains("dia siguiente a", StringComparison.Ordinal)
+            || normalized.Contains("dia posterior a", StringComparison.Ordinal) || normalized.Contains("dias despues de", StringComparison.Ordinal)
+            || normalized.Contains("de este mes", StringComparison.Ordinal))
+            return SlotResolution<DateOnly>.Missing("SemanticComposition");
         string? invalid = null;
         foreach (Match match in IsoDate().Matches(text))
             AddDate(Number(match, "day"), Number(match, "month"), Number(match, "year"));
@@ -75,6 +79,43 @@ public sealed partial class BusinessDateResolver
     }
 
     private static int Number(Match match, string group) => int.Parse(match.Groups[group].Value, CultureInfo.InvariantCulture);
+
+    // The model isolates a phrase; software still evaluates its calendar meaning.
+    public SlotResolution<DateOnly> ResolveEvidence(string fragment, DateTimeOffset localBusinessNow)
+    {
+        var words = SpanishTextNormalizer.Normalize(fragment).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var today = DateOnly.FromDateTime(localBusinessNow.DateTime);
+        var offset = words.Length >= 4 && words[0] == "dentro" && words[1] == "de" ? SpanishNumber(words[2]) : null;
+        if (offset.HasValue && words.Length == 4 && words[3] is "dia" or "dias" or "semana" or "semanas")
+            return Result(today.AddDays(offset.Value * (words[3].StartsWith("semana", StringComparison.Ordinal) ? 7 : 1)));
+        var normalized = string.Join(' ', words);
+        foreach (var prefix in new[] { "el dia siguiente a ", "el dia posterior a " })
+            if (normalized.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                var anchor = Resolve(normalized[prefix.Length..], localBusinessNow);
+                return anchor.TryGetValue(out var value) ? Result(value.AddDays(1)) : anchor;
+            }
+        if (words.Length is 4 or 5 && normalized.EndsWith(" de este mes", StringComparison.Ordinal))
+        {
+            var dayIndex = words[0] == "el" ? 1 : 0;
+            var day = SpanishNumber(words[dayIndex]);
+            if (day.HasValue)
+            {
+                try { return Result(new(today.Year, today.Month, day.Value)); }
+                catch (ArgumentOutOfRangeException) { return SlotResolution<DateOnly>.Invalid("InvalidCalendarDate"); }
+            }
+        }
+        return Resolve(fragment, localBusinessNow, true);
+        SlotResolution<DateOnly> Result(DateOnly value) => value < today ? SlotResolution<DateOnly>.Invalid("PastDate")
+            : SlotResolution<DateOnly>.Match(value, fragment, source: EvidenceSource.ValidatedLlm);
+    }
+
+    private static int? SpanishNumber(string text)
+    {
+        if (int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var numeric)) return numeric is >= 1 and <= 31 ? numeric : null;
+        var values = new[] { "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis", "diecisiete", "dieciocho", "diecinueve", "veinte", "veintiuno", "veintidos", "veintitres", "veinticuatro", "veinticinco", "veintiseis", "veintisiete", "veintiocho", "veintinueve", "treinta" };
+        var index = Array.IndexOf(values, text); return index < 0 ? null : index + 1;
+    }
     private static readonly Dictionary<string, int> Months = new(StringComparer.Ordinal)
     {
         ["enero"] = 1, ["ene"] = 1, ["febrero"] = 2, ["feb"] = 2, ["marzo"] = 3, ["mar"] = 3,

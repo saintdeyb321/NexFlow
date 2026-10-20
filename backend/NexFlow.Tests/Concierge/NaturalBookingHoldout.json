@@ -1,0 +1,8 @@
+[
+  { "id": "H01-name-last", "turns": ["Quisiera reservar", "En la sede Concepción, por favor", "Elijo limpieza dental", "este jueves", "16:00", "Lucía Torres", "sí"], "name": "Lucía Torres", "date": "2026-10-22", "bookings": 1 },
+  { "id": "H02-introduction", "turns": ["Mi nombre es Pedro Ruiz, quisiera reservar limpieza dental en San Jerónimo el 22 de octubre", "a las cuatro de la tarde", "confirmo"], "name": "Pedro Ruiz", "date": "2026-10-22", "bookings": 1 },
+  { "id": "H03-time-before-place", "turns": ["Quisiera reservar", "16:00", "Soy Carla Ríos", "En San Jerónimo", "Limpieza profunda", "22/10", "sí"], "name": "Carla Ríos", "date": "2026-10-22", "bookings": 1 },
+  { "id": "H04-price-resume", "turns": ["Quisiera reservar limpieza profunda en Concepción el 22 de octubre por la tarde", "¿Qué precio tiene?", "continuemos", "16:00", "Rosa Campos", "confirmo"], "name": "Rosa Campos", "date": "2026-10-22", "bookings": 1 },
+  { "id": "H05-orientation", "turns": ["Quiero orientación sobre reservas", "¿Puedo reservar?", "No deseo reservar"], "name": null, "date": null, "bookings": 0 },
+  { "id": "H06-decline", "turns": ["No necesito reservar", "Quiero información sobre reservas"], "name": null, "date": null, "bookings": 0 }
+]

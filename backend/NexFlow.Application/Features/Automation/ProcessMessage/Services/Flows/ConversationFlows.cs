@@ -16,6 +16,7 @@ using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Notifications;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
@@ -27,6 +28,8 @@ public interface IChatFlow { Task<ChatResponse> ProcessAsync(Guid workspaceId, s
 
 public class BookingFlow : IBookingFlow
 {
+    // Ephemeral verified output, ready for a composer; never another conversation store.
+    public ResponsePlan? LastResponsePlan { get; private set; }
     private readonly IEntitlementService _entitlementService;
     private readonly IOfferingService _offeringService;
     private readonly ILocationResolverService _locationResolver;
@@ -84,13 +87,12 @@ public class BookingFlow : IBookingFlow
         if (string.IsNullOrWhiteSpace(context.SelectedServiceId)) context.MissingFields.Add("Service");
         if (string.IsNullOrWhiteSpace(context.TargetDate)) context.MissingFields.Add("Date");
         if (string.IsNullOrWhiteSpace(context.TargetTime)) context.MissingFields.Add("Time");
-        context.CurrentStep = context.PendingDialogueSlots.Count > 0 ? $"COLLECT_{(context.PendingDialogueSlots[0] == "Name" ? "CUSTOMERNAME" : context.PendingDialogueSlots[0].ToUpperInvariant())}"
-            : context.MissingFields.Count == 0 ? "CONFIRM"
-            : $"COLLECT_{context.MissingFields[0].ToUpperInvariant()}";
+        context.CurrentStep = DialoguePolicy.NextBookingStep(context);
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct)
     {
+        LastResponsePlan = null;
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
         var replay = await TryResumeAsync(workspaceId, phone, sourceMessageId, context, ct);
         if (replay != null) return replay;
@@ -105,7 +107,10 @@ public class BookingFlow : IBookingFlow
             interpretation = new() { Intent = ConversationIntent.Reservation, Confirmed = interpretation.Confirmed };
         }
         var response = await ProcessTurnAsync(workspaceId, phone, context, interpretation, sourceMessageId, ct);
-        if (proposal?.Clarification != null && context.PendingDialogueSlots.Count > 0) response = proposal.Clarification;
+        var unresolved = proposal?.UnresolvedSlots.FirstOrDefault();
+        if (proposal?.Clarification != null && unresolved != null
+            && context.CurrentStep == "COLLECT_" + (unresolved == "Name" ? "CUSTOMERNAME" : unresolved.ToUpperInvariant()))
+            response = proposal.Clarification;
         if (proposal != null)
         {
             context.RecoveryLastMessageId = sourceMessageId; context.RecoveryLastResponse = response; context.RecoveryLastInterpretation = null;
@@ -205,16 +210,18 @@ public class BookingFlow : IBookingFlow
             }
             if (context.SelectedLocationId != locationId)
             {
-                if (context.SelectedLocationId != null) context.PendingServiceIds.Clear();
-                context.SelectedLocationId = locationId; context.SelectedServiceId = null; context.TargetTime = null;
-                context.PreferredTime = null; context.PendingDialogueSlots.Remove("Service"); context.PendingDialogueSlots.Remove("Time");
+                if (context.SelectedLocationId != null)
+                { context.PendingServiceIds.Clear(); context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
+                context.SelectedLocationId = locationId; context.SelectedServiceId = null;
+                context.PendingDialogueSlots.Remove("Service");
                 context.ReservationServiceOffset = 0;
             }
             context.PendingDialogueSlots.Remove("Location");
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date) && context.TargetDate != interpretation.Date)
         {
-            context.TargetDate = interpretation.Date; context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time");
+            if (context.TargetDate != null) { context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
+            context.TargetDate = interpretation.Date;
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date)) context.PendingDialogueSlots.Remove("Date");
         if (!string.IsNullOrWhiteSpace(interpretation.Time))
@@ -236,7 +243,7 @@ public class BookingFlow : IBookingFlow
                     UpdateStep(context);
                     return resolution.Clarification!;
                 }
-                if (context.SelectedServiceId != resolution.Service.Id && string.IsNullOrWhiteSpace(interpretation.Time))
+                if (context.SelectedServiceId != null && context.SelectedServiceId != resolution.Service.Id && string.IsNullOrWhiteSpace(interpretation.Time))
                 { context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
                 context.SelectedServiceId = resolution.Service.Id;
                 context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service");
@@ -252,6 +259,26 @@ public class BookingFlow : IBookingFlow
         }
         if (context.SelectedServiceId == null) await BookingDraftMerger.ResolvePendingServiceAsync(workspaceId, context, _offeringService, ct);
         UpdateStep(context);
+        if (context.CurrentStep is "COLLECT_CUSTOMERNAME" or "CONFIRM")
+        {
+            if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var requestedDate)
+                || !TimeOnly.TryParseExact(context.TargetTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            {
+                context.TargetTime = null;
+                if (requestedDate == default) context.TargetDate = null;
+                UpdateStep(context); return await PromptAsync(workspaceId, context, false, ct);
+            }
+            var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
+            var zone = BookingZone(profile?.TimeZone);
+            var available = await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId!, context.SelectedServiceId!,
+                requestedDate, ct);
+            if (!available.Any(s => s.IsAvailable && TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+                == $"{context.TargetDate} {context.TargetTime}"))
+            {
+                context.TargetTime = null; UpdateStep(context);
+                return "Ese horario no está disponible.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct);
+            }
+        }
         if (context.CurrentStep != "CONFIRM") return await PromptAsync(workspaceId, context, false, ct);
 
         var service = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
@@ -270,7 +297,15 @@ public class BookingFlow : IBookingFlow
             return "No pude interpretar la fecha u hora indicada.\n\n" + await PromptAsync(workspaceId, context, false, ct);
         }
         if (!interpretation.Confirmed)
-            return $"Reserva por confirmar: {service.Name}, {selectedTime:dd/MM/yyyy} a las {selectedTime:HH:mm}. ¿Confirmas? Responde sí o no.";
+        {
+            var location = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).Single(l => l.Id == context.SelectedLocationId);
+            LastResponsePlan = new(ConversationIntent.Reservation,
+                [new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id),
+                 new("Location", location.Name, VerifiedFactSource.BusinessRepository, location.Id),
+                 new("PriceMinorUnits", service.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.BusinessRepository, service.Id)],
+                "¿Confirmas? Responde sí o no.", []);
+            return $"Reserva por confirmar: {service.Name} en {location.Name}, {selectedTime:dd/MM/yyyy} a las {selectedTime:HH:mm}, a nombre de {context.RealCustomerName}. ¿Confirmas? Responde sí o no.";
+        }
         context.ReservationCommitSourceMessageId = sourceMessageId;
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         var result = await _reservationEngine.CreateReservationAsync(workspaceId, context.SelectedLocationId!, service.Id,
@@ -316,9 +351,9 @@ public class BookingFlow : IBookingFlow
     {
         // A catalog document/factual answer already supplied offerings. Resume
         // with one question without appending a second catalog to that answer.
-        if (concise && context.CurrentStep == "COLLECT_SERVICE")
+        if (concise && DialoguePolicy.NextBookingStep(context) == "COLLECT_SERVICE")
             return Task.FromResult("¿Qué servicio deseas reservar en la sede seleccionada?");
-        if (concise && context.CurrentStep == "COLLECT_LOCATION")
+        if (concise && DialoguePolicy.NextBookingStep(context) == "COLLECT_LOCATION")
             return Task.FromResult("¿En cuál sede deseas continuar con tu reserva?");
         return PromptAsync(workspaceId, context, true, ct);
     }
@@ -326,7 +361,8 @@ public class BookingFlow : IBookingFlow
     private async Task<string> PromptAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct)
     {
         if (!preserveDraft && context.CurrentStep == "COLLECT_SERVICE") context.ReservationServiceOffset = 0;
-        var question = context.CurrentStep switch
+        var step = DialoguePolicy.NextBookingStep(context);
+        var question = step switch
         {
             "COLLECT_CUSTOMERNAME" => "Para registrar tu reserva, ¿cuál es tu nombre y apellido?",
             "COLLECT_LOCATION" => await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas atenderte?", ct),
@@ -335,9 +371,10 @@ public class BookingFlow : IBookingFlow
                     await ReservableServicesAsync(workspaceId, context.SelectedLocationId, ct), context.ReservationServiceOffset),
             "COLLECT_DATE" => "¿Para qué fecha deseas reservar? Puedes indicar el día o escribir 'mañana'.",
             "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct),
-            "CONFIRM" => $"Tu borrador de reserva para el {context.TargetDate} a las {context.TargetTime} está pendiente de confirmación. ¿Confirmas? Responde sí o no.",
-            _ => "Para continuar con tu reserva, ¿cuál es tu nombre y apellido?"
+            "CONFIRM" => $"Tu reserva para el {context.TargetDate} a las {context.TargetTime} está pendiente de confirmación. ¿Confirmas? Responde sí o no.",
+            _ => "¿Qué servicio deseas reservar?"
         };
+        if (step != "COLLECT_TIME") LastResponsePlan = new(ConversationIntent.Reservation, [], question, []);
         if (!preserveDraft) context.LastQuestion = question;
         return question;
     }
@@ -377,6 +414,7 @@ public class BookingFlow : IBookingFlow
 
     private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct)
     {
+        LastResponsePlan = null;
         if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
         {
             if (!preserveDraft) { context.TargetDate = null; UpdateStep(context); }
@@ -393,7 +431,7 @@ public class BookingFlow : IBookingFlow
         var dayHours = hours.FirstOrDefault(h => h.DayOfWeek == (int)date.DayOfWeek);
         if (!BusinessHoursFormatter.IsOpen(dayHours))
         {
-            if (!preserveDraft) { context.TargetDate = null; context.TargetTime = null; UpdateStep(context); }
+            if (!preserveDraft) { context.TargetTime = null; UpdateStep(context); }
             return "Esta sede no atiende ese día.\n\n" + BusinessHoursFormatter.Format(hours) +
                 "\n\nDime otra combinación de día y hora para verificar su disponibilidad.";
         }
@@ -401,8 +439,9 @@ public class BookingFlow : IBookingFlow
             .Where(s => s.IsAvailable).OrderBy(s => s.StartTime).ToList();
         if (slots.Count == 0)
         {
-            if (!preserveDraft) { context.TargetDate = null; context.TargetTime = null; UpdateStep(context); }
-            return $"El negocio atiende el {date:dd/MM/yyyy}, pero ya no quedan horarios disponibles. ¿Qué otro día prefieres?";
+            if (!preserveDraft) { context.TargetTime = null; UpdateStep(context); }
+            return $"El negocio atiende el {date:dd/MM/yyyy}, pero ya no quedan horarios disponibles. "
+                + await VerifiedAlternativesAsync(workspaceId, context, date, ct);
         }
         var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
         TimeZoneInfo zone;
@@ -414,6 +453,11 @@ public class BookingFlow : IBookingFlow
             slots = new TimePreferenceResolver().FilterAvailableSlots(slots, DateOnly.FromDateTime(date), zone, context.PreferredTime).ToList();
             if (slots.Count == 0) return "Hay horarios disponibles, pero ninguno coincide con tu preferencia. ¿Qué otra franja u hora prefieres?";
         }
+        LastResponsePlan = new(ConversationIntent.Reservation,
+            slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(),
+            "¿Qué horario prefieres?", slots.Take(8).Select(s => {
+                var label = TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture);
+                return new ConversationMenuOption(label, label, "Time"); }).ToArray());
         return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
             string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
             (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +
@@ -424,6 +468,33 @@ public class BookingFlow : IBookingFlow
     {
         var index = options.LastIndexOf('¿');
         return index < 0 ? options : options[..index].TrimEnd();
+    }
+
+    private static TimeZoneInfo BookingZone(string? configured)
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(configured) ? "America/Lima" : configured); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+    }
+
+    private async Task<string> VerifiedAlternativesAsync(Guid workspace, ConversationContextDto context, DateTime date, CancellationToken ct)
+    {
+        var hours = (await _hoursRepo.GetBusinessHoursAsync(workspace, context.SelectedLocationId, ct)).ToArray();
+        var profile = await _profileRepo.GetProfileAsync(workspace, ct);
+        var zone = BookingZone(profile?.TimeZone);
+        // Bounded read-only search. Never change the requested date or auto-select an alternative.
+        for (var offset = 1; offset <= 3; offset++)
+        {
+            var next = date.AddDays(offset);
+            if (!BusinessHoursFormatter.IsOpen(hours.FirstOrDefault(h => h.DayOfWeek == (int)next.DayOfWeek))) continue;
+            var available = (await _reservationEngine.GetAvailabilityAsync(workspace, context.SelectedLocationId!, context.SelectedServiceId!, next, ct)).Where(s => s.IsAvailable);
+            if (context.PreferredTime != null) available = new TimePreferenceResolver().FilterAvailableSlots(available, DateOnly.FromDateTime(next), zone, context.PreferredTime);
+            var slots = available.Take(3).ToArray();
+            if (slots.Length == 0) continue;
+            LastResponsePlan = new(ConversationIntent.Reservation, slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(), "¿Te conviene ese día u otra fecha?", []);
+            return $"Sí hay opciones el {next:dd/MM/yyyy}: " + string.Join(", ", slots.Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture))) + ". ¿Te conviene ese día u otra fecha?";
+        }
+        return "¿Qué otra fecha te conviene?";
     }
 }
 

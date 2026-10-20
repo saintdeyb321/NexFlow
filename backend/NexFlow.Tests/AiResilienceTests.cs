@@ -113,6 +113,12 @@ public sealed class AiResilienceTests
 
     [Theory]
     [InlineData("{}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"Act\":\"Confirmation\",\"Evidence\":[{\"Slot\":\"Act\",\"Text\":\"consulta\",\"NormalizedValue\":\"Confirmation\"}]}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"Act\":\"StartOperation\"}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"Evidence\":null}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"Evidence\":[{\"Slot\":\"WorkspaceId\",\"Text\":\"consulta\",\"NormalizedValue\":\"foreign\"}]}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"Evidence\":[{\"Slot\":\"Date\",\"Text\":\"texto inventado\",\"NormalizedValue\":\"2026-10-22\"}]}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"Evidence\":[{\"Slot\":\"Date\",\"Text\":\"consulta\",\"NormalizedValue\":\"2026-10-22\"},{\"Slot\":\"Date\",\"Text\":\"consulta\",\"NormalizedValue\":\"2026-10-23\"}]}")]
     [InlineData("{\"Intent\":\"Order\",\"RequiresClarification\":\"false\"}")]
     [InlineData("{\"Intent\":\"Order\",\"Confirmed\":true}")]
     [InlineData("{\"Intent\":\"Reservation\",\"BookingProposal\":{\"WorkspaceId\":\"foreign\"}}")]

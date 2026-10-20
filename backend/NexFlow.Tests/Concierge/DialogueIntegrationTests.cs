@@ -53,7 +53,7 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
         Assert.Equal("service-a", Assert.Single((await f.Context()).PendingServiceIds));
         Assert.Null((await f.Context()).SelectedServiceId);
         f.OfferingReads.Invocations.Clear(); f.ProfileReads.Invocations.Clear(); f.LocationReads.Invocations.Clear();
-        await f.HandleTurn("Deyvid Pariona", "name");
+        await f.HandleTurn("Soy Deyvid Pariona", "name");
         Assert.Equal("Deyvid Pariona", (await f.Context()).RealCustomerName);
         Assert.Contains("sede", f.Sent["name"].Content, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, CatalogCalls(f, "GetServicesAsync")); Assert.Equal(0, CatalogCalls(f, "GetProductsAsync"));
@@ -233,7 +233,7 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
         var interpreter = new AiInterpreter(router.Object, Mock.Of<IClock>(c => c.UtcNow == f.Now), f.Profiles.Object, NullLogger<AiInterpreter>.Instance);
         var recovery = new Mock<IConversationRecoveryService>(MockBehavior.Strict);
         recovery.Setup(r => r.AcquireAiAsync(f.Workspace, "phone", "contextual", It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        var pipeline = new TurnUnderstandingPipeline(f.Resolver, new DialoguePolicy(), interpreter, recovery.Object);
+        var pipeline = new TurnUnderstandingPipeline(f.Resolver, new DialoguePolicy(), interpreter, recovery.Object, f.Offerings.Object);
         var result = await pipeline.PrepareAsync(f.Workspace, "phone", new("instance", "phone", "Ana", "cuánto cuesta la limpieza", "contextual", false, f.Workspace),
             new() { CurrentGoal = "RESERVATION", CurrentStep = "COLLECT_DATE" }, f.Modules, default);
         Assert.True(result.UsedAi); Assert.Equal(DialogueAct.InformationalInterruption, result.Act);
@@ -298,7 +298,7 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
         var f = new ConciergeFixture(); using var cancellation = new CancellationTokenSource();
         f.Profiles.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()))
             .Returns<Guid, CancellationToken>((_, token) => { cancellation.Cancel(); return Task.FromCanceled<NexFlow.Application.Features.Business.BusinessProfileDto?>(token); });
-        var pipeline = new TurnUnderstandingPipeline(f.Resolver, new DialoguePolicy(), Mock.Of<IAiInterpreter>(), Mock.Of<IConversationRecoveryService>());
+        var pipeline = new TurnUnderstandingPipeline(f.Resolver, new DialoguePolicy(), Mock.Of<IAiInterpreter>(), Mock.Of<IConversationRecoveryService>(), f.Offerings.Object);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pipeline.PrepareAsync(f.Workspace, "phone",
             new("instance", "phone", "Ana", "quiero reservar", "cancelled", false, f.Workspace), new(), f.Modules, cancellation.Token));
     }

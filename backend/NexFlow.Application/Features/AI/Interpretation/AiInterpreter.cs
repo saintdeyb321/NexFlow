@@ -32,7 +32,13 @@ public class AiInterpretation
     public ConversationDirective Directive { get; set; }
     public OfferingQueryKind QueryKind { get; set; } = OfferingQueryKind.Specific;
     public bool RequiresClarification { get; set; }
+    public List<AiSlotEvidence> Evidence { get; set; } = [];
+    public DialogueAct? Act { get; set; }
 }
+
+// Untrusted extraction: text must be an actual fragment of this inbound, and the
+// normalized value must agree with a deterministic resolver before it can be used.
+public sealed record AiSlotEvidence(string Slot, string Text, string NormalizedValue);
 
 public interface IAiInterpreter
 {
@@ -110,6 +116,8 @@ PASO ACTUAL: {currentStep ?? "NINGUNO"}
 - Date: Fecha en formato YYYY-MM-DD.
 - Time: Hora en formato HH:mm.
 - CustomerName: Nombre y apellido del cliente.
+- Act: acto opcional 'Information', 'OperationInformation', 'StartOperation', 'Correction', 'InformationalInterruption', 'Resume', 'Cancellation', 'HumanAssistance' o 'SemanticAmbiguity'. Diferencia deseo de atención de una pregunta sobre cómo reservar, una negación o una consulta comercial. Nunca confirmes operaciones.
+- Evidence: arreglo opcional de {{Slot, Text, NormalizedValue}} para Act, Date, Time, Name, Location o Service. Text copia el fragmento EXACTO del mensaje original que sustenta ese dato. NormalizedValue coincide con Act, Date (YYYY-MM-DD), Time (HH:mm), CustomerName o el nombre de entidad extraído. Act requiere evidencia. Nunca inventes evidencia ni selecciones una alternativa ambigua. Incluye la expresión temporal completa, no sólo su fecha u hora de referencia.
 - Directive: 'None', 'ChangeLocation', 'ChangeService', 'ShowOptions', 'CancelCurrentFlow'. Extrae sólo comandos explícitos del consumidor.
 - QueryKind: 'Broad' para consultas amplias de productos/servicios ('qué productos tienen', 'qué servicios ofrecen', 'muéstrame el catálogo', 'pásame sus productos', 'lista de servicios' y equivalentes). SearchTerm = null en estas consultas.
 - QueryKind: 'Specific' si pregunta sobre una offering concreta, su precio, duración o existencia; SearchTerm contiene únicamente su nombre. No conviertas una consulta específica en Broad.
@@ -151,6 +159,16 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
             if (new[] { interpretation.Service, interpretation.Location, interpretation.CustomerName, interpretation.SearchTerm }.Any(v => v?.Length > 200 || v?.Any(char.IsControl) == true)
                 || interpretation.Date != null && !DateOnly.TryParseExact(interpretation.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
                 || interpretation.Time != null && !TimeOnly.TryParseExact(interpretation.Time, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) throw new JsonException("Invalid entities.");
+            if (interpretation.Evidence == null || interpretation.Evidence.Count > 6
+                || interpretation.Evidence.Select(e => e?.Slot).Distinct(StringComparer.Ordinal).Count() != interpretation.Evidence.Count
+                || interpretation.Evidence.Any(e => e == null || e.Slot is not ("Act" or "Date" or "Time" or "Name" or "Location" or "Service")
+                    || string.IsNullOrWhiteSpace(e.Text) || e.Text.Length > 300 || string.IsNullOrWhiteSpace(e.NormalizedValue) || e.NormalizedValue.Length > 200
+                    || !userMessage.Contains(e.Text, StringComparison.OrdinalIgnoreCase)))
+                throw new JsonException("Invalid extraction evidence.");
+            if (interpretation.Act.HasValue && (interpretation.Act is not (DialogueAct.Information or DialogueAct.OperationInformation or DialogueAct.StartOperation
+                    or DialogueAct.Correction or DialogueAct.InformationalInterruption or DialogueAct.Resume or DialogueAct.Cancellation or DialogueAct.HumanAssistance or DialogueAct.SemanticAmbiguity)
+                || !interpretation.Evidence.Any(e => e.Slot == "Act" && e.NormalizedValue == interpretation.Act.ToString())))
+                throw new JsonException("Invalid dialogue act evidence.");
             if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && !userMessage.Contains("cancel", StringComparison.OrdinalIgnoreCase))
                 throw new JsonException("Cancellation was not explicit.");
             var normalizedInput = NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationRecoveryService.Normalize(userMessage);

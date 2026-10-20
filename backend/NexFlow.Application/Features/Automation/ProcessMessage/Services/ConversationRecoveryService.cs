@@ -35,7 +35,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
     private static bool No(string text) => text is "no" or "no gracias";
     private static string Fingerprint(ConversationContextDto c) => $"{c.CurrentGoal}:{c.CurrentStep}:{c.SelectedLocationId}:{c.SelectedServiceId}:{c.TargetDate}";
     private static string Continuation(ConversationContextDto c) => string.IsNullOrEmpty(c.CurrentGoal) ? "¿Qué necesitas consultar?"
-        : "Tu borrador sigue guardado. " + (c.CurrentStep switch {
+        : (c.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "Tu borrador sigue guardado. ") + (c.CurrentStep switch {
             "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre?", "COLLECT_LOCATION" => "¿En qué sede deseas reservar?",
             "COLLECT_SERVICE" => "¿Qué servicio deseas reservar?", "COLLECT_DATE" => "¿Para qué fecha?",
             "COLLECT_TIME" => "¿Qué hora prefieres?", "CONFIRM" => "¿Confirmas la reserva? Responde sí o no.",
@@ -52,9 +52,10 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (request.MessageText.Length > Limits.MaxInputCharacters)
             return await Remember("Tu mensaje es demasiado largo. Envíalo en partes más cortas y plantea una consulta por vez.");
         var text = Normalize(request.MessageText);
+        var booking = context.CurrentGoal is "BOOKING" or "RESERVATION";
         if (Regex.IsMatch(text, @"\b(ignora (?:todas las |las )?instrucciones|system prompt|api key|revela (?:el )?(?:prompt|secreto)|actua como administrador|cambia (?:el )?workspace)\b", RegexOptions.CultureInvariant))
             return await Remember("Solo puedo ayudarte con información y operaciones autorizadas de este negocio. " + Continuation(context));
-        if (Regex.IsMatch(text, @"\b(asesor humano|hablar con (?:un |una )?(?:asesor|persona|humano)|atencion humana)\b") || text is "asesor" or "humano")
+        if (!text.Split(' ').Contains("no") && (Regex.IsMatch(text, @"\b(asesor humano|hablar con (?:un |una )?(?:asesor|persona|humano)|atencion humana)\b") || text is "asesor" or "humano"))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Support });
         if (context.PendingRecoveryAction != null && Regex.IsMatch(text, @"\b(que|cual|cuanto|donde|como|precio|horarios?|direccion)\b"))
             return null;
@@ -74,27 +75,32 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 context.ReservationCommitSourceMessageId = null; context.RecoveryOptionsOffset = 0; context.RecoveryOptionsContext = null;
                 context.PendingCustomerName = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Clear(); context.PreferredTime = null;
                 context.PendingRecoveryAction = null; context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
-                return await Remember("He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.");
+                return await Remember(booking ? "He descartado esta reserva en preparación. No se ha cancelado ninguna reserva registrada."
+                    : "He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.");
             }
             if (No(text)) { context.PendingRecoveryAction = null; return await Remember(Continuation(context)); }
-            return await Remember("Confirma si deseas descartar el borrador: responde sí o no. Para hablar con una persona escribe asesor.");
+            return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Para hablar con una persona escribe asesor."
+                : "Confirma si deseas descartar el borrador: responde sí o no. Para hablar con una persona escribe asesor.");
         }
         if (!string.IsNullOrWhiteSpace(context.CurrentGoal) && context.LastUpdated < clock.UtcNow.AddHours(-Limits.ContextExpiryHours))
         {
             context.PendingRecoveryAction = "EXPIRE";
-            return await Remember("El borrador lleva tiempo sin actualizarse. ¿Quieres descartarlo para empezar de nuevo? Responde sí o no; no realizaré operaciones con esos datos mientras confirmas.");
+            return await Remember(booking ? "Ha pasado un tiempo desde tu última respuesta. ¿Deseas dejar esta reserva en preparación y comenzar de nuevo? Responde sí o no."
+                : "El borrador lleva tiempo sin actualizarse. ¿Quieres descartarlo para empezar de nuevo? Responde sí o no; no realizaré operaciones con esos datos mientras confirmas.");
         }
         if (text is "cancelar" or "cancela" or "cancelar reserva" or "cancelar pedido" or "cancelar borrador" or "cancela la reserva" or "cancela el pedido")
         {
             if (string.IsNullOrEmpty(context.CurrentGoal)) return await Remember("No hay un borrador activo. Para revisar una reserva o pedido registrado escribe asesor.");
             context.PendingRecoveryAction = "CANCEL";
-            return await Remember("¿Quieres descartar el borrador actual? Responde sí o no. Esto no cancela una reserva o pedido ya registrado.");
+            return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Esto no cancela ninguna reserva registrada."
+                : "¿Quieres descartar el borrador actual? Responde sí o no. Esto no cancela una reserva o pedido ya registrado.");
         }
         if (context.CurrentStep == "CONFIRM" && context.CurrentGoal is "BOOKING" or "RESERVATION" && Yes(text))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Confirmed = true });
-        if (No(text) && context.CurrentStep == "CONFIRM") return await Remember("No he registrado la reserva. Puedes corregir la sede, servicio, fecha u hora, o escribir cancelar para descartar el borrador.");
+        if (No(text) && context.CurrentStep == "CONFIRM") return await Remember("No he registrado la reserva. Puedes corregir la sede, servicio, fecha u hora, o escribir cancelar para dejar esta reserva en preparación.");
         if (Regex.IsMatch(text, @"^(hola+|holi|buenas|buenos dias|buenas tardes|buenas noches|hey|ola)$"))
-            return string.IsNullOrEmpty(context.CurrentGoal) ? await Menu("¡Hola! Puedo ayudarte con estas opciones:") : await Remember("¡Hola! " + Continuation(context));
+            return string.IsNullOrEmpty(context.CurrentGoal) ? await Menu("¡Hola! Puedo ayudarte con estas opciones:")
+                : await Remember((context.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "¡Hola! ") + Continuation(context));
         if (text is "adios" or "chau" or "hasta luego" or "gracias" or "muchas gracias")
             return await Remember("¡Gracias por escribirnos! " + (string.IsNullOrEmpty(context.CurrentGoal) ? "Aquí estaremos cuando necesites información del negocio." : Continuation(context)));
         if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones")
@@ -190,7 +196,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 + (context.RecoveryHasMore ? "\nHay más opciones disponibles: escribe ver más. Para solicitar ayuda humana escribe asesor." : "")
                 + (context.RecoveryOptionsOffset > 0 ? "\nPara volver al inicio escribe menú." : "");
         return replacePicker ? ComposePickerResponse(response, available, menu)
-            : response + "\n" + menu + "\n¿Cuál opción eliges? Escribe su número.";
+            : response + "\n" + menu + "\n¿Cuál prefieres? Puedes escribir el nombre o el número.";
     }
 
     private static string ComposePickerResponse(string response, List<ConversationMenuOption> available, string menu)
@@ -209,7 +215,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (i == insertion) parts.Add(menu);
             if (i < lines.Length && !pickerLines.Contains(lines[i].Trim())) parts.Add(lines[i]);
         }
-        if (!hasQuestion) parts.Add("¿Cuál opción eliges? Escribe su número.");
+        if (!hasQuestion) parts.Add("¿Cuál prefieres? Puedes escribir el nombre o el número.");
         return string.Join("\n", parts);
     }
 

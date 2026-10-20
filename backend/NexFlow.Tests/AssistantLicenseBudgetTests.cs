@@ -140,12 +140,12 @@ public sealed class AssistantLicenseBudgetTests
     {
         var f = new AssistantConversationTests.Fixture();
         f.Modules.IntersectWith(["SERVICES", "RESERVATIONS"]);
-        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation }); await f.Turn("quiero reservar");
-        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, CustomerName = "Ana Pérez" }); await f.Turn("Ana Pérez");
+        await f.Turn("quiero reservar");
         await f.Turn("1"); Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);
         await f.Turn("2"); Assert.Equal("service-b", (await f.Context()).SelectedServiceId);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Date = "2026-10-20" }); await f.Turn("el 20 de octubre");
-        await f.Turn("1"); Assert.Equal("CONFIRM", (await f.Context()).CurrentStep);
+        await f.Turn("1"); Assert.Equal("COLLECT_CUSTOMERNAME", (await f.Context()).CurrentStep);
+        await f.Turn("Ana Pérez"); Assert.Equal("CONFIRM", (await f.Context()).CurrentStep);
         await f.Turn("sí", "commit"); await f.Turn("sí", "commit");
         var booking = Assert.Single(f.Bookings.Values);
         Assert.Equal(f.Workspace, booking.WorkspaceId);

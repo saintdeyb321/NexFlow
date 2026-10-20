@@ -27,6 +27,7 @@ using NexFlow.Tests.Fakes;
 using Xunit;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 namespace NexFlow.Tests;
 
@@ -123,7 +124,7 @@ public sealed class AssistantConversationTests
     public async Task Booking_multiple_turns_select_real_options_preserve_interruption_and_require_explicit_confirmation()
     {
         var f = new Fixture();
-        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation }); await f.Turn("quiero reservar");
+        await f.Turn("quiero reservar");
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, CustomerName = "Ana Pérez" }); await f.Turn("Ana Pérez");
         await f.Turn("1"); Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);
         await f.Turn("la segunda"); Assert.Equal("service-b", (await f.Context()).SelectedServiceId);
@@ -232,6 +233,11 @@ public sealed class AssistantConversationTests
         public Mock<ILocationRepository> LocationReads { get; }
         public Mock<IOfferingService> OfferingReads { get; }
         public Mock<IBusinessProfileRepository> ProfileReads { get; }
+        public Mock<IBusinessHoursRepository> HoursReads { get; }
+        public Mock<IReservationEngine> EngineReads { get; }
+        public Mock<IEntitlementService> EntitlementReads { get; }
+        public Mock<IKnowledgeService> KnowledgeReads { get; }
+        public List<PreparedDialogueTurn> Understood { get; } = [];
         public ProcessIncomingMessageCommandHandler Handler { get; }
         public MessageStatus DeliveryStatus { get; set; } = MessageStatus.Sent;
         private readonly AiResponseOrchestrator _orchestrator; private int _turn;
@@ -256,8 +262,10 @@ public sealed class AssistantConversationTests
                 ? new[] { new LocationDto("sede-a", "Sede Concepcion", "Dirección verificada", null, null, true), new LocationDto("sede-b", "Sede San Jeronimo", "Otra dirección", null, null, false) }
                 : new[] { new LocationDto("sede-a", "Sede real", "Dirección verificada", null, null, true) });
             var hours = new Mock<IBusinessHoursRepository>(MockBehavior.Strict);
+            HoursReads = hours;
             hours.Setup(h => h.GetBusinessHoursAsync(Workspace, It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(Enumerable.Range(0, 7).Select(d => new BusinessHoursDto(d, "08:00", "18:00", false)));
             var engine = new Mock<IReservationEngine>(MockBehavior.Strict);
+            EngineReads = engine;
             engine.Setup(e => e.GetAvailabilityAsync(Workspace, It.Is<string>(l => l == "sede-a" || conciergeCatalog && l == "sede-b"), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, string _, DateTime d, CancellationToken _) => conciergeCatalog
                 ? new[] { new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(15), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(15.5), DateTimeKind.Utc), true), new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(21), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(21.5), DateTimeKind.Utc), true) }
                 : new[] { new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(15), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(15.5), DateTimeKind.Utc), true) });
@@ -267,10 +275,12 @@ public sealed class AssistantConversationTests
             var reservationRepo = new Mock<IReservationRepository>(MockBehavior.Strict);
             reservationRepo.Setup(r => r.GetBySourceMessageIdAsync(Workspace, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string source, CancellationToken _) => Bookings.GetValueOrDefault(source));
             var entitlements = new Mock<IEntitlementService>(MockBehavior.Strict);
+            EntitlementReads = entitlements;
             entitlements.Setup(e => e.GetAvailableModuleCodesAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(() => Modules.ToArray());
             var profiles = new Mock<IBusinessProfileRepository>(); profiles.Setup(p => p.GetProfileAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(new BusinessProfileDto("Negocio real", "", "", "", ""));
             ProfileReads = profiles;
             var knowledge = new Mock<IKnowledgeService>(MockBehavior.Strict);
+            KnowledgeReads = knowledge;
             knowledge.Setup(k => k.QueryAsync(Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == Workspace), It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid w, BusinessKnowledgeSnapshot _, KnowledgeQuery q, CancellationToken _) => {
                 FactualQueries.Add((w, q.Topic)); return new KnowledgeResult { Status = KnowledgeStatus.Found, Source = q.Topic, Facts = "Dato real autorizado del negocio: S/ 25.00, sede y horario registrados." }; });
             var notifications = Mock.Of<INotificationService>();
@@ -294,8 +304,8 @@ public sealed class AssistantConversationTests
             Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()), profiles.Object);
             var slots = new WorkspaceSlotResolver(entitlements.Object, profiles.Object, locations.Object, offerings.Object, clock.Object,
                 new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);
-            var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery);
-            _orchestrator = new(pipeline, entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, Recovery, clock.Object);
+            var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery, offerings.Object);
+            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, Recovery, clock.Object);
             var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);
             guard.Setup(g => g.CheckMessageAsync(It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync((true, Workspace, Phone));
             var stateService = new Mock<IConversationStateService>(MockBehavior.Strict);
@@ -321,5 +331,15 @@ public sealed class AssistantConversationTests
             await Contexts.SaveContextAsync(Workspace, Phone, c, default);
         }
         public static string BusinessDraft(ConversationContextDto c) => JsonSerializer.Serialize(new { c.CurrentGoal, c.CurrentStep, c.SelectedLocationId, c.SelectedServiceId, c.TargetDate, c.TargetTime, c.RealCustomerName, c.OrderDraftItems });
+        private sealed class RecordingPipeline(ITurnUnderstandingPipeline inner, List<PreparedDialogueTurn> turns) : ITurnUnderstandingPipeline
+        {
+            public async Task<PreparedDialogueTurn> PrepareAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
+                ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
+            {
+                var result = await inner.PrepareAsync(workspace, phone, request, context, modules, ct);
+                lock (turns) turns.Add(result);
+                return result;
+            }
+        }
     }
 }

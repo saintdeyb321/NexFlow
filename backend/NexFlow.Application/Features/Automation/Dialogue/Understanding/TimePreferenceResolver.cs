@@ -19,6 +19,8 @@ public sealed partial class TimePreferenceResolver
     {
         if (text.Length > 2000) return SlotResolution<TimePreference>.Invalid("InputTooLong");
         var normalized = SpanishTextNormalizer.Normalize(text);
+        if (normalized.Contains("media hora despues de ", StringComparison.Ordinal) || normalized.Contains("un cuarto para ", StringComparison.Ordinal))
+            return SlotResolution<TimePreference>.Missing("SemanticComposition");
         var periods = new List<TimePreference>();
         if (HasPeriod("manana")) periods.Add(new(TimePreferenceKind.Period, From: new(6, 0), Until: new(12, 0)));
         if (HasPeriod("tarde")) periods.Add(new(TimePreferenceKind.Period, From: new(12, 0), Until: new(18, 0)));
@@ -56,6 +58,24 @@ public sealed partial class TimePreferenceResolver
 
         bool HasPeriod(string period) => new[] { "por la ", "en la " }.Any(p => SpanishTextNormalizer.ContainsPhrase(normalized, p + period))
             || normalized == "de la " + period;
+    }
+
+    // Only filters real engine slots. Does not generate availability or convert a preference into a booking.
+    public SlotResolution<TimePreference> ResolveEvidence(string fragment)
+    {
+        var normalized = SpanishTextNormalizer.Normalize(fragment);
+        var expressions = new[] { (Prefix: "media hora despues de ", Delta: 30), (Prefix: "un cuarto para ", Delta: -15) };
+        foreach (var expression in expressions)
+            if (normalized.StartsWith(expression.Prefix, StringComparison.Ordinal))
+            {
+                var clock = normalized[expression.Prefix.Length..];
+                var anchor = Resolve(clock.StartsWith("las ", StringComparison.Ordinal) ? "a " + clock : clock, true);
+                if (!anchor.TryGetValue(out var value) || value.Kind != TimePreferenceKind.Exact) return anchor;
+                var shifted = value.ExactTime!.Value.AddMinutes(expression.Delta, out var wrappedDays);
+                return wrappedDays != 0 ? SlotResolution<TimePreference>.Invalid("TimeCrossesDay")
+                    : SlotResolution<TimePreference>.Match(new(TimePreferenceKind.Exact, ExactTime: shifted), fragment, source: EvidenceSource.ValidatedLlm);
+            }
+        return Resolve(fragment, true);
     }
 
     // Only filters real engine slots. Does not generate availability or convert a preference into a booking.
