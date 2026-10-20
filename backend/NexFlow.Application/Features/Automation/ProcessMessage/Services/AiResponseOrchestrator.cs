@@ -7,6 +7,8 @@ using NexFlow.Domain.Enums;
 using NexFlow.Application.Engines.AI;
 using System.Text.RegularExpressions;
 using NexFlow.Domain.Exceptions;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -17,7 +19,7 @@ public interface IAiResponseOrchestrator
 
 public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 {
-    private readonly IAiInterpreter _interpreter;
+    private readonly ITurnUnderstandingPipeline _understanding;
     private readonly IEntitlementService _entitlementService;
     private readonly IBookingFlow _bookingFlow;
     private readonly IRequestFlow _requestFlow;
@@ -31,12 +33,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IClock? _clock;
 
     public AiResponseOrchestrator(
-        IAiInterpreter interpreter, IEntitlementService entitlementService,
+        ITurnUnderstandingPipeline understanding, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger, IConversationRecoveryService? recovery = null, IClock? clock = null)
     {
-        _interpreter = interpreter; _entitlementService = entitlementService;
+        _understanding = understanding; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
         _supportFlow = supportFlow; _chatFlow = chatFlow;
         _contextRecovery = contextRecovery; _outboundMessageService = outboundMessageService;
@@ -63,24 +65,21 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
         if (recovery?.Response != null) return await SendText(recovery.Response);
         AiInterpretation interpretation;
+        PreparedDialogueTurn? prepared = null;
         if (recovery?.Interpretation != null) interpretation = recovery.Interpretation;
         else
         {
-            if (_recovery != null && !await _recovery.AcquireAiAsync(workspaceId, normalizedPhone, request.MessageId, cancellationToken))
-                return await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, normalizedPhone,
-                    "Hemos alcanzado el límite temporal de consultas. Espera un minuto o escribe asesor para recibir ayuda humana.", SenderType.AI,
-                    request.MessageId, cancellationToken);
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(20));
-            try { interpretation = await _interpreter.InterpretAsync(workspaceId, request.MessageText, context.CurrentGoal ?? "", context.CurrentStep, activeModules, deadline.Token); }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = AiFailureKind.Timeout }; }
+            prepared = await _understanding.PrepareAsync(workspaceId, normalizedPhone, request, context, activeModules, cancellationToken);
+            interpretation = prepared.Interpretation;
         }
         var normalized = ConversationRecoveryService.Normalize(request.MessageText);
         // A manual takeover while the provider was running invalidates this turn.
         var latest = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
         if (latest.Mode == "Human" || latest.StateVersion != context.StateVersion)
             throw new ConcurrencyException("Conversation changed during interpretation; reload before processing.");
+        activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (prepared?.Response != null)
+            return await SendText(AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules) ?? prepared.Response);
         interpretation.Confirmed = context.CurrentStep == "CONFIRM" && normalized is "si" or "si confirmo" or "confirmo" or "confirmar" or "de acuerdo";
         if (context.PendingRecoveryAction != null && interpretation.Intent != ConversationIntent.Support
             && (interpretation.Directive != ConversationDirective.None
@@ -96,8 +95,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             var confirmation = await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request with { MessageText = "cancelar" }, context, activeModules, cancellationToken);
             return await SendText(confirmation!.Response!);
         }
-        if (_recovery != null && (interpretation.RequiresClarification || interpretation.Intent is ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited
-            || recovery?.Interpretation == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
+        if (_recovery != null && interpretation.Intent is not (ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
+            && (interpretation.RequiresClarification || interpretation.Intent is ConversationIntent.General
+            || recovery?.Interpretation == null && interpretation.BookingProposal == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
                 || (interpretation.Intent == ConversationIntent.Order && !Regex.IsMatch(normalized, @"\b(compr|pedid|pedir|llevar|orden)"))
                 || (interpretation.Intent == ConversationIntent.Request && !Regex.IsMatch(normalized, @"\b(solicit|reclamo|queja|cotiz|registr|tramite|soporte)")))))
         {
@@ -113,13 +113,15 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (context.ClarificationAttempts > 0 && interpretation.Intent is not (ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited or ConversationIntent.Support))
         {
             context.ClarificationAttempts = 0;
-            await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
+            if (interpretation.BookingProposal == null) await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
         }
 
         if (interpretation.Intent == ConversationIntent.ProviderUnavailable || interpretation.Intent == ConversationIntent.RateLimited)
         {
             finalResponse = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes intentar en un minuto o solicitar un asesor."
                 : "No pude interpretar tu consulta en este momento. Indica qué información necesitas o solicita un asesor.";
+            if (context.CurrentGoal is "BOOKING" or "RESERVATION")
+                finalResponse += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
         }
         else
         {

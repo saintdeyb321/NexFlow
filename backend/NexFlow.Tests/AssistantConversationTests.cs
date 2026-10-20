@@ -25,6 +25,8 @@ using NexFlow.Domain.Enums;
 using NexFlow.Infrastructure.Persistence.Firestore;
 using NexFlow.Tests.Fakes;
 using Xunit;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
+using NexFlow.Application.Features.Automation.Dialogue.Policy;
 
 namespace NexFlow.Tests;
 
@@ -227,27 +229,39 @@ public sealed class AssistantConversationTests
         public Dictionary<string, MessageRecord> Sent { get; } = new(); public List<(Guid Workspace, KnowledgeTopic Topic)> FactualQueries { get; } = new();
         public int AiCalls { get; private set; } public int Handoffs { get; private set; }
         public Func<Task>? DuringInterpretation { get; set; }
+        public Mock<ILocationRepository> LocationReads { get; }
+        public Mock<IOfferingService> OfferingReads { get; }
+        public Mock<IBusinessProfileRepository> ProfileReads { get; }
+        public ProcessIncomingMessageCommandHandler Handler { get; }
+        public MessageStatus DeliveryStatus { get; set; } = MessageStatus.Sent;
         private readonly AiResponseOrchestrator _orchestrator; private int _turn;
-        public Fixture(int serviceCount = 2)
+        public Fixture(int serviceCount = 2, bool conciergeCatalog = false)
         {
             var cache = new Mock<IConversationCache>();
             var clock = new Mock<IClock>(); clock.SetupGet(c => c.UtcNow).Returns(() => Now);
             Contexts = new ContextRecoveryService(cache.Object, new FirestoreConversationStateRepository(Firestore.Db), clock.Object);
             var offerings = new Mock<IOfferingService>(MockBehavior.Strict);
-            var services = new[] { new ServiceDto { Id = "service-a", Name = "Servicio A", RequiresReservation = true, DurationInMinutes = 30 }, new ServiceDto { Id = "service-b", Name = "Servicio B", RequiresReservation = true, DurationInMinutes = 30 } }
+            OfferingReads = offerings;
+            var services = new[] { new ServiceDto { Id = "service-a", Name = conciergeCatalog ? "Limpieza dental" : "Servicio A", RequiresReservation = true, DurationInMinutes = 30 }, new ServiceDto { Id = "service-b", Name = conciergeCatalog ? "Limpieza profunda" : "Servicio B", RequiresReservation = true, DurationInMinutes = 30 } }
                 .Concat(Enumerable.Range(2, serviceCount - 2).Select(i => new ServiceDto { Id = $"service-{i}", Name = $"Servicio {i}", RequiresReservation = true, DurationInMinutes = 30 })).ToArray();
             offerings.Setup(o => o.GetProductsAsync(Workspace, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { new ProductDto { Id = "product-a", Name = "Producto real", PriceMinorUnits = 2500 } });
             offerings.Setup(o => o.GetServicesAsync(Workspace, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(services);
             offerings.Setup(o => o.GetProductByIdAsync(Workspace, "product-a", It.IsAny<CancellationToken>())).ReturnsAsync(new ProductDto { Id = "product-a", Name = "Producto real", PriceMinorUnits = 2500 });
             offerings.Setup(o => o.GetServiceByIdAsync(Workspace, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string id, CancellationToken _) => services.SingleOrDefault(s => s.Id == id));
             offerings.Setup(o => o.IsServiceAvailableAtLocationAsync(Workspace, It.IsAny<string>(), "sede-a", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            if (conciergeCatalog) offerings.Setup(o => o.IsServiceAvailableAtLocationAsync(Workspace, It.IsAny<string>(), "sede-b", It.IsAny<CancellationToken>())).ReturnsAsync(true);
             var locations = new Mock<ILocationRepository>(MockBehavior.Strict);
-            locations.Setup(l => l.GetLocationsAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { new LocationDto("sede-a", "Sede real", "Dirección verificada", null, null, true) });
+            LocationReads = locations;
+            locations.Setup(l => l.GetLocationsAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(conciergeCatalog
+                ? new[] { new LocationDto("sede-a", "Sede Concepcion", "Dirección verificada", null, null, true), new LocationDto("sede-b", "Sede San Jeronimo", "Otra dirección", null, null, false) }
+                : new[] { new LocationDto("sede-a", "Sede real", "Dirección verificada", null, null, true) });
             var hours = new Mock<IBusinessHoursRepository>(MockBehavior.Strict);
             hours.Setup(h => h.GetBusinessHoursAsync(Workspace, It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(Enumerable.Range(0, 7).Select(d => new BusinessHoursDto(d, "08:00", "18:00", false)));
             var engine = new Mock<IReservationEngine>(MockBehavior.Strict);
-            engine.Setup(e => e.GetAvailabilityAsync(Workspace, "sede-a", It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, string _, DateTime d, CancellationToken _) => new[] { new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(15), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(15.5), DateTimeKind.Utc), true) });
-            engine.Setup(e => e.CreateReservationAsync(Workspace, "sede-a", It.IsAny<string>(), Phone, It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), It.IsAny<string?>())).ReturnsAsync((Guid w, string l, string s, string p, string n, DateTime d, CancellationToken _, string? source) => {
+            engine.Setup(e => e.GetAvailabilityAsync(Workspace, It.Is<string>(l => l == "sede-a" || conciergeCatalog && l == "sede-b"), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, string _, DateTime d, CancellationToken _) => conciergeCatalog
+                ? new[] { new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(15), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(15.5), DateTimeKind.Utc), true), new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(21), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(21.5), DateTimeKind.Utc), true) }
+                : new[] { new TimeSlotDto(DateTime.SpecifyKind(d.Date.AddHours(15), DateTimeKind.Utc), DateTime.SpecifyKind(d.Date.AddHours(15.5), DateTimeKind.Utc), true) });
+            engine.Setup(e => e.CreateReservationAsync(Workspace, It.Is<string>(l => l == "sede-a" || conciergeCatalog && l == "sede-b"), It.IsAny<string>(), Phone, It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), It.IsAny<string?>())).ReturnsAsync((Guid w, string l, string s, string p, string n, DateTime d, CancellationToken _, string? source) => {
                 var utc = DateTime.SpecifyKind(d.AddHours(5), DateTimeKind.Utc); var r = Reservation.Create(w, l, s, p, n, utc, utc.AddMinutes(30), source); Bookings.TryAdd(source!, r);
                 return Result<ReservationDto>.Success(new(r.Id, w, l, s, n, p, utc, "Confirmed")); });
             var reservationRepo = new Mock<IReservationRepository>(MockBehavior.Strict);
@@ -255,6 +269,7 @@ public sealed class AssistantConversationTests
             var entitlements = new Mock<IEntitlementService>(MockBehavior.Strict);
             entitlements.Setup(e => e.GetAvailableModuleCodesAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(() => Modules.ToArray());
             var profiles = new Mock<IBusinessProfileRepository>(); profiles.Setup(p => p.GetProfileAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(new BusinessProfileDto("Negocio real", "", "", "", ""));
+            ProfileReads = profiles;
             var knowledge = new Mock<IKnowledgeService>(MockBehavior.Strict);
             knowledge.Setup(k => k.QueryAsync(Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == Workspace), It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid w, BusinessKnowledgeSnapshot _, KnowledgeQuery q, CancellationToken _) => {
                 FactualQueries.Add((w, q.Topic)); return new KnowledgeResult { Status = KnowledgeStatus.Found, Source = q.Topic, Facts = "Dato real autorizado del negocio: S/ 25.00, sede y horario registrados." }; });
@@ -269,16 +284,29 @@ public sealed class AssistantConversationTests
             interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).Returns(async () => { AiCalls++; if (DuringInterpretation != null) await DuringInterpretation(); return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
             var outbound = new Mock<IOutboundMessageService>(MockBehavior.Strict);
             outbound.Setup(o => o.SendMessageAsync(Workspace, "chat", Phone, It.IsAny<string>(), SenderType.AI, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, string _, string content, SenderType _, string source, CancellationToken _) => {
-                if (!Sent.TryGetValue(source, out var r)) { r = new MessageRecord { Id = source, Status = MessageStatus.Sent, Content = content }; Sent.Add(source, r); } return r; });
+                if (!Sent.TryGetValue(source, out var r)) { r = new MessageRecord { Id = source, Status = DeliveryStatus, Content = content }; Sent.Add(source, r); } return r; });
+            outbound.Setup(o => o.TryResumeResponseAsync(Workspace, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string source, CancellationToken _) => Sent.ContainsKey(source));
             var support = new Mock<ISupportFlow>(MockBehavior.Strict);
             outbound.Setup(o => o.SendHandoffAcknowledgementAsync(Workspace, "chat", Phone, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid w, string chatId, string phone, string content, string source, CancellationToken ct) => outbound.Object.SendMessageAsync(w, chatId, phone, content, SenderType.AI, source, ct));
             support.Setup(s => s.ProcessAsync(Workspace, "chat", It.IsAny<CancellationToken>())).Returns(async () => { Handoffs++; var c = await Context(); c.Mode = "Human"; await Contexts.SaveContextAsync(Workspace, Phone, c, default); return "Un asesor continuará la conversación."; });
             var chat = new ChatFlow(knowledge.Object, entitlements.Object, new LocationResolverService(locations.Object), NullLogger<ChatFlow>.Instance, Mock.Of<ICatalogGenerationService>(), notifications);
             Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()), profiles.Object);
-            _orchestrator = new(interpreter.Object, entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, Recovery, clock.Object);
+            var slots = new WorkspaceSlotResolver(entitlements.Object, profiles.Object, locations.Object, offerings.Object, clock.Object,
+                new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);
+            var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery);
+            _orchestrator = new(pipeline, entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, Recovery, clock.Object);
+            var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);
+            guard.Setup(g => g.CheckMessageAsync(It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync((true, Workspace, Phone));
+            var stateService = new Mock<IConversationStateService>(MockBehavior.Strict);
+            stateService.Setup(s => s.ProcessStateAsync(Workspace, Phone, It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(async () => { var state = await Context(); return (state.Mode != "Human", new ConversationRecord { Id = "chat", Mode = state.Mode == "Human" ? ConversationMode.Human : ConversationMode.Automatic }, (string?)null); });
+            Handler = new(guard.Object, stateService.Object, _orchestrator, knowledge.Object, outbound.Object,
+                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object);
         }
         public Task<ConversationContextDto> Context() => Contexts.GetOrRecoverContextAsync(Workspace, Phone, default);
+        public Task<NexFlow.Application.Common.Result> HandleTurn(string text, string source)
+            => Handler.Handle(new("instance", Phone, "Ana", text, source, false, Workspace), default);
         public async Task Turn(string text, string? source = null)
         {
             source ??= $"turn-{++_turn}";

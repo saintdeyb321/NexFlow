@@ -247,14 +247,14 @@ public sealed class SlotResolverSafetyTests
     }
 
     [Fact]
-    public async Task Incident_baseline_reproduces_legacy_location_failure_and_synthetic_provider_outage_without_changing_live_flows()
+    public async Task Incident_legacy_location_failure_is_reproduced_but_phase_two_local_slots_no_longer_depend_on_the_provider()
     {
         var f = new ConciergeFixture();
         var legacy = new LocationResolverService(f.Locations.Object);
         Assert.Null(await legacy.ResolveLocationIdAsync(f.Workspace, "En la sede concepción", default));
         var resolved = await f.Resolver.ResolveAsync(f.Workspace, "incident", "En la sede concepción", new(), SlotResolutionPurpose.Reservation, default);
         Assert.True(resolved.Location.TryGetValue(out var location)); Assert.Equal("concepcion", location.Id);
-        var conversation = new AssistantConversationTests.Fixture();
+        var conversation = new AssistantConversationTests.Fixture(conciergeCatalog: true);
         await conversation.Turn("Hola");
         var draft = await conversation.Context(); draft.CurrentGoal = "RESERVATION"; draft.CurrentStep = "COLLECT_CUSTOMERNAME";
         await conversation.Contexts.SaveContextAsync(conversation.Workspace, AssistantConversationTests.Fixture.Phone, draft, default);
@@ -263,7 +263,8 @@ public sealed class SlotResolverSafetyTests
             conversation.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProviderUnavailable, Failure = NexFlow.Application.Engines.AI.AiFailureKind.Unavailable });
             await conversation.Turn(text);
         }
-        Assert.Equal(1, conversation.Handoffs); Assert.Empty(conversation.Bookings);
-        // This provider outage is injected; it does not identify Oracle's real provider failure.
+        Assert.Equal(0, conversation.Handoffs); Assert.Equal(0, conversation.AiCalls); Assert.Empty(conversation.Bookings);
+        var final = await conversation.Context(); Assert.Equal("Deyvid Pariona", final.RealCustomerName);
+        Assert.Equal("sede-a", final.SelectedLocationId); Assert.NotNull(final.TargetDate);
     }
 }

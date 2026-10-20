@@ -51,7 +51,7 @@ public sealed class AssistantDurabilityTests
     [Theory]
     [InlineData(AiFailureKind.Configuration)] [InlineData(AiFailureKind.InvalidResponse)] [InlineData(AiFailureKind.Timeout)]
     [InlineData(AiFailureKind.Unavailable)] [InlineData(AiFailureKind.RateLimit)]
-    public async Task Provider_failure_recovers_with_real_options_preserves_draft_and_stops_at_the_clarification_limit(AiFailureKind failure)
+    public async Task Provider_failure_preserves_draft_without_incrementing_semantic_clarifications_or_forcing_handoff(AiFailureKind failure)
     {
         var f = new AssistantConversationTests.Fixture(); await f.SeedDraft("ORDER"); var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
         for (var i = 0; i < 3; i++)
@@ -59,7 +59,9 @@ public sealed class AssistantDurabilityTests
             f.Interpretations.Enqueue(new() { Intent = failure == AiFailureKind.RateLimit ? ConversationIntent.RateLimited : ConversationIntent.ProviderUnavailable, Failure = failure });
             await f.Turn("consulta que requiere interpretación");
         }
-        Assert.Equal(1, f.Handoffs); Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Equal(0, f.Handoffs); Assert.Equal(0, (await f.Context()).ClarificationAttempts);
+        Assert.Equal(3, f.AiCalls); Assert.Equal(3, f.Sent.Count);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
         Assert.All(f.Sent.Values, r => Assert.DoesNotContain("alta demanda", r.Content, StringComparison.OrdinalIgnoreCase));
         Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }

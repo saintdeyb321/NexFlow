@@ -29,6 +29,11 @@ public class ConversationContextDto
     public string? TargetDate { get; set; }
     public string? TargetTime { get; set; }
     public string? RealCustomerName { get; set; }
+    // Additive fields inside the existing contextJson envelope, never another Firestore document/schema.
+    public string? PendingCustomerName { get; set; }
+    public List<string> PendingServiceIds { get; set; } = new();
+    public List<string> PendingDialogueSlots { get; set; } = new();
+    public NexFlow.Application.Features.Automation.Dialogue.Contracts.TimePreference? PreferredTime { get; set; }
     public string? OrderLastSourceMessageId { get; set; }
     public string? OrderLastResponse { get; set; }
     public List<OrderDraftItem> OrderDraftItems { get; set; } = new();

@@ -6,6 +6,7 @@ using NexFlow.Application.Features.AI.Router;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Engines.AI;
 using System.Globalization;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 namespace NexFlow.Application.Features.AI.Interpretation;
 
@@ -21,6 +22,7 @@ public class AiInterpretation
     public string? DeniedResponse { get; set; }
     [JsonIgnore] public AiFailureKind Failure { get; set; }
     [JsonIgnore] public bool Confirmed { get; set; }
+    [JsonIgnore] public BookingDraftProposal? BookingProposal { get; set; }
     public string? Service { get; set; }
     public string? Location { get; set; }
     public string? Date { get; set; }
@@ -37,7 +39,12 @@ public interface IAiInterpreter
     Task<AiInterpretation> InterpretAsync(Guid workspaceId, string userMessage, string currentGoal, string? currentStep, HashSet<string> activeModules, CancellationToken ct);
 }
 
-public class AiInterpreter : IAiInterpreter
+public interface IContextualAiInterpreter
+{
+    Task<AiInterpretation> InterpretAsync(string userMessage, DialogueTurnContext context, CancellationToken ct);
+}
+
+public class AiInterpreter : IAiInterpreter, IContextualAiInterpreter
 {
     private readonly IAiRouter _router;
     private readonly IClock _clock;
@@ -73,6 +80,16 @@ public class AiInterpreter : IAiInterpreter
         var workspaceZone = TimeZoneInfo.FindSystemTimeZoneById(tzId);
 
         var localBusinessTime = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
+        return await InterpretAtBusinessTimeAsync(workspaceId, userMessage, currentGoal, currentStep, activeModules, localBusinessTime, ct);
+    }
+
+    public Task<AiInterpretation> InterpretAsync(string userMessage, DialogueTurnContext context, CancellationToken ct)
+        => InterpretAtBusinessTimeAsync(context.WorkspaceId, userMessage, context.CurrentGoal ?? "", context.CurrentStep,
+            context.EnabledModules.ToHashSet(StringComparer.OrdinalIgnoreCase), context.LocalBusinessNow.DateTime, ct);
+
+    private async Task<AiInterpretation> InterpretAtBusinessTimeAsync(Guid workspaceId, string userMessage, string currentGoal, string? currentStep,
+        HashSet<string> activeModules, DateTime localBusinessTime, CancellationToken ct)
+    {
         var activeModulesList = string.Join(", ", activeModules);
 
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
@@ -122,7 +139,8 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
             if (json.RootElement.ValueKind != JsonValueKind.Object || json.RootElement.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != json.RootElement.EnumerateObject().Count())
                 throw new JsonException("Invalid interpretation object.");
             if (json.RootElement.EnumerateObject().Any(p => p.Name.Equals("Confirmed", StringComparison.OrdinalIgnoreCase)
-                || p.Name.Equals("DeniedResponse", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Failure", StringComparison.OrdinalIgnoreCase)))
+                || p.Name.Equals("DeniedResponse", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Failure", StringComparison.OrdinalIgnoreCase)
+                || p.Name.Equals("BookingProposal", StringComparison.OrdinalIgnoreCase)))
                 throw new JsonException("Interpretation contains server-owned fields.");
             var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, Converters = { new JsonStringEnumConverter(allowIntegerValues: false) } })
                    ?? throw new JsonException("Interpretation was null.");

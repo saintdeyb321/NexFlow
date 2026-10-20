@@ -62,6 +62,9 @@ public sealed record TurnUnderstanding(DialogueTurnContext Context, SlotResoluti
 {
     // Phase 1 deliberately does not infer actions, confirm operations or merge state.
     public ConversationIntent? Intent { get; init; }
+    public IReadOnlyList<BusinessEntityOption> AuthorizedLocations { get; init; } = [];
+    public IReadOnlyList<BusinessEntityOption> AuthorizedServices { get; init; } = [];
+    public IReadOnlyList<BusinessEntityOption> AuthorizedProducts { get; init; } = [];
 }
 
 public sealed record DialogueFailure(DialogueFailureDomain Domain, string Code)

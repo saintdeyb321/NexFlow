@@ -30,16 +30,19 @@ public sealed class Rc3Sprint0IncidentTests
     {
         var f = new AssistantConversationTests.Fixture();
         await f.Turn("Quiero informacion", "incident-1"); Assert.Contains("1. Consultar productos", f.Sent["incident-1"].Content);
-        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation });
         await f.Turn("Como puedo hacer una reserva?", "incident-2");
+        Assert.Contains("Para reservar", f.Sent["incident-2"].Content); Assert.Equal(0, f.AiCalls);
+        Assert.Null((await f.Context()).CurrentGoal);
         var draft = AssistantConversationTests.Fixture.BusinessDraft(await f.Context()); var calls = f.AiCalls;
         await f.Turn("Hola?", "incident-3"); Assert.Equal(calls, f.AiCalls);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProductQuery, QueryKind = OfferingQueryKind.Broad });
         await f.Turn("Que productos tienen", "incident-4");
+        Assert.Contains(f.FactualQueries, q => q.Topic == NexFlow.Application.Features.Knowledge.KnowledgeTopic.Products);
         Assert.Equal(draft, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
         await f.Turn("Escojo la opción 1", "incident-5");
         // Strict selection now clarifies the absent/current picker deterministically.
-        Assert.Equal(5, f.Sent.Count); Assert.Equal(2, f.AiCalls);
+        // Reservation instructions are now local; only the natural product query uses AI.
+        Assert.Equal(5, f.Sent.Count); Assert.Equal(1, f.AiCalls);
         Assert.All(f.Sent.Values, response => { Assert.Equal(MessageStatus.Sent, response.Status); Assert.False(string.IsNullOrWhiteSpace(response.Content)); });
         Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }

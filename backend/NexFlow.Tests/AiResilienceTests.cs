@@ -115,6 +115,7 @@ public sealed class AiResilienceTests
     [InlineData("{}")]
     [InlineData("{\"Intent\":\"Order\",\"RequiresClarification\":\"false\"}")]
     [InlineData("{\"Intent\":\"Order\",\"Confirmed\":true}")]
+    [InlineData("{\"Intent\":\"Reservation\",\"BookingProposal\":{\"WorkspaceId\":\"foreign\"}}")]
     [InlineData("{\"Intent\":\"Request\",\"DeniedResponse\":null}")]
     [InlineData("{\"Intent\":1}")]
     [InlineData("{\"Intent\":\"ProviderUnavailable\"}")]

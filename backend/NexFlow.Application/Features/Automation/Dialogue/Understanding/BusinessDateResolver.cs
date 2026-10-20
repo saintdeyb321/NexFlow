@@ -6,6 +6,16 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
 public sealed partial class BusinessDateResolver
 {
+    internal static bool IsOnlyDateExpression(string text)
+    {
+        var raw = IsoDate().Replace(text, " "); raw = NumericDate().Replace(raw, " ");
+        var normalized = SpanishTextNormalizer.Normalize(raw);
+        var remaining = WrittenDate().Replace(normalized, " ");
+        remaining = RelativeDate().Replace(remaining, " "); remaining = Weekday().Replace(remaining, " ");
+        if (raw == text && remaining == normalized) return false;
+        return remaining.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(w => w is "mejor" or "el" or "la" or "para" or "fecha" or "dia" or "es" or "cambia" or "cambiar");
+    }
+
     public SlotResolution<DateOnly> Resolve(string text, DateTimeOffset localBusinessNow, bool dateWasRequested = false)
     {
         if (text.Length > 2000) return SlotResolution<DateOnly>.Invalid("InputTooLong");

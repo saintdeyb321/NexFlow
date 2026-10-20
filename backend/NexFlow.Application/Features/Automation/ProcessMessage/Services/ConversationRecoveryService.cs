@@ -10,6 +10,7 @@ using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Business.Offerings;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Domain.Enums;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -71,6 +72,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 context.CurrentGoal = null; context.CurrentStep = null; context.SelectedServiceId = null; context.SelectedLocationId = null;
                 context.TargetDate = null; context.TargetTime = null; context.OrderDraftItems.Clear(); context.MissingFields.Clear(); context.LastQuestion = null;
                 context.ReservationCommitSourceMessageId = null; context.RecoveryOptionsOffset = 0; context.RecoveryOptionsContext = null;
+                context.PendingCustomerName = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Clear(); context.PreferredTime = null;
                 context.PendingRecoveryAction = null; context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
                 return await Remember("He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.");
             }
@@ -226,7 +228,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone); }
                 catch (TimeZoneNotFoundException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
                 catch (InvalidTimeZoneException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
-                result.AddRange((await reservations.GetAvailabilityAsync(workspace, context.SelectedLocationId, context.SelectedServiceId, date, ct)).Where(s => s.IsAvailable).OrderBy(s => s.StartTime).Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).Distinct().Select(t => new ConversationMenuOption(t, t, "Time")));
+                var available = (await reservations.GetAvailabilityAsync(workspace, context.SelectedLocationId, context.SelectedServiceId, date, ct)).Where(s => s.IsAvailable);
+                if (context.PreferredTime != null) available = new TimePreferenceResolver().FilterAvailableSlots(available, DateOnly.FromDateTime(date), zone, context.PreferredTime);
+                result.AddRange(available.OrderBy(s => s.StartTime).Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).Distinct().Select(t => new ConversationMenuOption(t, t, "Time")));
             }
             else return result;
         }

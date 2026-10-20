@@ -7,6 +7,14 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
 public sealed partial class TimePreferenceResolver
 {
+    internal static bool IsOnlyTimeExpression(string text)
+    {
+        var clock = ClockMention().Replace(text, " ");
+        var normalized = SpanishTextNormalizer.Normalize(clock);
+        return (clock != text || normalized.Contains("manana", StringComparison.Ordinal) || normalized.Contains("tarde", StringComparison.Ordinal) || normalized.Contains("noche", StringComparison.Ordinal))
+            && normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(w => w is "por" or "la" or "en" or "de" or "manana" or "tarde" or "noche" or "mejor" or "prefiero" or "y" or "o");
+    }
+
     public SlotResolution<TimePreference> Resolve(string text, bool timeWasRequested = false)
     {
         if (text.Length > 2000) return SlotResolution<TimePreference>.Invalid("InputTooLong");

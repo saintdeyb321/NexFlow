@@ -11,17 +11,23 @@ public interface IWorkspaceSlotResolver
 {
     Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
         ConversationContextDto state, SlotResolutionPurpose purpose, CancellationToken ct);
+    Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
+        ConversationContextDto state, SlotResolutionPurpose purpose, SlotReadPlan reads, CancellationToken ct);
 }
 
-// Read-only integration seam for AiInterpreter/DialoguePolicy in the next phase.
+// Read-only understanding shared by the dialogue policy and AiInterpreter.
 // It cannot save context, confirm a draft, query providers, send messages or call a transaction engine.
 public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBusinessProfileRepository profiles,
     ILocationRepository locations, IOfferingService offerings, IClock clock, NameSlotResolver names,
     LocationMentionResolver locationMentions, OfferingMentionResolver offeringMentions, BusinessDateResolver dates,
     TimePreferenceResolver times, ILogger<WorkspaceSlotResolver> logger) : IWorkspaceSlotResolver
 {
-    public async Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
+    public Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
         ConversationContextDto state, SlotResolutionPurpose purpose, CancellationToken ct)
+        => ResolveAsync(workspaceId, sourceMessageId, text, state, purpose, SlotReadPlan.All, ct);
+
+    public async Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
+        ConversationContextDto state, SlotResolutionPurpose purpose, SlotReadPlan reads, CancellationToken ct)
     {
         if (workspaceId == Guid.Empty) throw new ArgumentException("Workspace required.", nameof(workspaceId));
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
@@ -38,36 +44,46 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         var utcNow = clock.UtcNow;
         if (utcNow.Kind != DateTimeKind.Utc) throw new InvalidOperationException("IClock must provide UTC.");
         var localNow = TimeZoneInfo.ConvertTime(new DateTimeOffset(utcNow), zone);
-        var turn = DialogueTurnContext.Capture(workspaceId, sourceMessageId, state, localNow, zone, modules);
         var reservation = purpose == SlotResolutionPurpose.Reservation;
+        if (reads.Locations) modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var canReserve = modules.Contains("RESERVATIONS") && modules.Contains("SERVICES");
         var canReadLocations = reservation ? canReserve : modules.Contains("LOCATIONS");
-        var authorizedLocations = canReadLocations ? (await locations.GetLocationsAsync(workspaceId, ct)).ToArray() : [];
-        var location = canReadLocations ? locationMentions.Resolve(text,
+        var authorizedLocations = canReadLocations && reads.Locations ? (await locations.GetLocationsAsync(workspaceId, ct)).ToArray() : [];
+        var location = canReadLocations && reads.Locations ? locationMentions.Resolve(text,
             authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)).ToArray(), state.CurrentStep == "COLLECT_LOCATION")
-            : SlotResolution<ResolvedBusinessEntity>.Invalid("ModuleDenied");
+            : canReadLocations ? SlotResolution<ResolvedBusinessEntity>.Missing() : SlotResolution<ResolvedBusinessEntity>.Invalid("ModuleDenied");
         // A newly mentioned unique location takes precedence only in this ephemeral resolution scope.
         var scope = location.TryGetValue(out var selected) ? selected.Id
             : location.Status is ResolutionStatus.Ambiguous or ResolutionStatus.Invalid ? null
             : authorizedLocations.Any(l => l.Id == state.SelectedLocationId) ? state.SelectedLocationId : null;
-        var canReadServices = modules.Contains("SERVICES") && (!reservation || canReserve);
-        var canReadProducts = modules.Contains("CATALOG") && (purpose != SlotResolutionPurpose.Order || modules.Contains("ORDERS"));
-        var service = SlotResolution<ResolvedBusinessEntity>.Invalid("ModuleDenied");
-        if (canReadServices)
+        if (reads.Services) modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var canReadServices = modules.Contains("SERVICES") && (!reservation || modules.Contains("RESERVATIONS"));
+        BusinessEntityOption[] serviceOptions = [], productOptions = [];
+        var service = canReadServices ? SlotResolution<ResolvedBusinessEntity>.Missing() : SlotResolution<ResolvedBusinessEntity>.Invalid("ModuleDenied");
+        if (canReadServices && reads.Services)
         {
             var values = (await offerings.GetServicesAsync(workspaceId, scope, null, ct))
                 .Where(s => Eligible(s, "SERVICE", scope) && (!reservation || s.RequiresReservation && s.DurationInMinutes >= 5));
-            service = offeringMentions.Resolve(text, values.Select(s => new BusinessEntityOption(s.Id, s.Name, LocationId: scope)).ToArray(), state.CurrentStep == "COLLECT_SERVICE");
+            serviceOptions = values.Select(s => new BusinessEntityOption(s.Id, s.Name, LocationId: scope)).ToArray();
+            service = offeringMentions.Resolve(text, serviceOptions, state.CurrentStep == "COLLECT_SERVICE");
         }
-        var product = SlotResolution<ResolvedBusinessEntity>.Invalid("ModuleDenied");
-        if (canReadProducts)
+        if (reads.Products) modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var canReadProducts = modules.Contains("CATALOG") && (purpose != SlotResolutionPurpose.Order || modules.Contains("ORDERS"));
+        var product = canReadProducts ? SlotResolution<ResolvedBusinessEntity>.Missing() : SlotResolution<ResolvedBusinessEntity>.Invalid("ModuleDenied");
+        if (canReadProducts && reads.Products)
         {
             var values = (await offerings.GetProductsAsync(workspaceId, scope, null, ct)).Where(p => Eligible(p, "PRODUCT", scope));
-            product = offeringMentions.Resolve(text, values.Select(p => new BusinessEntityOption(p.Id, p.Name, LocationId: scope)).ToArray());
+            productOptions = values.Select(p => new BusinessEntityOption(p.Id, p.Name, LocationId: scope)).ToArray();
+            product = offeringMentions.Resolve(text, productOptions);
         }
         ct.ThrowIfCancellationRequested();
+        var turn = DialogueTurnContext.Capture(workspaceId, sourceMessageId, state, localNow, zone, modules);
         var result = new TurnUnderstanding(turn, names.Resolve(text, state.CurrentStep == "COLLECT_CUSTOMERNAME"),
-            location, service, product, dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE"), times.Resolve(text, state.CurrentStep == "COLLECT_TIME"));
+            location, service, product, dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE"), times.Resolve(text, state.CurrentStep == "COLLECT_TIME"))
+        {
+            AuthorizedLocations = authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)).ToArray(),
+            AuthorizedServices = serviceOptions, AuthorizedProducts = productOptions
+        };
         try
         {
             // Fixed, low-cardinality diagnostic fields. No text, name, phone, entity labels or prompt.

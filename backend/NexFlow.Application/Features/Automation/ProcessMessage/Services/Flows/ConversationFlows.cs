@@ -14,6 +14,8 @@ using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Services.DTOs;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Notifications;
+using NexFlow.Application.Features.Automation.Dialogue.Policy;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
@@ -71,6 +73,7 @@ public class BookingFlow : IBookingFlow
         context.ReservationCommitSourceMessageId = null;
         context.TargetDate = null; context.TargetTime = null;
         context.MissingFields.Clear(); context.LastQuestion = null;
+        context.PendingCustomerName = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Clear(); context.PreferredTime = null;
     }
 
     private static void UpdateStep(ConversationContextDto context)
@@ -81,7 +84,8 @@ public class BookingFlow : IBookingFlow
         if (string.IsNullOrWhiteSpace(context.SelectedServiceId)) context.MissingFields.Add("Service");
         if (string.IsNullOrWhiteSpace(context.TargetDate)) context.MissingFields.Add("Date");
         if (string.IsNullOrWhiteSpace(context.TargetTime)) context.MissingFields.Add("Time");
-        context.CurrentStep = context.MissingFields.Count == 0 ? "CONFIRM"
+        context.CurrentStep = context.PendingDialogueSlots.Count > 0 ? $"COLLECT_{(context.PendingDialogueSlots[0] == "Name" ? "CUSTOMERNAME" : context.PendingDialogueSlots[0].ToUpperInvariant())}"
+            : context.MissingFields.Count == 0 ? "CONFIRM"
             : $"COLLECT_{context.MissingFields[0].ToUpperInvariant()}";
     }
 
@@ -90,7 +94,23 @@ public class BookingFlow : IBookingFlow
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
         var replay = await TryResumeAsync(workspaceId, phone, sourceMessageId, context, ct);
         if (replay != null) return replay;
+        if (context.RecoveryLastMessageId == sourceMessageId && context.RecoveryLastResponse != null) return context.RecoveryLastResponse;
+        var proposal = interpretation.BookingProposal;
+        if (proposal != null)
+        {
+            var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var denied = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules);
+            if (denied != null) return denied;
+            await BookingDraftMerger.ApplyAsync(workspaceId, sourceMessageId, context, proposal, _offeringService, ct);
+            interpretation = new() { Intent = ConversationIntent.Reservation, Confirmed = interpretation.Confirmed };
+        }
         var response = await ProcessTurnAsync(workspaceId, phone, context, interpretation, sourceMessageId, ct);
+        if (proposal?.Clarification != null && context.PendingDialogueSlots.Count > 0) response = proposal.Clarification;
+        if (proposal != null)
+        {
+            context.RecoveryLastMessageId = sourceMessageId; context.RecoveryLastResponse = response; context.RecoveryLastInterpretation = null;
+            context.LastQuestion = response;
+        }
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         return response;
     }
@@ -113,6 +133,7 @@ public class BookingFlow : IBookingFlow
             if (interpretation.Directive == ConversationDirective.ChangeLocation)
             {
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
+                context.PreferredTime = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service"); context.PendingDialogueSlots.Remove("Time");
                 context.ReservationServiceOffset = 0;
                 UpdateStep(context);
                 context.CurrentStep = "COLLECT_LOCATION";
@@ -121,6 +142,7 @@ public class BookingFlow : IBookingFlow
             if (interpretation.Directive == ConversationDirective.ChangeService)
             {
                 context.SelectedServiceId = null; context.TargetTime = null;
+                context.PreferredTime = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service"); context.PendingDialogueSlots.Remove("Time");
                 UpdateStep(context);
                 if (string.IsNullOrWhiteSpace(interpretation.Service))
                     return await GetContinuationAsync(workspaceId, context, ct);
@@ -170,7 +192,8 @@ public class BookingFlow : IBookingFlow
 
         context.CurrentGoal = "RESERVATION";
         context.LastIntent = interpretation.Intent.ToString();
-        if (!string.IsNullOrWhiteSpace(interpretation.CustomerName)) context.RealCustomerName = interpretation.CustomerName;
+        if (!string.IsNullOrWhiteSpace(interpretation.CustomerName))
+        { context.RealCustomerName = interpretation.CustomerName; context.PendingCustomerName = null; context.PendingDialogueSlots.Remove("Name"); }
         if (!string.IsNullOrWhiteSpace(interpretation.Location))
         {
             var locationId = await _locationResolver.ResolveLocationIdAsync(workspaceId, interpretation.Location, ct);
@@ -182,15 +205,20 @@ public class BookingFlow : IBookingFlow
             }
             if (context.SelectedLocationId != locationId)
             {
+                if (context.SelectedLocationId != null) context.PendingServiceIds.Clear();
                 context.SelectedLocationId = locationId; context.SelectedServiceId = null; context.TargetTime = null;
+                context.PreferredTime = null; context.PendingDialogueSlots.Remove("Service"); context.PendingDialogueSlots.Remove("Time");
                 context.ReservationServiceOffset = 0;
             }
+            context.PendingDialogueSlots.Remove("Location");
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date) && context.TargetDate != interpretation.Date)
         {
-            context.TargetDate = interpretation.Date; context.TargetTime = null;
+            context.TargetDate = interpretation.Date; context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time");
         }
-        if (!string.IsNullOrWhiteSpace(interpretation.Time)) context.TargetTime = interpretation.Time;
+        if (!string.IsNullOrWhiteSpace(interpretation.Date)) context.PendingDialogueSlots.Remove("Date");
+        if (!string.IsNullOrWhiteSpace(interpretation.Time))
+        { context.TargetTime = interpretation.Time; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
 
         if (!string.IsNullOrWhiteSpace(context.SelectedLocationId))
         {
@@ -198,6 +226,7 @@ public class BookingFlow : IBookingFlow
             if (!locations.Any(l => l.Id == context.SelectedLocationId))
             {
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
+                context.PreferredTime = null; context.PendingServiceIds.Clear();
             }
             else if (!string.IsNullOrWhiteSpace(interpretation.Service))
             {
@@ -208,17 +237,20 @@ public class BookingFlow : IBookingFlow
                     return resolution.Clarification!;
                 }
                 if (context.SelectedServiceId != resolution.Service.Id && string.IsNullOrWhiteSpace(interpretation.Time))
-                    context.TargetTime = null;
+                { context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
                 context.SelectedServiceId = resolution.Service.Id;
+                context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service");
             }
             else if (!string.IsNullOrWhiteSpace(context.SelectedServiceId) && !await IsSelectedServiceValidAsync(workspaceId, context, ct))
             {
                 context.SelectedServiceId = null; context.TargetTime = null;
+                context.PreferredTime = null;
                 UpdateStep(context);
                 return "El servicio seleccionado ya no está disponible para reservar en esta sede.\n\n" +
                     await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct);
             }
         }
+        if (context.SelectedServiceId == null) await BookingDraftMerger.ResolvePendingServiceAsync(workspaceId, context, _offeringService, ct);
         UpdateStep(context);
         if (context.CurrentStep != "CONFIRM") return await PromptAsync(workspaceId, context, false, ct);
 
@@ -377,6 +409,11 @@ public class BookingFlow : IBookingFlow
         try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone); }
         catch (TimeZoneNotFoundException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
         catch (InvalidTimeZoneException) { zone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
+        if (context.PreferredTime != null)
+        {
+            slots = new TimePreferenceResolver().FilterAvailableSlots(slots, DateOnly.FromDateTime(date), zone, context.PreferredTime).ToList();
+            if (slots.Count == 0) return "Hay horarios disponibles, pero ninguno coincide con tu preferencia. ¿Qué otra franja u hora prefieres?";
+        }
         return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
             string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
             (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +
