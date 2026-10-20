@@ -65,8 +65,8 @@ public sealed class ReservationMigrationIntegrationTests
         await using var f = await IsolatedStores.Create(); var ws = await f.Workspace(false);
         await using var db = f.Db(); await f.Coordinator(db).ReadAsync(f.Key(ws), f.Ct);
         var row = Row(ws, "preserve"); db.Reservations.Add(row); await db.SaveChangesAsync(f.Ct);
-        var ex = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(IsolatedStores.Previous, f.Ct));
-        Assert.Equal("55000", ex.SqlState);
+        await AssertRollbackRefusedAsync(() => db.GetService<IMigrator>().MigrateAsync(IsolatedStores.Previous, f.Ct),
+            "Rollback refused: durable reservation resource epochs exist. Keep the compatible schema.");
         await using var check = f.Db(); Assert.Contains(IsolatedStores.Target, await check.Database.GetAppliedMigrationsAsync(f.Ct));
         Assert.Single(await check.Set<NexFlow.Domain.Entities.System.ReservationResourceState>().ToListAsync(f.Ct));
         Assert.Equal(row.Id, (await check.Reservations.SingleAsync(f.Ct)).Id);
@@ -78,14 +78,25 @@ public sealed class ReservationMigrationIntegrationTests
         await using var f = await IsolatedStores.Create(); var ws = await f.Workspace(false);
         await using var db = f.Db(); var old = Row(ws, "cancelled"); old.Cancel(); db.Reservations.Add(old); db.Reservations.Add(Row(ws, "current"));
         await db.SaveChangesAsync(f.Ct);
-        var ex = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(IsolatedStores.Previous, f.Ct));
-        Assert.Equal("55000", ex.SqlState);
+        await AssertRollbackRefusedAsync(() => db.GetService<IMigrator>().MigrateAsync(IsolatedStores.Previous, f.Ct),
+            "Rollback refused: reused reservation slots are incompatible with the old unique index.");
         await using var check = f.Db(); Assert.Contains(IsolatedStores.Target, await check.Database.GetAppliedMigrationsAsync(f.Ct));
         Assert.Equal(2, await check.Reservations.CountAsync(f.Ct));
         Assert.Empty(await check.Set<NexFlow.Domain.Entities.System.ReservationResourceState>().ToListAsync(f.Ct));
         // The partial index survived the failed Down, not just the data.
         var another = Row(ws, "another-cancelled"); another.Cancel(); check.Reservations.Add(another); await check.SaveChangesAsync(f.Ct);
         Assert.Equal(3, await check.Reservations.CountAsync(f.Ct));
+    }
+
+    private static async Task AssertRollbackRefusedAsync(Func<Task> migrate, string expectedMessage)
+    {
+        var exception = await Assert.ThrowsAnyAsync<Exception>(migrate);
+        while (exception is not PostgresException && exception.InnerException is { } inner)
+            exception = inner;
+
+        var postgres = Assert.IsType<PostgresException>(exception);
+        Assert.Equal("55000", postgres.SqlState);
+        Assert.Equal(expectedMessage, postgres.MessageText);
     }
 
     private static Reservation Row(Guid ws, string source, int minute = 0) => Reservation.Create(ws, "location", "service", "synthetic", "Synthetic",
