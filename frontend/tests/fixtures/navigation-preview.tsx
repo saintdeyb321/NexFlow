@@ -26,11 +26,13 @@ connectQueryIdentity(useAuthStore.getState().me!);
 let logoutCount = 0;
 useAuthStore.setState({ logout: async () => { logoutCount++; disconnectQueryIdentity(); clearNexFlowStorage(); useAuthStore.setState({ me: null, selectedLocationId: 'all' }); } });
 const uploadChanges: (string | null)[] = [];
+const uploadContexts: boolean[] = [];
 const UploadPreview = () => {
   const [url, setUrl] = useState<string | null>(null);
-  return <ImageUploader value={url} onChange={value => { uploadChanges.push(value); setUrl(value); }} />;
+  const [uploading, setUploading] = useState(false);
+  return <><output data-uploading-context>{String(uploading)}</output><ImageUploader value={url} onChange={value => { uploadChanges.push(value); setUrl(value); }} onUploadingContext={value => { uploadContexts.push(value); setUploading(value); }} /></>;
 };
-const audit = { calls, fixture, remote, locations, initialProfile, adminFixture, adminWorkspaces, uploadChanges, store: useAuthStore, client: queryClient, setIdentity, persistQueryCache, defaultIdentity: navigationIdentity, logoutCount: () => logoutCount, boot: Date.now() };
+const audit = { calls, fixture, remote, locations, initialProfile, adminFixture, adminWorkspaces, uploadChanges, uploadContexts, store: useAuthStore, client: queryClient, setIdentity, persistQueryCache, defaultIdentity: navigationIdentity, logoutCount: () => logoutCount, boot: Date.now() };
 Object.assign(window, { navigationAudit: audit });
 export const NavigationPreview = () => {
   const navigate = useNavigate();

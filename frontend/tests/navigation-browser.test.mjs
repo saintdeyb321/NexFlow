@@ -83,6 +83,38 @@ test('RC3 upload: respuesta tardía tras desmontar/cambiar workspace nunca aplic
   await evaluate("(()=>{const a=window.navigationAudit;a.navigate('/');a.setIdentity({...structuredClone(a.defaultIdentity),workspace:{...a.defaultIdentity.workspace,id:'workspace-b'}})})()");
   await wait(850); assert.deepEqual(await evaluate('window.navigationAudit.uploadChanges'),[]);
 });
+for (const identity of ['workspace', 'user']) test('RC3 upload montado: cambio de '+identity+' libera estado y contexto, permite otra carga e ignora respuesta anterior', async () => {
+  await adminReset(); await evaluate("window.navigationAudit.uploadChanges.length=0;window.navigationAudit.uploadContexts.length=0;window.navigationAudit.adminFixture.delay=1000;window.navigationAudit.navigate('/upload-test')");
+  await until("document.querySelector('input[type=file]')",'Upload missing.'); await selectImage();
+  await until("window.navigationAudit.calls.some(c=>c.path==='/storage/upload')&&document.querySelector('[data-uploading-context]').textContent==='true'",'Upload not started.');
+  const inputId = await evaluate("document.querySelector('input[type=file]').id");
+  await evaluate("(()=>{const a=window.navigationAudit;const me=structuredClone(a.defaultIdentity);"+(identity==='workspace'?"me.workspace.id='workspace-b';":"me.user.id='another-user';")+"a.setIdentity(me)})()");
+  await wait(1200);
+  assert.equal(await evaluate("document.querySelector('input[type=file]').id"),inputId,'Component must stay mounted.');
+  assert.deepEqual(await evaluate('window.navigationAudit.uploadChanges'),[]);
+  assert.equal(await evaluate("document.querySelector('input[type=file]').disabled"),false,'Previous HTTP completion must not leave the new session locked.');
+  assert.equal(await evaluate("document.querySelector('[data-uploading-context]').textContent"),'false');
+  assert.deepEqual(await evaluate('window.navigationAudit.uploadContexts'),[true,false]);
+  assert.equal(await evaluate("document.querySelector('[role=alert]')!==null"),false,'Cancellation must not notify an error.');
+  await evaluate('window.navigationAudit.adminFixture.delay=0'); await selectImage();
+  await until("window.navigationAudit.uploadChanges.length===1&&document.querySelector('[data-uploading-context]').textContent==='false'",'New upload failed.');
+  assert.deepEqual(await evaluate('window.navigationAudit.uploadContexts'),[true,false,true,false]);
+  assert.equal(await evaluate("window.navigationAudit.calls.filter(c=>c.path==='/storage/upload').length"),2);
+});
+test('RC3 upload montado: finally antiguo no libera ni reemplaza una carga nueva todavía pendiente', async () => {
+  await adminReset(); await evaluate("window.navigationAudit.uploadChanges.length=0;window.navigationAudit.uploadContexts.length=0;window.navigationAudit.adminFixture.delay=650;window.navigationAudit.navigate('/upload-test')");
+  await until("document.querySelector('input[type=file]')",'Upload missing.'); await selectImage();
+  await until("window.navigationAudit.calls.some(c=>c.path==='/storage/upload')",'First upload missing.');
+  await evaluate("(()=>{const a=window.navigationAudit;const me=structuredClone(a.defaultIdentity);me.workspace.id='workspace-b';a.setIdentity(me);a.adminFixture.delay=1500})()");
+  await until("!document.querySelector('input[type=file]').disabled",'Session reset did not release input.'); await selectImage();
+  await until("window.navigationAudit.calls.filter(c=>c.path==='/storage/upload').length===2",'Second upload missing.');
+  await wait(850);
+  assert.deepEqual(await evaluate('window.navigationAudit.uploadChanges'),[]);
+  assert.equal(await evaluate("document.querySelector('input[type=file]').disabled"),true);
+  assert.equal(await evaluate("document.querySelector('[data-uploading-context]').textContent"),'true');
+  await until("window.navigationAudit.uploadChanges.length===1&&!document.querySelector('input[type=file]').disabled",'New upload did not finish.');
+  assert.deepEqual(await evaluate('window.navigationAudit.uploadContexts'),[true,false,true,false]);
+});
 test('RC3 administración: aprovisionamiento, renovación y asignación conservan contratos', async () => {
   await adminReset(); await click('Aprovisionar Cliente');
   await change('Correo del Dueño (Google Auth)', 'synthetic@example.invalid');

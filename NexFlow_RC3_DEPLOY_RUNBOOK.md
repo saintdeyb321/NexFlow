@@ -4,7 +4,7 @@
 
 ## 1. Identidad y condiciones previas
 
-Referencia publicada según propietario y HEAD local verificado: `df5cfac0159bdf65ad915f9197927303b6df69cd`, main, más **diff local de recuperación final sin commit** (2026-10-20). Sprints 5–7 están en ese commit; las correcciones finales admin/uploads, tests, smoke y CI todavía no. Tras revisión/publicación independiente del propietario, fijar RELEASE_SHA del commit final aprobado y árbol limpio. No construir/etiquetar el diff actual como si fuera el SHA publicado. Mantener candidato anterior **compatible con epochs/fences/UpdateTime** y digest, o pausa de escrituras/corrección hacia delante. No inventar rollback.
+Referencia publicada según propietario y HEAD local/main verificado: `ddea5d96791b2c0eff1a969d7f32be722201c0a7` (2026-10-20), árbol inicial limpio. Incluye cierre anterior (admin/licencias/uploads/tests/smoke/CI). Solo el nuevo ajuste de uploader que permanece montado, sus tres regresiones, umbral CI y documentos están en diff local sin commit. Antes de ejecutar CI/build externo, publicar por el propietario la revisión final aprobada y fijar RELEASE_SHA limpio; ddea5d9 no incluye este último diff. Mantener candidato anterior **compatible con epochs/fences/UpdateTime** y digest, o pausa de escrituras/corrección hacia delante.
 
 Requisitos de autorización antes de la ventana:
 
@@ -91,7 +91,7 @@ docker image inspect "nexflow-api:$RELEASE_SHA" --format '{{.Id}} {{.Architectur
 
 El Dockerfile existente tiene contexto **backend**, targets final/migrator, usuario no root y publicación Release. No ejecuta migraciones en el entrypoint API de producción. Las imágenes base `:10.0` son móviles: registrar los digests resueltos/metadatos del build y conservar el artefacto construido; no reconstruir un tag suponiendo identidad. Si se usa registro, fijar image `repositorio@sha256:...` en el override privado autorizado; en host local fijar ID inmutable verificado y no reciclar tags. No publicar una imagen sin revisión de SHA/digest. Guardar digests del migrator y binario compatible anterior.
 
-No asumir que estos comandos se ejecutaron aquí: hubo publish Release linux-arm64 local de API y Migrator, build del smoke y ejecución Windows; no Docker, push ni registro remoto.
+No asumir que estos comandos se ejecutaron aquí: el publish Release linux-arm64 de API/Migrator corresponde al cierre previo (histórico). En este cierre se repitieron build/tests y smoke Windows; no Docker, push ni registro remoto.
 
 ### 5.1 Smoke codec en la imagen API Linux ARM64 (PENDIENTE de ejecución)
 
@@ -128,7 +128,7 @@ Aceptar solo exit 0, plataforma Linux/Arm64 y tres PASS. La herramienta no inici
 
 ### 5.2 CI manual y evidencia (NO ejecutado)
 
-No requiere GitHub CLI: propietario publica revisión final aprobada mediante operación separada, verifica HEAD remoto y ausencia de corrida equivalente activa. En `saintdeyb321/NexFlow` → Actions → **RC3 local-equivalent release checks** → Run workflow → main aprobado; repetir procedimiento para **RC3 disposable reservation integration**. Confirmar en cada run el SHA exacto RELEASE_SHA, conservar Run ID/enlace, conclusión y artefactos TRX. No usar solo el título del commit como identidad. Verificar 708 o más locales sin skips y 24 o más integraciones sin skips, más suites frontend (83/145 o más sin omisiones). Si main cambia, no certificar esa ejecución para otra revisión. No hay ejecución real/Run ID de estos workflows en este encargo.
+No requiere GitHub CLI: propietario publica revisión final aprobada mediante operación separada, verifica HEAD remoto y ausencia de corrida equivalente activa. En `saintdeyb321/NexFlow` → Actions → **RC3 local-equivalent release checks** → Run workflow → main aprobado; repetir procedimiento para **RC3 disposable reservation integration**. Confirmar en cada run el SHA exacto RELEASE_SHA, conservar Run ID/enlace, conclusión y artefactos TRX. No usar solo el título del commit como identidad. Verificar 708 o más locales sin skips y 24 o más integraciones sin skips, más suites frontend (83/148 o más sin omisiones). Si main cambia, no certificar esa ejecución para otra revisión. No hay ejecución real/Run ID de estos workflows en este encargo.
 
 Runner Windows verifica Chromium instalado, lockfile, publish, smoke Windows y JUnit; runner Ubuntu usa PostgreSQL 15.10 y Emulator demo con datos ficticios, timeout 30 min, TRX 7 días. `emulators:exec` y runner efímero terminan procesos/servicios; no comparten SaaS ni credenciales de Oracle. No tercer workflow, no despliegue ni mutaciones de infraestructura compartida.
 
@@ -195,3 +195,51 @@ Down de la migración obtiene ACCESS EXCLUSIVE y debe rechazar si existe **cualq
 Rollback frontend: versión Hosting anterior aprobada compatible con API; conservar contratos. No usar un rollback de UI para reactivar operaciones backend bloqueadas. Mantener volúmenes, secretos, Caddy e integraciones compartidas intactos.
 
 Cerrar ventana solo con evidencias privadas sanitizadas de SHA/digests, tests, health, métricas, respaldo/restauración, funcionales y decisión del responsable. **Ninguna operación de este runbook se ejecutó en Oracle en este encargo.**
+
+## 11. Siguiente operación segura — cierre final ddea5d9 + diff local
+
+Estado actual: 708 backend y 231 frontend locales aprobadas, builds/lint correctos; 24 integraciones, CI real, imagen/smoke ARM64, entorno Oracle, backup/restauración y funcionales reales todavía pendientes. Migración PostgreSQL existente `20261019170831_CoordinateReservationResourcesAndReuseCancelledSlots` NO aplicada. Nuclear permanece prohibido. Publicaciones ARM64 previas son históricas; el smoke Windows actual no sustituye Linux.
+
+**A → B → C → D**, sin modificar producción en esta preparación:
+
+A. Propietario revisa/publica separadamente la corrección final y fija SHA limpio. Verifica HEAD remoto/ninguna corrida equivalente activa. Ejecuta ambos workflows manuales desde Actions (procedimiento 5.2), comprueba SHA de cada run y recupera TRX/JUnit. 708 locales + 24 integraciones sin omisiones, 83 TS + 148 browser; analizar cualquier fallo antes de otro paso. No se han ejecutado aquí. CLI no es requisito; alternativa futura si ya está instalada:
+
+```powershell
+$releaseSha = '<SHA_FINAL_PUBLICADO_Y_APROBADO>'
+$remoteSha = gh api repos/saintdeyb321/NexFlow/git/ref/heads/main --jq .object.sha
+if ($LASTEXITCODE -ne 0 -or $remoteSha -ne $releaseSha) { throw 'HEAD remoto no coincide con la revisión aprobada.' }
+# Solo después de verificar que no existe corrida equivalente activa:
+gh workflow run rc3-release-checks.yml --repo saintdeyb321/NexFlow --ref main
+if ($LASTEXITCODE -ne 0) { throw 'Dispatch release checks falló.' }
+# Revalidar main antes del segundo dispatch; nunca certificar otro SHA.
+$remoteSha = gh api repos/saintdeyb321/NexFlow/git/ref/heads/main --jq .object.sha
+if ($LASTEXITCODE -ne 0 -or $remoteSha -ne $releaseSha) { throw 'HEAD remoto cambió.' }
+gh workflow run rc3-reservation-integration.yml --repo saintdeyb321/NexFlow --ref main
+if ($LASTEXITCODE -ne 0) { throw 'Dispatch integration falló.' }
+gh run list --repo saintdeyb321/NexFlow --limit 10 --json databaseId,workflowName,headSha,status,conclusion,url
+# IDs comprobados por nombre y SHA, no asumir que el más reciente es el propio:
+$releaseRunId = '<RUN_ID_RELEASE>'
+$integrationRunId = '<RUN_ID_INTEGRATION>'
+gh run view $releaseRunId --repo saintdeyb321/NexFlow --json headSha,status,conclusion,url
+gh run view $integrationRunId --repo saintdeyb321/NexFlow --json headSha,status,conclusion,url
+gh run download $releaseRunId --repo saintdeyb321/NexFlow --name rc3-release-unit-results --dir "backend/NexFlow.Tests/TestResults/ci-release-$releaseRunId"
+gh run download $integrationRunId --repo saintdeyb321/NexFlow --name rc3-isolated-test-results --dir "backend/NexFlow.Tests/TestResults/ci-integration-$integrationRunId"
+```
+
+No invocar estos comandos con ddea5d9 suponiendo que incluye el parche nuevo. Confirmar headSha y conclusión en los runs antes de aceptar evidencia; la rama puede avanzar entre dispatch y ejecución. No automatizar reintentos ni ocultar omisiones.
+
+B. En builder temporal autorizado: comandos 5/5.1 construyen API/Migrator por SHA, registran ID/digest/arquitectura y ejecutan smoke con `--require-arm64`, sin SaaS/secretos/red. Si Docker no existe, ejecutar en builder preparado, no instalar ni tocar servicios de Oracle para hacerlo. No convertir presencia ELF o smoke Windows en PASS ARM64.
+
+C. Lectura Oracle con operador autorizado: inventario de imagen/Compose completo/overrides de sección 2, history e índices de sección 3 y health HTTPS/cuerpo. Contenedores activos sin volcar ENV:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+docker inspect nexflow_api --format '{{.Config.Image}} {{.Image}} {{.State.StartedAt}}'
+docker inspect nexflow_api --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}'
+```
+
+Evaluar agregados PDF históricos sin reinyectar. Recuperar, si persiste, evidencia agregada del incidente 18/10/2026 23:07–23:10 Perú (19/10/2026 04:07–04:10 UTC), con ventana de análisis 03:55–04:35 UTC y script read-only previamente revisado; no publicar logs crudos, teléfonos, payloads ni claves. Causa e imagen realmente ejecutada siguen sin confirmar aquí. No se consultó Oracle desde esta sesión.
+
+D. Solo con resultados A/B/C y aprobación operacional explícita: respaldo + restauración aislada (4), drenado de TODOS los escritores anteriores, revisión/aplicación autorizada de migración con migrator exacto (6), APIs/worker compatibles, health y funcionales (7/8), Hosting compatible (9) y rollback certificado (10). No rolling con escritores preepochs; sin imagen compatible, pausa y corrección hacia delante. Integraciones compartidas, volúmenes, secretos y legacy no se alteran por rutina. Un GO de desarrollo local no autoriza ejecutar D.
+
+Workflows auditados estáticamente: SDK 10.0.401, release Node 24.18.1, integración Node 22.14.0/Temurin 21.0.8+9 y Firebase CLI 14.12.0 (engine Node >=20 compatible). Chromium instalado exigido. AST PowerShell y XML/JUnit revisados; Bash no ejecutable en esta máquina, validación Linux real pendiente de CI. Integración serializa por ref sin cancelar el job activo; release usa runner independiente y sin datos/servicios compartidos, su concurrencia no toca el SaaS. Timeout 30 min, contents read, artefactos sintéticos 7 días, sin secrets ni deploy. Sin Run ID no hay CI verde.

@@ -62,7 +62,7 @@ jobs:
           New-Item -ItemType Directory -Force node_modules/.tmp | Out-Null
           node --import ./tests/reservations-loader.mjs --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=node_modules/.tmp/rc3-typescript.xml tests/*.test.ts
           node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=node_modules/.tmp/rc3-browser.xml tests/*.test.mjs
-          foreach ($suite in @(@('typescript',83), @('browser',145))) {
+          foreach ($suite in @(@('typescript',83), @('browser',148))) {
             [xml]$result = Get-Content "node_modules/.tmp/rc3-$($suite[0]).xml"
             if ($result.SelectNodes('//testcase').Count -lt $suite[1] -or $result.SelectNodes('//failure|//error|//skipped').Count -ne 0) { throw 'Incomplete frontend test evidence.' }
           }

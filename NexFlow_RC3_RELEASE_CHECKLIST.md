@@ -1,6 +1,6 @@
 # NexFlow RC-3 — candidato de release
 
-Fecha: 2026-10-20. HEAD local/main verificado `df5cfac0159bdf65ad915f9197927303b6df69cd` (publicado según autorización del propietario). `88db9e0` solo retiró caché y `df5cfac` incluye Sprints 5–7. Estado inicial limpio. El cierre actual añade un **diff local sin commit**: ese SHA NO identifica las nuevas correcciones admin/uploads, tests, smoke y ajustes CI. La release exige publicar/revisar después un SHA final limpio y fijar digests; no se verificó GitHub remoto en esta ejecución.
+Fecha: 2026-10-20, cierre final de preproducción. HEAD local/main verificado `ddea5d96791b2c0eff1a969d7f32be722201c0a7`, publicado según propietario; árbol inicial limpio. Ese commit ya contiene las correcciones anteriores admin/licencias/seguridad, pruebas, smoke y CI (19 archivos del cierre anterior). **Únicamente el nuevo ajuste ImageUploader montado, tres regresiones, umbral CI y actualización documental están en diff local sin commit**. No atribuir este diff nuevo a ddea5d9; no se verificó remoto ni se publicó desde esta sesión.
 
 **CODE COMPLETE — VALIDACIÓN PREPRODUCCIÓN PENDIENTE. RELEASE NO-GO.** Esta decisión concluye desarrollo local autorizado; no aprueba Oracle, migraciones, servicios reales ni despliegue.
 
@@ -14,7 +14,7 @@ Fecha: 2026-10-20. HEAD local/main verificado `df5cfac0159bdf65ad915f9197927303b
 
 Las ejecuciones dirigidas se solapan con las suites finales: **no sumar esos conteos para inflar cobertura**.
 
-## Validación nueva de recuperación final (2026-10-20)
+## Validación del cierre anterior (histórica; resultados de este encargo en adenda final)
 
 | Comando / evidencia | Resultado real |
 |---|---|
@@ -85,3 +85,50 @@ No se identificó un P0 local conocido sin mitigación en la funcionalidad habil
 Antes de cambiar RELEASE a GO: aprobar diff, generar SHA exacto limpio/digests, ejecutar las 24 integraciones sin skips, aplicar runbook en staging aislado autorizado, verificar respaldo/restauración y rollback compatible, funcionales reales y revisión del riesgo residual. No ejecutar workflows/Oracle/migraciones/deploy por este documento: requieren autorización independiente.
 
 Inventario exacto de archivos, decisiones por sprint y resultados: `NexFlow_RC3_PROGRESS.md`. Procedimiento: `NexFlow_RC3_DEPLOY_RUNBOOK.md`.
+
+## Cierre final de preproducción — evidencia vigente (2026-10-20)
+
+Solo nuevo defecto: ImageUploader seguía ocupado al cambiar identidad sin desmontarse. Dos reproducciones rojas demostradas; parche de estado/sesión/abort y tres regresiones (usuario, workspace, finally antiguo durante nueva carga). No se rehace el cierre publicado. SuperAdmin/Reason/reactivación/vigencia/entitlements/nuclear pasan las regresiones existentes; sin cambio backend en este encargo.
+
+| Validación NUEVA | Resultado |
+|---|---|
+| Restore solución backend | Exit 0. |
+| Build solución backend --no-restore | Exit 0, **0 errores / 3 warnings históricos** (CS8981 x2, CS8602 x1). |
+| Tests csproj explícito --no-restore | **708 aprobadas / 0 fallidas / 24 omitidas / 732 total**, 12 s. TRX rc3-preproduction-final.trx local ignorado. |
+| npm ci | Exit 0; versiones/lockfile intactos, 4 altas y avisos de scripts pendientes. |
+| npm run build / npm run lint | Ambos exit 0; dist generado, JS 710,55 kB (>500 aviso), CSS 50,73. |
+| TypeScript (loader existente) | **83/83**, sin fallos/omisiones, 4,67 s. |
+| Navegador/Hosting completo --test-concurrency=1 | **148/148**, sin fallos/omisiones, 153,34 s (última corrida JUnit de la versión final; primera corrida 184,05 s, no sumar). Total frontend distinto **231**, baseline 228 conservado + 3. |
+| Smoke codec publicado contra API local | Build 0 errores/0 warnings; PNG/JPEG/WebP 3 PASS **Windows X64**. ARM64 real no ejecutado. Publish ARM64 del cierre previo sigue siendo evidencia histórica. |
+| Workflows | YAML y AST PowerShell revisados; permisos mínimos/manual, mínimo 708/83/148; CI remoto **NO EJECUTADO**, sin Run ID. Bash local es alias inaccesible, validación en shell Linux pendiente; no se instala ni se bloquea el resto por ello. |
+
+### Evaluación concreta de npm (4 alertas altas de una cadena, no cuatro fallos independientes)
+
+| Paquete instalado | Papel / alcance |
+|---|---|
+| firebase 13.0.0 | Dependencia directa; app/auth usados. Alerta transitiva por Firestore. |
+| @firebase/firestore-compat 0.4.15 | Transitiva; no importada por aplicación ni incluida en chunks emitidos. |
+| @firebase/firestore 4.18.0 | Transitiva; entrypoints Node usan grpc-js; entrypoint browser separado. No importado por aplicación ni incluido en chunks emitidos. |
+| @grpc/grpc-js 1.9.16 | Paquete raíz vulnerable señalado; dependencia Node de Firestore ~1.9.0. No es parte del backend .NET ni del bundle browser. |
+
+Grafo real inspeccionado con plugin efímero generateBundle de Vite (sin modificar config): 287 módulos emitidos, 2 Firebase auth, **0 Firestore y 0 grpc-js**; mismo hash/tamaño de dist que el build normal. Fuentes usan exclusivamente firebase/app y firebase/auth. Hosting publica solo dist; Node/node_modules no se sirven ni despliegan como servidor.
+
+El [aviso alto del proveedor](https://github.com/grpc/grpc-node/security/advisories/GHSA-m9gg-hp2v-232j) requiere autenticación de servidor mediante getAuthContext con requireClientCertificate=false. El [aviso bajo de errores de handlers](https://github.com/grpc/grpc-node/security/advisories/GHSA-f596-whhp-79r4) afecta servidores grpc-js que exponen excepciones. Estas rutas de servidor Node no existen en el runtime actual de NexFlow; no se encontró camino aplicable en este artefacto. Inferencia limitada al código/target inspeccionado, no afirmación de que el paquete instalado esté corregido.
+
+Metadata oficial npm: Firebase 13.0.0 / Firestore latest 4.18.0 aún declaran ~1.9.0; parche grpc 1.13.7 disponible para ambos avisos pero **fuera de ese rango**. npm propone downgrade mayor Firebase 9.14.0. Ninguno se fuerza sin pruebas de compatibilidad del SDK Node ajeno al uso actual. Sin cambios de dependencias/overrides/lockfile. Mitigación: app/auth y Hosting estático, sin servidor JS grpc/SSR ni frontend Firestore; mantener escaneo, adoptar parche upstream compatible cuando exista y reevaluar antes de introducir esos runtimes. Riesgo de dependencia **P2 residual** para aceptación explícita; npm audit continúa con 4 altas, no se oculta.
+
+### Puertas de GO/NO-GO vigentes
+
+- [x] Código local y contratos corregidos, builds/lint y 708 + 231 pruebas locales sin fallos.
+- [x] Permisos, aislamiento, Reason, vigencia, idempotencia y protección nuclear conservados.
+- [ ] Publicar por propietario SHA final aprobado y limpio que incluya este nuevo diff; fijar artefactos/digests (ddea5d9 no lo incluye).
+- [ ] Ambos workflows con SHA final, Run ID, TRX/JUnit; 24 integraciones PG/Emulator **ejecutadas sin omisiones**.
+- [ ] Imagen Linux ARM64 exacta y smoke codec de contenedor aprobado.
+- [ ] Inventario/esquema/history Oracle solo lectura; aprobación de migración pendiente y ventana sin escritores antiguos.
+- [ ] Backup privado + restauración aislada, rollback de aplicación compatible con epochs/fences/UpdateTime.
+- [ ] Health y funcionales autorizadas de dos workspaces: WhatsApp/Evolution/Inbox/reservas/pedidos/PDF PRODUCT y SERVICE/licencias, recursos compartidos intactos.
+- [ ] Evidencia real incidente/4 PDF históricos y retiro legacy coordinado; sin replay ciego ni UnknownDelivery reenviado.
+
+**P0 potencial mitigado:** nuclear deshabilitado y sin bypass. **P1 bloqueantes de release:** integraciones/ARM64/CI/configuración/migración/backup y prueba operacional real pendientes. **P2:** dependencia transitiva sin ruta runtime identificada, warnings/bundle y métricas/coste en carga. Ninguna migración nueva/aplicada, infraestructura/secretos/servicios modificados, commit/push ni despliegue.
+
+**CODE COMPLETE / READY FOR STAGING (validación aislada) / RELEASE NO-GO.** Listo el alcance local; no autorización de despliegue productivo. Inventario de este encargo: ImageUploader.tsx, navigation-browser.test.mjs, fixtures/navigation-preview.tsx, rc3-release-checks.yml (umbral 148) y los tres documentos existentes. Backend y migraciones sin cambios. Ver runbook para siguientes operaciones seguras; no iniciar otro sprint.

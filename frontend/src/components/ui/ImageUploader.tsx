@@ -1,5 +1,5 @@
 import { usePermissions } from '../../core/auth/permissions';
-import { useEffect, useId, useState, useRef } from 'react';
+import { useEffect, useEffectEvent, useId, useState, useRef } from 'react';
 import { getQuerySession, isCurrentQuerySession } from '../../core/query/queryPersistence';
 import { UploadCloud, Loader2, X } from 'lucide-react';
 import { axiosClient } from '../../core/api/axiosClient';
@@ -23,9 +23,26 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
   const canUpload = can('CATALOG', 'CREATE') || can('CATALOG', 'UPDATE') || can('SERVICES', 'CREATE') || can('SERVICES', 'UPDATE');
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const sessionAtRender = getQuerySession();
+  const [uploadSession, setUploadSession] = useState(sessionAtRender);
+  // Reset local UI during the identity render, without applying any old response.
+  if (uploadSession !== sessionAtRender) {
+    setUploadSession(sessionAtRender);
+    setIsUploading(false);
+    setErrorMsg(null);
+  }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingUpload = useRef<AbortController | null>(null);
-  useEffect(() => () => { pendingUpload.current?.abort(); }, []);
+  const releaseUploadingContext = useEffectEvent(() => onUploadingContext?.(false));
+  useEffect(() => {
+    if (pendingUpload.current) {
+      pendingUpload.current.abort();
+      pendingUpload.current = null;
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      releaseUploadingContext();
+    }
+    return () => { pendingUpload.current?.abort(); };
+  }, [sessionAtRender]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -65,8 +82,8 @@ export const ImageUploader = ({ value, onChange, onUploadingContext, label = "Im
         setIsUploading(false);
         onUploadingContext?.(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
+        if (pendingUpload.current === controller) pendingUpload.current = null;
       }
-      if (pendingUpload.current === controller) pendingUpload.current = null;
     }
   };
 
