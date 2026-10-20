@@ -3,6 +3,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Importación requerida
 using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
@@ -44,6 +45,12 @@ public static class DependencyInjection
         services.AddScoped<IConversationStateService, ConversationStateService>();
         services.AddScoped<IAiResponseOrchestrator, AiResponseOrchestrator>();
         services.AddScoped<IConversationRecoveryService, ConversationRecoveryService>();
+        services.AddSingleton<NameSlotResolver>();
+        services.AddSingleton<LocationMentionResolver>();
+        services.AddSingleton<OfferingMentionResolver>();
+        services.AddSingleton<BusinessDateResolver>();
+        services.AddSingleton<TimePreferenceResolver>();
+        services.AddScoped<IWorkspaceSlotResolver, WorkspaceSlotResolver>();
 
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();

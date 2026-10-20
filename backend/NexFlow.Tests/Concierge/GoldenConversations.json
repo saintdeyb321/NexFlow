@@ -1,0 +1,3114 @@
+{
+  "BaselineCommit": "9c038c898080c0e212f8bd0df4daba07a08d8e8f",
+  "Scope": "Phase0And1SlotResolutionOnly",
+  "Dialogues": [
+    {
+      "Id": "clinica-01-incidente-nombre-sede-fecha",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        },
+        {
+          "Text": "En la sede concepción",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-02-incidente-variantes",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Deyvid Pariona Ramos",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona Ramos"
+            }
+          }
+        },
+        {
+          "Text": "en San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        },
+        {
+          "Text": "22/10",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-03-multislot",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola, soy Ana Pérez, quiero Limpieza dental en Concepción pasado mañana por la tarde",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            },
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "16:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-04-parcial-unico",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "SEDE CONCEPCIÓN",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "dental",
+          "Step": "COLLECT_SERVICE",
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "22 de oct",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-05-horas-ambiguas",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "a las 4",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "por la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-06-semana",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "el viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "el próximo viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-23"
+            }
+          }
+        },
+        {
+          "Text": "este jueves",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-07-fecha-invalida",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "31 de febrero de 2027",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "hoy",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-20"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-08-incidente-insulto",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "22 de octubre estúpido",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "por la mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:06:00-12:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-09-sedes-ambiguas",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Concepción o San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "Limpieza dental",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Sede Concepcion",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-10-sede-inexistente",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Sede Arequipa",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "San Jerónimo",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-11-licencia-reservas",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "SERVICES",
+        "RESERVATIONS"
+      ],
+      "Purpose": "Reservation",
+      "Turns": [
+        {
+          "Text": "Concepción",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Product": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "Limpieza dental",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-21"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-12-licencia-pedidos",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "ORDERS"
+      ],
+      "Purpose": "Order",
+      "Turns": [
+        {
+          "Text": "Cepillo dental",
+          "Step": null,
+          "Expected": {
+            "Product": {
+              "Status": "Determined",
+              "Value": "product"
+            },
+            "Service": {
+              "Status": "Invalid"
+            },
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "me llamo Ana Pérez",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-13-sin-proveedor",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "me llamo José del Carmen",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "José del Carmen"
+            }
+          }
+        },
+        {
+          "Text": "22 de octubre",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-14-preferencias",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "después de las cinco de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "After:17:00"
+            }
+          }
+        },
+        {
+          "Text": "antes de las 12:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Before:12:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la mañana",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:04:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-15-respuesta-no-nominal",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Invalid"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "clinica-16-revocacion",
+      "Sector": "clinica",
+      "Service": "Limpieza dental",
+      "Product": "Cepillo dental",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Limpieza dental",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Limpieza dental",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Invalid"
+            }
+          },
+          "Modules": [
+            "CATALOG",
+            "RESERVATIONS",
+            "ORDERS",
+            "LOCATIONS",
+            "BUSINESS_HOURS",
+            "REQUESTS"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "hotel-01-incidente-nombre-sede-fecha",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        },
+        {
+          "Text": "En la sede concepción",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-02-incidente-variantes",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Deyvid Pariona Ramos",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona Ramos"
+            }
+          }
+        },
+        {
+          "Text": "en San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        },
+        {
+          "Text": "22/10",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-03-multislot",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola, soy Ana Pérez, quiero Hospedaje familiar en Concepción pasado mañana por la tarde",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            },
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "16:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-04-parcial-unico",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "SEDE CONCEPCIÓN",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "familiar",
+          "Step": "COLLECT_SERVICE",
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "22 de oct",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-05-horas-ambiguas",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "a las 4",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "por la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-06-semana",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "el viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "el próximo viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-23"
+            }
+          }
+        },
+        {
+          "Text": "este jueves",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-07-fecha-invalida",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "31 de febrero de 2027",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "hoy",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-20"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-08-incidente-insulto",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "22 de octubre estúpido",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "por la mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:06:00-12:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-09-sedes-ambiguas",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Concepción o San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "Hospedaje familiar",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Sede Concepcion",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-10-sede-inexistente",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Sede Arequipa",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "San Jerónimo",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-11-licencia-reservas",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "SERVICES",
+        "RESERVATIONS"
+      ],
+      "Purpose": "Reservation",
+      "Turns": [
+        {
+          "Text": "Concepción",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Product": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "Hospedaje familiar",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-21"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-12-licencia-pedidos",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "ORDERS"
+      ],
+      "Purpose": "Order",
+      "Turns": [
+        {
+          "Text": "Kit de viaje",
+          "Step": null,
+          "Expected": {
+            "Product": {
+              "Status": "Determined",
+              "Value": "product"
+            },
+            "Service": {
+              "Status": "Invalid"
+            },
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "me llamo Ana Pérez",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-13-sin-proveedor",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "me llamo José del Carmen",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "José del Carmen"
+            }
+          }
+        },
+        {
+          "Text": "22 de octubre",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-14-preferencias",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "después de las cinco de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "After:17:00"
+            }
+          }
+        },
+        {
+          "Text": "antes de las 12:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Before:12:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la mañana",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:04:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-15-respuesta-no-nominal",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Invalid"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "hotel-16-revocacion",
+      "Sector": "hotel",
+      "Service": "Hospedaje familiar",
+      "Product": "Kit de viaje",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hospedaje familiar",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Hospedaje familiar",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Invalid"
+            }
+          },
+          "Modules": [
+            "CATALOG",
+            "RESERVATIONS",
+            "ORDERS",
+            "LOCATIONS",
+            "BUSINESS_HOURS",
+            "REQUESTS"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-01-incidente-nombre-sede-fecha",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        },
+        {
+          "Text": "En la sede concepción",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-02-incidente-variantes",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Deyvid Pariona Ramos",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona Ramos"
+            }
+          }
+        },
+        {
+          "Text": "en San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        },
+        {
+          "Text": "22/10",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-03-multislot",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola, soy Ana Pérez, quiero Catering de eventos en Concepción pasado mañana por la tarde",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            },
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "16:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-04-parcial-unico",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "SEDE CONCEPCIÓN",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "eventos",
+          "Step": "COLLECT_SERVICE",
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "22 de oct",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-05-horas-ambiguas",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "a las 4",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "por la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-06-semana",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "el viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "el próximo viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-23"
+            }
+          }
+        },
+        {
+          "Text": "este jueves",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-07-fecha-invalida",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "31 de febrero de 2027",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "hoy",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-20"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-08-incidente-insulto",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "22 de octubre estúpido",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "por la mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:06:00-12:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-09-sedes-ambiguas",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Concepción o San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "Catering de eventos",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Sede Concepcion",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-10-sede-inexistente",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Sede Arequipa",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "San Jerónimo",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-11-licencia-reservas",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "SERVICES",
+        "RESERVATIONS"
+      ],
+      "Purpose": "Reservation",
+      "Turns": [
+        {
+          "Text": "Concepción",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Product": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "Catering de eventos",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-21"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-12-licencia-pedidos",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "ORDERS"
+      ],
+      "Purpose": "Order",
+      "Turns": [
+        {
+          "Text": "Pan integral",
+          "Step": null,
+          "Expected": {
+            "Product": {
+              "Status": "Determined",
+              "Value": "product"
+            },
+            "Service": {
+              "Status": "Invalid"
+            },
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "me llamo Ana Pérez",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-13-sin-proveedor",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "me llamo José del Carmen",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "José del Carmen"
+            }
+          }
+        },
+        {
+          "Text": "22 de octubre",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-14-preferencias",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "después de las cinco de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "After:17:00"
+            }
+          }
+        },
+        {
+          "Text": "antes de las 12:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Before:12:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la mañana",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:04:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-15-respuesta-no-nominal",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Invalid"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "panaderia-16-revocacion",
+      "Sector": "panaderia",
+      "Service": "Catering de eventos",
+      "Product": "Pan integral",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Catering de eventos",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Catering de eventos",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Invalid"
+            }
+          },
+          "Modules": [
+            "CATALOG",
+            "RESERVATIONS",
+            "ORDERS",
+            "LOCATIONS",
+            "BUSINESS_HOURS",
+            "REQUESTS"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "servicios-01-incidente-nombre-sede-fecha",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Location": {
+              "Status": "Insufficient"
+            },
+            "Service": {
+              "Status": "Insufficient"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        },
+        {
+          "Text": "En la sede concepción",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-02-incidente-variantes",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Deyvid Pariona Ramos",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona Ramos"
+            }
+          }
+        },
+        {
+          "Text": "en San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        },
+        {
+          "Text": "22/10",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-03-multislot",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Hola, soy Ana Pérez, quiero Cambio de aceite en Concepción pasado mañana por la tarde",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            },
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            },
+            "Product": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "16:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-04-parcial-unico",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "SEDE CONCEPCIÓN",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        },
+        {
+          "Text": "aceite",
+          "Step": "COLLECT_SERVICE",
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "22 de oct",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-05-horas-ambiguas",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "a las 4",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "por la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:12:00-18:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:16:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-06-semana",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "el viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "el próximo viernes",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-23"
+            }
+          }
+        },
+        {
+          "Text": "este jueves",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-07-fecha-invalida",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "31 de febrero de 2027",
+          "Step": "COLLECT_DATE",
+          "Expected": {
+            "Date": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "hoy",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-20"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-08-incidente-insulto",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "22 de octubre estúpido",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "por la mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Determined",
+              "Value": "Period:06:00-12:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-09-sedes-ambiguas",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Concepción o San Jerónimo",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Ambiguous"
+            }
+          }
+        },
+        {
+          "Text": "Cambio de aceite",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Sede Concepcion",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-10-sede-inexistente",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Sede Arequipa",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "San Jerónimo",
+          "Step": "COLLECT_LOCATION",
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "san-jeronimo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-11-licencia-reservas",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "SERVICES",
+        "RESERVATIONS"
+      ],
+      "Purpose": "Reservation",
+      "Turns": [
+        {
+          "Text": "Concepción",
+          "Step": null,
+          "Expected": {
+            "Location": {
+              "Status": "Determined",
+              "Value": "concepcion"
+            },
+            "Product": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "Cambio de aceite",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "mañana",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-21"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-12-licencia-pedidos",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "ORDERS"
+      ],
+      "Purpose": "Order",
+      "Turns": [
+        {
+          "Text": "Aceite sintético",
+          "Step": null,
+          "Expected": {
+            "Product": {
+              "Status": "Determined",
+              "Value": "product"
+            },
+            "Service": {
+              "Status": "Invalid"
+            },
+            "Location": {
+              "Status": "Invalid"
+            }
+          }
+        },
+        {
+          "Text": "me llamo Ana Pérez",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Ana Pérez"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-13-sin-proveedor",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "No sé cómo hacer una reserva",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Insufficient"
+            },
+            "Date": {
+              "Status": "Insufficient"
+            },
+            "Time": {
+              "Status": "Insufficient"
+            }
+          }
+        },
+        {
+          "Text": "me llamo José del Carmen",
+          "Step": null,
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "José del Carmen"
+            }
+          }
+        },
+        {
+          "Text": "22 de octubre",
+          "Step": null,
+          "Expected": {
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-14-preferencias",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "después de las cinco de la tarde",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "After:17:00"
+            }
+          }
+        },
+        {
+          "Text": "antes de las 12:00",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Before:12:00"
+            }
+          }
+        },
+        {
+          "Text": "a las 4 de la mañana",
+          "Step": null,
+          "Expected": {
+            "Time": {
+              "Status": "Determined",
+              "Value": "Exact:04:00"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-15-respuesta-no-nominal",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "pasado mañana",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Invalid"
+            },
+            "Date": {
+              "Status": "Determined",
+              "Value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "Text": "Deyvid Pariona",
+          "Step": "COLLECT_CUSTOMERNAME",
+          "Expected": {
+            "Name": {
+              "Status": "Determined",
+              "Value": "Deyvid Pariona"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "servicios-16-revocacion",
+      "Sector": "servicios",
+      "Service": "Cambio de aceite",
+      "Product": "Aceite sintético",
+      "Modules": [
+        "CATALOG",
+        "SERVICES",
+        "RESERVATIONS",
+        "ORDERS",
+        "LOCATIONS",
+        "BUSINESS_HOURS",
+        "REQUESTS"
+      ],
+      "Purpose": "Information",
+      "Turns": [
+        {
+          "Text": "Cambio de aceite",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Determined",
+              "Value": "service"
+            }
+          }
+        },
+        {
+          "Text": "Cambio de aceite",
+          "Step": null,
+          "Expected": {
+            "Service": {
+              "Status": "Invalid"
+            }
+          },
+          "Modules": [
+            "CATALOG",
+            "RESERVATIONS",
+            "ORDERS",
+            "LOCATIONS",
+            "BUSINESS_HOURS",
+            "REQUESTS"
+          ]
+        }
+      ]
+    }
+  ]
+}
