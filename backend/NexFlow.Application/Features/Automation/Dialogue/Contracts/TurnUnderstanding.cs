@@ -79,7 +79,5 @@ public sealed record DialogueFailure(DialogueFailureDomain Domain, string Code)
         : slot.Status == ResolutionStatus.ProviderUnavailable ? new(DialogueFailureDomain.Provider, "Unavailable")
         : slot.Status is ResolutionStatus.Ambiguous or ResolutionStatus.Invalid ? new(DialogueFailureDomain.Semantic, slot.Status.ToString()) : null;
 }
-public enum VerifiedFactSource { BusinessRepository, TransactionEngine }
-public sealed record VerifiedFact(string Key, string Value, VerifiedFactSource Source, string? EntityId = null);
-public sealed record ResponsePlan(ConversationIntent Intent, IReadOnlyList<VerifiedFact> Facts,
-    string? NextQuestion, IReadOnlyList<ConversationMenuOption> Choices, bool AllowCreativeParaphrase = false);
+public enum VerifiedFactSource { BusinessRepository, TransactionEngine, ValidatedConversation, AuthorizedWorkflow }
+public sealed record VerifiedFact(string Key, string Value, VerifiedFactSource Source, string? EntityId = null, bool Sensitive = false);

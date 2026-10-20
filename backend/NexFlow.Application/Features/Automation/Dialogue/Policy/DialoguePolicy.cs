@@ -10,6 +10,7 @@ public sealed class DialoguePolicy
     {
         var normalized = SpanishTextNormalizer.Normalize(text);
         var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (IsInformationOnly(normalized)) return DialogueAct.Information;
         var booking = state.CurrentGoal is "BOOKING" or "RESERVATION";
         if (normalized is "quiero hablar con una persona" or "quiero hablar con alguien" or "necesito hablar con una persona") return DialogueAct.HumanAssistance;
         if (normalized is "ya no quiero continuar" or "no quiero continuar" or "no quiero seguir" or "no sigamos") return DialogueAct.Cancellation;
@@ -18,6 +19,7 @@ public sealed class DialoguePolicy
         if (booking && words.Any(w => w is "pedir" or "pedido" or "comprar" or "solicitud" or "reclamo")) return DialogueAct.SemanticAmbiguity;
         // A negated clause requires semantic scope; extracted nouns must not start an operation.
         if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
+        if (HasContradictoryGoals(normalized)) return DialogueAct.SemanticAmbiguity;
         var reservationMention = words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita");
         var instruction = normalized.Contains("como ", StringComparison.Ordinal) || normalized.Contains("no se", StringComparison.Ordinal)
             || words.Contains("puedo") || words.Contains("puede") || words.Contains("informacion") || words.Contains("orientacion");
@@ -29,6 +31,16 @@ public sealed class DialoguePolicy
         if (reservationMention && words.Any(w => w is "quiero" or "quisiera" or "necesito" or "deseo" or "reservar" or "agenda"))
             return DialogueAct.StartOperation;
         return booking ? DialogueAct.RequestedData : DialogueAct.SemanticAmbiguity;
+    }
+
+    public static bool IsInformationOnly(string normalized) =>
+        normalized is "solo estoy preguntando" or "solamente estoy preguntando" or "solo estoy consultando" or "solo quiero informacion";
+
+    public static bool HasContradictoryGoals(string normalized)
+    {
+        var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita")
+            && words.Any(w => w is "pedir" or "comprar" or "pedido" or "solicitud" or "reclamo");
     }
 
     public SlotReadPlan Reads(string text, ConversationContextDto state, DialogueAct act)

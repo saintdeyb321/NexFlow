@@ -20,6 +20,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.Configure<NexFlow.Application.Features.Automation.Dialogue.Composition.ResponseCompositionOptions>(builder.Configuration.GetSection("Assistant:Composition"));
 
 // Validate before registering infrastructure, creating SDK clients or workers.
 if (builder.Environment.IsProduction()) RuntimeConfiguration.ValidateProduction(builder.Configuration);

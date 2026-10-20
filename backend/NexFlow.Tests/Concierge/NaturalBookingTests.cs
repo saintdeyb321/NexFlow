@@ -101,8 +101,9 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
         await Turn(f, (earlyName ? "Soy Ana Pérez, " : "") + "quiero limpieza dental en Concepción pasado mañana por la tarde");
         Assert.Equal("2026-10-22", (await f.Context()).TargetDate); Assert.Equal("service-a", (await f.Context()).SelectedServiceId);
         Assert.Null((await f.Context()).TargetTime); Assert.Empty(f.Bookings);
-        var plan = ((BookingFlow)f.Booking).LastResponsePlan!;
-        Assert.All(plan.Facts, fact => Assert.Equal(VerifiedFactSource.TransactionEngine, fact.Source));
+        var plan = f.Plans.Last();
+        Assert.Contains(plan.Facts, fact => fact.Key == "AvailableStartUtc");
+        Assert.All(plan.Facts.Where(fact => fact.Key == "AvailableStartUtc"), fact => Assert.Equal(VerifiedFactSource.TransactionEngine, fact.Source));
         Assert.Single(plan.Choices); Assert.Equal("16:00", plan.Choices[0].Key);
         await Turn(f, "16:00"); Assert.Empty(f.Bookings);
         if (!earlyName) await Turn(f, "Ana Pérez");
@@ -283,7 +284,7 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
         await Turn(f, "quiero limpieza dental en Concepción pasado mañana");
         Assert.Equal("2026-10-22", (await f.Context()).TargetDate); Assert.Null((await f.Context()).TargetTime);
         Assert.Contains("23/10/2026", f.Sent.Values.Last().Content); Assert.Contains("16:00", f.Sent.Values.Last().Content);
-        Assert.Empty(f.Bookings); Assert.All(((BookingFlow)f.Booking).LastResponsePlan!.Facts, fact => Assert.Contains("2026-10-23", fact.Value));
+        Assert.Empty(f.Bookings); Assert.Contains(f.Plans.Last().Facts, fact => fact.Key == "AvailableStartUtc"); Assert.All(f.Plans.Last().Facts.Where(fact => fact.Key == "AvailableStartUtc"), fact => Assert.Contains("2026-10-23", fact.Value));
         await Turn(f, "el 23 de octubre"); await Turn(f, "16:00"); await Turn(f, "Ana Pérez"); await Turn(f, "sí"); Assert.Single(f.Bookings);
     }
 

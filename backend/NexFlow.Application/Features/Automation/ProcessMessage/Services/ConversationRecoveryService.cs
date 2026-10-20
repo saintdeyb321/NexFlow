@@ -11,14 +11,16 @@ using NexFlow.Application.Features.Business.Offerings;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
-public sealed record RecoveryDecision(string? Response = null, AiInterpretation? Interpretation = null);
+public sealed record RecoveryDecision(string? Response = null, AiInterpretation? Interpretation = null,
+    DialogueAct Act = DialogueAct.Information, OperationStatus Operation = OperationStatus.Informational);
 public interface IConversationRecoveryService
 {
     Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation, ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
-    Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct);
+    Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false);
     Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct);
     Task<bool> AcquireAiAsync(Guid workspace, string phone, string source, CancellationToken ct);
 }
@@ -76,7 +78,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 context.PendingCustomerName = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Clear(); context.PreferredTime = null;
                 context.PendingRecoveryAction = null; context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
                 return await Remember(booking ? "He descartado esta reserva en preparación. No se ha cancelado ninguna reserva registrada."
-                    : "He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.");
+                    : "He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.", DialogueAct.Cancellation, OperationStatus.Cancelled);
             }
             if (No(text)) { context.PendingRecoveryAction = null; return await Remember(Continuation(context)); }
             return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Para hablar con una persona escribe asesor."
@@ -93,7 +95,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (string.IsNullOrEmpty(context.CurrentGoal)) return await Remember("No hay un borrador activo. Para revisar una reserva o pedido registrado escribe asesor.");
             context.PendingRecoveryAction = "CANCEL";
             return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Esto no cancela ninguna reserva registrada."
-                : "¿Quieres descartar el borrador actual? Responde sí o no. Esto no cancela una reserva o pedido ya registrado.");
+                : "¿Quieres descartar el borrador actual? Responde sí o no. Esto no cancela una reserva o pedido ya registrado.", DialogueAct.Cancellation, OperationStatus.AwaitingConfirmation);
         }
         if (context.CurrentStep == "CONFIRM" && context.CurrentGoal is "BOOKING" or "RESERVATION" && Yes(text))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Confirmed = true });
@@ -143,7 +145,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (text is "ubicacion" or "direccion" || text.Contains("donde estan") || text.Contains("donde atienden")) return await RememberInterpretation(new() { Intent = ConversationIntent.Location });
         return null;
 
-        Task<RecoveryDecision> Remember(string response) => SaveAsync(workspace, phone, request.MessageId, context, new(response), ct);
+        Task<RecoveryDecision> Remember(string response, DialogueAct act = DialogueAct.Information, OperationStatus operation = OperationStatus.Informational) => SaveAsync(workspace, phone, request.MessageId, context, new(response, Act: act, Operation: operation), ct);
         Task<RecoveryDecision> RememberInterpretation(AiInterpretation interpretation) => SaveAsync(workspace, phone, request.MessageId, context, new(Interpretation: interpretation), ct);
         async Task<RecoveryDecision> Menu(string intro)
         {
@@ -169,10 +171,16 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return index == 0 ? -1 : index;
     }
 
-    public async Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct)
+    public async Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false)
     {
         if (++context.ClarificationAttempts >= Limits.MaxClarifications)
             return await SaveAsync(workspace, phone, source, context, new(Interpretation: new() { Intent = ConversationIntent.Support }), ct);
+        if (contextual)
+        {
+            // A semantic clarification is one question, not an unsolicited global menu.
+            context.RecoveryOptions.Clear(); context.RecoveryOptionsContext = null;
+            return await SaveAsync(workspace, phone, source, context, new(introduction), ct);
+        }
         return await SaveAsync(workspace, phone, source, context, new(await PrepareOptionsAsync(workspace, context, modules, introduction, ct)), ct);
     }
 

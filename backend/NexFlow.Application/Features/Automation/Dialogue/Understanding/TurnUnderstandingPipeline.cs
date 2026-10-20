@@ -41,6 +41,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(act, new() { Intent = ConversationIntent.General }, Response: "De acuerdo. ¿Qué información necesitas consultar?");
         if (act == DialogueAct.Resume) return new(act, new() { Intent = ConversationIntent.Reservation });
         var normalized = SpanishTextNormalizer.Normalize(request.MessageText);
+        if (DialoguePolicy.IsInformationOnly(normalized))
+            return new(DialogueAct.Information, new() { Intent = ConversationIntent.General }, Response: "De acuerdo, no iniciaré ninguna operación. ¿Qué información necesitas consultar?");
+        var contradictory = DialoguePolicy.HasContradictoryGoals(normalized);
         if (context.CurrentGoal is "BOOKING" or "RESERVATION" && normalized is "cuanto cuesta" or "cuanto cuesta ese servicio" or "cual es el precio" or "que precio tiene")
         {
             if (!modules.Contains("SERVICES")) return new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery }, Response: AiIntentAccess.ServicesUnavailable);
@@ -56,7 +59,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
                     ?? (context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction));
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION" || act == DialogueAct.StartOperation;
         var reservationCandidate = !booking && context.CurrentGoal == null && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES")
-            && act == DialogueAct.SemanticAmbiguity && !normalized.Split(' ').Contains("no")
+            && act == DialogueAct.SemanticAmbiguity && !contradictory && !normalized.Split(' ').Contains("no")
             && normalized.Split(' ').Any(w => w is "quiero" or "quisiera" or "necesito" or "deseo");
         var purpose = booking || reservationCandidate ? SlotResolutionPurpose.Reservation : context.CurrentGoal == "ORDER" ? SlotResolutionPurpose.Order : SlotResolutionPurpose.Information;
         var local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, purpose, policy.Reads(request.MessageText, context, act), ct);
@@ -98,7 +101,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && AiEvidenceValidator.HasFragment(request.MessageText, actEvidence[0].Text)
             && actEvidence[0].NormalizedValue == interpretation.Act?.ToString();
         if (backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
-            && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
+            && !contradictory && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
         {
             // Semantic intent can start a draft; only licensed, reservable entities
             // from this workspace can enter it. Confirmation remains server-owned.
@@ -111,7 +114,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         if (interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.ProductQuery
             or ConversationIntent.ServiceQuery or ConversationIntent.Location or ConversationIntent.BusinessHours or ConversationIntent.Faq)
             return new(booking ? DialogueAct.InformationalInterruption : DialogueAct.Information, interpretation, true);
-        if (act == DialogueAct.SemanticAmbiguity && normalized.Split(' ').Contains("no"))
+        if (act == DialogueAct.SemanticAmbiguity && (contradictory || normalized.Split(' ').Contains("no")))
             return new(act, new() { Intent = ConversationIntent.General, RequiresClarification = true }, true);
         if (interpretation.Intent == ConversationIntent.Support) return new(DialogueAct.HumanAssistance, interpretation, true);
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) return new(DialogueAct.Cancellation, interpretation, true);

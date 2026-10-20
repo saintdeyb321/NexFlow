@@ -1,3 +1,5 @@
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
+using NexFlow.Application.Features.AI.Router;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -238,6 +240,10 @@ public sealed class AssistantConversationTests
         public Mock<IEntitlementService> EntitlementReads { get; }
         public Mock<IKnowledgeService> KnowledgeReads { get; }
         public List<PreparedDialogueTurn> Understood { get; } = [];
+        public List<ResponsePlan> Plans { get; } = [];
+        public List<ComposedResponse> Composed { get; } = [];
+        public Mock<IAiRouter> Wording { get; } = new(MockBehavior.Strict);
+        public ResponseCompositionOptions CompositionOptions { get; } = new();
         public ProcessIncomingMessageCommandHandler Handler { get; }
         public MessageStatus DeliveryStatus { get; set; } = MessageStatus.Sent;
         private readonly AiResponseOrchestrator _orchestrator; private int _turn;
@@ -276,6 +282,7 @@ public sealed class AssistantConversationTests
             reservationRepo.Setup(r => r.GetBySourceMessageIdAsync(Workspace, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string source, CancellationToken _) => Bookings.GetValueOrDefault(source));
             var entitlements = new Mock<IEntitlementService>(MockBehavior.Strict);
             EntitlementReads = entitlements;
+            entitlements.Setup(e => e.IsLicenseValidAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(true);
             entitlements.Setup(e => e.GetAvailableModuleCodesAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(() => Modules.ToArray());
             var profiles = new Mock<IBusinessProfileRepository>(); profiles.Setup(p => p.GetProfileAsync(Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(new BusinessProfileDto("Negocio real", "", "", "", ""));
             ProfileReads = profiles;
@@ -305,7 +312,7 @@ public sealed class AssistantConversationTests
             var slots = new WorkspaceSlotResolver(entitlements.Object, profiles.Object, locations.Object, offerings.Object, clock.Object,
                 new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);
             var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery, offerings.Object);
-            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, Recovery, clock.Object);
+            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, new RecordingComposer(new ResponseComposer(Wording.Object, entitlements.Object, Recovery, Options.Create(CompositionOptions)), Plans, Composed), Recovery, clock.Object);
             var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);
             guard.Setup(g => g.CheckMessageAsync(It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync((true, Workspace, Phone));
             var stateService = new Mock<IConversationStateService>(MockBehavior.Strict);
@@ -331,6 +338,11 @@ public sealed class AssistantConversationTests
             await Contexts.SaveContextAsync(Workspace, Phone, c, default);
         }
         public static string BusinessDraft(ConversationContextDto c) => JsonSerializer.Serialize(new { c.CurrentGoal, c.CurrentStep, c.SelectedLocationId, c.SelectedServiceId, c.TargetDate, c.TargetTime, c.RealCustomerName, c.OrderDraftItems });
+        private sealed class RecordingComposer(IResponseComposer inner, List<ResponsePlan> plans, List<ComposedResponse> composed) : IResponseComposer
+        {
+            public async Task<ComposedResponse> ComposeAsync(ResponsePlan plan, string phone, CancellationToken ct)
+            { plans.Add(plan); var result = await inner.ComposeAsync(plan, phone, ct); composed.Add(result); return result; }
+        }
         private sealed class RecordingPipeline(ITurnUnderstandingPipeline inner, List<PreparedDialogueTurn> turns) : ITurnUnderstandingPipeline
         {
             public async Task<PreparedDialogueTurn> PrepareAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,

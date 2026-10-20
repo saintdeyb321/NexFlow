@@ -5,6 +5,7 @@ using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services; // 🔥 Importación requerida
 using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
@@ -54,6 +55,8 @@ public static class DependencyInjection
         services.AddScoped<IWorkspaceSlotResolver, WorkspaceSlotResolver>();
         services.AddSingleton<DialoguePolicy>();
         services.AddScoped<ITurnUnderstandingPipeline, TurnUnderstandingPipeline>();
+        services.AddOptions<ResponseCompositionOptions>();
+        services.AddScoped<IResponseComposer, ResponseComposer>();
 
         services.AddScoped<AssignModuleToLicenseCommandHandler>();
         services.AddScoped<CreateCustomLicenseCommandHandler>();

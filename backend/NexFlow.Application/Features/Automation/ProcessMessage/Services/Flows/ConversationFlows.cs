@@ -20,16 +20,30 @@ using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
-public interface IBookingFlow { Task<string?> TryResumeAsync(Guid workspaceId, string phone, string sourceMessageId, ConversationContextDto context, CancellationToken ct); Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct); Task<string> GetContinuationAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct, bool concise = false); }
+public interface IBookingFlow { Task<string?> TryResumeAsync(Guid workspaceId, string phone, string sourceMessageId, ConversationContextDto context, CancellationToken ct); Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct); Task<ResponsePlan> ProcessPlannedAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, DialogueAct act, CancellationToken ct); Task<string> GetContinuationAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct, bool concise = false); }
 public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, string sourceMessageId, CancellationToken ct); }
 public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, string conversationId, CancellationToken ct); }
-public record ChatResponse(string Text, string? MediaUrl = null, string? FileName = null, string? CatalogScope = null);
+public record ChatResponse(string Text, string? MediaUrl = null, string? FileName = null, string? CatalogScope = null)
+{
+    public IReadOnlyList<VerifiedFact> Facts { get; init; } = [];
+    public OperationStatus Operation { get; init; } = OperationStatus.Informational;
+}
 public interface IChatFlow { Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct); }
 
 public class BookingFlow : IBookingFlow
 {
-    // Ephemeral verified output, ready for a composer; never another conversation store.
-    public ResponsePlan? LastResponsePlan { get; private set; }
+    // Evidence belongs to this invocation only; the returned plan takes defensive copies.
+    private sealed class TurnEvidence
+    {
+        public List<VerifiedFact> Facts { get; } = [];
+        public IReadOnlyList<ConversationMenuOption> Choices { get; set; } = [];
+        public string? Question { get; set; }
+        public string? Currency { get; set; }
+        public string? Zone { get; set; }
+        public OperationStatus Operation { get; set; } = OperationStatus.Collecting;
+        public void Set(IEnumerable<VerifiedFact> facts, string? question, IReadOnlyList<ConversationMenuOption> choices)
+        { Facts.AddRange(facts); Question = question; Choices = choices; }
+    }
     private readonly IEntitlementService _entitlementService;
     private readonly IOfferingService _offeringService;
     private readonly ILocationResolverService _locationResolver;
@@ -91,22 +105,53 @@ public class BookingFlow : IBookingFlow
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, CancellationToken ct)
+        => (await ProcessPlannedAsync(workspaceId, phone, conversationId, context, interpretation, fallbackName, sourceMessageId, DialogueAct.RequestedData, ct)).FallbackText;
+
+    public async Task<ResponsePlan> ProcessPlannedAsync(Guid workspaceId, string phone, string conversationId, ConversationContextDto context, AiInterpretation interpretation, string fallbackName, string sourceMessageId, DialogueAct act, CancellationToken ct)
     {
-        LastResponsePlan = null;
+        var evidence = new TurnEvidence();
+        ResponsePlan Plan(string text, bool creative = false) => new(workspaceId, sourceMessageId, context.StateVersion,
+            ConversationIntent.Reservation, act, evidence.Operation, evidence.Facts, evidence.Choices, context.MissingFields,
+            evidence.Zone, evidence.Currency, evidence.Question is { } question && question.LastIndexOf('¿') >= 0 ? question[question.LastIndexOf('¿')..] : evidence.Question, text, creative);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
         var replay = await TryResumeAsync(workspaceId, phone, sourceMessageId, context, ct);
-        if (replay != null) return replay;
-        if (context.RecoveryLastMessageId == sourceMessageId && context.RecoveryLastResponse != null) return context.RecoveryLastResponse;
+        if (replay != null) { evidence.Operation = OperationStatus.Succeeded; return Plan(replay); }
+        if (context.RecoveryLastMessageId == sourceMessageId && context.RecoveryLastResponse != null) return Plan(context.RecoveryLastResponse);
         var proposal = interpretation.BookingProposal;
         if (proposal != null)
         {
             var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var denied = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules);
-            if (denied != null) return denied;
+            if (denied != null) { evidence.Operation = OperationStatus.Denied; return Plan(denied); }
             await BookingDraftMerger.ApplyAsync(workspaceId, sourceMessageId, context, proposal, _offeringService, ct);
             interpretation = new() { Intent = ConversationIntent.Reservation, Confirmed = interpretation.Confirmed };
         }
-        var response = await ProcessTurnAsync(workspaceId, phone, context, interpretation, sourceMessageId, ct);
+        var response = await ProcessTurnAsync(workspaceId, phone, context, interpretation, sourceMessageId, evidence, ct);
+        if (proposal != null && evidence.Operation == OperationStatus.Collecting)
+        {
+            var resolved = proposal.Understanding;
+            evidence.Zone = resolved.Context.TimeZoneId;
+            if (resolved.Service.TryGetValue(out var selected) && (selected.Id == context.SelectedServiceId || context.PendingServiceIds.Contains(selected.Id)))
+                evidence.Facts.Add(new("Service", selected.Name, VerifiedFactSource.BusinessRepository, selected.Id));
+            if (resolved.Location.TryGetValue(out var location) && location.Id == context.SelectedLocationId)
+                evidence.Facts.Add(new("Location", location.Name, VerifiedFactSource.BusinessRepository, location.Id));
+            if (resolved.Date.TryGetValue(out var date) && date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) == context.TargetDate)
+                evidence.Facts.Add(new("RequestedDate", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), VerifiedFactSource.ValidatedConversation));
+        }
+        if (proposal != null && evidence.Operation == OperationStatus.Collecting
+            && act is DialogueAct.StartOperation or DialogueAct.MultipleData or DialogueAct.Correction
+            && context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE")
+        {
+            var serviceFact = proposal.Understanding.Service.TryGetValue(out var requestedService)
+                ? evidence.Facts.FirstOrDefault(f => f.Key == "Service" && f.EntityId == requestedService.Id) : null;
+            var dateFact = evidence.Facts.FirstOrDefault(f => f.Key == "RequestedDate");
+            if (serviceFact != null)
+            {
+                var dateText = DateOnly.TryParseExact(dateFact?.Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var knownDate)
+                    ? " para el " + knownDate.ToString("dddd d", CultureInfo.GetCultureInfo("es-PE")) : "";
+                response = $"Te ayudo con {serviceFact.Value}{dateText}.\n\n" + response;
+            }
+        }
         var unresolved = proposal?.UnresolvedSlots.FirstOrDefault();
         if (proposal?.Clarification != null && unresolved != null
             && context.CurrentStep == "COLLECT_" + (unresolved == "Name" ? "CUSTOMERNAME" : unresolved.ToUpperInvariant()))
@@ -117,14 +162,13 @@ public class BookingFlow : IBookingFlow
             context.LastQuestion = response;
         }
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
-        return response;
+        return Plan(response, evidence.Operation == OperationStatus.Collecting);
     }
 
-    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, ConversationContextDto context, AiInterpretation interpretation, string sourceMessageId, CancellationToken ct)
+    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, ConversationContextDto context, AiInterpretation interpretation, string sourceMessageId, TurnEvidence evidence, CancellationToken ct)
     {
         var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!modules.Contains("SERVICES")) return AiIntentAccess.ServicesUnavailable;
-        if (!modules.Contains("RESERVATIONS")) return "No hay información de reservas disponible en este momento.";
+        if (!modules.Contains("SERVICES") || !modules.Contains("RESERVATIONS")) { evidence.Operation = OperationStatus.Denied; return AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules)!; }
 
         // Informational turns are handled before applying extracted entities.
         // Neither a question's location nor its date/time can overwrite the draft.
@@ -132,6 +176,7 @@ public class BookingFlow : IBookingFlow
         {
             if (interpretation.Directive == ConversationDirective.CancelCurrentFlow)
             {
+                evidence.Operation = OperationStatus.Cancelled;
                 ClearDraft(context);
                 return "He cancelado el borrador de tu reserva. ¿En qué más puedo ayudarte?";
             }
@@ -266,20 +311,21 @@ public class BookingFlow : IBookingFlow
             {
                 context.TargetTime = null;
                 if (requestedDate == default) context.TargetDate = null;
-                UpdateStep(context); return await PromptAsync(workspaceId, context, false, ct);
+                UpdateStep(context); return await PromptAsync(workspaceId, context, false, ct, evidence);
             }
             var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
             var zone = BookingZone(profile?.TimeZone);
+            evidence.Zone = zone.Id;
             var available = await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId!, context.SelectedServiceId!,
                 requestedDate, ct);
             if (!available.Any(s => s.IsAvailable && TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
                 == $"{context.TargetDate} {context.TargetTime}"))
             {
                 context.TargetTime = null; UpdateStep(context);
-                return "Ese horario no está disponible.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct);
+                return "Ese horario no está disponible.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence);
             }
         }
-        if (context.CurrentStep != "CONFIRM") return await PromptAsync(workspaceId, context, false, ct);
+        if (context.CurrentStep != "CONFIRM") return await PromptAsync(workspaceId, context, false, ct, evidence);
 
         var service = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
         if (service == null || !await IsSelectedServiceValidAsync(workspaceId, context, ct))
@@ -294,12 +340,18 @@ public class BookingFlow : IBookingFlow
             if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
                 context.TargetDate = null;
             UpdateStep(context);
-            return "No pude interpretar la fecha u hora indicada.\n\n" + await PromptAsync(workspaceId, context, false, ct);
+            return "No pude interpretar la fecha u hora indicada.\n\n" + await PromptAsync(workspaceId, context, false, ct, evidence);
         }
+        evidence.Currency = service.Currency;
+        evidence.Facts.Add(new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id));
+        evidence.Facts.Add(new("Currency", service.Currency, VerifiedFactSource.BusinessRepository, service.Id));
+        evidence.Facts.Add(new("RequestedLocalTime", selectedTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), VerifiedFactSource.ValidatedConversation));
+        evidence.Facts.Add(new("CustomerName", context.RealCustomerName!, VerifiedFactSource.ValidatedConversation, Sensitive: true));
         if (!interpretation.Confirmed)
         {
             var location = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).Single(l => l.Id == context.SelectedLocationId);
-            LastResponsePlan = new(ConversationIntent.Reservation,
+            evidence.Operation = OperationStatus.AwaitingConfirmation;
+            evidence.Set(
                 [new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id),
                  new("Location", location.Name, VerifiedFactSource.BusinessRepository, location.Id),
                  new("PriceMinorUnits", service.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.BusinessRepository, service.Id)],
@@ -312,6 +364,8 @@ public class BookingFlow : IBookingFlow
             phone, context.RealCustomerName!, DateTime.SpecifyKind(selectedTime, DateTimeKind.Unspecified), ct, sourceMessageId);
         if (result.IsSuccess)
         {
+            evidence.Operation = OperationStatus.Succeeded;
+            evidence.Facts.Add(new("ReservationStatus", "Confirmed", VerifiedFactSource.TransactionEngine));
             var name = context.RealCustomerName;
             ClearDraft(context);
             return $"✅ ¡Todo listo, {name}! Tu reserva está confirmada:\n• Servicio: {service.Name}\n• Fecha: {selectedTime:dd/MM/yyyy}\n• Hora: {selectedTime:HH:mm}\n\n¡Te esperamos!";
@@ -328,7 +382,7 @@ public class BookingFlow : IBookingFlow
         if (result.Error.Code is "Reservation.Conflict" or "Reservation.ConcurrencyConflict")
         {
             UpdateStep(context);
-            return "Ese horario acaba de ser ocupado.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct);
+            return "Ese horario acaba de ser ocupado.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence);
         }
         if (result.Error.Code.StartsWith("Service.", StringComparison.Ordinal))
         {
@@ -344,7 +398,7 @@ public class BookingFlow : IBookingFlow
             return "La sede ya no está disponible.\n\n" + await LocationOptionsAsync(workspaceId, "¿Cuál sede deseas elegir?", ct);
         }
         UpdateStep(context);
-        return result.Error.Description + "\n\n" + await PromptAsync(workspaceId, context, false, ct);
+        return result.Error.Description + "\n\n" + await PromptAsync(workspaceId, context, false, ct, evidence);
     }
 
     public Task<string> GetContinuationAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct, bool concise = false)
@@ -358,36 +412,42 @@ public class BookingFlow : IBookingFlow
         return PromptAsync(workspaceId, context, true, ct);
     }
 
-    private async Task<string> PromptAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct)
+    private async Task<string> PromptAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct, TurnEvidence? evidence = null)
     {
         if (!preserveDraft && context.CurrentStep == "COLLECT_SERVICE") context.ReservationServiceOffset = 0;
         var step = DialoguePolicy.NextBookingStep(context);
         var question = step switch
         {
             "COLLECT_CUSTOMERNAME" => "Para registrar tu reserva, ¿cuál es tu nombre y apellido?",
-            "COLLECT_LOCATION" => await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas atenderte?", ct),
+            "COLLECT_LOCATION" => await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas atenderte?", ct, evidence),
             "COLLECT_SERVICE" when !string.IsNullOrWhiteSpace(context.SelectedLocationId)
-                => OfferingServiceReservationExtensions.FormatReservationOptions(
-                    await ReservableServicesAsync(workspaceId, context.SelectedLocationId, ct), context.ReservationServiceOffset),
+                => await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct, evidence, context.ReservationServiceOffset),
             "COLLECT_DATE" => "¿Para qué fecha deseas reservar? Puedes indicar el día o escribir 'mañana'.",
-            "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct),
+            "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct, evidence),
             "CONFIRM" => $"Tu reserva para el {context.TargetDate} a las {context.TargetTime} está pendiente de confirmación. ¿Confirmas? Responde sí o no.",
             _ => "¿Qué servicio deseas reservar?"
         };
-        if (step != "COLLECT_TIME") LastResponsePlan = new(ConversationIntent.Reservation, [], question, []);
+        if (step != "COLLECT_TIME" && evidence != null) evidence.Question = question;
         if (!preserveDraft) context.LastQuestion = question;
         return question;
     }
 
-    private async Task<string> LocationOptionsAsync(Guid workspaceId, string question, CancellationToken ct)
+    private async Task<string> LocationOptionsAsync(Guid workspaceId, string question, CancellationToken ct, TurnEvidence? evidence = null)
     {
-        var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+        var locations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).Where(l => l.Id != null).ToList();
+        evidence?.Set(locations.Select(l => new VerifiedFact("Location", l.Name, VerifiedFactSource.BusinessRepository, l.Id)), question,
+            locations.Select(l => new ConversationMenuOption(l.Id!, l.Name, "Location")).ToArray());
         if (locations.Count == 0) return "No hay sedes registradas disponibles para reservar.";
         return "Sedes disponibles:\n" + string.Join("\n", locations.Select(l => $"• {l.Name}")) + "\n\n" + question;
     }
 
-    private async Task<string> ServiceOptionsAsync(Guid workspaceId, string locationId, CancellationToken ct)
-        => OfferingServiceReservationExtensions.FormatReservationOptions(await ReservableServicesAsync(workspaceId, locationId, ct));
+    private async Task<string> ServiceOptionsAsync(Guid workspaceId, string locationId, CancellationToken ct, TurnEvidence? evidence = null, int offset = 0)
+    {
+        var services = await ReservableServicesAsync(workspaceId, locationId, ct);
+        evidence?.Set(services.Skip(offset).Take(5).Select(s => new VerifiedFact("Service", s.Name, VerifiedFactSource.BusinessRepository, s.Id)),
+            "¿Qué servicio deseas reservar?", services.Skip(offset).Take(5).Select(s => new ConversationMenuOption(s.Id, s.Name, "Service")).ToArray());
+        return OfferingServiceReservationExtensions.FormatReservationOptions(services, offset);
+    }
 
     private async Task<List<ServiceDto>> ReservableServicesAsync(Guid workspaceId, string locationId, CancellationToken ct)
     {
@@ -412,9 +472,8 @@ public class BookingFlow : IBookingFlow
         return $"Horario de atención de {location.Name}:\n" + BusinessHoursFormatter.Format(hours);
     }
 
-    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct)
+    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct, TurnEvidence? evidence = null)
     {
-        LastResponsePlan = null;
         if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
         {
             if (!preserveDraft) { context.TargetDate = null; UpdateStep(context); }
@@ -441,7 +500,7 @@ public class BookingFlow : IBookingFlow
         {
             if (!preserveDraft) { context.TargetTime = null; UpdateStep(context); }
             return $"El negocio atiende el {date:dd/MM/yyyy}, pero ya no quedan horarios disponibles. "
-                + await VerifiedAlternativesAsync(workspaceId, context, date, ct);
+                + await VerifiedAlternativesAsync(workspaceId, context, date, ct, evidence);
         }
         var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
         TimeZoneInfo zone;
@@ -453,11 +512,11 @@ public class BookingFlow : IBookingFlow
             slots = new TimePreferenceResolver().FilterAvailableSlots(slots, DateOnly.FromDateTime(date), zone, context.PreferredTime).ToList();
             if (slots.Count == 0) return "Hay horarios disponibles, pero ninguno coincide con tu preferencia. ¿Qué otra franja u hora prefieres?";
         }
-        LastResponsePlan = new(ConversationIntent.Reservation,
+        if (evidence != null) { evidence.Zone = zone.Id; evidence.Set(
             slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(),
             "¿Qué horario prefieres?", slots.Take(8).Select(s => {
                 var label = TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture);
-                return new ConversationMenuOption(label, label, "Time"); }).ToArray());
+                return new ConversationMenuOption(label, label, "Time"); }).ToArray()); }
         return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
             string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
             (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +
@@ -477,7 +536,7 @@ public class BookingFlow : IBookingFlow
         catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Lima"); }
     }
 
-    private async Task<string> VerifiedAlternativesAsync(Guid workspace, ConversationContextDto context, DateTime date, CancellationToken ct)
+    private async Task<string> VerifiedAlternativesAsync(Guid workspace, ConversationContextDto context, DateTime date, CancellationToken ct, TurnEvidence? evidence = null)
     {
         var hours = (await _hoursRepo.GetBusinessHoursAsync(workspace, context.SelectedLocationId, ct)).ToArray();
         var profile = await _profileRepo.GetProfileAsync(workspace, ct);
@@ -491,7 +550,7 @@ public class BookingFlow : IBookingFlow
             if (context.PreferredTime != null) available = new TimePreferenceResolver().FilterAvailableSlots(available, DateOnly.FromDateTime(next), zone, context.PreferredTime);
             var slots = available.Take(3).ToArray();
             if (slots.Length == 0) continue;
-            LastResponsePlan = new(ConversationIntent.Reservation, slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(), "¿Te conviene ese día u otra fecha?", []);
+            if (evidence != null) { evidence.Zone = zone.Id; evidence.Set( slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(), "¿Te conviene ese día u otra fecha?", []); }
             return $"Sí hay opciones el {next:dd/MM/yyyy}: " + string.Join(", ", slots.Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture))) + ". ¿Te conviene ese día u otra fecha?";
         }
         return "¿Qué otra fecha te conviene?";
@@ -565,7 +624,7 @@ public class ChatFlow : IChatFlow
     {
         var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var denied = interpretation.DeniedResponse ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
-        if (denied != null) return new ChatResponse(denied);
+        if (denied != null) return new ChatResponse(denied) { Operation = OperationStatus.Denied };
 
         KnowledgeTopic? topic = interpretation.Intent switch
         {
@@ -634,7 +693,7 @@ public class ChatFlow : IChatFlow
         if (interpretation.Intent == ConversationIntent.General && result.Status == KnowledgeStatus.NotFound)
         {
             result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery { Topic = KnowledgeTopic.Profile }, ct);
-            if (result.Found) return new ChatResponse($"Esta es la información registrada del negocio:\n{result.Facts}\nSi necesitas otro dato, indícame cuál.");
+            if (result.Found) return Factual($"Esta es la información registrada del negocio:\n{result.Facts}\nSi necesitas otro dato, indícame cuál.");
         }
 
         // Business facts are returned verbatim from the factual query, never
@@ -645,9 +704,14 @@ public class ChatFlow : IChatFlow
                 ? result.ToResponse() : "No hay opciones registradas disponibles para esta consulta.";
             var next = interpretation.Intent == ConversationIntent.ServiceQuery && modules.Contains("RESERVATIONS")
                 ? "Si deseas reservar, dime qué servicio te interesa." : "También puedo ayudarte con ubicaciones, horarios o información específica. ¿Qué dato necesitas?";
-            return new ChatResponse($"{fallbackIntroduction}\n\n{facts}\n\n{next}");
+            return Factual($"{fallbackIntroduction}\n\n{facts}\n\n{next}");
         }
-        return new ChatResponse(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());
+        return Factual(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());
+
+        ChatResponse Factual(string response) => new(response) {
+            Facts = result.Found ? Array.AsReadOnly(new[] { new VerifiedFact(result.Source.ToString(), result.Facts, VerifiedFactSource.BusinessRepository) }) : [],
+            Operation = result.Found ? OperationStatus.Informational : OperationStatus.NotAvailable
+        };
     }
 }
 
