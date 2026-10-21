@@ -41,6 +41,27 @@ public sealed class LocationMentionResolver
 
 public sealed class OfferingMentionResolver
 {
+    internal static IReadOnlyList<BusinessEntityOption> NamedLiterals(string text, IReadOnlyList<BusinessEntityOption> options)
+    {
+        var value = " " + SpanishTextNormalizer.Normalize(text) + " ";
+        var hits = new List<(BusinessEntityOption Option, int Start, int End)>();
+        foreach (var option in options)
+            foreach (var name in new[] { option.Name }.Concat(option.Aliases ?? []))
+            {
+                var normalized = SpanishTextNormalizer.Normalize(name);
+                if (normalized.Length == 0) continue;
+                var phrase = " " + normalized + " ";
+                for (var start = value.IndexOf(phrase, StringComparison.Ordinal); start >= 0;
+                    start = value.IndexOf(phrase, start + 1, StringComparison.Ordinal))
+                    hits.Add((option, start, start + phrase.Length));
+            }
+        // Only subsumed spans lose specificity. Separate mentions remain separate,
+        // and equal names/aliases retain ambiguity instead of choosing an ID.
+        return hits.Where(h => !hits.Any(other => other.Start <= h.Start && other.End >= h.End
+                && other.End - other.Start > h.End - h.Start))
+            .Select(h => h.Option).DistinctBy(o => o.Id).ToArray();
+    }
+
     public SlotResolution<ResolvedBusinessEntity> Resolve(string text, IReadOnlyList<BusinessEntityOption> authorizedOfferings, bool directAnswer = false)
         => EntityMentionMatcher.Resolve(text, authorizedOfferings, directAnswer);
 
@@ -48,10 +69,9 @@ public sealed class OfferingMentionResolver
     {
         var words = SpanishTextNormalizer.Terms(text).Where(w => !CommercialWords.Contains(w)).ToArray();
         if (words.Length == 0) return SlotResolution<ResolvedBusinessEntity>.Missing();
-        bool Same(string a, string b) => Forms(a).Intersect(Forms(b), StringComparer.Ordinal).Any();
         bool Matches(string name) {
             var terms = SpanishTextNormalizer.Terms(name);
-            return words.All(w => terms.Any(t => Same(w, t)));
+            return words.All(w => terms.Any(t => SameWord(w, t)));
         }
         var exact = options.Where(o => o.Id == text || new[] { o.Name }.Concat(o.Aliases ?? []).Any(n => SpanishTextNormalizer.Normalize(n) == SpanishTextNormalizer.Normalize(text))).ToArray();
         var matches = (exact.Length > 0 ? exact : options.Where(o => new[] { o.Name }.Concat(o.Aliases ?? []).Any(Matches)))
@@ -68,5 +88,6 @@ public sealed class OfferingMentionResolver
         if (word.Length > 3 && word.EndsWith('s')) yield return word[..^1];
         if (word.Length > 4 && word.EndsWith("es", StringComparison.Ordinal)) yield return word[..^2];
     }
+    internal static bool SameWord(string a, string b) => Forms(a).Intersect(Forms(b), StringComparer.Ordinal).Any();
     private static readonly HashSet<string> CommercialWords = new(["cuanto","cuesta","cuestan","cual","que","es","son","esos","estos","ese","esa","dos","tres","tengo","hay","disponible","disponibles","atienden","aqui","dura","duracion","precio","precios","diferencia","entre","compara","comparar","con","recomiendas","para","una","general","ofrecen","tienen"], StringComparer.Ordinal);
 }

@@ -15,7 +15,8 @@ public sealed class OrderMentionResolver
         ["trece"]=13,["catorce"]=14,["quince"]=15,["dieciseis"]=16,["diecisiete"]=17,["dieciocho"]=18,
         ["diecinueve"]=19,["veinte"]=20,["treinta"]=30,["cuarenta"]=40,["cincuenta"]=50 };
     private static readonly HashSet<string> Noise = new(["quiero","quisiera","necesito","comprar","llevar","llevo","dame","agrega","agregar","anade","pon","poner","cambia","cambiar","mejor","quita","quitar","elimina","eliminar","saca","sacar","el","la","los","las","de","del","al","a","en","unidades","unidad","producto","productos","por","favor","me","puedes","apuntar","apuntas","vendes","pedir","pedido","si","y","esta","bien","entonces","igual","otro","otra","otros","otras"], StringComparer.Ordinal);
-    public static bool IsQuestion(string text) => text.Contains('?') || Words(text).Any(w => w is "cuanto" or "cuesta" or "cuestan" or "dura" or "tienen" or "hay" or "diferencia" or "compara" or "recomiendas");
+    public static bool IsQuestion(string text) => text.Contains('?') || PoliteRequest(text, information: true)
+        || Words(text).Any(w => w is "cuanto" or "cuesta" or "cuestan" or "dura" or "tienen" or "hay" or "diferencia" or "compara" or "recomiendas");
     public static bool IsHypothetical(string text) => SpanishTextNormalizer.Normalize(text).Contains("y si ", StringComparison.Ordinal)
         || Words(text).Any(w => w is "hipoteticamente" or "supongamos" or "llevara" or "comprara");
     public static bool IsSubmit(string text)
@@ -41,13 +42,24 @@ public sealed class OrderMentionResolver
         if (NexFlow.Application.Features.Automation.Dialogue.Policy.DialoguePolicy.HasContradictoryGoals(SpanishTextNormalizer.Normalize(text))) return false;
         if (words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita")
             && !words.Any(w=>w is "precio" or "cuesta" or "cuestan" or "dura" or "duracion" or "compara" or "diferencia")) return false;
-        return IsQuestion(text) || words.Any(w => w is "producto" or "productos" or "servicios" or "catalogo" or "pedido" or "comprar" or "agrega" or "quita" or "quiero" or "quisiera" or "necesito" or "llevo" or "dame" or "apuntas" or "apuntar" or "vendes" or "anade");
+        return IsQuestion(text) || PolitePurchase(text) || InformationalRequest.Catalog(text)
+            || words.Any(w => w is "producto" or "productos" or "servicios" or "catalogo" or "pedido" or "comprar" or "agrega" or "quita" or "quiero" or "quisiera" or "necesito" or "llevo" or "dame" or "apuntas" or "apuntar" or "vendes" or "anade");
     }
     public static string[] Words(string text) => SpanishTextNormalizer.Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    internal static bool PolitePurchase(string text) => PoliteRequest(text, information: false);
+    private static bool PoliteRequest(string text, bool information)
+    {
+        var value = SpanishTextNormalizer.Normalize(text);
+        var prefix = value.StartsWith("me das ", StringComparison.Ordinal) || value.StartsWith("agregame ", StringComparison.Ordinal);
+        var asking = value.Split(' ').Any(w => w is "precio" or "precios" or "cuanto" or "cuesta" or "cuestan"
+            or "informacion" or "duracion" or "horario" or "horarios" or "direccion");
+        return prefix && asking == information;
+    }
 
     public (IReadOnlyList<OrderEdit> Edits, string? Error) Resolve(string text, IReadOnlyList<VerifiedOffering> products,
         ConversationContextDto context, OfferingReference? reference, bool hypothetical = false)
     {
+        text = CommercialCourtesy.Trim(text, products);
         var words = Words(text);
         if (words.Contains("no")) return ([], "No cambiaré el pedido. ¿Qué deseas consultar o corregir?");
         var kind = words.Any(w => w is "quita" or "quitar" or "elimina" or "eliminar" or "saca" or "sacar") ? OrderEditKind.Remove
@@ -59,6 +71,9 @@ public sealed class OrderMentionResolver
         foreach (var part in parts)
         {
             var tokens = Words(part);
+            // These are command prefixes only, never stop words inside a catalog name.
+            if (tokens.Length >= 2 && tokens[0] == "me" && tokens[1] == "das") tokens = tokens[2..];
+            else if (tokens.Length > 0 && tokens[0] == "agregame") tokens = tokens[1..];
             // Reject decimal/negative/overflow quantities instead of rounding or dropping a sign.
             if (Regex.IsMatch(part, @"-\s*\d|\d[.,]\d", RegexOptions.CultureInvariant)) return ([], "La cantidad debe ser un entero mayor que cero.");
             var number = tokens.Select((token,index) => (token,index)).FirstOrDefault(t => Numbers.ContainsKey(t.token) || t.token.All(char.IsDigit));
@@ -118,13 +133,15 @@ public sealed class OrderMentionResolver
         }
         if (edits.GroupBy(e => e.ProductId).Any(g => g.Count() > 1 && g.Any(e => e.Kind != OrderEditKind.Add)))
             return ([], "Has indicado varios cambios para el mismo producto. ¿Qué cantidad o cambio deseas aplicar?");
-        return (edits, null);
+        return edits.Count == 0 ? ([], "¿Qué producto y cantidad deseas agregar o cambiar?") : (edits, null);
     }
 
     public static IReadOnlyList<VerifiedOffering> Match(string original, string term, IReadOnlyList<VerifiedOffering> offerings)
     {
         var matcher = new OfferingMentionResolver();
         var options=offerings.Select(p=>p.Option).ToArray();
+        var named = OfferingMentionResolver.NamedLiterals(original, options).Select(o => o.Id).ToHashSet(StringComparer.Ordinal);
+        if (named.Count > 0) return offerings.Where(o => named.Contains(o.Id)).ToArray();
         var literal=matcher.Resolve(original,options);
         var resolution=literal.Status == ResolutionStatus.Determined ? literal : matcher.ResolveCommercial(term, options);
         if (resolution.Status == ResolutionStatus.Insufficient) resolution = matcher.ResolveCommercial(original, offerings.Select(p => p.Option).ToArray());

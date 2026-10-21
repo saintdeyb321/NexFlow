@@ -23,18 +23,20 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var words = OrderMentionResolver.Words(text); var normalized = SpanishTextNormalizer.Normalize(text);
         var activeOrder = context.CurrentGoal == "ORDER";
         var hypothetical = OrderMentionResolver.IsHypothetical(text);
+        var catalogRequest = InformationalRequest.Catalog(text);
+        var politePurchase = OrderMentionResolver.PolitePurchase(text);
         var submit = OrderMentionResolver.IsSubmit(text) || activeOrder && context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true
             && normalized is "si" or "si confirmo" or "confirmo" or "de acuerdo";
         var summary = activeOrder && !hypothetical && (words.Any(w => w is "total" or "subtotal") || normalized is "cuanto seria" or "cuanto es" or "mostrar pedido" or "listar pedido" or "ver pedido" or "mi pedido");
         var changing = words.Any(w => w is "agrega" or "agregar" or "quita" or "quitar" or "elimina" or "eliminar" or "saca" or "cambia" or "mejor" or "pon");
-        var polite = !hypothetical && !words.Contains("no") && (changing && words.Contains("puedes") || words.Contains("me") && words.Any(w=>w is "apuntas" or "vendes"));
-        var buying = words.Any(w => w is "quiero" or "quisiera" or "necesito" or "comprar" or "llevo" or "dame" or "agrega" or "agregar" or "anade" or "apuntas" or "apuntar" or "vendes" or "pedir")
+        var polite = !hypothetical && !words.Contains("no") && (politePurchase || changing && words.Contains("puedes") || words.Contains("me") && words.Any(w=>w is "apuntas" or "vendes"));
+        var buying = !catalogRequest && (politePurchase || words.Any(w => w is "quiero" or "quisiera" or "necesito" or "comprar" or "llevo" or "dame" or "agrega" or "agregar" or "anade" or "apuntas" or "apuntar" or "vendes" or "pedir"))
             && !words.Contains("no") && (!OrderMentionResolver.IsQuestion(text) || polite);
         var internalLocation = activeOrder && (context.CurrentStep == "ORDER_LOCATION" || words.Any(w => w is "sede" or "en" or "cambia")) && !OrderMentionResolver.IsQuestion(text);
         if (changing && OrderMentionResolver.IsQuestion(text) && !hypothetical && !polite)
             return new(DialogueAct.Information, new() { Intent=ConversationIntent.Order }, Response: "¿Deseas modificar el pedido o solo consultar esa posibilidad?");
-        var readOnly = !submit && !summary && !polite && (hypothetical || OrderMentionResolver.IsQuestion(text)) && !changing;
-        var explicitOrder=words.Any(w=>w is "comprar" or "pedido" or "producto" or "productos" or "agrega" or "agregar" or "anade" or "dame" or "llevo" or "apuntas" or "vendes");
+        var readOnly = !submit && !summary && !polite && (catalogRequest || hypothetical || OrderMentionResolver.IsQuestion(text)) && !changing;
+        var explicitOrder=politePurchase || words.Any(w=>w is "comprar" or "pedido" or "producto" or "productos" or "agrega" or "agregar" or "anade" or "dame" or "llevo" or "apuntas" or "vendes");
         var weakPurchase=buying && !activeOrder && !explicitOrder;
         if (weakPurchase && !modules.Contains("CATALOG")) return null;
         var order = activeOrder && !readOnly || buying || submit;
@@ -65,8 +67,10 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var namedProducts=words.Any(w=>w is "producto" or "productos" or "stock");
         var namedServices=words.Any(w=>w is "servicio" or "servicios" or "dura" or "duracion");
         var wantsServices=namedServices || !namedProducts && (anaphora && reference?.Type == "SERVICE"
+            || catalogRequest && (reference?.Type == "SERVICE" || context.CurrentGoal is "BOOKING" or "RESERVATION"
+                || modules.Contains("SERVICES") && !modules.Contains("CATALOG"))
             || words.Contains("catalogo") && modules.Contains("SERVICES") && !modules.Contains("CATALOG"));
-        var wantsProducts=order || hypothetical || namedProducts || words.Contains("catalogo") && !wantsServices
+        var wantsProducts=order || hypothetical || namedProducts || (catalogRequest || words.Contains("catalogo")) && !wantsServices
             || !namedServices && anaphora && reference?.Type == "PRODUCT";
         var catalog = await slots.ReadCommerceAsync(workspace,context,wantsProducts || !wantsServices,(!order || weakPurchase) && !hypothetical && (weakPurchase || wantsServices || !wantsProducts),order && !weakPurchase,scope,ct);
         var products=catalog.Products.ToArray();
@@ -89,8 +93,9 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (wantsServices && !modules.Contains("SERVICES")) return Query("SERVICE", [], false, AiIntentAccess.ServicesUnavailable);
         if (wantsProducts && !modules.Contains("CATALOG")) return Query("PRODUCT", [], false, AiIntentAccess.ProductsUnavailable);
         var productMatches = OrderMentionResolver.Match(text, text, products); var serviceMatches = OrderMentionResolver.Match(text, text, services);
-        var broad = words.Any(w => w is "productos" or "servicios" or "catalogo")
-            && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo") && !words.Contains("diferencia");
+        var broad = (catalogRequest || words.Any(w => w is "productos" or "servicios" or "catalogo")
+            && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo"))
+            && !words.Contains("diferencia") && productMatches.Count == 0 && serviceMatches.Count == 0;
         if (broad) return wantsServices ? Query("SERVICE", services.Take(5).ToArray(), true) : Query("PRODUCT", products.Take(5).ToArray(), true);
         var matches = productMatches.Concat(serviceMatches).ToArray();
         if (matches.Length == 0 && reference != null && OrderMentionResolver.Ordinal(words) is { } ordinal && ordinal < reference.Ids.Length)

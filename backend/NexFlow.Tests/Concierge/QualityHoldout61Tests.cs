@@ -43,6 +43,7 @@ public sealed class QualityHoldout61Tests(ITestOutputHelper output)
                 Now = new(2026, 10, 20, 21, 0, 0, DateTimeKind.Utc)
             };
             f.Services[0].PriceMinorUnits = 7500;
+            f.UseCatalogKnowledge();
             if (script.Modules != null) f.Modules.IntersectWith(script.Modules);
             if (script.InactiveBread) f.Products[0].IsActive = false;
             if (script.MixedCurrency) f.Products[1].Currency = "USD";
@@ -104,6 +105,7 @@ public sealed class QualityHoldout61Tests(ITestOutputHelper output)
                     && !response.Contains("Puedo ayudarte con estas opciones", StringComparison.OrdinalIgnoreCase), "NoForcedGlobalMenu");
                 Check(repositories.SelectMany((m, i) => m.Invocations.Skip(offsets[i])).All(call => call.Arguments.Count == 0 || call.Arguments[0] is not Guid ws || ws == f.Workspace), "WorkspaceIsolation");
                 Check(f.Wording.Invocations.Count == wording, "NoCourtesyAi");
+                LinguisticTrace.Write(id, index, f, prior, state, understood, turn.Text, response, issues);
                 watch.Stop();
                 output.WriteLine(JsonSerializer.Serialize(new {
                     Metric = "QualityHoldout61", Case = id, Turn = index, Scope = other ? "B" : "A", Synthetic = true,

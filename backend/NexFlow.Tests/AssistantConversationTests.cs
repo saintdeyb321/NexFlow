@@ -343,6 +343,21 @@ public sealed class AssistantConversationTests
                 NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object);
         }
         public Task<ConversationContextDto> Context() => Contexts.GetOrRecoverContextAsync(Workspace, Phone, default);
+        public void UseCatalogKnowledge()
+        {
+            // Menu actions use IKnowledgeService, whereas direct commerce carries a
+            // verified offering plan. Exercise the real formatter against the same
+            // authorized fixture catalog, not the legacy generic S/25 placeholder.
+            var service = new KnowledgeService(ProfileReads.Object, LocationReads.Object, HoursReads.Object,
+                Mock.Of<IFaqRepository>(MockBehavior.Strict), OfferingReads.Object, NullLogger<KnowledgeService>.Instance);
+            KnowledgeReads.Setup(k => k.QueryAsync(Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == Workspace),
+                It.Is<KnowledgeQuery>(q => q.Topic == KnowledgeTopic.Products || q.Topic == KnowledgeTopic.Services || q.Topic == KnowledgeTopic.Offerings),
+                It.IsAny<CancellationToken>()))
+                .Returns((Guid w, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken ct) => {
+                    FactualQueries.Add((w, query.Topic));
+                    return service.QueryAsync(w, snapshot, query, ct);
+                });
+        }
         public Task<NexFlow.Application.Common.Result> HandleTurn(string text, string source)
             => Handler.Handle(new("instance", Phone, "Ana", text, source, false, Workspace), default);
         public async Task Turn(string text, string? source = null)

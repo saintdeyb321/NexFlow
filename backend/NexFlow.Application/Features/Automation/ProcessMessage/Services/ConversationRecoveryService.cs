@@ -114,7 +114,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                     : "¿Quieres preparar un pedido nuevo o consultar uno ya enviado? Para revisar un pedido enviado puedes solicitar un asesor."));
         if (text is "adios" or "chau" or "hasta luego" or "gracias" or "muchas gracias")
             return await Remember("¡Gracias por escribirnos! " + (string.IsNullOrEmpty(context.CurrentGoal) ? "Aquí estaremos cuando necesites información del negocio." : Continuation(context)));
-        if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones")
+        if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones" || InformationalRequest.Menu(text))
         { context.RecoveryOptionsOffset = 0; return await Menu("Estas son las opciones disponibles:"); }
         if (text is "ver mas" or "mas opciones" or "otros servicios")
         {
