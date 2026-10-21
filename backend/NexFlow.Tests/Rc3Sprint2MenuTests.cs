@@ -80,7 +80,7 @@ public sealed class Rc3Sprint2MenuTests
         offerings.Setup(o => o.GetProductsAsync(f.Workspace, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ProductDto>());
         var recovery = new ConversationRecoveryService(f.Contexts, Mock.Of<IConversationStateRepository>(), offerings.Object,
             Mock.Of<ILocationRepository>(), Mock.Of<IBusinessHoursRepository>(), Mock.Of<IReservationEngine>(),
-            Mock.Of<IClock>(clock => clock.UtcNow == f.Now), Options.Create(new AssistantRecoveryOptions()), Mock.Of<IBusinessProfileRepository>());
+            Mock.Of<IClock>(clock => clock.UtcNow == f.Now), Options.Create(new AssistantRecoveryOptions()), Mock.Of<IBusinessProfileRepository>(), f.KnowledgeReads.Object);
         f.Modules.Add("CATALOG"); await f.Turn("menú", "refresh-products");
         var context = await f.Context();
         result = await recovery.RecoverAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, "chat", Command(f, "opción 1"), context, f.Modules, default);

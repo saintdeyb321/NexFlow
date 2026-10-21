@@ -14,14 +14,25 @@ internal static class BusinessHoursFormatter
     {
         var records = hours.ToList();
         if (records.Any(h => h.DayOfWeek is < 0 or > 6)) throw new InvalidOperationException("Invalid stored day of week.");
-        if (records.Count == 0) return "No hay horarios de atención registrados para esta sede.";
+        if (records.Count == 0) return "No hay horarios de atención registrados para el alcance consultado.";
+        if (records.GroupBy(h => h.DayOfWeek).Any(g => g.Count() != 1)) throw new InvalidOperationException("Duplicate stored day of week.");
         string[] days = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-        return string.Join("\n", new[] { 1, 2, 3, 4, 5, 6, 0 }.Select(day =>
+        var week = new[] { 1, 2, 3, 4, 5, 6, 0 };
+        var labels = week.Select(day =>
         {
             var record = records.FirstOrDefault(h => h.DayOfWeek == day);
-            return record == null ? $"{days[day]}: Sin horario registrado"
-                : record.IsClosed ? $"{days[day]}: Cerrado"
-                : $"{days[day]}: {record.OpenTime} – {record.CloseTime}";
-        }));
+            if (record is { IsClosed: false } && !IsOpen(record)) throw new InvalidOperationException("Invalid stored business hours.");
+            return record == null ? "Sin horario registrado" : record.IsClosed ? "Cerrado" : $"{record.OpenTime} – {record.CloseTime}";
+        }).ToArray();
+        var groups = new List<string>();
+        for (var start = 0; start < week.Length;)
+        {
+            var end = start;
+            while (end + 1 < week.Length && labels[end + 1] == labels[start]) end++;
+            var range = start == end ? days[week[start]] : $"{days[week[start]]} a {days[week[end]].ToLowerInvariant()}";
+            groups.Add($"{range}: {labels[start]}");
+            start = end + 1;
+        }
+        return string.Join("\n", groups);
     }
 }

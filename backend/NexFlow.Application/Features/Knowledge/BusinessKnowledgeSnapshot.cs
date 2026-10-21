@@ -10,6 +10,8 @@ public class BusinessKnowledgeSnapshot
     public Guid WorkspaceId { get; init; }
     public BusinessProfileDto? Profile { get; init; }
     public IReadOnlyList<LocationDto> Locations { get; init; } = Array.Empty<LocationDto>();
+    // Server-only, freshly read for this query; never populated from a cached/historical snapshot.
+    internal IReadOnlyList<LocationDto>? CurrentQueryLocations { get; init; }
     public IReadOnlyList<BusinessHoursDto> Hours { get; init; } = Array.Empty<BusinessHoursDto>();
     public IReadOnlyList<FaqDto> Faqs { get; init; } = Array.Empty<FaqDto>();
 

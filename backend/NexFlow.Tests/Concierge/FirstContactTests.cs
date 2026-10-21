@@ -23,7 +23,8 @@ public sealed class FirstContactTests(ITestOutputHelper output)
             await f.HandleTurn(Inputs[scenario],"first");var text=f.Sent.GetValueOrDefault("first")?.Content??"";
             ExportSynthetic(scenario,text);
             Check(text.Length>0,"Response");Check(!text.Contains("estas opciones",StringComparison.OrdinalIgnoreCase),"NoGlobalMenu");
-            if(scenario<=3) Check(!Regex.IsMatch(text,@"\b\d+[.)]"),"NoForcedNumericChoice");
+            // A decimal price in a factual reply is not a numbered choice; match actual list lines.
+            if(scenario<=3) Check(!Regex.IsMatch(text,@"(?m)^\s*\d+[.)]\s+"),"NoForcedNumericChoice");
             if(scenario==4) Check(text.Contains("Limpieza dental",StringComparison.OrdinalIgnoreCase),"Services");
             if(scenario==5) Check((await f.Context()).CurrentGoal=="RESERVATION","BookingDraft");
             if(scenario==6) Check(text.Contains("75.00",StringComparison.OrdinalIgnoreCase),"VerifiedPrice");

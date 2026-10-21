@@ -28,7 +28,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var dualCatalog = unscopedCatalog && modules.Contains("CATALOG") && modules.Contains("SERVICES");
         var politePurchase = OrderMentionResolver.PolitePurchase(text);
         var submit = OrderMentionResolver.IsSubmit(text) || activeOrder && context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true
-            && normalized is "si" or "si confirmo" or "confirmo" or "de acuerdo";
+            && NexFlow.Application.Features.Automation.Dialogue.Policy.ConversationConfirmation.IsAffirmative(text);
         var summary = activeOrder && !hypothetical && (words.Any(w => w is "total" or "subtotal") || normalized is "cuanto seria" or "cuanto es" or "mostrar pedido" or "listar pedido" or "ver pedido" or "mi pedido");
         var changing = words.Any(w => w is "agrega" or "agregar" or "quita" or "quitar" or "elimina" or "eliminar" or "saca" or "cambia" or "mejor" or "pon");
         var polite = !hypothetical && !words.Contains("no") && (politePurchase || changing && words.Contains("puedes") || words.Contains("me") && words.Any(w=>w is "apuntas" or "vendes"));

@@ -28,6 +28,7 @@ public record ChatResponse(string Text, string? MediaUrl = null, string? FileNam
 {
     public IReadOnlyList<VerifiedFact> Facts { get; init; } = [];
     public IReadOnlyList<ConversationMenuOption>? Choices { get; init; }
+    public KnowledgeResult? Information { get; init; }
     public OperationStatus Operation { get; init; } = OperationStatus.Informational;
 }
 public interface IChatFlow { Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct); }
@@ -740,6 +741,7 @@ public class ChatFlow : IChatFlow
         return Factual(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());
 
         ChatResponse Factual(string response) => new(response) {
+            Information = result.Source is KnowledgeTopic.BusinessHours or KnowledgeTopic.Locations or KnowledgeTopic.Profile ? result : null,
             Facts = result.Found ? Array.AsReadOnly(new[] { new VerifiedFact(result.Source.ToString(), result.Facts, VerifiedFactSource.BusinessRepository) }) : [],
             Operation = result.Found ? OperationStatus.Informational : OperationStatus.NotAvailable
         };

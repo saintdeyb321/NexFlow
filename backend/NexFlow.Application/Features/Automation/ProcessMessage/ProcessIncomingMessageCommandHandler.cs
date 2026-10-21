@@ -6,6 +6,7 @@ using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Application.Features.Knowledge;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
@@ -116,6 +117,8 @@ public class ProcessIncomingMessageCommandHandler
                 EnsureOutboundFinalized(response);
                 return true;
             }
+            // Once a scope/clarification exists, use recovery's clock, expiry and selection policy.
+            if (topic == KnowledgeTopic.BusinessHours && context.Information != null) return false;
             KnowledgeResult result;
             try
             {
@@ -123,8 +126,9 @@ public class ProcessIncomingMessageCommandHandler
                 var mentionedLocations = locations.Where(l => !string.IsNullOrWhiteSpace(l.Name) && message.Contains(l.Name, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (mentionedLocations.Count > 1) return false;
 
-                var locationId = mentionedLocations.Count == 1 ? mentionedLocations[0].Id : context.SelectedLocationId;
-                var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
+                var locationId = mentionedLocations.Count == 1 ? mentionedLocations[0].Id
+                    : locations.Any(l => l.Id == context.SelectedLocationId) ? context.SelectedLocationId : null;
+                var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId, CurrentQueryLocations = locations };
                 result = await _knowledgeService.QueryAsync(workspaceId, snapshot,
                     new KnowledgeQuery { Topic = topic.Value, LocationId = locationId }, ct);
             }
@@ -135,6 +139,8 @@ public class ProcessIncomingMessageCommandHandler
                 result = new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value };
             }
 
+            InformationalRequest.Remember(context, topic.Value, result, DateTime.UtcNow);
+            await _contextRecovery.SaveContextAsync(workspaceId, phone, context, ct);
             var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone,
                 result.ToResponse(), SenderType.AI, sourceMessageId, ct);
             EnsureOutboundFinalized(outbound);

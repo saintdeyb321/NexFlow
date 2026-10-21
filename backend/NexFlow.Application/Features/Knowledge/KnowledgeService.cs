@@ -56,10 +56,10 @@ public sealed class KnowledgeService : IKnowledgeService
         {
             if (snapshot.WorkspaceId != workspaceId) throw new InvalidOperationException("Knowledge workspace mismatch.");
             var locationId = query.LocationId;
-            List<LocationDto>? locations = null;
+            List<LocationDto>? locations = snapshot.CurrentQueryLocations?.ToList();
             if (query.Topic == KnowledgeTopic.Locations || !string.IsNullOrWhiteSpace(locationId))
             {
-                locations = (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList();
+                locations ??= (await _locationRepo.GetLocationsAsync(workspaceId, cancellationToken)).ToList();
                 if (!string.IsNullOrWhiteSpace(locationId) && !locations.Any(l => l.Id == locationId)) return Result(query, locationId);
             }
 
@@ -70,8 +70,7 @@ public sealed class KnowledgeService : IKnowledgeService
                     facts = QueryLocations(locations!, locationId);
                     break;
                 case KnowledgeTopic.BusinessHours:
-                    facts = QueryHours((await _hoursRepo.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken)).ToList());
-                    break;
+                    return await QueryBusinessHoursAsync(workspaceId, query, locations, cancellationToken);
                 case KnowledgeTopic.Faqs:
                     facts = QueryFaqs((await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList(), query.SearchTerm);
                     break;
@@ -143,7 +142,38 @@ public sealed class KnowledgeService : IKnowledgeService
         return sb.ToString().Trim();
     }
 
-    private static string QueryHours(IEnumerable<BusinessHoursDto> hours) => BusinessHoursFormatter.Format(hours);
+    private async Task<KnowledgeResult> QueryBusinessHoursAsync(Guid workspaceId, KnowledgeQuery query, List<LocationDto>? locations, CancellationToken ct)
+    {
+        var records = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, query.LocationId, ct)).ToList();
+        if (!string.IsNullOrWhiteSpace(query.LocationId))
+        {
+            var location = locations!.Single(l => l.Id == query.LocationId);
+            return Result(query, location.Id, records.Count == 0
+                ? $"No hay horarios de atención configurados para {location.Name}. Esto no indica que esté cerrada."
+                : $"Horario de atención de {location.Name}:\n{BusinessHoursFormatter.Format(records)}");
+        }
+        if (records.Count > 0) return Result(query, null, $"Horario general de atención:\n{BusinessHoursFormatter.Format(records)}");
+
+        // No calendar fan-out: read at most one additional schedule, or ask for a bounded choice.
+        locations ??= (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToList();
+        var choices = locations.Where(l => !string.IsNullOrWhiteSpace(l.Id)).OrderBy(l => l.Name).ThenBy(l => l.Id).Take(6).ToArray();
+        if (choices.Length == 0) return Result(query, null, "No hay un horario general ni sedes configuradas para consultar. Puedes solicitar un asesor.");
+        if (choices.Length == 1)
+        {
+            var location = choices[0];
+            var schedule = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, location.Id, ct)).ToList();
+            return Result(query, location.Id, schedule.Count == 0
+                ? $"No hay horarios de atención configurados para {location.Name}. Esto no indica que esté cerrada."
+                : $"Horario de atención de {location.Name}:\n{BusinessHoursFormatter.Format(schedule)}");
+        }
+        var page = choices.Take(5).Select(l => new KnowledgeLocationChoice(l.Id!, l.Name)).ToArray();
+        return new KnowledgeResult {
+            Status = KnowledgeStatus.Found, Source = KnowledgeTopic.BusinessHours, LocationChoices = page,
+            Facts = "No hay un horario general configurado. ¿De qué sede deseas consultar los horarios?\n"
+                + string.Join("\n", page.Select((l, index) => $"{index + 1}. {l.Name}"))
+                + (choices.Length > 5 ? "\nTambién puedes indicar el nombre de otra sede." : "")
+        };
+    }
 
     private static string QueryFaqs(IEnumerable<FaqDto> faqs, string? searchTerm)
     {

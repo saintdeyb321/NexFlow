@@ -32,6 +32,7 @@ public class KnowledgeResult
     public string Facts { get; init; } = string.Empty;
     public KnowledgeTopic Source { get; init; }
     public string? LocationId { get; init; }
+    public IReadOnlyList<KnowledgeLocationChoice> LocationChoices { get; init; } = [];
 
     public string ToResponse() => Status switch
     {
@@ -40,3 +41,5 @@ public class KnowledgeResult
         _ => "No tengo información registrada que coincida con tu consulta. ¿Podrías precisar qué necesitas o indicar la sede?"
     };
 }
+
+public sealed record KnowledgeLocationChoice(string Id, string Name);

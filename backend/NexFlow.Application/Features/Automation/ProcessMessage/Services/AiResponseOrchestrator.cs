@@ -10,6 +10,7 @@ using NexFlow.Domain.Exceptions;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
+using NexFlow.Application.Features.Automation.Dialogue.Policy;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -73,7 +74,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
 
         var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
-        if (recovery?.Response != null) { act = recovery.Act; operation = recovery.Operation; return await SendText(recovery.Response); }
+        if (recovery?.Response != null) { intent = recovery.Interpretation?.Intent ?? ConversationIntent.General; act = recovery.Act; operation = recovery.Operation; return await SendText(recovery.Response); }
         AiInterpretation interpretation;
         PreparedDialogueTurn? prepared = null;
         if (recovery?.Interpretation != null) interpretation = recovery.Interpretation;
@@ -106,7 +107,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 response += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
             return await SendText(response);
         }
-        interpretation.Confirmed = context.CurrentStep == "CONFIRM" && normalized is "si" or "si confirmo" or "confirmo" or "confirmar" or "de acuerdo";
+        interpretation.Confirmed = context.CurrentStep == "CONFIRM" && ConversationConfirmation.IsAffirmative(request.MessageText);
         if (interpretation.Confirmed) act = DialogueAct.Confirmation;
         else if (interpretation.Intent == ConversationIntent.Support) act = DialogueAct.HumanAssistance;
         else if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) act = DialogueAct.Cancellation;
@@ -267,6 +268,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             conversation.Id, normalizedPhone, await Compose(response), SenderType.AI, request.MessageId, cancellationToken);
         async Task<MessageRecord> SendChat(ChatResponse response)
         {
+            if (response.Information != null)
+            {
+                InformationalRequest.Remember(context, response.Information.Source, response.Information, _clock?.UtcNow ?? DateTime.UtcNow);
+                await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
+            }
             if (response.Choices != null && _recovery != null)
             {
                 var currentModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);

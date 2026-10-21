@@ -12,6 +12,8 @@ public class ConversationContextDto
     public string? RecoveryLastMessageId { get; set; }
     public string? RecoveryLastResponse { get; set; }
     public string? RecoveryLastInterpretation { get; set; }
+    // Optional in legacy contextJson. Informational scope never replaces transactional draft slots.
+    public ConversationInformationContext? Information { get; set; }
 
     public string Mode { get; set; } = "Automatic"; // Automatic, Human
     public string? HandoffReason { get; set; }
@@ -48,6 +50,16 @@ public class ConversationContextDto
 }
 
 public sealed record ConversationMenuOption(string Key, string Label, string Kind);
+
+public sealed class ConversationInformationContext
+{
+    public string Topic { get; set; } = string.Empty;
+    public string? LocationId { get; set; }
+    public string? Clarification { get; set; }
+    public List<ConversationMenuOption> Locations { get; set; } = new();
+    public string? DraftFingerprint { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
 
 public class OrderDraftItem
 {

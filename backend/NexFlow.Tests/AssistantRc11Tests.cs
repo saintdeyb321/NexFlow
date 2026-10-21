@@ -109,7 +109,7 @@ public sealed class AssistantRc11Tests
             _engine = new(_reservations.Object, catalog.Object, hours.Object, _profiles.Object, locations.Object, uow.Object, availability.Object, clock.Object, outbox.Object, new NexFlow.Tests.Fakes.InMemoryReservationResourceCoordinator());
             var entitlements = new Mock<IEntitlementService>(); entitlements.Setup(e => e.GetAvailableModuleCodesAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), default)).ReturnsAsync(_modules);
             _booking = new(_offerings.Object, new LocationResolverService(locations.Object), _engine, locations.Object, hours.Object, entitlements.Object, _contexts, _reservations.Object, _profiles.Object, Mock.Of<IKnowledgeService>(MockBehavior.Strict));
-            _recovery = new(_contexts, states, _offerings.Object, locations.Object, hours.Object, _engine, clock.Object, Options.Create(new AssistantRecoveryOptions()), _profiles.Object);
+            _recovery = new(_contexts, states, _offerings.Object, locations.Object, hours.Object, _engine, clock.Object, Options.Create(new AssistantRecoveryOptions()), _profiles.Object, Mock.Of<IKnowledgeService>(MockBehavior.Strict));
         }
 
         public Guid AddWorkspace(string? zone) { var id = Guid.NewGuid(); _zones.Add(id, zone); return id; }
