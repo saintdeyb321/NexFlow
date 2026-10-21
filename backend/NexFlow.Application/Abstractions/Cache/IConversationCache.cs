@@ -14,6 +14,7 @@ public class ConversationContextDto
     public string? RecoveryLastInterpretation { get; set; }
     // Optional in legacy contextJson. Informational scope never replaces transactional draft slots.
     public ConversationInformationContext? Information { get; set; }
+    public ReservationManagementContext? ReservationManagement { get; set; }
 
     public string Mode { get; set; } = "Automatic"; // Automatic, Human
     public string? HandoffReason { get; set; }

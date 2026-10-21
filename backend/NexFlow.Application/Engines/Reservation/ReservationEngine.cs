@@ -83,7 +83,17 @@ public class ReservationEngine : IReservationEngine
         return true;
     }
 
-    public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
+    public Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
+        => GetAvailabilityCoreAsync(workspaceId, locationId, serviceId, date, null, cancellationToken);
+
+    public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityForExistingAsync(Guid workspaceId, string canonicalContact, Guid reservationId, DateTime date, CancellationToken ct)
+    {
+        var owned = await _reservationRepository.GetOwnedFutureAsync(workspaceId, canonicalContact, reservationId, ct);
+        if (owned == null || !await _reservationRepository.HasSingleFutureOwnerAsync(workspaceId, canonicalContact, ct)) return [];
+        return await GetAvailabilityCoreAsync(workspaceId, owned.LocationId, owned.ServiceId, date, owned.Id, ct);
+    }
+
+    private async Task<IEnumerable<TimeSlotDto>> GetAvailabilityCoreAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, Guid? excludeReservationId, CancellationToken cancellationToken)
     {
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (!locations.Any(l => l.Id == locationId)) return [];
@@ -123,7 +133,7 @@ public class ReservationEngine : IReservationEngine
             var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, workspaceZone);
             var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, workspaceZone);
 
-            bool isOccupied = existingReservations.Any(r => r.Status != Domain.Enums.ReservationStatus.Cancelled && r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
+            bool isOccupied = existingReservations.Any(r => r.Id != excludeReservationId && r.Status != Domain.Enums.ReservationStatus.Cancelled && r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
             bool isPast = currentSlotStartLocal <= localNow;
 
             if (!isOccupied && !isPast) availableSlots.Add(new TimeSlotDto(utcSlotStart, utcSlotEnd, true));
@@ -221,10 +231,28 @@ public class ReservationEngine : IReservationEngine
         }
     }
 
-    public async Task<Result<ReservationDto>> EditReservationAsync(Guid workspaceId, Guid reservationId, DateTime newDateTime, CancellationToken cancellationToken)
+    public Task<Result<ReservationDto>> EditReservationAsync(Guid workspaceId, Guid reservationId, DateTime newDateTime, CancellationToken cancellationToken)
+        => EditCoreAsync(workspaceId, reservationId, newDateTime, null, cancellationToken);
+
+    public async Task<Result<ReservationDto>> ApplyExistingOperationAsync(ReservationOperationCommand operation, CancellationToken ct)
+    {
+        operation.Validate();
+        var replay = await ReadOperationAsync(operation, ct);
+        if (replay != null) return replay;
+        if (operation.Action == ReservationOperationKind.RescheduleExistingReservation && operation.ProposedUtc <= _clock.UtcNow)
+            return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTime", "La nueva fecha y hora deben ser futuras."));
+        return operation.Action == ReservationOperationKind.RescheduleExistingReservation
+            ? await EditCoreAsync(operation.WorkspaceId, operation.ReservationId, operation.ProposedUtc!.Value, operation, ct)
+            : await CancelExistingCoreAsync(operation, ct);
+    }
+
+    private async Task<Result<ReservationDto>> EditCoreAsync(Guid workspaceId, Guid reservationId, DateTime newDateTime, ReservationOperationCommand? operation, CancellationToken cancellationToken)
     {
         var reservation = await _reservationRepository.GetByIdAsync(workspaceId, reservationId, cancellationToken);
         if (reservation == null) return Result<ReservationDto>.Failure(new Error("Reservation.NotFound", "La reserva no existe."));
+        if (operation != null && !MatchesOperation(reservation, operation))
+            return await ReadOperationAsync(operation, cancellationToken)
+                ?? Result<ReservationDto>.Failure(new Error("Reservation.SelectionExpired", "La cita cambió o ya no pertenece al contacto autorizado. Vuelve a consultarla."));
         if (reservation.Status != Domain.Enums.ReservationStatus.Confirmed)
             return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", "Solo se pueden reagendar reservas confirmadas."));
 
@@ -267,16 +295,27 @@ public class ReservationEngine : IReservationEngine
         {
             using (var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled))
             {
+                if (operation != null)
+                {
+                    var replay = await ReadOperationAsync(operation, cancellationToken);
+                    if (replay != null) return replay;
+                    if (!await _reservationRepository.HasSingleFutureOwnerAsync(workspaceId, operation.Contact, cancellationToken))
+                        return Result<ReservationDto>.Failure(new Error("Reservation.VerificationRequired", "Este contacto requiere verificación adicional con un asesor."));
+                }
                 await _resources.ValidateAsync(resourceVersions, cancellationToken);
                 var isAvailable = await _reservationRepository.IsTimeSlotAvailableAsync(workspaceId, reservation.LocationId, newStartTimeUtc, newEndTimeUtc, reservation.Id, cancellationToken);
                 if (!isAvailable) return Result<ReservationDto>.Failure(new Error("Reservation.Conflict", "El nuevo horario ya está ocupado."));
 
+                if (operation != null && reservation.StartTime == newStartTimeUtc && reservation.EndTime == newEndTimeUtc)
+                    return Result<ReservationDto>.Failure(new Error("Reservation.NoChange", "La cita conserva su fecha y hora; no se realizó ningún cambio."));
                 try { reservation.Reschedule(newStartTimeUtc, newEndTimeUtc); }
                 catch (DomainException ex) { return Result<ReservationDto>.Failure(new Error("Reservation.InvalidTransition", ex.Message)); }
 
                 var dto = ToDto(reservation);
                 var payload = new N8nEventPayload<object>(workspaceId, "RESERVATION_RESCHEDULED", Guid.NewGuid().ToString(), $"res_upd_{reservation.Id}", DateTime.UtcNow, dto);
-                var outboxMessage = new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_RESCHEDULED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) };
+                var outboxMessage = operation == null
+                    ? new OutboxMessage { WorkspaceId = workspaceId, EventType = "RESERVATION_RESCHEDULED", PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload) }
+                    : ReservationOperationReceipt.Create(operation, "RESERVATION_RESCHEDULED", dto, dto, _clock.UtcNow);
                 pendingEvent = outboxMessage;
 
                 await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
@@ -289,6 +328,11 @@ public class ReservationEngine : IReservationEngine
         catch (Exception ex) when (ex is ConcurrencyException || IsConcurrencyConflict(ex))
         {
             _unitOfWork.DiscardChanges(pendingEvent == null ? [reservation] : [reservation, pendingEvent]);
+            if (operation != null)
+            {
+                var replay = await ReadOperationAsync(operation, cancellationToken);
+                if (replay != null) return replay;
+            }
             return Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "El horario acaba de ser tomado por otro cliente."));
         }
     }
@@ -400,6 +444,53 @@ public class ReservationEngine : IReservationEngine
             return Result.Failure(new Error("Reservation.ConcurrencyConflict", "La reserva cambió concurrentemente. Vuelve a consultarla."));
         }
     }
+    private bool MatchesOperation(Domain.Entities.Reservation reservation, ReservationOperationCommand operation)
+        => reservation.WorkspaceId == operation.WorkspaceId && reservation.CustomerIdentifier == operation.Contact
+            && reservation.Status == Domain.Enums.ReservationStatus.Confirmed && reservation.StartTime > _clock.UtcNow
+            && reservation.RowVersion == operation.ExpectedVersion && reservation.StartTime == operation.ExpectedStartTime;
+
+    private async Task<Result<ReservationDto>?> ReadOperationAsync(ReservationOperationCommand operation, CancellationToken ct)
+    {
+        var message = await _outboxRepository.GetByIdAsync(operation.WorkspaceId, operation.Key, ct);
+        if (message == null) return null;
+        var receipt = ReservationOperationReceipt.Read(message, operation.WorkspaceId, operation.Contact);
+        return receipt.Fingerprint == operation.Fingerprint
+            ? Result<ReservationDto>.Success(receipt.Result)
+            : Result<ReservationDto>.Failure(new Error("Reservation.IdempotencyConflict", "La identidad de esta solicitud ya fue utilizada con otro contenido."));
+    }
+
+    private async Task<Result<ReservationDto>> CancelExistingCoreAsync(ReservationOperationCommand operation, CancellationToken ct)
+    {
+        var reservation = await _reservationRepository.GetByIdAsync(operation.WorkspaceId, operation.ReservationId, ct);
+        if (reservation == null || !MatchesOperation(reservation, operation))
+            return await ReadOperationAsync(operation, ct)
+                ?? Result<ReservationDto>.Failure(new Error("Reservation.SelectionExpired", "La cita cambió o ya no pertenece al contacto autorizado. Vuelve a consultarla."));
+        var versions = await CaptureResourcesAsync(operation.WorkspaceId, reservation.LocationId, reservation.ServiceId, ct);
+        OutboxMessage? pending = null;
+        try
+        {
+            using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled);
+            var replay = await ReadOperationAsync(operation, ct);
+            if (replay != null) return replay;
+            if (!await _reservationRepository.HasSingleFutureOwnerAsync(operation.WorkspaceId, operation.Contact, ct))
+                return Result<ReservationDto>.Failure(new Error("Reservation.VerificationRequired", "Este contacto requiere verificación adicional con un asesor."));
+            await _resources.ValidateAsync(versions, ct);
+            reservation.Cancel();
+            var dto = ToDto(reservation);
+            pending = ReservationOperationReceipt.Create(operation, "RESERVATION_CANCELLED", new { ReservationId = reservation.Id, Status = "CANCELLED" }, dto, _clock.UtcNow);
+            await _outboxRepository.AddAsync(pending, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
+            scope.Complete();
+            return Result<ReservationDto>.Success(dto);
+        }
+        catch (Exception ex) when (ex is ConcurrencyException || IsConcurrencyConflict(ex))
+        {
+            _unitOfWork.DiscardChanges(pending == null ? [reservation] : [reservation, pending]);
+            var replay = await ReadOperationAsync(operation, ct);
+            return replay ?? Result<ReservationDto>.Failure(new Error("Reservation.ConcurrencyConflict", "La cita cambió concurrentemente. Vuelve a consultarla."));
+        }
+    }
+
     private static ReservationDto ToDto(Domain.Entities.Reservation reservation) => new(
         reservation.Id, reservation.WorkspaceId, reservation.LocationId, reservation.ServiceId,
         reservation.CustomerName, reservation.CustomerIdentifier, reservation.StartTime, reservation.Status.ToString());

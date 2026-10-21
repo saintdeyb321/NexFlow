@@ -46,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<IIncomingMessageGuard, IncomingMessageGuard>();
         services.AddScoped<IConversationStateService, ConversationStateService>();
         services.AddScoped<IAiResponseOrchestrator, AiResponseOrchestrator>();
+        services.AddScoped<IExistingReservationFlow, ExistingReservationFlow>();
         services.AddScoped<IConversationRecoveryService, ConversationRecoveryService>();
         services.AddSingleton<NameSlotResolver>();
         services.AddSingleton<LocationMentionResolver>();

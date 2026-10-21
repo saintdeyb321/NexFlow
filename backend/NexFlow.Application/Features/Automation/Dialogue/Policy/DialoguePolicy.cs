@@ -1,6 +1,7 @@
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
+using NexFlow.Application.Features.Reservations;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Policy;
 
@@ -22,6 +23,8 @@ public sealed class DialoguePolicy
         var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (IsInformationOnly(normalized)) return DialogueAct.Information;
         var booking = state.CurrentGoal is "BOOKING" or "RESERVATION";
+        if (ReservationOperationClassifier.Classify(text, booking) == ReservationOperationKind.EditActiveDraft)
+            return DialogueAct.Correction;
         if (normalized is "quiero hablar con una persona" or "quiero hablar con alguien" or "necesito hablar con una persona") return DialogueAct.HumanAssistance;
         if (normalized is "ya no quiero continuar" or "no quiero continuar" or "no quiero seguir" or "no sigamos") return DialogueAct.Cancellation;
         if (normalized is "no quiero reservar" or "no deseo reservar" or "no necesito reservar") return DialogueAct.DeclineOperation;

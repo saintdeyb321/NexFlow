@@ -7,6 +7,10 @@ using Moq;
 using NexFlow.Application.Abstractions;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Enums;
+using NexFlow.Application.Features.Reservations;
+using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Domain.Entities.System;
+using System.Text.Json;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Configurations;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Context;
 using NexFlow.Infrastructure.Persistence.PostgreSQL.Repositories;
@@ -16,6 +20,98 @@ namespace NexFlow.Tests;
 
 public sealed class ReservationsRepositoryTests
 {
+    [Fact]
+    public async Task Future_contact_page_is_bounded_in_sql_and_details_recheck_owner_workspace_and_state()
+    {
+        await using var f = await DbFixture.CreateAsync(); var now = Utc("2030-07-01T12:00:00Z");
+        f.Clock.SetupGet(c => c.UtcNow).Returns(now);
+        const string contact = "+51999999999";
+        for (var i = 1; i <= 9; i++)
+        {
+            var row = Reservation.Create(i == 9 ? Guid.NewGuid() : f.Workspace, $"location-{i}", "service", i == 8 ? "+51888888888" : contact,
+                "Customer", now.AddHours(i <= 5 ? 1 : i), now.AddHours(i <= 5 ? 1 : i).AddMinutes(30));
+            f.Db.Entry(row).Property(r => r.Id).CurrentValue = Id(i);
+            if (i == 7) row.Cancel(); f.Repository.Add(row);
+        }
+        await f.SeedAsync();
+        var page = await f.Repository.GetFutureForContactAsync(f.Workspace, contact, null, 5, default);
+        Assert.Equal(Enumerable.Range(1, 5).Select(Id), page.Items.Select(r => r.Id)); Assert.True(page.HasMore);
+        var sql = Assert.Single(f.Sql.Commands); Assert.Contains("LIMIT", sql); Assert.Contains("ORDER BY", sql);
+        Assert.Contains("CustomerIdentifier", sql); Assert.Contains("Status", sql); Assert.DoesNotContain("CustomerName", sql);
+        f.Sql.Commands.Clear(); var last = page.Items[^1];
+        var second = await f.Repository.GetFutureForContactAsync(f.Workspace, contact, new(DateTime.SpecifyKind(last.StartTime, DateTimeKind.Utc), last.Id), 5, default);
+        Assert.Equal(Id(6), Assert.Single(second.Items).Id); Assert.False(second.HasMore);
+        Assert.Null(await f.Repository.GetOwnedFutureAsync(Guid.NewGuid(), contact, Id(1), default));
+        Assert.Null(await f.Repository.GetOwnedFutureAsync(f.Workspace, "+51888888888", Id(1), default));
+        Assert.Null(await f.Repository.GetOwnedFutureAsync(f.Workspace, contact, Id(7), default));
+        Assert.NotNull(await f.Repository.GetOwnedFutureAsync(f.Workspace, contact, Id(1), default));
+        f.Clock.SetupGet(c => c.UtcNow).Returns(now.AddDays(2));
+        Assert.Null(await f.Repository.GetOwnedFutureAsync(f.Workspace, contact, Id(1), default));
+    }
+
+    [Fact]
+    public async Task Contact_owner_check_is_bounded_and_does_not_assume_a_shared_number_is_one_person()
+    {
+        await using var f = await DbFixture.CreateAsync(); var now = Utc("2030-07-01T12:00:00Z");
+        f.Clock.SetupGet(c => c.UtcNow).Returns(now); const string phone = "+51999999999";
+        f.Repository.Add(Reservation.Create(f.Workspace, "l", "s", phone, "Ana", now.AddHours(1), now.AddHours(1.5)));
+        await f.SeedAsync(); Assert.True(await f.Repository.HasSingleFutureOwnerAsync(f.Workspace, phone, default));
+        f.Repository.Add(Reservation.Create(f.Workspace, "l", "s", phone, "Otra persona", now.AddHours(2), now.AddHours(2.5)));
+        await f.SeedAsync(); Assert.False(await f.Repository.HasSingleFutureOwnerAsync(f.Workspace, phone, default));
+        Assert.Contains("DISTINCT", Assert.Single(f.Sql.Commands)); Assert.Contains("LIMIT", Assert.Single(f.Sql.Commands));
+        await Assert.ThrowsAsync<ArgumentException>(() => f.Repository.GetFutureForContactAsync(Guid.Empty, phone, null, 5, default));
+        await Assert.ThrowsAsync<ArgumentException>(() => f.Repository.GetFutureForContactAsync(f.Workspace, "unverified", null, 5, default));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => f.Repository.GetFutureForContactAsync(f.Workspace, phone, null, 6, default));
+    }
+
+    [Fact]
+    public void Npgsql_translates_the_actual_keyset_projection_without_opening_a_connection()
+    {
+        using var db = new NexFlowDbContext(new DbContextOptionsBuilder<NexFlowDbContext>()
+            .UseNpgsql("Host=127.0.0.1;Database=not-opened;Username=synthetic").Options);
+        var clock = Mock.Of<IClock>(c => c.UtcNow == new DateTime(2030, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+        var sql = new ReservationRepository(db, clock).QueryFutureForContact(Guid.NewGuid(), "+51999999999",
+            new(new DateTime(2030, 7, 2, 0, 0, 0, DateTimeKind.Utc), Guid.NewGuid()), 5).ToQueryString();
+        Assert.Contains("LIMIT", sql); Assert.Contains("ORDER BY", sql); Assert.Contains("xmin", sql);
+        Assert.Contains("CustomerIdentifier", sql); Assert.DoesNotContain("CustomerName", sql);
+    }
+
+    [Fact]
+    public async Task Existing_outbox_primary_key_rolls_back_duplicate_receipt_and_reservation_change_atomically()
+    {
+        await using var f = await DbFixture.CreateAsync(); const string contact = "+51999999999";
+        var start = Utc("2030-07-02T15:00:00Z");
+        var row = Reservation.Create(f.Workspace, "location", "service", contact, "Ana", start, start.AddMinutes(30));
+        f.Repository.Add(row); await f.SeedAsync();
+        var operation = new ReservationOperationCommand(f.Workspace, row.Id, contact, "confirmation", ReservationOperationKind.RescheduleExistingReservation,
+            0, start, start.AddHours(1), ReservationOperationCommand.Hash("si confirmo"));
+        var result = new ReservationDto(row.Id, f.Workspace, row.LocationId, row.ServiceId, row.CustomerName, contact, start.AddHours(1), "Confirmed");
+        var message = ReservationOperationReceipt.Create(operation, "RESERVATION_RESCHEDULED", result, result, start);
+        await using (var tx = await f.Db.Database.BeginTransactionAsync())
+        {
+            var tracked = (await f.Repository.GetByIdAsync(f.Workspace, row.Id, default))!;
+            tracked.Reschedule(start.AddHours(1), start.AddHours(1.5));
+            await new PostgresOutboxRepository(f.Db).AddAsync(message, default);
+            await f.Db.SaveChangesAsync(); await tx.CommitAsync();
+        }
+        f.Db.ChangeTracker.Clear();
+        var stored = (await new PostgresOutboxRepository(f.Db).GetByIdAsync(f.Workspace, operation.Key, default))!;
+        Assert.Equal(operation.Fingerprint, ReservationOperationReceipt.Read(stored, f.Workspace, contact).Fingerprint);
+        var forwarded = JsonSerializer.Deserialize<N8nEventPayload<JsonElement>>(stored.PayloadJson)!;
+        Assert.Equal(operation.Key, forwarded.IdempotencyKey);
+        Assert.DoesNotContain("ReservationOperationReceipt", JsonSerializer.Serialize(forwarded));
+        await using (var tx = await f.Db.Database.BeginTransactionAsync())
+        {
+            var tracked = (await f.Repository.GetByIdAsync(f.Workspace, row.Id, default))!;
+            tracked.Reschedule(start.AddHours(2), start.AddHours(2.5));
+            await new PostgresOutboxRepository(f.Db).AddAsync(ReservationOperationReceipt.Create(operation, "RESERVATION_RESCHEDULED", result, result, start), default);
+            await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync()); await tx.RollbackAsync();
+        }
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal(start.AddHours(1), (await f.Repository.GetByIdAsync(f.Workspace, row.Id, default))!.StartTime);
+        Assert.Equal(row.Id, (await f.Repository.GetByIdAsync(f.Workspace, row.Id, default))!.Id);
+        Assert.Single(await f.Db.OutboxMessages.ToListAsync());
+    }
     [Fact]
     public async Task Historical_week_is_one_bounded_database_query_with_all_states_tenant_isolation_and_deterministic_order()
     {
@@ -254,6 +350,7 @@ public sealed class ReservationsRepositoryTests
             modelBuilder.Entity<Reservation>().Ignore(r => r.DomainEvents);
             // SQLite has no PostgreSQL xmin generation. Keep its concurrency flag and leave the production mapping untouched.
             modelBuilder.Entity<Reservation>().Property(r => r.RowVersion).ValueGeneratedNever();
+            modelBuilder.Entity<OutboxMessage>().HasKey(r => r.Id);
         }
     }
 

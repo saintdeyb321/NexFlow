@@ -38,7 +38,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         .Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     private static bool No(string text) => text is "no" or "no gracias";
     private static string Fingerprint(ConversationContextDto c) => $"{c.CurrentGoal}:{c.CurrentStep}:{c.SelectedLocationId}:{c.SelectedServiceId}:{c.TargetDate}";
-    private static string Continuation(ConversationContextDto c) => string.IsNullOrEmpty(c.CurrentGoal) ? "¿Qué necesitas consultar?"
+    private static string Continuation(ConversationContextDto c) => c.ReservationManagement != null ? c.ReservationManagement.NextQuestion
+        : string.IsNullOrEmpty(c.CurrentGoal) ? "¿Qué necesitas consultar?"
         : (c.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "Tu borrador sigue guardado. ") + (c.CurrentStep switch {
             "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre?", "COLLECT_LOCATION" => "¿En qué sede deseas reservar?",
             "COLLECT_SERVICE" => "¿Qué servicio deseas reservar?", "COLLECT_DATE" => "¿Para qué fecha?",
@@ -59,6 +60,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         var greeting = GreetingRecognizer.Parse(request.MessageText);
         var text = Normalize(greeting.Content);
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION";
+        var reservationOperation = ReservationOperationClassifier.Classify(request.MessageText, booking);
         if (Regex.IsMatch(text, @"\b(ignora (?:todas las |las )?instrucciones|system prompt|api key|revela (?:el )?(?:prompt|secreto)|actua como administrador|cambia (?:el )?workspace)\b", RegexOptions.CultureInvariant))
             return await Remember("Solo puedo ayudarte con información y operaciones autorizadas de este negocio. " + Continuation(context));
         if (!text.Split(' ').Contains("no") && (Regex.IsMatch(text, @"\b(asesor humano|hablar con (?:un |una )?(?:asesor|persona|humano)|atencion humana)\b") || text is "asesor" or "humano"))
@@ -66,6 +68,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (InformationalRequest.ExistingReservation(text, booking))
             return await Remember("Todavía no puedo consultar, modificar ni cancelar una cita ya registrada por este chat. No he realizado ningún cambio. Escribe asesor para recibir atención humana."
                 + (context.CurrentGoal != null ? " Tu borrador en preparación sigue guardado." : ""));
+        if (reservationOperation == ReservationOperationKind.AmbiguousReservationOperation)
+            return await Remember("¿Deseas crear una reserva nueva o revisar una cita ya registrada?" + (booking ? " Tu borrador sigue guardado." : ""));
 
         var information = context.Information is { } saved && saved.UpdatedAt >= clock.UtcNow.AddHours(-Limits.ContextExpiryHours)
             && saved.DraftFingerprint == InformationalRequest.DraftFingerprint(context) ? saved : null;
@@ -78,15 +82,15 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         }
         if (repair)
         {
-            if (context.CurrentGoal != null) return await Remember("Conservamos los datos de tu borrador. " + Continuation(context));
             if (information != null)
             {
                 information.Clarification = "Topic";
                 var subject = information.Topic == nameof(KnowledgeTopic.BusinessHours) ? "los horarios de atención"
                     : information.Topic == nameof(KnowledgeTopic.Profile) ? "la información del negocio" : "las ubicaciones";
                 return await ClarifyAsync(workspace, phone, request.MessageId, context, modules,
-                    $"Estábamos consultando {subject}. ¿Qué dato necesitas corregir o consultar?", ct, contextual: true);
+                    $"Estábamos consultando {subject}. ¿Qué dato necesitas corregir o consultar?" + (context.CurrentGoal != null ? " Tu borrador sigue guardado." : ""), ct, contextual: true);
             }
+            if (context.CurrentGoal != null) return await Remember("Conservamos los datos de tu borrador. " + Continuation(context));
             return await ClarifyAsync(workspace, phone, request.MessageId, context, modules,
                 "Para corregir la respuesta, ¿qué información del negocio necesitas consultar?", ct, contextual: true);
         }
@@ -110,6 +114,12 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 if (new LocationMentionResolver().Resolve(request.MessageText, candidates, directAnswer: true).TryGetValue(out var location))
                     return await AnswerInformation(KnowledgeTopic.BusinessHours, location.Id, knownLocations: currentLocations);
             }
+        }
+        if ((context.CurrentStep == "CONFIRM" || context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true || context.PendingRecoveryAction is "CANCEL" or "EXPIRE")
+            && ConversationConfirmation.IsNegative(request.MessageText))
+        {
+            context.PendingRecoveryAction = null;
+            return await Remember("No he confirmado la operación. Conservamos el borrador; indica qué deseas corregir o escribe cancelar para descartarlo.");
         }
         if ((context.CurrentStep == "CONFIRM" || context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true || context.PendingRecoveryAction is "CANCEL" or "EXPIRE")
             && ConversationConfirmation.NeedsClarification(request.MessageText))
@@ -257,7 +267,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                     }
                     else
                     {
-                        var contextual = information?.Topic == source.ToString() ? information.LocationId ?? context.SelectedLocationId : context.SelectedLocationId;
+                        var activeLocation = context.ReservationManagement?.Selected?.LocationId ?? context.SelectedLocationId;
+                        var contextual = information?.Topic == source.ToString() ? information.LocationId ?? activeLocation : activeLocation;
                         if (text.Split(' ').Any(w => w is "general" or "generales")) contextual = null;
                         if (authorized.Any(l => l.Id == contextual)) scope = contextual;
                     }
@@ -272,7 +283,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 if (result.Found) context.ClarificationAttempts = 0;
                 InformationalRequest.Remember(context, source, result, clock.UtcNow);
                 var response = result.ToResponse();
-                if (context.CurrentGoal != null) response += "\n\n" + (context.PendingRecoveryAction is "CANCEL" or "EXPIRE"
+                if (context.CurrentGoal != null || context.ReservationManagement != null) response += "\n\n" + (context.PendingRecoveryAction is "CANCEL" or "EXPIRE"
                     ? "Sigue pendiente tu confirmación para descartar el borrador: responde sí o no."
                     : "Tu borrador sigue sin cambios. " + Continuation(context));
                 return await SaveAsync(workspace, phone, request.MessageId, context, new(response, new() { Intent = intent }), ct);
@@ -287,7 +298,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         }
     }
 
-    private static int SelectionIndex(string text)
+    internal static int SelectionIndex(string text)
     {
         // Match the whole utterance. Quantities, identifiers, dates, times and
         // mixed requests must never be extracted as a menu index.

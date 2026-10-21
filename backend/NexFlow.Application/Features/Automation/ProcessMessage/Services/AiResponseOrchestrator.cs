@@ -34,12 +34,14 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly ILogger<AiResponseOrchestrator> _logger;
     private readonly IConversationRecoveryService? _recovery;
     private readonly IClock? _clock;
+    private readonly IExistingReservationFlow? _existingReservations;
 
     public AiResponseOrchestrator(
         ITurnUnderstandingPipeline understanding, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
-        ILogger<AiResponseOrchestrator> logger, IResponseComposer composer, IConversationRecoveryService? recovery = null, IClock? clock = null)
+        ILogger<AiResponseOrchestrator> logger, IResponseComposer composer, IConversationRecoveryService? recovery = null, IClock? clock = null,
+        IExistingReservationFlow? existingReservations = null)
     {
         _understanding = understanding; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
@@ -48,6 +50,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         _logger = logger; _composer = composer;
         _recovery = recovery;
         _clock = clock;
+        _existingReservations = existingReservations;
     }
 
     public async Task<MessageRecord> RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
@@ -73,6 +76,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     replay, SenderType.AI, request.MessageId, cancellationToken);
         }
 
+        if (_existingReservations != null)
+        {
+            var managed = await _existingReservations.TryHandleAsync(workspaceId, normalizedPhone, request, context, activeModules, cancellationToken);
+            if (managed != null) { intent = ConversationIntent.Reservation; return await SendText(managed); }
+        }
         var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
         if (recovery?.Response != null) { intent = recovery.Interpretation?.Intent ?? ConversationIntent.General; act = recovery.Act; operation = recovery.Operation; return await SendText(recovery.Response); }
         AiInterpretation interpretation;
@@ -268,6 +276,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             conversation.Id, normalizedPhone, await Compose(response), SenderType.AI, request.MessageId, cancellationToken);
         async Task<MessageRecord> SendChat(ChatResponse response)
         {
+            if (context.ReservationManagement != null) response = response with { Text = response.Text + "\n\n" + context.ReservationManagement.NextQuestion };
             if (response.Information != null)
             {
                 InformationalRequest.Remember(context, response.Information.Source, response.Information, _clock?.UtcNow ?? DateTime.UtcNow);

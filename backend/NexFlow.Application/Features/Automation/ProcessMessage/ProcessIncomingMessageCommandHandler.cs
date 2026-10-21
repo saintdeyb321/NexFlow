@@ -106,7 +106,7 @@ public class ProcessIncomingMessageCommandHandler
         if (topic.HasValue)
         {
             var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, phone, ct);
-            if (!string.IsNullOrWhiteSpace(context.CurrentGoal)) return false;
+            if (!string.IsNullOrWhiteSpace(context.CurrentGoal) || context.ReservationManagement != null) return false;
             var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var intent = topic == KnowledgeTopic.Locations ? ConversationIntent.Location : ConversationIntent.BusinessHours;
             var denied = AiIntentAccess.GetDeniedResponse(intent, modules);

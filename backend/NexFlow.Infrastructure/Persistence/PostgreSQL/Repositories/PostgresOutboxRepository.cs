@@ -9,6 +9,9 @@ public class PostgresOutboxRepository(NexFlowDbContext context) : IOutboxReposit
 {
     public async Task AddAsync(OutboxMessage message, CancellationToken ct) => await context.OutboxMessages.AddAsync(message, ct);
 
+    public Task<OutboxMessage?> GetByIdAsync(Guid workspaceId, string id, CancellationToken ct)
+        => context.OutboxMessages.AsNoTracking().SingleOrDefaultAsync(m => m.WorkspaceId == workspaceId && m.Id == id, ct);
+
     public async Task<OutboxMessage?> ClaimAsync(CancellationToken ct)
     {
         var now = new DateTime(DateTime.UtcNow.Ticks / 10 * 10, DateTimeKind.Utc);

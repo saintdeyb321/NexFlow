@@ -119,11 +119,11 @@ public sealed class InformationalRecoverySprint1Tests
         var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
         await f.HandleTurn("Quiero información de la clínica", "profile");
         await f.HandleTurn("No te pedí eso", "repair");
-        Assert.Contains("Conservamos los datos", f.Sent["repair"].Content);
+        Assert.Contains("Estábamos consultando la información del negocio", f.Sent["repair"].Content);
         await f.HandleTurn("Yo pregunté por sus horarios", "correct-topic");
         Assert.Contains("Horario de atención de Sede Concepcion", f.Sent["correct-topic"].Content);
         await f.HandleTurn("Eso ya te lo dije", "repeat");
-        Assert.Contains("Conservamos los datos", f.Sent["repeat"].Content);
+        Assert.Contains("Estábamos consultando los horarios", f.Sent["repeat"].Content);
         Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
         Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
     }

@@ -10,8 +10,16 @@ public static class ConversationConfirmation
 
     public static bool NeedsClarification(string text)
     {
-        if (IsAffirmative(text)) return false;
+        if (IsAffirmative(text) || IsNegative(text)) return false;
         var words = SpanishTextNormalizer.Normalize(text).Split(' ');
         return words.FirstOrDefault() == "si" || words.Any(w => w.StartsWith("confirm", StringComparison.Ordinal));
+    }
+
+    public static bool IsNegative(string text)
+    {
+        var normalized = SpanishTextNormalizer.Normalize(text);
+        var words = normalized.Split(' ');
+        return normalized is "no" or "no gracias" or "todavia no" or "aun no"
+            || words.Contains("no") && words.Any(w => w.StartsWith("confirm", StringComparison.Ordinal));
     }
 }

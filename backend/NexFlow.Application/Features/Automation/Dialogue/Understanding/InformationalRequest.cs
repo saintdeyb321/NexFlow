@@ -1,5 +1,7 @@
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.Knowledge;
+using NexFlow.Application.Features.Automation.Dialogue.Policy;
+using NexFlow.Application.Features.Reservations;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
@@ -26,16 +28,8 @@ internal static class InformationalRequest
     }
 
     internal static bool ExistingReservation(string text, bool draft)
-    {
-        var normalized = SpanishTextNormalizer.Normalize(text);
-        var words = normalized.Split(' ');
-        if (!words.Any(w => w is "reserva" or "reservacion" or "cita")) return false;
-        var registered = words.Any(w => w is "registrada" or "confirmada" or "existente") || normalized.Contains("ya reserve", StringComparison.Ordinal);
-        if (draft && !registered && normalized is "cancelar reserva" or "cancela la reserva") return false;
-        var change = words.Any(w => w is "editar" or "modificar" or "cambiar" or "reagendar" or "cancelar" or "anular");
-        return change && (!draft || registered || words.Contains("mi"))
-            || (registered || words.Contains("mi")) && words.Any(w => w is "consultar" or "revisar" or "ver" or "cuando" or "hora" or "estado");
-    }
+        => ReservationOperationClassifier.Classify(text, draft) is ReservationOperationKind.ViewExistingReservation
+            or ReservationOperationKind.RescheduleExistingReservation or ReservationOperationKind.CancelExistingReservation;
 
     internal static bool IsRepair(string text)
     {

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using NexFlow.Application.Features.Reservations;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Domain.Entities;
@@ -50,6 +51,46 @@ public class ReservationRepository : IReservationRepository
         return await _context.Reservations
             .FirstOrDefaultAsync(r => r.Id == reservationId && r.WorkspaceId == workspaceId, cancellationToken);
     }
+
+    public async Task<ReservationPage> GetFutureForContactAsync(Guid workspaceId, string canonicalContact, ReservationCursor? after, int pageSize, CancellationToken ct)
+    {
+        var rows = await QueryFutureForContact(workspaceId, canonicalContact, after, pageSize).ToListAsync(ct);
+        return new(rows.Take(pageSize).ToArray(), rows.Count > pageSize);
+    }
+
+    internal IQueryable<ReservationCandidate> QueryFutureForContact(Guid workspaceId, string canonicalContact, ReservationCursor? after, int pageSize)
+    {
+        ReservationContact.Validate(workspaceId, canonicalContact);
+        if (pageSize is < 1 or > 5) throw new ArgumentOutOfRangeException(nameof(pageSize));
+        var query = FutureContact(workspaceId, canonicalContact);
+        if (after != null)
+        {
+            if (after.StartTime.Kind != DateTimeKind.Utc) throw new ArgumentException("UTC cursor required.");
+            query = query.Where(r => r.StartTime > after.StartTime || r.StartTime == after.StartTime && r.Id.CompareTo(after.Id) > 0);
+        }
+        return query.OrderBy(r => r.StartTime).ThenBy(r => r.Id)
+            .Select(r => new ReservationCandidate(r.Id, r.LocationId, r.ServiceId, r.StartTime, r.EndTime, r.RowVersion))
+            .Take(pageSize + 1);
+    }
+
+    public Task<ReservationCandidate?> GetOwnedFutureAsync(Guid workspaceId, string canonicalContact, Guid reservationId, CancellationToken ct)
+    {
+        ReservationContact.Validate(workspaceId, canonicalContact);
+        return FutureContact(workspaceId, canonicalContact).Where(r => r.Id == reservationId)
+            .Select(r => new ReservationCandidate(r.Id, r.LocationId, r.ServiceId, r.StartTime, r.EndTime, r.RowVersion)).SingleOrDefaultAsync(ct);
+    }
+
+    public async Task<bool> HasSingleFutureOwnerAsync(Guid workspaceId, string canonicalContact, CancellationToken ct)
+    {
+        ReservationContact.Validate(workspaceId, canonicalContact);
+        var names = await FutureContact(workspaceId, canonicalContact).Select(r => r.CustomerName.Trim().ToLower())
+            .Distinct().Take(2).ToListAsync(ct);
+        return names.Count == 1 && !string.IsNullOrWhiteSpace(names[0]);
+    }
+
+    private IQueryable<Reservation> FutureContact(Guid workspaceId, string contact) => _context.Reservations.AsNoTracking()
+        .Where(r => r.WorkspaceId == workspaceId && r.CustomerIdentifier == contact
+            && r.Status == ReservationStatus.Confirmed && r.StartTime > _clock.UtcNow);
 
     public async Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken)
     {

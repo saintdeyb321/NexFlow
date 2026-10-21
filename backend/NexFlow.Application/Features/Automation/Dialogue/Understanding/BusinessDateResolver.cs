@@ -65,6 +65,7 @@ public sealed partial class BusinessDateResolver
             if (unclearWeek) return SlotResolution<DateOnly>.Ambiguous([], "WeekNeedsClarification");
             var day = Weekdays[match.Groups["day"].Value];
             var qualifier = match.Groups["qualifier"].Value;
+            if (match.Groups["following"].Success) qualifier = "proximo";
             var monday = today.AddDays(-((int)today.DayOfWeek + 6) % 7);
             DateOnly? weekDate = reservation && (thisWeek || nextWeek)
                 ? monday.AddDays((nextWeek ? 7 : 0) + ((int)day + 6) % 7) : null;
@@ -171,6 +172,6 @@ public sealed partial class BusinessDateResolver
     private static partial Regex WrittenDate();
     [GeneratedRegex(@"\b(?:pasado manana|manana|hoy)\b", RegexOptions.CultureInvariant, 100)]
     private static partial Regex RelativeDate();
-    [GeneratedRegex(@"\b(?:(?<qualifier>el proximo|el siguiente|proximo|proxima|este|esta) )?(?<day>lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b", RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"\b(?:(?<qualifier>el proximo|el siguiente|proximo|proxima|este|esta) )?(?<day>lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b(?: (?<following>que viene))?", RegexOptions.CultureInvariant, 100)]
     private static partial Regex Weekday();
 }
