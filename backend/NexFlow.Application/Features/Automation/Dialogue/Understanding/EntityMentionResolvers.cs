@@ -43,4 +43,30 @@ public sealed class OfferingMentionResolver
 {
     public SlotResolution<ResolvedBusinessEntity> Resolve(string text, IReadOnlyList<BusinessEntityOption> authorizedOfferings, bool directAnswer = false)
         => EntityMentionMatcher.Resolve(text, authorizedOfferings, directAnswer);
+
+    public SlotResolution<ResolvedBusinessEntity> ResolveCommercial(string text, IReadOnlyList<BusinessEntityOption> options)
+    {
+        var words = SpanishTextNormalizer.Terms(text).Where(w => !CommercialWords.Contains(w)).ToArray();
+        if (words.Length == 0) return SlotResolution<ResolvedBusinessEntity>.Missing();
+        bool Same(string a, string b) => Forms(a).Intersect(Forms(b), StringComparer.Ordinal).Any();
+        bool Matches(string name) {
+            var terms = SpanishTextNormalizer.Terms(name);
+            return words.All(w => terms.Any(t => Same(w, t)));
+        }
+        var exact = options.Where(o => o.Id == text || new[] { o.Name }.Concat(o.Aliases ?? []).Any(n => SpanishTextNormalizer.Normalize(n) == SpanishTextNormalizer.Normalize(text))).ToArray();
+        var matches = (exact.Length > 0 ? exact : options.Where(o => new[] { o.Name }.Concat(o.Aliases ?? []).Any(Matches)))
+            .DistinctBy(o => o.Id).ToArray();
+        return matches.Length switch {
+            0 => SlotResolution<ResolvedBusinessEntity>.Missing(),
+            1 => SlotResolution<ResolvedBusinessEntity>.Match(new(matches[0].Id, matches[0].Name, matches[0].LocationId), text, matches[0].Id),
+            _ => SlotResolution<ResolvedBusinessEntity>.Ambiguous(matches.Select(o => new SlotCandidate<ResolvedBusinessEntity>(new(o.Id, o.Name, o.LocationId), text, EvidenceSource.LocalResolver, o.Id)), "MultipleEntities")
+        };
+    }
+    private static IEnumerable<string> Forms(string word)
+    {
+        yield return word;
+        if (word.Length > 3 && word.EndsWith('s')) yield return word[..^1];
+        if (word.Length > 4 && word.EndsWith("es", StringComparison.Ordinal)) yield return word[..^2];
+    }
+    private static readonly HashSet<string> CommercialWords = new(["cuanto","cuesta","cuestan","cual","que","es","son","esos","estos","ese","esa","dos","tres","tengo","hay","disponible","disponibles","atienden","aqui","dura","duracion","precio","precios","diferencia","entre","compara","comparar","con","recomiendas","para","una","general","ofrecen","tienen"], StringComparer.Ordinal);
 }

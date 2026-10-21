@@ -1,3 +1,4 @@
+using NexFlow.Application.Abstractions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moq;
@@ -167,7 +168,9 @@ public sealed class Rc3Sprint4CommercialTests
         notifications.Setup(n => n.NotifyOnceAsync(f.Workspace, "ORDERS", NotificationType.NewCommercialRequest,
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), "/orders", default)).Returns(() =>
             ++attempts == 1 ? Task.FromException(new IOException("Notification unavailable")) : Task.CompletedTask);
-        var flow = new OrderFlow(f.Repository, notifications.Object, contexts.Object, new OfferingService(f.Catalog));
+        var access = new Mock<IEntitlementService>();
+        access.Setup(e => e.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { "ORDERS", "CATALOG" });
+        var flow = new OrderFlow(f.Repository, notifications.Object, contexts.Object, new OfferingService(f.Catalog), access.Object);
         Task<string> Send() => flow.ProcessAsync(f.Workspace, "phone", "conversation", "Customer", "enviar pedido", new AiInterpretation(), "source", default);
         await Assert.ThrowsAsync<IOException>(Send);
         Assert.Single(await f.Repository.GetOrdersAsync(f.Workspace, null, default)); Assert.Single(durable.OrderDraftItems);

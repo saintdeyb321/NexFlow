@@ -107,7 +107,7 @@ public sealed class AssistantRc1ConcurrencyTests
     {
         var f = new AssistantConversationTests.Fixture(); await f.SeedDraft("ORDER");
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order });
-        f.Firestore.BeforeCommit = commit => commit.Writes.Any(w => w.Update?.Fields.TryGetValue("contextJson", out var json) == true && json.StringValue.Contains("\"OrderLastSourceMessageId\":\"finish\""))
+        f.Firestore.BeforeCommit = commit => f.Orders.Count > 0 && commit.Writes.Any(w => w.Update?.Fields.TryGetValue("contextJson", out var json) == true && json.StringValue.Contains("\"OrderLastSourceMessageId\":\"finish\""))
             ? new IOException("Crash after order persistence") : null;
         await Assert.ThrowsAsync<IOException>(() => f.Turn("enviar pedido", "finish")); Assert.Single(f.Orders); Assert.Empty(f.Sent);
         f.Firestore.BeforeCommit = null; f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order });

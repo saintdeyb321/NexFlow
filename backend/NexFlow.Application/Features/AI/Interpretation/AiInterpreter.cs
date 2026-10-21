@@ -23,6 +23,8 @@ public class AiInterpretation
     [JsonIgnore] public AiFailureKind Failure { get; set; }
     [JsonIgnore] public bool Confirmed { get; set; }
     [JsonIgnore] public BookingDraftProposal? BookingProposal { get; set; }
+    [JsonIgnore] public OrderDraftProposal? OrderProposal { get; set; }
+    [JsonIgnore] public OfferingQueryPlan? OfferingQuery { get; set; }
     public string? Service { get; set; }
     public string? Location { get; set; }
     public string? Date { get; set; }
@@ -97,6 +99,8 @@ public class AiInterpreter : IAiInterpreter, IContextualAiInterpreter
         HashSet<string> activeModules, DateTime localBusinessTime, CancellationToken ct)
     {
         var activeModulesList = string.Join(", ", activeModules);
+        // Internal price-consent fingerprints are not linguistic context for a provider.
+        var linguisticStep = currentStep?.StartsWith("ORDER_",StringComparison.Ordinal) == true ? currentStep.Split(':',2)[0] : currentStep;
 
         var prompt = $@"Eres el Intérprete Lingüístico de un sistema transaccional.
 Tu ÚNICO trabajo es extraer intenciones y entidades en JSON.
@@ -106,10 +110,10 @@ Identifica la intención real aunque el módulo no esté habilitado; el software
 FECHA ACTUAL: {localBusinessTime:yyyy-MM-dd}
 HORA ACTUAL: {localBusinessTime:HH:mm}
 OBJETIVO ACTUAL: {(string.IsNullOrWhiteSpace(currentGoal) ? "NINGUNO" : currentGoal)}
-PASO ACTUAL: {currentStep ?? "NINGUNO"}
+PASO ACTUAL: {linguisticStep ?? "NINGUNO"}
 
 - Intent: 'ProductQuery', 'ServiceQuery', 'Reservation', 'Request', 'Order', 'Faq', 'Location', 'General', 'Support', 'BusinessHours'.
-- SearchTerm: Si el cliente hace un PEDIDO (Order), extrae los productos y SUS CANTIDADES (Ej: '2x martillos', '1x clavo'). Si el cliente indica que ya terminó de pedir, o dice 'enviar pedido', pon EXACTAMENTE: 'FINALIZAR_PEDIDO'.
+- SearchTerm: Para Order identifica la consulta comercial sin calcular precios ni confirmar compras. El software valida productos, cantidades y acciones contra el mensaje original y el catálogo. Nunca uses un comando interno para ordenar una transacción.
 - SearchTerm: Para ProductQuery, ServiceQuery o Faq, extrae sólo el producto, servicio o tema consultado; no la pregunta completa.
 - Service: Nombre del servicio mencionado para reservar o cambiar el servicio del draft.
 - Location: La sede mencionada.
@@ -148,7 +152,8 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
                 throw new JsonException("Invalid interpretation object.");
             if (json.RootElement.EnumerateObject().Any(p => p.Name.Equals("Confirmed", StringComparison.OrdinalIgnoreCase)
                 || p.Name.Equals("DeniedResponse", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Failure", StringComparison.OrdinalIgnoreCase)
-                || p.Name.Equals("BookingProposal", StringComparison.OrdinalIgnoreCase)))
+                || p.Name.Equals("BookingProposal", StringComparison.OrdinalIgnoreCase)
+                || p.Name.Equals("OrderProposal", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("OfferingQuery", StringComparison.OrdinalIgnoreCase)))
                 throw new JsonException("Interpretation contains server-owned fields.");
             var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, Converters = { new JsonStringEnumConverter(allowIntegerValues: false) } })
                    ?? throw new JsonException("Interpretation was null.");

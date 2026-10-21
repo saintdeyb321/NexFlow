@@ -17,6 +17,7 @@ using NexFlow.Application.Features.Notifications;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
@@ -626,6 +627,26 @@ public class ChatFlow : IChatFlow
         var denied = interpretation.DeniedResponse ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
         if (denied != null) return new ChatResponse(denied) { Operation = OperationStatus.Denied };
 
+        if (interpretation.OfferingQuery is { } query)
+        {
+            if (query.WorkspaceId != workspaceId || query.Type != (interpretation.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE"))
+                throw new InvalidOperationException("Offering query workspace/type mismatch.");
+            var body = OfferingResponseFormatter.Format(query);
+            var facts = query.Offerings.SelectMany(p => new[] { new VerifiedFact("Offering",p.Name,VerifiedFactSource.BusinessRepository,p.Id),
+                new VerifiedFact("PriceMinorUnits",p.PriceMinorUnits.ToString(CultureInfo.InvariantCulture),VerifiedFactSource.BusinessRepository,p.Id),
+                new VerifiedFact("Currency",p.Currency,VerifiedFactSource.BusinessRepository,p.Id) }).ToArray();
+            if (query.Broad)
+            {
+                var artifact = await _catalogGeneration.GetArtifactAsync(workspaceId,query.Type,ct);
+                if (artifact != null && (artifact.WorkspaceId != workspaceId || artifact.Scope != query.Type)) throw new InvalidOperationException("Catalog artifact workspace/scope mismatch.");
+                body += "\n" + OfferingResponseFormatter.Capabilities(modules);
+                if (artifact?.Status == CatalogArtifactStatus.Current && Uri.TryCreate(artifact.PdfUrl,UriKind.Absolute,out var uri) && uri.Scheme is "https" or "http")
+                    return new(body,artifact.PdfUrl,query.Type == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf",query.Type) { Facts=Array.AsReadOnly(facts), Operation=OperationStatus.MediaPending };
+                if (artifact?.Status != CatalogArtifactStatus.Generating) await _notifications.NotifyCatalogUnavailableAsync(workspaceId,query.Type,ct);
+            }
+            return new(body) { Facts=Array.AsReadOnly(facts), Operation=query.Offerings.Count == 0 ? OperationStatus.NotAvailable : OperationStatus.Informational };
+        }
+
         KnowledgeTopic? topic = interpretation.Intent switch
         {
             ConversationIntent.ProductQuery => KnowledgeTopic.Products,
@@ -668,10 +689,15 @@ public class ChatFlow : IChatFlow
                 && pdfUri.Scheme is "https" or "http")
             {
                 var caption = scope == "PRODUCT"
-                    ? "Te comparto nuestro catálogo actualizado de productos 😊. También puedo ayudarte con ubicaciones, horarios o una consulta sobre algún producto específico."
-                    : "Te comparto nuestro catálogo actualizado de servicios 😊. " +
-                        (modules.Contains("RESERVATIONS") ? "Si deseas reservar, también puedo ayudarte paso a paso." : "También puedo ayudarte con información sobre un servicio específico.");
-                return new ChatResponse(caption, artifact.PdfUrl, scope == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf", scope);
+                    ? "Te comparto nuestro catálogo actualizado de productos. " + OfferingResponseFormatter.Capabilities(modules)
+                    : "Te comparto nuestro catálogo actualizado de servicios. " + OfferingResponseFormatter.Capabilities(modules);
+                var current = await _knowledgeService.QueryAsync(workspaceId,new BusinessKnowledgeSnapshot { WorkspaceId=workspaceId },
+                    new KnowledgeQuery { Topic=topic.Value, LocationId=locationId },ct);
+                caption = (current.Found ? current.Facts + "\n" : "") + caption;
+                return new ChatResponse(caption, artifact.PdfUrl, scope == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf", scope) {
+                    Facts=current.Found ? Array.AsReadOnly(new[]{new VerifiedFact(topic.Value.ToString(),current.Facts,VerifiedFactSource.BusinessRepository)}) : [],
+                    Operation=OperationStatus.MediaPending
+                };
             }
             if (artifact?.Status == CatalogArtifactStatus.Generating)
                 fallbackIntroduction = "Nuestro catálogo se está actualizando. Mientras tanto, estas son algunas opciones disponibles:";
@@ -702,8 +728,7 @@ public class ChatFlow : IChatFlow
         {
             var facts = result.Found ? result.Facts : result.Status == KnowledgeStatus.Unavailable
                 ? result.ToResponse() : "No hay opciones registradas disponibles para esta consulta.";
-            var next = interpretation.Intent == ConversationIntent.ServiceQuery && modules.Contains("RESERVATIONS")
-                ? "Si deseas reservar, dime qué servicio te interesa." : "También puedo ayudarte con ubicaciones, horarios o información específica. ¿Qué dato necesitas?";
+            var next = OfferingResponseFormatter.Capabilities(modules);
             return Factual($"{fallbackIntroduction}\n\n{facts}\n\n{next}");
         }
         return Factual(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());

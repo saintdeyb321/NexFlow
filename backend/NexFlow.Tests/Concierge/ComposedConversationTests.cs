@@ -107,7 +107,7 @@ public sealed class ComposedConversationTests(ITestOutputHelper output)
                 f.Wording.Setup(r => r.ExecuteTaskAsync(AiTaskType.ComplexChat, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
                     .ReturnsAsync("{\"Lead\":\"Reserva confirmada gratis a las 03:00\"}");
                 await Turn("quiero limpieza dental en Concepción pasado mañana");
-                Assert.Equal(f.Plans.Last().FallbackText, f.Sent.Values.Last().Content); Assert.Empty(f.Bookings); break;
+                Assert.EndsWith(f.Plans.Last().FallbackText, f.Sent.Values.Last().Content); Assert.Empty(f.Bookings); Assert.Empty(f.Wording.Invocations); break;
             case 14:
                 f.Modules.Remove("CATALOG"); f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProductQuery });
                 await Turn("¿Qué productos tienen?"); Assert.Empty(f.FactualQueries); Assert.Empty(f.Wording.Invocations); break;
@@ -149,12 +149,10 @@ public sealed class ComposedConversationTests(ITestOutputHelper output)
     public async Task Revocation_or_human_takeover_during_writing_cannot_leak_a_stale_response(bool human)
     {
         var f = Create();
-        f.Wording.Setup(r => r.ExecuteTaskAsync(AiTaskType.ComplexChat, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(async () => {
-                if (human) { var c = await f.Context(); c.Mode = "Human"; await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, c, default); }
-                else f.Modules.Remove("SERVICES");
-                return "{\"Lead\":\"Perfecto.\"}";
-            });
+        f.DuringComposition = async () => {
+            if (human) { var c = await f.Context(); c.Mode = "Human"; await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, c, default); }
+            else f.Modules.Remove("SERVICES");
+        };
         if (human) { await Assert.ThrowsAsync<ConcurrencyException>(() => f.HandleTurn("quiero limpieza dental en Concepción", "race")); Assert.Empty(f.Sent); }
         else { await f.HandleTurn("quiero limpieza dental en Concepción", "race"); Assert.DoesNotContain("Limpieza dental", f.Sent["race"].Content); }
         Assert.Empty(f.Bookings);

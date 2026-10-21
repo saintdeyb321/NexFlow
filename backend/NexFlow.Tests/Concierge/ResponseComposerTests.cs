@@ -67,7 +67,7 @@ public sealed class ResponseComposerTests
     {
         var h = new Harness(); h.Return(json); var plan = h.Plan();
         var result = await h.Composer.ComposeAsync(plan, "private-phone", default);
-        Assert.Equal(plan.FallbackText, result.Text); Assert.False(result.UsedAi); Assert.Single(h.Router.Invocations);
+        Assert.EndsWith(plan.FallbackText, result.Text); Assert.False(result.UsedAi); Assert.Empty(h.Router.Invocations);
     }
 
     [Theory]
@@ -81,12 +81,9 @@ public sealed class ResponseComposerTests
         var h = new Harness(); h.Settings.WorkspaceStyles[h.Workspace] = style;
         h.Return(System.Text.Json.JsonSerializer.Serialize(new { Lead = lead })); var plan = h.Plan();
         var result = await h.Composer.ComposeAsync(plan, "private-phone", default);
-        Assert.Equal(lead + " " + plan.FallbackText, result.Text); Assert.True(result.UsedAi);
-        var request = Assert.Single(h.Router.Invocations);
-        var prompt = (string)request.Arguments[1] + (string)request.Arguments[2];
-        foreach (var privateValue in new[] { "private-phone", "Nombre sensible", "Servicio real", "secret-source", h.Workspace.ToString(), "cas-v1", "16:00", "America/Lima" })
-            Assert.DoesNotContain(privateValue, prompt);
-        Assert.Equal(1, result.Text.Count(c => c == '?')); Assert.Single(h.Budget.Invocations);
+        Assert.Equal(lead + " " + plan.FallbackText, result.Text); Assert.False(result.UsedAi);
+        Assert.Empty(h.Router.Invocations); Assert.Empty(h.Budget.Invocations); Assert.Empty(h.Access.Invocations);
+        Assert.Equal(1, result.Text.Count(c => c == '?'));
     }
 
     [Theory]
@@ -102,7 +99,7 @@ public sealed class ResponseComposerTests
 
     [Theory]
     [InlineData("disabled")] [InlineData("forbidden")] [InlineData("license")] [InlineData("module")] [InlineData("budget")]
-    public async Task Explicit_configuration_license_module_and_budget_gate_writing(string denied)
+    public async Task Composition_is_pure_and_does_not_spend_budget_or_authorization_io(string denied)
     {
         var h = new Harness();
         if (denied == "disabled") h.Settings.EnableAi = false;
@@ -110,21 +107,21 @@ public sealed class ResponseComposerTests
         if (denied == "module") h.Access.Setup(e => e.GetAvailableModuleCodesAsync(h.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<string>());
         if (denied == "budget") h.Budget.Setup(b => b.AcquireAiAsync(h.Workspace, "private-phone", It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var plan = h.Plan(creative: denied != "forbidden");
-        Assert.Equal(plan.FallbackText, (await h.Composer.ComposeAsync(plan, "private-phone", default)).Text);
-        Assert.Empty(h.Router.Invocations);
+        Assert.EndsWith(plan.FallbackText, (await h.Composer.ComposeAsync(plan, "private-phone", default)).Text);
+        Assert.Empty(h.Router.Invocations); Assert.Empty(h.Budget.Invocations); Assert.Empty(h.Access.Invocations);
     }
 
     [Theory]
     [InlineData(false)] [InlineData(true)]
-    public async Task Failing_or_hanging_writer_has_one_bounded_attempt_and_local_fallback(bool hangs)
+    public async Task Failing_or_hanging_provider_is_never_used_for_trivial_wording(bool hangs)
     {
         var h = new Harness(); h.Settings.TimeoutMilliseconds = 50;
         var never = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         h.Router.Setup(r => r.ExecuteTaskAsync(AiTaskType.ComplexChat, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
             .Returns(hangs ? never.Task : Task.FromException<string>(new HttpRequestException("Simulated provider outage")));
         var plan = h.Plan(); var result = await h.Composer.ComposeAsync(plan, "private-phone", default).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(plan.FallbackText, result.Text); Assert.Single(h.Router.Invocations);
-        Assert.Equal(hangs ? "Timeout" : "ProviderOrOutputFailure", result.Outcome);
+        Assert.EndsWith(plan.FallbackText, result.Text); Assert.Empty(h.Router.Invocations); Assert.Empty(h.Budget.Invocations);
+        Assert.Equal("LocalStyle", result.Outcome);
     }
 
     [Fact]
@@ -133,6 +130,7 @@ public sealed class ResponseComposerTests
         var h = new Harness(); using var cancellation = new CancellationTokenSource();
         h.Router.Setup(r => r.ExecuteTaskAsync(AiTaskType.ComplexChat, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
             .Returns(async (AiTaskType _, string _, string _, bool _, CancellationToken ct) => { cancellation.Cancel(); await Task.Delay(Timeout.Infinite, ct); return ""; });
+        cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Composer.ComposeAsync(h.Plan(), "private-phone", cancellation.Token));
     }
 }

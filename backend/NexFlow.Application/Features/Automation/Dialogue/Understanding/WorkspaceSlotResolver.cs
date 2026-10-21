@@ -9,6 +9,8 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
 public interface IWorkspaceSlotResolver
 {
+    Task<CommerceCatalog> ReadCommerceAsync(Guid workspaceId, ConversationContextDto context, bool products, bool services, bool order, string? locationId, CancellationToken ct);
+    Task<IReadOnlyList<BusinessEntityOption>> ReadCommerceLocationsAsync(Guid workspaceId, bool order, CancellationToken ct);
     Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
         ConversationContextDto state, SlotResolutionPurpose purpose, CancellationToken ct);
     Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
@@ -22,6 +24,25 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
     LocationMentionResolver locationMentions, OfferingMentionResolver offeringMentions, BusinessDateResolver dates,
     TimePreferenceResolver times, ILogger<WorkspaceSlotResolver> logger) : IWorkspaceSlotResolver
 {
+    public async Task<IReadOnlyList<BusinessEntityOption>> ReadCommerceLocationsAsync(Guid workspaceId, bool order, CancellationToken ct)
+    {
+        var modules=(await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!(order ? modules.Contains("ORDERS") && modules.Contains("CATALOG") : modules.Contains("LOCATIONS"))) return [];
+        return (await locations.GetLocationsAsync(workspaceId,ct)).Where(l=>l.Id!=null).Select(l=>new BusinessEntityOption(l.Id!,l.Name)).ToArray();
+    }
+
+    public async Task<CommerceCatalog> ReadCommerceAsync(Guid workspaceId, ConversationContextDto context, bool products, bool services, bool order, string? locationId, CancellationToken ct)
+    {
+        if (workspaceId == Guid.Empty || context.Mode == "Human") throw new InvalidOperationException("Authorized workspace and automatic mode required.");
+        var modules=(await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var productValues=products && modules.Contains("CATALOG") && (!order || modules.Contains("ORDERS"))
+            ? (await offerings.GetProductsAsync(workspaceId,locationId,null,ct)).Where(p=>Eligible(p,"PRODUCT",locationId)).Select(VerifiedOffering.Capture).ToArray() : [];
+        modules=(await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var serviceValues=services && modules.Contains("SERVICES")
+            ? (await offerings.GetServicesAsync(workspaceId,locationId,null,ct)).Where(s=>Eligible(s,"SERVICE",locationId)).Select(VerifiedOffering.Capture).ToArray() : [];
+        return new(workspaceId,context.StateVersion,Array.AsReadOnly(productValues),Array.AsReadOnly(serviceValues),Array.AsReadOnly(Array.Empty<BusinessEntityOption>()));
+    }
+
     public Task<TurnUnderstanding> ResolveAsync(Guid workspaceId, string sourceMessageId, string text,
         ConversationContextDto state, SlotResolutionPurpose purpose, CancellationToken ct)
         => ResolveAsync(workspaceId, sourceMessageId, text, state, purpose, SlotReadPlan.All, ct);
@@ -64,7 +85,7 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         {
             var values = (await offerings.GetServicesAsync(workspaceId, scope, null, ct))
                 .Where(s => Eligible(s, "SERVICE", scope) && (!reservation || s.RequiresReservation && s.DurationInMinutes >= 5));
-            serviceOptions = values.Select(s => new BusinessEntityOption(s.Id, s.Name, LocationId: scope)).ToArray();
+            serviceOptions = values.Select(s => new BusinessEntityOption(s.Id, s.Name, VerifiedOffering.Capture(s).Aliases, scope)).ToArray();
             service = offeringMentions.Resolve(text, serviceOptions, state.CurrentStep == "COLLECT_SERVICE");
         }
         if (reads.Products) modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -73,7 +94,7 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         if (canReadProducts && reads.Products)
         {
             var values = (await offerings.GetProductsAsync(workspaceId, scope, null, ct)).Where(p => Eligible(p, "PRODUCT", scope));
-            productOptions = values.Select(p => new BusinessEntityOption(p.Id, p.Name, LocationId: scope)).ToArray();
+            productOptions = values.Select(p => new BusinessEntityOption(p.Id, p.Name, VerifiedOffering.Capture(p).Aliases, scope)).ToArray();
             product = offeringMentions.Resolve(text, productOptions);
         }
         ct.ThrowIfCancellationRequested();

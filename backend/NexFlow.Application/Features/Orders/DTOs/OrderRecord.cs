@@ -10,6 +10,8 @@ public class OrderRecord
     public string ConsumerName { get; set; } = string.Empty;
 
     public OrderStatus Status { get; set; } = OrderStatus.PendingReview;
+    [System.Text.Json.Serialization.JsonIgnore] public string? RequestedLocationId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public IReadOnlyDictionary<string, OrderCatalogExpectation>? ExpectedCatalog { get; set; }
     public string? Currency { get; set; }
     public long? TotalAmountMinorUnits { get; set; }
 
@@ -29,3 +31,5 @@ public class OrderItemRecord
     public string? Currency { get; set; }
     public long SubtotalMinorUnits => checked(Quantity * UnitPriceMinorUnits);
 }
+
+public sealed record OrderCatalogExpectation(string Name, long PriceMinorUnits, string Currency);

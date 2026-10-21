@@ -112,6 +112,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (context.RecoveryOptionsContext == Fingerprint(context) && context.RecoveryHasMore) context.RecoveryOptionsOffset += 5;
             return await Menu("Estas son las opciones disponibles:");
         }
+        if (context.CurrentGoal == "ORDER" && context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true && Yes(text)) return null;
         var index = SelectionIndex(text);
         if (index == 0 && context.RecoveryOptionsContext == Fingerprint(context))
         {

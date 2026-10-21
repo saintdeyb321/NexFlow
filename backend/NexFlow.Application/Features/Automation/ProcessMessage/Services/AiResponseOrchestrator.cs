@@ -60,6 +60,10 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             throw new ConcurrencyException("Conversation is under human control; reload its state before processing.");
         var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var recoveredOrder = await _orderFlow.TryResumeAsync(workspaceId,normalizedPhone,conversation.Id,request.MessageId,context,cancellationToken);
+        if (recoveredOrder != null)
+            return await _outboundMessageService.SendMessageAsync(workspaceId,conversation.Id,normalizedPhone,recoveredOrder,SenderType.AI,request.MessageId,cancellationToken);
+
         if (activeModules.Contains("RESERVATIONS") && activeModules.Contains("SERVICES"))
         {
             var replay = await _bookingFlow.TryResumeAsync(workspaceId, normalizedPhone, request.MessageId, context, cancellationToken);
@@ -116,7 +120,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         if (_recovery != null && interpretation.Intent is not (ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             && (interpretation.RequiresClarification || interpretation.Intent is ConversationIntent.General
-            || recovery?.Interpretation == null && interpretation.BookingProposal == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
+            || recovery?.Interpretation == null && interpretation.BookingProposal == null && interpretation.OrderProposal == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
                 || (interpretation.Intent == ConversationIntent.Order && !Regex.IsMatch(normalized, @"\b(compr|pedid|pedir|llevar|orden)"))
                 || (interpretation.Intent == ConversationIntent.Request && !Regex.IsMatch(normalized, @"\b(solicit|reclamo|queja|cotiz|registr|tramite|soporte)")))))
         {
@@ -135,7 +139,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (context.ClarificationAttempts > 0 && interpretation.Intent is not (ConversationIntent.General or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited or ConversationIntent.Support))
         {
             context.ClarificationAttempts = 0;
-            if (interpretation.BookingProposal == null) await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
+            if (interpretation.BookingProposal == null && interpretation.OrderProposal == null && interpretation.OfferingQuery == null) await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
         }
 
         if (interpretation.Intent == ConversationIntent.ProviderUnavailable || interpretation.Intent == ConversationIntent.RateLimited)
@@ -179,7 +183,10 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 if (context.PendingRecoveryAction is "CANCEL" or "EXPIRE") continuation = context.CurrentGoal is "BOOKING" or "RESERVATION"
                     ? "¿Deseas dejar esta reserva en preparación? Responde sí o no."
                     : "Sigue pendiente tu confirmación para descartar el borrador: responde sí o no.";
+                if (interpretation.OfferingQuery?.Clarification != null && context.CurrentGoal == "ORDER" && activeFlowDenied == null)
+                    continuation = "Conservamos tu pedido mientras aclaramos esta consulta.";
                 if (!string.IsNullOrWhiteSpace(continuation)) answer = answer with { Text = answer.Text + "\n\n" + continuation };
+                await RememberOfferingQuery();
                 return await SendChat(answer);
             }
             else if ((context.CurrentGoal == "BOOKING" || context.CurrentGoal == "RESERVATION" || (string.IsNullOrWhiteSpace(context.CurrentGoal) && interpretation.Intent == ConversationIntent.Reservation)) && activeModules.Contains("RESERVATIONS"))
@@ -202,9 +209,10 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     finalResponse = AiIntentAccess.ProductsUnavailable;
                 else
                 {
-                    finalResponse = await _orderFlow.ProcessAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, request.MessageText, interpretation, request.MessageId, cancellationToken);
-                    // OrderFlow owns its context load/CAS; bind composition to its committed version.
+                    responsePlan = await _orderFlow.ProcessPlannedAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName, request.MessageText, interpretation, request.MessageId, act, cancellationToken);
+                    finalResponse = responsePlan.FallbackText;
                     context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+                    if (context.StateVersion != responsePlan.StateVersion) throw new ConcurrencyException("Order changed after its result was prepared.");
                 }
             }
             else if (interpretation.Intent == ConversationIntent.Request && activeModules.Contains("REQUESTS"))
@@ -214,6 +222,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             else
             {
                 var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, null, cancellationToken);
+                await RememberOfferingQuery();
                 return await SendChat(answer);
             }
         }
@@ -222,6 +231,15 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             return await _outboundMessageService.SendHandoffAcknowledgementAsync(workspaceId, conversation.Id, normalizedPhone, finalResponse, request.MessageId, cancellationToken);
         return await SendText(finalResponse);
 
+        async Task RememberOfferingQuery()
+        {
+            if (interpretation.OfferingQuery is not { } query) return;
+            if (query.WorkspaceId != workspaceId || query.SourceMessageId != request.MessageId || query.StateVersion != context.StateVersion)
+                throw new ConcurrencyException("Offering query no longer matches this turn.");
+            if (query.Offerings.Count > 0) new OfferingReference(workspaceId,query.Type,query.Offerings.Select(o => o.Id).ToArray(),query.LocationId).Remember(context);
+            else context.LastIntent = interpretation.Intent.ToString();
+            await _contextRecovery.SaveContextAsync(workspaceId,normalizedPhone,context,cancellationToken);
+        }
         ResponsePlan Bind(string text, bool media = false) => responsePlan?.WithText(text, context.StateVersion)
             ?? new(workspaceId, request.MessageId, context.StateVersion, intent, act,
                 media ? OperationStatus.MediaPending : operation, [], context.RecoveryOptions, [], null, null, null, text,

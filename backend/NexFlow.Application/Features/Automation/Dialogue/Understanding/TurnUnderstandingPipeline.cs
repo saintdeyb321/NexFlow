@@ -17,7 +17,7 @@ public interface ITurnUnderstandingPipeline
 }
 
 public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, DialoguePolicy policy,
-    IAiInterpreter interpreter, IConversationRecoveryService recovery, IOfferingService offerings) : ITurnUnderstandingPipeline
+    IAiInterpreter interpreter, IConversationRecoveryService recovery, IOfferingService offerings, ICommerceTurnResolver? commerce = null) : ITurnUnderstandingPipeline
 {
     public async Task<PreparedDialogueTurn> PrepareAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
@@ -57,6 +57,8 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(act, new() { Intent = ConversationIntent.Reservation }, Response:
                 AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules)
                     ?? (context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction));
+        if (commerce != null && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct) is { } commercial)
+            return commercial;
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION" || act == DialogueAct.StartOperation;
         var reservationCandidate = !booking && context.CurrentGoal == null && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES")
             && act == DialogueAct.SemanticAmbiguity && !contradictory && !normalized.Split(' ').Contains("no")
@@ -95,6 +97,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = NexFlow.Application.Engines.AI.AiFailureKind.Timeout }; }
         if (interpretation.Intent is ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             return new(DialogueAct.ProviderFailure, interpretation, true);
+        if (commerce != null && interpretation.Intent == ConversationIntent.Order
+            && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct, interpretation) is { } understoodOrder)
+            return understoodOrder with { UsedAi = true };
         var actEvidence = (interpretation.Evidence ?? []).Where(e => e != null && e.Slot == "Act").ToArray();
         var backedAct = !interpretation.RequiresClarification && actEvidence.Length == 1
             && !string.IsNullOrWhiteSpace(actEvidence[0].Text) && actEvidence[0].Text.Length <= 300

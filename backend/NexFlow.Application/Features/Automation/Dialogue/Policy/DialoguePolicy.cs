@@ -6,6 +6,16 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Policy;
 
 public sealed class DialoguePolicy
 {
+    public static DialogueAct OrderAct(OrderTurnKind kind, IReadOnlyList<OrderEdit> edits, ConversationContextDto state) => kind switch {
+        OrderTurnKind.Summary or OrderTurnKind.Hypothetical => DialogueAct.Information,
+        OrderTurnKind.Submit => DialogueAct.Confirmation,
+        OrderTurnKind.Clarify => DialogueAct.SemanticAmbiguity,
+        OrderTurnKind.Location => DialogueAct.Correction,
+        _ when edits.Any(e=>e.Kind != OrderEditKind.Add) => DialogueAct.Correction,
+        _ when edits.Count > 1 => DialogueAct.MultipleData,
+        _ => state.CurrentGoal == "ORDER" ? DialogueAct.RequestedData : DialogueAct.StartOperation
+    };
+
     public DialogueAct Classify(string text, ConversationContextDto state)
     {
         var normalized = SpanishTextNormalizer.Normalize(text);

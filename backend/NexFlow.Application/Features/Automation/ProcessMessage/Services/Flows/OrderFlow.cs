@@ -1,168 +1,152 @@
 using System.Security.Cryptography;
-using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
+using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.AI.Interpretation;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Policy;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Business.Offerings;
 using NexFlow.Application.Features.Notifications;
 using NexFlow.Application.Features.Orders.DTOs;
 using NexFlow.Domain.Enums;
+using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
 public interface IOrderFlow
 {
+    Task<string?> TryResumeAsync(Guid workspaceId, string phone, string conversationId, string sourceMessageId, ConversationContextDto context, CancellationToken ct);
     Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, string sourceMessageId, CancellationToken ct);
+    Task<ResponsePlan> ProcessPlannedAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, string sourceMessageId, DialogueAct act, CancellationToken ct);
 }
 
-public class OrderFlow : IOrderFlow
+public sealed class OrderFlow(IOrderRepository orders, INotificationService notifications, IContextRecoveryService contexts,
+    IOfferingService offerings, IEntitlementService entitlements) : IOrderFlow
 {
-    private readonly IOrderRepository _orderRepository;
-    private readonly INotificationService _notificationService;
-    private readonly IContextRecoveryService _contextStore;
-    private readonly IOfferingService _offerings;
-
-    public OrderFlow(IOrderRepository orderRepository, INotificationService notificationService, IContextRecoveryService contextStore, IOfferingService offerings)
+    public async Task<string?> TryResumeAsync(Guid workspaceId, string phone, string conversationId, string sourceMessageId, ConversationContextDto context, CancellationToken ct)
     {
-        _orderRepository = orderRepository;
-        _notificationService = notificationService;
-        _contextStore = contextStore;
-        _offerings = offerings;
+        var pending=context.CurrentGoal == "ORDER" && context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true;
+        if (context.Mode == "Human" || context.OrderLastSourceMessageId != sourceMessageId
+            || !pending && (context.CurrentGoal != null || context.OrderDraftItems.Count != 0)) return null;
+        var id=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));
+        var existing=await orders.GetOrderByIdAsync(workspaceId,id,ct);
+        if (existing == null) return null;
+        if (existing.ConsumerPhone != phone || existing.ConversationId != conversationId
+            || pending && !existing.Items.OrderBy(i=>i.ProductId).Select(i=>(i.ProductId,i.Quantity))
+                .SequenceEqual(context.OrderDraftItems.OrderBy(i=>i.ProductId).Select(i=>(i.ProductId,i.Quantity))))
+            throw new ConcurrencyException("Order recovery identity mismatch.");
+        if (pending)
+        {
+            // Completing an already durable effect is not a new licensed purchase.
+            await notifications.NotifyOnceAsync(workspaceId,"ORDERS",NotificationType.NewCommercialRequest,existing.Id,"Pedido recibido",
+                $"{existing.ConsumerName} envió una solicitud con {existing.Items.Count} ítems para revisión.","/orders",ct);
+            context.CurrentGoal=null;context.CurrentStep=null;context.OrderDraftItems.Clear();context.MissingFields.Clear();context.LastQuestion=null;
+            context.OrderLastResponse=$"Tu solicitud de pedido fue enviada. El negocio la revisará. Código: {existing.Id[..6]}.";
+            await contexts.SaveContextAsync(workspaceId,phone,context,ct);
+        }
+        return context.OrderLastResponse;
     }
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, string sourceMessageId, CancellationToken ct)
+        => (await ProcessPlannedAsync(workspaceId,phone,conversationId,customerName,messageText,interpretation,sourceMessageId,DialogueAct.RequestedData,ct)).FallbackText;
+
+    public async Task<ResponsePlan> ProcessPlannedAsync(Guid workspaceId, string phone, string conversationId, string customerName, string messageText, AiInterpretation interpretation, string sourceMessageId, DialogueAct act, CancellationToken ct)
     {
-        var context = await _contextStore.GetOrRecoverContextAsync(workspaceId, phone, ct);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
-        if (context.OrderLastSourceMessageId == sourceMessageId && context.OrderLastResponse != null) return context.OrderLastResponse;
-        context.CurrentGoal = "ORDER";
-        var response = await ProcessTurnAsync(workspaceId, phone, conversationId, customerName, messageText, interpretation, context, sourceMessageId, ct);
-        context.OrderLastSourceMessageId = sourceMessageId;
-        context.OrderLastResponse = response;
-        await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
-        return response;
-    }
-
-    private async Task<string> ProcessTurnAsync(Guid workspaceId, string phone, string conversationId, string customerName,
-        string messageText, AiInterpretation interpretation, ConversationContextDto context, string sourceMessageId, CancellationToken ct)
-    {
-        var command = Normalize(messageText).Trim(' ', '.', '!', '?', '¿', '¡');
-        if (command is "cancelar" or "cancelar pedido" or "cancela el pedido")
+        var context = await contexts.GetOrRecoverContextAsync(workspaceId,phone,ct);
+        if (context.Mode == "Human") throw new ConcurrencyException("Order is under human control.");
+        ResponsePlan Plan(string text, OperationStatus status = OperationStatus.Collecting, OrderDraftMerger.Quote? quote = null) => new(workspaceId,sourceMessageId,context.StateVersion,
+            ConversationIntent.Order,act,status,quote?.Facts ?? [],[],[],null,quote?.Currency,null,text);
+        if (await TryResumeAsync(workspaceId,phone,conversationId,sourceMessageId,context,ct) is { } replay) return Plan(replay,OperationStatus.Succeeded);
+        var modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (AiIntentAccess.GetDeniedResponse(ConversationIntent.Order,modules) is { } denied)
         {
-            CloseDraft(context);
-            return "Pedido cancelado.";
+            if (context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true && context.OrderLastSourceMessageId == sourceMessageId)
+            { context.CurrentStep=null;return await Remember(denied,OperationStatus.Denied); }
+            return Plan(denied,OperationStatus.Denied);
         }
-        if (command is "mostrar pedido" or "listar pedido" or "ver pedido" or "mi pedido")
-            return Summary(context);
-
-        if (command is "enviar pedido" or "finalizar pedido" or "finalizar")
+        if (context.OrderLastSourceMessageId == sourceMessageId && context.OrderLastResponse != null) return Plan(context.OrderLastResponse);
+        if (context.CurrentGoal is not (null or "ORDER")) return Plan("Completa la operación actual o solicita cancelar su preparación antes de iniciar un pedido.");
+        var resuming = context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true && context.OrderLastSourceMessageId == sourceMessageId;
+        if (context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true && !resuming) throw new ConcurrencyException("An earlier order commit must recover before processing another turn.");
+        var proposal = interpretation.OrderProposal;
+        if (proposal != null && (proposal.WorkspaceId != workspaceId || proposal.SourceMessageId != sourceMessageId || proposal.ExpectedStateVersion != context.StateVersion))
+            throw new ConcurrencyException("Stale or foreign order proposal.");
+        if (proposal?.Kind == OrderTurnKind.Clarify) return await Remember(proposal.Clarification ?? "¿Cuál producto deseas agregar o cambiar?");
+        var products = (await offerings.GetProductsAsync(workspaceId, proposal?.LocationId ?? context.SelectedLocationId,null,ct))
+            .Where(p => p.IsActive).Select(VerifiedOffering.Capture).ToArray();
+        if (proposal == null)
         {
-            if (context.OrderDraftItems.Count == 0) return "Tu pedido está vacío. ¿Qué producto deseas agregar?";
-            var orderId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));
-            var order = new OrderRecord
+            var result = new OrderMentionResolver().Resolve(messageText,products,context,OfferingReference.Read(workspaceId,context));
+            var kind = OrderMentionResolver.IsSubmit(messageText) ? OrderTurnKind.Submit
+                : OrderMentionResolver.IsQuestion(messageText) ? OrderTurnKind.Summary : result.Error == null ? OrderTurnKind.Edit : OrderTurnKind.Summary;
+            proposal = new(workspaceId,sourceMessageId,context.StateVersion,kind,Array.AsReadOnly(result.Edits.ToArray()));
+        }
+        try
+        {
+            var staged = OrderDraftMerger.Apply(workspaceId,sourceMessageId,context,proposal,products);
+            var location = proposal.LocationId ?? context.SelectedLocationId;
+            var quote = OrderDraftMerger.Price(workspaceId,staged,products,location);
+            if (proposal.Kind == OrderTurnKind.Hypothetical)
+                return await Remember("Si eligieras esas cantidades, quedaría así:\n" + quote.Text + "\nNo he cambiado tu pedido. Para aplicarlo, indica la nueva cantidad. ¿Qué deseas ajustar?",OperationStatus.Informational,quote);
+            if (proposal.Kind == OrderTurnKind.Submit)
             {
-                Id = orderId,
-                ConversationId = conversationId,
-                ConsumerPhone = phone,
-                ConsumerName = string.IsNullOrWhiteSpace(interpretation.CustomerName) ? customerName : interpretation.CustomerName,
-                Status = OrderStatus.PendingReview,
-                Notes = "Solicitud pendiente de revisión por el negocio. Los precios corresponden al catálogo al enviarla.",
-                Items = context.OrderDraftItems.Select(i => new OrderItemRecord
-                {
-                    ProductId = i.ProductId, ProductName = i.ProductName, Quantity = i.Quantity
-                }).ToList()
-            };
-            try
-            {
-                // The repository validates every writer against the current catalog before persistence.
-                order = await _orderRepository.CreateOrderAsync(workspaceId, order, ct);
+                if (!quote.Complete) return await Remember(quote.Text + "\n¿Qué producto deseas corregir o quitar?",OperationStatus.NotAvailable,quote);
+                if (quote.NeedsLocation) { context.CurrentStep="ORDER_LOCATION"; return await Remember(quote.Text + "\n¿En cuál sede deseas solicitar estos productos?",quote:quote); }
+                if (context.CurrentStep?.StartsWith("ORDER_COMMIT:",StringComparison.Ordinal) == true && context.CurrentStep != "ORDER_COMMIT:" + quote.Fingerprint
+                    || context.CurrentStep?.StartsWith("ORDER_REVIEW:",StringComparison.Ordinal) == true && context.CurrentStep != "ORDER_REVIEW:" + quote.Fingerprint
+                    || context.CurrentStep?.StartsWith("ORDER_CONFIRM:",StringComparison.Ordinal) == true && context.CurrentStep != "ORDER_CONFIRM:" + quote.Fingerprint)
+                { context.CurrentStep="ORDER_CONFIRM:" + quote.Fingerprint; return await Remember("El catálogo cambió.\n" + quote.Text + "\n¿Confirmas que la enviemos al negocio con estos importes?",OperationStatus.AwaitingConfirmation,quote); }
+                return await Submit(quote);
             }
-            catch (ArgumentException ex) { return ex.Message + " Corrige o quita el producto antes de enviar."; }
-
-            await _notificationService.NotifyOnceAsync(workspaceId, "ORDERS", NotificationType.NewCommercialRequest, order.Id,
-                "Pedido recibido", $"{order.ConsumerName} envió una solicitud con {order.Items.Count} ítems para revisión.", "/orders", ct);
-            CloseDraft(context);
-            return $"Tu solicitud de pedido fue enviada. El negocio la revisará. Código: {order.Id[..6]}.";
+            if (proposal.Kind is OrderTurnKind.Edit or OrderTurnKind.Location)
+            {
+                context.OrderDraftItems = staged; context.SelectedLocationId=location;
+                context.CurrentGoal="ORDER"; context.CurrentStep=quote.NeedsLocation ? "ORDER_LOCATION" : "ORDER_REVIEW:" + quote.Fingerprint;
+                if (proposal.Edits.Count > 0) new OfferingReference(workspaceId,"PRODUCT",proposal.Edits.Select(e => e.ProductId).Distinct().ToArray(),location).Remember(context);
+            }
+            var question = quote.NeedsLocation ? "¿En cuál sede deseas solicitar estos productos?" : "¿Deseas agregar o cambiar algo, o enviar la solicitud para revisión?";
+            context.LastQuestion=question;
+            return await Remember(quote.Text + "\n" + question,quote:quote);
         }
+        catch (OverflowException) { return await Remember("La cantidad o el importe supera el máximo permitido. ¿Qué cantidad menor deseas?",OperationStatus.NotAvailable); }
+        catch (ArgumentException ex) { return await Remember(ex.Message + " ¿Qué producto deseas corregir?",OperationStatus.NotAvailable); }
 
-        var remove = Regex.Match(command, @"^(?:quitar|quita|eliminar|elimina|sacar|saca)\s+(.+)$");
-        if (remove.Success)
+        async Task<ResponsePlan> Remember(string text, OperationStatus status = OperationStatus.Collecting, OrderDraftMerger.Quote? quote = null)
         {
-            var name = remove.Groups[1].Value;
-            var matches = context.OrderDraftItems.Where(i => Normalize(i.ProductName) == name || i.ProductId == name).ToList();
-            if (matches.Count != 1) return "Indica el nombre exacto o ID del producto que quieres quitar.\n" + Summary(context);
-            context.OrderDraftItems.Remove(matches[0]);
-            return Summary(context);
+            context.OrderLastSourceMessageId=sourceMessageId; context.OrderLastResponse=text;
+            await contexts.SaveContextAsync(workspaceId,phone,context,ct);
+            return Plan(text,status,quote);
         }
-
-        var change = Regex.Match(command, @"^(?:cambiar|cambia|poner|pon)\s+(.+?)\s+a\s+(-?\d+)\s*(?:unidades)?$");
-        if (change.Success)
+        async Task<ResponsePlan> Submit(OrderDraftMerger.Quote? quote)
         {
-            if (!int.TryParse(change.Groups[2].Value, out var quantity) || quantity <= 0)
-                return "La cantidad debe ser un entero mayor que cero.";
-            var matches = context.OrderDraftItems.Where(i => Normalize(i.ProductName) == change.Groups[1].Value || i.ProductId == change.Groups[1].Value).ToList();
-            if (matches.Count != 1) return "Indica el nombre exacto o ID del producto cuya cantidad quieres cambiar.\n" + Summary(context);
-            var product = await _offerings.GetProductByIdAsync(workspaceId, matches[0].ProductId, ct);
-            if (product == null) return "Ese producto ya no está disponible. Puedes quitarlo del pedido.";
-            matches[0].Quantity = quantity;
-            matches[0].ProductName = product.Name;
-            return Summary(context);
+            if (context.OrderDraftItems.Count == 0) return await Remember("Tu pedido está vacío. ¿Qué producto deseas agregar?");
+            var id=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceMessageId)));
+            // CAS is acquired before the durable business effect, without holding a transaction across network calls.
+            if (!resuming) {
+                context.CurrentStep="ORDER_COMMIT:" + quote!.Fingerprint; context.OrderLastSourceMessageId=sourceMessageId; context.OrderLastResponse=null;
+                await contexts.SaveContextAsync(workspaceId,phone,context,ct);
+            }
+            var currentModules=(await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (AiIntentAccess.GetDeniedResponse(ConversationIntent.Order,currentModules) is { } revoked) {
+                context.CurrentStep=null; return await Remember(revoked,OperationStatus.Denied);
+            }
+            var request=new OrderRecord { Id=id,ConversationId=conversationId,ConsumerPhone=phone,ConsumerName=customerName,
+                Status=OrderStatus.PendingReview, RequestedLocationId=context.SelectedLocationId,
+                ExpectedCatalog=context.OrderDraftItems.ToDictionary(i=>i.ProductId,i=>{
+                    var p=products.Single(p=>p.Id==i.ProductId);return new OrderCatalogExpectation(p.Name,p.PriceMinorUnits,p.Currency);
+                }),
+                Notes="Solicitud pendiente de revisión por el negocio. Precios del catálogo al enviarla." + (context.SelectedLocationId == null ? "" : " Sede solicitada: " + context.SelectedLocationId + "."),
+                Items=context.OrderDraftItems.Select(i => new OrderItemRecord { ProductId=i.ProductId,ProductName=i.ProductName,Quantity=i.Quantity }).ToList() };
+            OrderRecord saved;
+            try { saved=await orders.CreateOrderAsync(workspaceId,request,ct); }
+            catch (ArgumentException ex) { context.CurrentStep=null; return await Remember(ex.Message + " Corrige o quita el producto antes de enviar.",OperationStatus.NotAvailable); }
+            await notifications.NotifyOnceAsync(workspaceId,"ORDERS",NotificationType.NewCommercialRequest,saved.Id,"Pedido recibido",
+                $"{saved.ConsumerName} envió una solicitud con {saved.Items.Count} ítems para revisión.","/orders",ct);
+            context.CurrentGoal=null; context.CurrentStep=null; context.OrderDraftItems.Clear(); context.MissingFields.Clear();context.LastQuestion=null;
+            return await Remember($"Tu solicitud de pedido fue enviada. El negocio la revisará. Código: {saved.Id[..6]}.",OperationStatus.Succeeded,quote);
         }
-
-        // Commands must not become additions just because extraction omitted the operation.
-        if (Regex.IsMatch(command, @"^(?:cambiar|cambia|poner|pon|quitar|quita|eliminar|elimina|sacar|saca|cancelar|mostrar|listar|ver)\b"))
-            return "Puedes escribir 'cambiar PRODUCTO a 2', 'quitar PRODUCTO', 'mostrar pedido' o 'cancelar pedido'.";
-
-        if (Regex.IsMatch(command, @"(?:^|\s)(?:-\d+|0+)(?:[xX]|\s|$)"))
-            return "La cantidad debe ser un entero mayor que cero.";
-
-        var input = interpretation.SearchTerm;
-        if (string.IsNullOrWhiteSpace(input)) return Summary(context);
-        var products = (await _offerings.GetProductsAsync(workspaceId, context.SelectedLocationId, null, ct)).ToList();
-        var additions = new List<OrderDraftItem>();
-        foreach (var raw in input.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var match = Regex.Match(raw.Trim(), @"^(?:(-?\d+)\s*[xX]?\s+)?(.+)$");
-            var qty = 1;
-            if (match.Groups[1].Success && (!int.TryParse(match.Groups[1].Value, out qty) || qty <= 0))
-                return "La cantidad debe ser un entero mayor que cero.";
-            var name = Normalize(match.Groups[2].Value);
-            var matches = products.Where(p => Normalize(p.Name) == name || p.Id.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (matches.Count != 1)
-                return matches.Count == 0 ? $"No encontré un producto activo llamado '{match.Groups[2].Value}'. Indica el nombre exacto o ID del catálogo."
-                    : "Hay varios productos con ese nombre. Indica su ID:\n" + string.Join("\n", matches.Select(p => $"- {p.Name}: {p.Id}"));
-            additions.Add(new OrderDraftItem { ProductId = matches[0].Id, ProductName = matches[0].Name, Quantity = qty });
-        }
-        // Validate the complete turn before mutating the durable draft.
-        foreach (var group in additions.GroupBy(i => i.ProductId))
-        {
-            var current = context.OrderDraftItems.FirstOrDefault(i => i.ProductId == group.Key)?.Quantity ?? 0;
-            if (group.Sum(i => (long)i.Quantity) + current > int.MaxValue) return "La cantidad indicada es demasiado grande.";
-        }
-        foreach (var item in additions)
-        {
-            var existing = context.OrderDraftItems.FirstOrDefault(i => i.ProductId == item.ProductId);
-            if (existing == null) context.OrderDraftItems.Add(item);
-            else existing.Quantity += item.Quantity;
-        }
-        return Summary(context);
     }
-
-    private static void CloseDraft(ConversationContextDto context)
-    {
-        context.CurrentGoal = null;
-        context.CurrentStep = null;
-        context.OrderDraftItems.Clear();
-        context.MissingFields.Clear();
-        context.LastQuestion = null;
-    }
-
-    private static string Summary(ConversationContextDto context) =>
-        (context.OrderDraftItems.Count == 0 ? "Tu pedido está vacío." : "Pedido actual:\n" + string.Join("\n", context.OrderDraftItems.Select(i => $"- {i.Quantity}x {i.ProductName}")))
-        + "\nPuedes agregar productos, cambiar PRODUCTO a CANTIDAD, quitar PRODUCTO, mostrar pedido, cancelar pedido o enviar pedido.";
-
-    private static string Normalize(string text) => string.Concat(text.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD)
-        .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)).Normalize(NormalizationForm.FormC);
 }

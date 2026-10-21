@@ -54,6 +54,8 @@ public static class DependencyInjection
         services.AddSingleton<TimePreferenceResolver>();
         services.AddScoped<IWorkspaceSlotResolver, WorkspaceSlotResolver>();
         services.AddSingleton<DialoguePolicy>();
+        services.AddSingleton<OrderMentionResolver>();
+        services.AddScoped<ICommerceTurnResolver, CommerceTurnResolver>();
         services.AddScoped<ITurnUnderstandingPipeline, TurnUnderstandingPipeline>();
         services.AddOptions<ResponseCompositionOptions>();
         services.AddScoped<IResponseComposer, ResponseComposer>();
