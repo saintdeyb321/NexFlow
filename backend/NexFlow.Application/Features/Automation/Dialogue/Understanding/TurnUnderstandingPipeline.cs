@@ -33,6 +33,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
     private async Task<PreparedDialogueTurn> PrepareCoreAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
     {
+        var greeting = GreetingRecognizer.Parse(request.MessageText);
+        if (greeting.HasGreeting && greeting.Content.Length > 0)
+            request = request with { MessageText = greeting.Content };
         var act = policy.Classify(request.MessageText, context);
         if (act == DialogueAct.HumanAssistance) return new(act, new() { Intent = ConversationIntent.Support });
         if (act == DialogueAct.Cancellation || act == DialogueAct.DeclineOperation && context.CurrentGoal != null)

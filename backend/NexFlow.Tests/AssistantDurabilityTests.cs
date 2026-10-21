@@ -79,7 +79,7 @@ public sealed class AssistantDurabilityTests
     [Fact]
     public async Task Persistent_menu_recovers_after_recreating_the_context_service_without_redis()
     {
-        var f = new AssistantConversationTests.Fixture(); await f.Turn("hola");
+        var f = new AssistantConversationTests.Fixture(); await f.Turn("menú");
         var cold = new ContextRecoveryService(Mock.Of<IConversationCache>(), new FirestoreConversationStateRepository(f.Firestore.Db));
         var state = await cold.GetOrRecoverContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, default);
         Assert.Equal("ProductQuery", state.RecoveryOptions[0].Key); Assert.NotNull(state.StateVersion);

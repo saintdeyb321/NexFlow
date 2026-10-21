@@ -27,9 +27,10 @@ public sealed class AssistantLicenseBudgetTests
         Assert.Equal(0, f.AiCalls);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProductQuery, QueryKind = OfferingQueryKind.Broad });
         await f.Turn("que productos tiene?", "natural");
+        await f.Turn("menú", "optional-menu");
         await f.Turn("1", "selection");
         Assert.Equal(1, f.AiCalls);
-        Assert.Equal(3, f.Sent.Count);
+        Assert.Equal(4, f.Sent.Count);
         Assert.Equal(2, f.FactualQueries.Count);
         Assert.All(f.FactualQueries, q => Assert.Equal((f.Workspace, KnowledgeTopic.Products), q));
         Assert.NotNull(f.Firestore.Read($"workspaces/{f.Workspace}/conversationStates/ai-budget"));
@@ -45,7 +46,7 @@ public sealed class AssistantLicenseBudgetTests
     {
         var f = new AssistantConversationTests.Fixture();
         f.Modules.IntersectWith(modules.Split(',', StringSplitOptions.RemoveEmptyEntries));
-        await f.Turn("hola");
+        await f.Turn("menú");
         var actions = new List<string>();
         while (true)
         {
@@ -90,7 +91,7 @@ public sealed class AssistantLicenseBudgetTests
     {
         var f = new AssistantConversationTests.Fixture();
         f.Modules.IntersectWith([module]);
-        await f.Turn("hola");
+        await f.Turn("menú");
         Assert.Equal(action, (await f.Context()).RecoveryOptions[0].Key);
         f.Modules.Remove(module);
         await f.Turn("1");
@@ -138,7 +139,7 @@ public sealed class AssistantLicenseBudgetTests
     [Fact]
     public async Task Reservations_keep_internal_locations_hours_and_availability_without_independent_information_modules()
     {
-        var f = new AssistantConversationTests.Fixture();
+        var f = new AssistantConversationTests.Fixture { Now = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc) };
         f.Modules.IntersectWith(["SERVICES", "RESERVATIONS"]);
         await f.Turn("quiero reservar");
         await f.Turn("1"); Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);

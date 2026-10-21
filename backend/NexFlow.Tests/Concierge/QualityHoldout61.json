@@ -1,0 +1,656 @@
+[
+  {
+    "Id": "H01",
+    "Purpose": "Precio y comparación factual informal",
+    "Turns": [
+      {
+        "Text": "Buen día, ¿me dices el precio del pan integral?",
+        "Contains": [
+          "2.50"
+        ]
+      },
+      {
+        "Text": "¿Y el queque a cuánto sale?",
+        "Contains": [
+          "10.00"
+        ]
+      }
+    ]
+  },
+  {
+    "Id": "H02",
+    "Purpose": "Pedido cortés y cantidad absoluta",
+    "Turns": [
+      {
+        "Text": "Quisiera dos queques, porfa",
+        "Quantities": {
+          "product-b": 2
+        }
+      },
+      {
+        "Text": "Cambia el queque a tres, porfa",
+        "Quantities": {
+          "product-b": 3
+        }
+      }
+    ]
+  },
+  {
+    "Id": "H03",
+    "Purpose": "Multiartículo y corrección ordinal",
+    "Turns": [
+      {
+        "Text": "Dame un queque y dos panes integrales por favor",
+        "Quantities": {
+          "product-b": 1,
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cambia el segundo producto a cuatro, porfa",
+        "Quantities": {
+          "product-b": 1,
+          "product-a": 4
+        }
+      }
+    ]
+  },
+  {
+    "Id": "H04",
+    "Purpose": "Negación informativa preserva borrador",
+    "Turns": [
+      {
+        "Text": "Quiero cinco panes integrales porfa",
+        "Quantities": {
+          "product-a": 5
+        }
+      },
+      {
+        "Text": "Solo estoy preguntando, no lo envíes",
+        "Preserve": true,
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H05",
+    "Purpose": "Consulta durante preparación",
+    "Turns": [
+      {
+        "Text": "Me vendes dos panes integrales",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "¿cuánto demora la limpieza dental?",
+        "Preserve": true,
+        "Contains": [
+          "30 min"
+        ]
+      }
+    ]
+  },
+  {
+    "Id": "H06",
+    "Purpose": "Reserva implícita completa",
+    "Turns": [
+      {
+        "Text": "Quisiera una limpieza dental en san jeronimo el jueves por la tarde",
+        "Goal": "RESERVATION",
+        "Date": "2026-10-22"
+      },
+      {
+        "Text": "las 16:00"
+      },
+      {
+        "Text": "Soy Elena Rojas",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "De acuerdo.",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "H07",
+    "Purpose": "Reserva fragmentada",
+    "Turns": [
+      {
+        "Text": "Me gustaría reservar",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "San Jerónimo"
+      },
+      {
+        "Text": "limpieza dental, porfa"
+      },
+      {
+        "Text": "24/10",
+        "Date": "2026-10-24"
+      },
+      {
+        "Text": "10:00"
+      },
+      {
+        "Text": "Rosa Mora",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "Confirmo.",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "H08",
+    "Purpose": "Corrección de fecha y mañana",
+    "Turns": [
+      {
+        "Text": "Quiero agendar la limpieza dental en concepcion para el 24/10 por la mañana",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "mejor el 25 de octubre",
+        "Date": "2026-10-25"
+      },
+      {
+        "Text": "10:00"
+      },
+      {
+        "Text": "Nora Vidal",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "Sí confirmo.",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "H09",
+    "Purpose": "Rechazo de cancelación preserva reserva",
+    "Turns": [
+      {
+        "Text": "Necesito reservar limpieza dental en Concepción para el 23/10",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "cancela la reserva"
+      },
+      {
+        "Text": "No.",
+        "Goal": "RESERVATION",
+        "Bookings": 0
+      }
+    ]
+  },
+  {
+    "Id": "H10",
+    "Purpose": "Información de precio en medio de agenda",
+    "Turns": [
+      {
+        "Text": "Quisiera agendar limpieza dental en San Jerónimo pasado mañana",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "Antes de confirmar ¿qué costo tiene la limpieza dental?",
+        "Contains": [
+          "75.00"
+        ],
+        "Preserve": true
+      },
+      {
+        "Text": "por la tarde",
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0
+      }
+    ]
+  },
+  {
+    "Id": "H11",
+    "Purpose": "Dependencias internas sin módulo informativo",
+    "Turns": [
+      {
+        "Text": "¿pueden enseñar su catálogo de servicios?",
+        "Contains": [
+          "Limpieza dental"
+        ]
+      },
+      {
+        "Text": "Quiero reservar limpieza dental en Concepcion mañana por la tarde",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "¿Dónde está el negocio?",
+        "Semantic": "Location",
+        "NoKnowledge": true,
+        "Bookings": 0
+      }
+    ],
+    "Modules": [
+      "SERVICES",
+      "RESERVATIONS"
+    ]
+  },
+  {
+    "Id": "H12",
+    "Purpose": "Licencia comercial sin reservas",
+    "Turns": [
+      {
+        "Text": "buenas noches ¿me dices qué productos venden?",
+        "Contains": [
+          "Pan integral"
+        ]
+      },
+      {
+        "Text": "¿También se puede reservar limpieza dental?",
+        "Bookings": 0
+      },
+      {
+        "Text": "Quiero dos queques porfa",
+        "Quantities": {
+          "product-b": 2
+        }
+      }
+    ],
+    "Modules": [
+      "CATALOG",
+      "ORDERS"
+    ]
+  },
+  {
+    "Id": "H13",
+    "Purpose": "Revocación con información aún autorizada",
+    "Turns": [
+      {
+        "Text": "necesito tres queques",
+        "Quantities": {
+          "product-b": 3
+        }
+      },
+      {
+        "Text": "enviar el pedido",
+        "Revoke": "ORDERS",
+        "Orders": 0,
+        "Quantities": {
+          "product-b": 3
+        }
+      },
+      {
+        "Text": "el queque cuánto cuesta ahora",
+        "Contains": [
+          "10.00"
+        ],
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H14",
+    "Purpose": "Solicitud natural de asesor",
+    "Turns": [
+      {
+        "Text": "¿me comunicas con alguien, por favor?",
+        "Semantic": "Support",
+        "Human": true
+      },
+      {
+        "Text": "ya puedo comprar el pan?",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H15",
+    "Purpose": "Ortografía informal en consulta factual",
+    "Turns": [
+      {
+        "Text": "ola, kuanto cuesta la limpieza dental?",
+        "Contains": [
+          "75.00"
+        ]
+      },
+      {
+        "Text": "¿y cuánto dura ese servicio?",
+        "Contains": [
+          "30 min"
+        ]
+      }
+    ]
+  },
+  {
+    "Id": "H16",
+    "Purpose": "Consulta y PDF por lenguaje informal",
+    "Turns": [
+      {
+        "Text": "holaaa, tienen PAN INTEGRAL?",
+        "Contains": [
+          "Pan integral"
+        ]
+      },
+      {
+        "Text": "mándame el folleto de productos",
+        "Semantic": "ProductQuery",
+        "Broad": true,
+        "Contains": [
+          "Pan integral"
+        ],
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H17",
+    "Purpose": "Producto ambiguo y aclaración natural",
+    "Turns": [
+      {
+        "Text": "Quiero pan",
+        "EmptyDraft": true,
+        "Contains": [
+          "Pan integral",
+          "Pan blanco"
+        ]
+      },
+      {
+        "Text": "Quisiera dos del integral",
+        "Quantities": {
+          "product-a": 2
+        }
+      }
+    ]
+  },
+  {
+    "Id": "H18",
+    "Purpose": "Producto inactivo y alternativa",
+    "Turns": [
+      {
+        "Text": "Quiero comprar pan integral porfa",
+        "EmptyDraft": true,
+        "Orders": 0
+      },
+      {
+        "Text": "Quiero un queque, porfa",
+        "Quantities": {
+          "product-b": 1
+        }
+      }
+    ],
+    "InactiveBread": true
+  },
+  {
+    "Id": "H19",
+    "Purpose": "Monedas distintas e hipótesis",
+    "Turns": [
+      {
+        "Text": "Me apuntas dos panes integrales y un queque?",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 1
+        },
+        "Contains": [
+          "PEN",
+          "USD"
+        ]
+      },
+      {
+        "Text": "¿Y si comprara cuatro panes integrales?",
+        "Preserve": true,
+        "Contains": [
+          "No he cambiado"
+        ],
+        "Orders": 0
+      }
+    ],
+    "MixedCurrency": true
+  },
+  {
+    "Id": "H20",
+    "Purpose": "Retiro ordinal y nuevo artículo",
+    "Turns": [
+      {
+        "Text": "Agrega dos panes integrales y un queque, porfa.",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 1
+        }
+      },
+      {
+        "Text": "Quita el segundo producto",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "agrega un pan blanco, gracias",
+        "Quantities": {
+          "product-a": 2,
+          "product-c": 1
+        }
+      },
+      {
+        "Text": "¿Qué subtotal llevo?",
+        "Contains": [
+          "7.00"
+        ],
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H21",
+    "Purpose": "Proveedor caído durante agenda",
+    "Turns": [
+      {
+        "Text": "Quiero reservar limpieza dental en Concepción el 27/10",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "ya pe, avancemos con eso",
+        "Provider": "Timeout",
+        "Preserve": true,
+        "Bookings": 0
+      },
+      {
+        "Text": "por la tarde",
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0
+      }
+    ]
+  },
+  {
+    "Id": "H22",
+    "Purpose": "JSON inválido sin perder pedido",
+    "Turns": [
+      {
+        "Text": "Dame tres panes integrales porfa",
+        "Quantities": {
+          "product-a": 3
+        }
+      },
+      {
+        "Text": "¿será q lo dejan en la recepción?",
+        "Provider": "InvalidJson",
+        "Preserve": true,
+        "Orders": 0
+      },
+      {
+        "Text": "¿Qué subtotal tengo pendiente?",
+        "Contains": [
+          "7.50"
+        ],
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H23",
+    "Purpose": "Confirmación demasiado temprana",
+    "Turns": [
+      {
+        "Text": "Me interesa reservar una limpieza dental en Concepción",
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "SI CONFIRMO.",
+        "Bookings": 0,
+        "Goal": "RESERVATION"
+      },
+      {
+        "Text": "para el 28/10",
+        "Date": "2026-10-28",
+        "Bookings": 0
+      }
+    ]
+  },
+  {
+    "Id": "H24",
+    "Purpose": "Fecha reemplazada con contexto",
+    "Turns": [
+      {
+        "Text": "Necesito reservar limpieza dental en San Jerónimo para el 26/10",
+        "Date": "2026-10-26"
+      },
+      {
+        "Text": "mejor pasado mañana",
+        "Date": "2026-10-22"
+      },
+      {
+        "Text": "las 16:00",
+        "Bookings": 0
+      }
+    ]
+  },
+  {
+    "Id": "H25",
+    "Purpose": "Cancelación repetida no toca registros",
+    "Turns": [
+      {
+        "Text": "Quiero cuatro queques por favor",
+        "Quantities": {
+          "product-b": 4
+        }
+      },
+      {
+        "Text": "CANCELAR PEDIDO."
+      },
+      {
+        "Text": "SI CONFIRMO.",
+        "Source": "cancel-ack",
+        "EmptyDraft": true,
+        "Orders": 0
+      },
+      {
+        "Text": "SI CONFIRMO.",
+        "Source": "cancel-ack",
+        "EmptyDraft": true,
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H26",
+    "Purpose": "Envió idempotente de solicitud",
+    "Turns": [
+      {
+        "Text": "Dame dos queques y un pan blanco",
+        "Quantities": {
+          "product-b": 2,
+          "product-c": 1
+        }
+      },
+      {
+        "Text": "Por favor enviar mi pedido",
+        "Source": "submit",
+        "Orders": 1
+      },
+      {
+        "Text": "Por favor enviar mi pedido",
+        "Source": "submit",
+        "Orders": 1
+      }
+    ]
+  },
+  {
+    "Id": "H27",
+    "Purpose": "Menú sólo por solicitud expresa",
+    "Turns": [
+      {
+        "Text": "¿Me muestras las opciones que puedo usar?",
+        "OptionalMenu": true
+      },
+      {
+        "Text": "la primera.",
+        "Contains": [
+          "Pan integral"
+        ],
+        "Orders": 0
+      }
+    ]
+  },
+  {
+    "Id": "H28",
+    "Purpose": "Horario sin licencia no consulta datos",
+    "Turns": [
+      {
+        "Text": "¿abren los domingos en la sede?",
+        "Semantic": "BusinessHours",
+        "NoKnowledge": true
+      },
+      {
+        "Text": "el pan integral ¿cuánto sale por unidad?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0
+      }
+    ],
+    "Modules": [
+      "CATALOG"
+    ]
+  },
+  {
+    "Id": "H29",
+    "Purpose": "Dos negocios y un mismo nombre",
+    "Turns": [
+      {
+        "Text": "¿En cuánto están ofreciendo el pan integral ahorita?",
+        "Contains": [
+          "2.50"
+        ]
+      },
+      {
+        "Text": "¿Ese precio es por unidad?",
+        "Contains": [
+          "2.50"
+        ]
+      }
+    ],
+    "OtherWorkspace": true
+  },
+  {
+    "Id": "H30",
+    "Purpose": "Cliente impaciente y prioridad humana",
+    "Turns": [
+      {
+        "Text": "Porfa necesito que me atienda una persona",
+        "Semantic": "Support",
+        "Human": true
+      },
+      {
+        "Text": "Quisiera dos queques por favor",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0
+      }
+    ]
+  }
+]

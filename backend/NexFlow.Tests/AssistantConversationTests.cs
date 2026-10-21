@@ -51,13 +51,14 @@ public sealed class AssistantConversationTests
     public async Task Guided_multi_turn_choices_use_real_tenant_options_without_ai_or_transaction_writes(string first, string selection)
     {
         var f = new Fixture(); await f.Turn(first);
+        await f.Turn("menú"); // Numeric navigation is explicitly requested, never imposed by a greeting.
         var state = await f.Context(); Assert.True(state.RecoveryOptions.Count >= 2);
         Assert.Equal("ProductQuery", state.RecoveryOptions[0].Key); Assert.Equal("ServiceQuery", state.RecoveryOptions[1].Key);
         await f.Turn(selection);
         Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
         Assert.NotEmpty(f.FactualQueries); Assert.All(f.FactualQueries, q => Assert.Equal(f.Workspace, q.Workspace));
         var second = await f.Context(); Assert.Null(second.CurrentGoal); Assert.Empty(second.OrderDraftItems);
-        Assert.Equal(2, f.Sent.Count);
+        Assert.Equal(3, f.Sent.Count);
     }
 
     [Theory]
@@ -125,7 +126,7 @@ public sealed class AssistantConversationTests
     [Fact]
     public async Task Booking_multiple_turns_select_real_options_preserve_interruption_and_require_explicit_confirmation()
     {
-        var f = new Fixture();
+        var f = new Fixture { Now = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc) };
         await f.Turn("quiero reservar");
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, CustomerName = "Ana Pérez" }); await f.Turn("Ana Pérez");
         await f.Turn("1"); Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);
@@ -201,7 +202,7 @@ public sealed class AssistantConversationTests
     [Fact]
     public async Task Menu_selection_is_revalidated_when_a_module_is_removed_and_ambiguity_does_not_choose_for_the_user()
     {
-        var f = new Fixture(); await f.Turn("hola"); f.Modules.Remove("CATALOG");
+        var f = new Fixture(); await f.Turn("menú"); f.Modules.Remove("CATALOG");
         await f.Turn("1"); Assert.Empty(f.FactualQueries); Assert.Empty(f.Orders);
         await f.Turn("esa opción"); Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
     }
@@ -209,7 +210,7 @@ public sealed class AssistantConversationTests
     [Fact]
     public async Task More_options_are_discoverable_and_preserve_the_exact_page_selection_without_ai()
     {
-        var f = new Fixture(); await f.Turn("hola");
+        var f = new Fixture(); await f.Turn("menú");
         Assert.True((await f.Context()).RecoveryHasMore);
         Assert.Contains("ver más", Assert.Single(f.Sent.Values).Content);
         await f.Turn("ver más");

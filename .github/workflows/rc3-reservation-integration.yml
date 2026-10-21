@@ -83,12 +83,21 @@ jobs:
           assert counters is not None
           assert int(counters.attrib['total']) >= 37, 'RC3 and commercial integration tests were not discovered'
           assert counters.attrib['total'] == counters.attrib['executed'] == counters.attrib['passed'], 'No skipped/failed integration is certifiable'
+      - name: Record release identity without configuration payloads
+        if: always()
+        shell: python
+        run: |
+          import json, os
+          from pathlib import Path
+          target = Path('artifacts/rc3'); target.mkdir(parents=True, exist_ok=True)
+          data = {key: os.environ[key] for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
+          (target / 'identity.json').write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
       - name: Upload synthetic test results only
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
           name: rc3-isolated-test-results
-          path: artifacts/rc3/*.trx
+          path: artifacts/rc3/
           if-no-files-found: warn
           retention-days: 7
 # No SaaS secrets, environment/deployment permissions or cloud login. The

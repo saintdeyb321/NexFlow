@@ -59,7 +59,7 @@ public sealed class AssistantRc1Tests
     public async Task Opening_menu_resets_pagination_and_last_page_does_not_wrap()
     {
         var f = new AssistantConversationTests.Fixture();
-        await f.Turn("hola"); await f.Turn("ver más");
+        await f.Turn("menú"); await f.Turn("ver más");
         var last = JsonSerializer.Serialize((await f.Context()).RecoveryOptions);
         await f.Turn("ver más"); Assert.Equal(last, JsonSerializer.Serialize((await f.Context()).RecoveryOptions));
         await f.Turn("menú"); Assert.Equal("ProductQuery", (await f.Context()).RecoveryOptions[0].Key);
@@ -68,7 +68,7 @@ public sealed class AssistantRc1Tests
     [Fact]
     public async Task Changing_menu_context_cannot_inherit_another_menus_offset()
     {
-        var f = new AssistantConversationTests.Fixture(8); await f.Turn("hola"); await f.Turn("ver más");
+        var f = new AssistantConversationTests.Fixture(8); await f.Turn("menú"); await f.Turn("ver más");
         var c = await f.Context(); c.CurrentGoal = "RESERVATION"; c.CurrentStep = "COLLECT_SERVICE"; c.SelectedLocationId = "sede-a";
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, c, default);
         await f.Turn("menú"); Assert.Equal("service-2", (await f.Context()).RecoveryOptions[0].Key);

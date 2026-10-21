@@ -53,7 +53,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return new(context.RecoveryLastResponse, context.RecoveryLastInterpretation == null ? null : JsonSerializer.Deserialize<AiInterpretation>(context.RecoveryLastInterpretation));
         if (request.MessageText.Length > Limits.MaxInputCharacters)
             return await Remember("Tu mensaje es demasiado largo. Envíalo en partes más cortas y plantea una consulta por vez.");
-        var text = Normalize(request.MessageText);
+        var greeting = GreetingRecognizer.Parse(request.MessageText);
+        var text = Normalize(greeting.Content);
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION";
         if (Regex.IsMatch(text, @"\b(ignora (?:todas las |las )?instrucciones|system prompt|api key|revela (?:el )?(?:prompt|secreto)|actua como administrador|cambia (?:el )?workspace)\b", RegexOptions.CultureInvariant))
             return await Remember("Solo puedo ayudarte con información y operaciones autorizadas de este negocio. " + Continuation(context));
@@ -100,9 +101,17 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (context.CurrentStep == "CONFIRM" && context.CurrentGoal is "BOOKING" or "RESERVATION" && Yes(text))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Confirmed = true });
         if (No(text) && context.CurrentStep == "CONFIRM") return await Remember("No he registrado la reserva. Puedes corregir la sede, servicio, fecha u hora, o escribir cancelar para dejar esta reserva en preparación.");
-        if (Regex.IsMatch(text, @"^(hola+|holi|buenas|buenos dias|buenas tardes|buenas noches|hey|ola)( (buenos dias|buenas tardes|buenas noches))?$"))
-            return string.IsNullOrEmpty(context.CurrentGoal) ? await Menu("¡Hola! Puedo ayudarte con estas opciones:")
-                : await Remember((context.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "¡Hola! ") + Continuation(context));
+        if (greeting.HasGreeting && text.Length == 0)
+            return await Remember(context.CurrentGoal != null ? Continuation(context)
+                : context.RecoveryLastMessageId != null || context.LastQuestion != null || context.LastIntent != null
+                    ? "¿En qué más puedo ayudarte? Si prefieres, escribe menú para ver opciones o asesor para hablar con una persona."
+                    : "¡Hola! Soy el asistente del negocio. ¿Qué necesitas consultar? Si prefieres, escribe menú para ver opciones o asesor para hablar con una persona.");
+        if (greeting.HasGreeting && text is "quisiera informacion" or "quiero informacion" or "necesito informacion")
+            return await Remember("Claro, ¿qué información del negocio necesitas? También puedes escribir menú para ver las opciones disponibles o asesor para solicitar ayuda humana.");
+        if (text is "necesito ayuda con un pedido" or "quiero ayuda con un pedido")
+            return await Remember(AiIntentAccess.GetDeniedResponse(ConversationIntent.Order, modules)
+                ?? (context.CurrentGoal != null ? Continuation(context)
+                    : "¿Quieres preparar un pedido nuevo o consultar uno ya enviado? Para revisar un pedido enviado puedes solicitar un asesor."));
         if (text is "adios" or "chau" or "hasta luego" or "gracias" or "muchas gracias")
             return await Remember("¡Gracias por escribirnos! " + (string.IsNullOrEmpty(context.CurrentGoal) ? "Aquí estaremos cuando necesites información del negocio." : Continuation(context)));
         if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones")
