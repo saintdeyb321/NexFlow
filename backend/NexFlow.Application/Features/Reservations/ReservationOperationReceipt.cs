@@ -45,7 +45,7 @@ public sealed record ReservationOperationReceipt(string Fingerprint, string Conf
         var root = JsonNode.Parse(message.PayloadJson)!.AsObject();
         var receipt = root["ReservationOperationReceipt"]!.Deserialize<ReservationOperationReceipt>() ?? throw new InvalidOperationException("Missing durable receipt.");
         if (receipt.ContactHash != ReservationOperationCommand.Hash(contact) || receipt.Result.WorkspaceId != workspace
-            || receipt.Result.CustomerIdentifier != contact) throw new InvalidOperationException("Operation owner mismatch.");
+            || !ReservationContact.IsSameInternationalContact(receipt.Result.CustomerIdentifier, contact)) throw new InvalidOperationException("Operation owner mismatch.");
         return receipt;
     }
 }

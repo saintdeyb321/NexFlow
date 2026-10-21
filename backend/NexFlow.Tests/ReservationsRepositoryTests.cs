@@ -20,6 +20,32 @@ namespace NexFlow.Tests;
 
 public sealed class ReservationsRepositoryTests
 {
+    [Theory]
+    [InlineData("987654321", null, null)]
+    [InlineData("987654321", "PE", "+51987654321")]
+    [InlineData("987654321", "US", null)]
+    [InlineData("51987654321", null, "+51987654321")]
+    [InlineData("+51 987-654-321", null, "+51987654321")]
+    [InlineData("+987654321", "PE", null)]
+    [InlineData("+051987654321", null, null)]
+    [InlineData("51987654321@untrusted", null, null)]
+    public void Contact_normalization_requires_an_explicit_national_country(string input, string? country, string? expected)
+    {
+        Assert.Equal(expected != null, ReservationContact.TryNormalize(input, country, out var actual));
+        Assert.Equal(expected ?? string.Empty, actual);
+    }
+
+    [Fact]
+    public void Historical_aliases_are_exact_international_forms_and_do_not_guess_national_identity()
+    {
+        const string canonical = "+51987654321";
+        Assert.Equal(new[] { canonical, "51987654321" }, ReservationContact.InternationalAliases(canonical));
+        Assert.True(ReservationContact.IsSameInternationalContact("51987654321", canonical));
+        Assert.False(ReservationContact.IsSameInternationalContact("987654321", canonical));
+        Assert.False(ReservationContact.IsSameInternationalContact("+52987654321", canonical));
+        Assert.Equal(canonical, NexFlow.Application.Features.Automation.ProcessMessage.Services.IncomingMessageGuard.NormalizePhone("51987654321@s.whatsapp.net"));
+    }
+
     [Fact]
     public async Task Future_contact_page_is_bounded_in_sql_and_details_recheck_owner_workspace_and_state()
     {
@@ -55,9 +81,9 @@ public sealed class ReservationsRepositoryTests
         await using var f = await DbFixture.CreateAsync(); var now = Utc("2030-07-01T12:00:00Z");
         f.Clock.SetupGet(c => c.UtcNow).Returns(now); const string phone = "+51999999999";
         f.Repository.Add(Reservation.Create(f.Workspace, "l", "s", phone, "Ana", now.AddHours(1), now.AddHours(1.5)));
-        await f.SeedAsync(); Assert.True(await f.Repository.HasSingleFutureOwnerAsync(f.Workspace, phone, default));
+        await f.SeedAsync(); Assert.True(await f.Repository.HasUnambiguousFutureOwnerNameAsync(f.Workspace, phone, default));
         f.Repository.Add(Reservation.Create(f.Workspace, "l", "s", phone, "Otra persona", now.AddHours(2), now.AddHours(2.5)));
-        await f.SeedAsync(); Assert.False(await f.Repository.HasSingleFutureOwnerAsync(f.Workspace, phone, default));
+        await f.SeedAsync(); Assert.False(await f.Repository.HasUnambiguousFutureOwnerNameAsync(f.Workspace, phone, default));
         Assert.Contains("DISTINCT", Assert.Single(f.Sql.Commands)); Assert.Contains("LIMIT", Assert.Single(f.Sql.Commands));
         await Assert.ThrowsAsync<ArgumentException>(() => f.Repository.GetFutureForContactAsync(Guid.Empty, phone, null, 5, default));
         await Assert.ThrowsAsync<ArgumentException>(() => f.Repository.GetFutureForContactAsync(f.Workspace, "unverified", null, 5, default));
@@ -73,6 +99,7 @@ public sealed class ReservationsRepositoryTests
         var sql = new ReservationRepository(db, clock).QueryFutureForContact(Guid.NewGuid(), "+51999999999",
             new(new DateTime(2030, 7, 2, 0, 0, 0, DateTimeKind.Utc), Guid.NewGuid()), 5).ToQueryString();
         Assert.Contains("LIMIT", sql); Assert.Contains("ORDER BY", sql); Assert.Contains("xmin", sql);
+        Assert.Contains("ANY", sql);
         Assert.Contains("CustomerIdentifier", sql); Assert.DoesNotContain("CustomerName", sql);
     }
 

@@ -16,13 +16,16 @@ public class ReservationsController : ControllerBase
     private readonly IReservationRepository _reservationRepository;
     private readonly IWorkspaceContext _workspaceContext;
     private readonly IEntitlementService _entitlementService;
+    private readonly ReservationContactOptions _contactOptions;
 
     public ReservationsController(
         IReservationEngine reservationEngine, IReservationRepository reservationRepository,
-        IWorkspaceContext workspaceContext, IEntitlementService entitlementService)
+        IWorkspaceContext workspaceContext, IEntitlementService entitlementService,
+        Microsoft.Extensions.Options.IOptions<ReservationContactOptions>? contactOptions = null)
     {
         _reservationEngine = reservationEngine; _reservationRepository = reservationRepository;
         _workspaceContext = workspaceContext; _entitlementService = entitlementService;
+        _contactOptions = contactOptions?.Value ?? new();
     }
 
     private Guid WorkspaceId => _workspaceContext.CurrentWorkspaceId;
@@ -188,8 +191,10 @@ public class ReservationsController : ControllerBase
         if (!await HasAccessTo("RESERVATIONS", cancellationToken)) return StatusCode(403, "Módulo RESERVATIONS no contratado.");
 
         // 🔥 SPRINT 2: Sin zona = hora del workspace; con Z = UTC. Solo el motor convierte.
+        if (!ReservationContact.TryNormalize(request.CustomerIdentifier, _contactOptions.NationalNumberCountry, out var contact))
+            return BadRequest(new { code = "Reservation.InvalidContact", message = "Indica un teléfono válido con código de país, por ejemplo +51987654321. Los números nacionales requieren una política de país configurada." });
         var result = await _reservationEngine.CreateReservationAsync(
-            WorkspaceId, request.LocationId, request.ServiceId, request.CustomerIdentifier, request.CustomerName, request.DateTime, cancellationToken);
+            WorkspaceId, request.LocationId, request.ServiceId, contact, request.CustomerName, request.DateTime, cancellationToken);
 
         if (result.IsFailure) return ReservationError(result.Error);
         return Ok(result.Value);

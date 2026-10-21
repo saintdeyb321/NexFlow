@@ -79,7 +79,13 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (_existingReservations != null)
         {
             var managed = await _existingReservations.TryHandleAsync(workspaceId, normalizedPhone, request, context, activeModules, cancellationToken);
-            if (managed != null) { intent = ConversationIntent.Reservation; return await SendText(managed); }
+            if (managed?.Operation == OperationStatus.Human)
+            {
+                await _supportFlow.ProcessAsync(workspaceId, conversation.Id, cancellationToken);
+                return await _outboundMessageService.SendHandoffAcknowledgementAsync(workspaceId, conversation.Id, normalizedPhone,
+                    managed.Response!, request.MessageId, cancellationToken);
+            }
+            if (managed?.Response != null) { intent = ConversationIntent.Reservation; return await SendText(managed.Response); }
         }
         var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
         if (recovery?.Response != null) { intent = recovery.Interpretation?.Intent ?? ConversationIntent.General; act = recovery.Act; operation = recovery.Operation; return await SendText(recovery.Response); }

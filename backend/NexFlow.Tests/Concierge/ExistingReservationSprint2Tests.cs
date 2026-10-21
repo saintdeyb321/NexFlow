@@ -29,96 +29,87 @@ public sealed class ExistingReservationSprint2Tests
         => Assert.Equal(expected, ReservationOperationClassifier.Classify(text, draft));
 
     [Fact]
-    public async Task Single_future_appointment_reschedules_same_id_without_recollecting_commercial_data()
-    {
-        var f = new Fixture(); var original = f.Add(); var id = original.Id;
-        await f.Turn("quiero editar mi reserva", "start");
-        Assert.Contains("23/10/2026", f.Text("start")); Assert.Contains("Sede Concepcion", f.Text("start"));
-        await f.Turn("Mejor para el martes que viene, por la mañana", "date");
-        Assert.Empty(f.Events); Assert.Contains("27/10/2026", f.Text("date"));
-        await f.Turn("1", "time"); Assert.Empty(f.Events); Assert.Contains("¿Confirmas", f.Text("time"));
-        await f.Turn("sí confirmo", "confirm"); await f.Turn("sí confirmo", "confirm");
-        Assert.Equal(id, Assert.Single(f.Rows.Values).Id); Assert.Equal(new DateTime(2026, 10, 27, 15, 0, 0, DateTimeKind.Utc), original.StartTime);
-        Assert.Equal("service-a", original.ServiceId); Assert.Equal("sede-a", original.LocationId); Assert.Equal("Ana Pérez", original.CustomerName);
-        Assert.Single(f.Events); Assert.Equal(1, f.Saves); Assert.Equal(0, f.Dialog.AiCalls); Assert.Empty(f.Dialog.Bookings);
-    }
-
-    [Fact]
-    public async Task Several_appointments_page_with_current_references_and_revalidate_selection()
-    {
-        var f = new Fixture(); for (var i = 0; i < 7; i++) f.Add(day: 23 + i);
-        await f.Turn("quiero ver mis citas", "page1");
-        Assert.Equal(5, (await f.Dialog.Context()).ReservationManagement!.Options.Count);
-        Assert.Contains("ver más", f.Text("page1")); Assert.DoesNotContain(Assert.Single(f.Rows.Values.Take(1)).Id.ToString(), f.Text("page1"));
-        await f.Turn("ver más", "page2"); Assert.Equal(2, (await f.Dialog.Context()).ReservationManagement!.Options.Count);
-        var selected = (await f.Dialog.Context()).ReservationManagement!.Options[0]; f.Rows[selected.Id].Cancel();
-        await f.Turn("1", "stale"); Assert.Contains("no está vigente", f.Text("stale")); Assert.Empty(f.Events);
-    }
-
-    [Fact]
-    public async Task Zero_foreign_expired_and_shared_contacts_do_not_disclose_private_appointments()
-    {
-        var f = new Fixture(); f.Add(contact: "+51888888888"); f.Add(workspace: Guid.NewGuid()); f.Add(day: 19);
-        await f.Turn("quiero ver mis citas", "none"); Assert.Contains("No identifiqué", f.Text("none"));
-        var one = f.Add(); f.Add(day: 24, name: "Otra persona");
-        await f.Turn("quiero ver mis citas", "shared"); Assert.Contains("verificación", f.Text("shared"));
-        Assert.DoesNotContain("23/10", f.Text("shared")); Assert.Empty(f.Events);
-    }
-
-    [Fact]
-    public async Task Hour_only_change_preserves_date_and_cancel_is_a_separate_confirmed_operation()
-    {
-        var f = new Fixture(); var row = f.Add();
-        await f.Turn("quiero cambiar el horario de mi cita", "start"); await f.Turn("16:00", "time");
-        await f.Turn("no confirmo", "no"); Assert.Empty(f.Events); Assert.Contains("No he realizado cambios", f.Text("no"));
-        await f.Turn("16:00", "time2"); await f.Turn("sí confirmos", "ambiguous"); Assert.Empty(f.Events);
-        await f.Turn("sí confirmo", "yes"); Assert.Equal(new DateTime(2026, 10, 23, 21, 0, 0, DateTimeKind.Utc), row.StartTime);
-        await f.Turn("quiero cancelar mi cita", "cancel-start"); Assert.Equal(ReservationStatus.Confirmed, row.Status);
-        await f.Turn("no", "cancel-no"); Assert.Equal(ReservationStatus.Confirmed, row.Status); Assert.Single(f.Events);
-        await f.Turn("quiero cancelar mi cita", "cancel-again"); await f.Turn("sí confirmo", "cancel-yes");
-        Assert.Equal(ReservationStatus.Cancelled, row.Status); Assert.Equal(2, f.Events.Count);
-    }
-
-    [Fact]
-    public async Task Information_interruption_expiry_revocation_and_handoff_preserve_original_reservation()
+    public async Task Single_future_appointment_requires_handoff_before_any_private_read_or_mutation()
     {
         var f = new Fixture(); var row = f.Add(); var start = row.StartTime;
-        await f.Turn("quiero editar mi reserva", "start");
-        await f.Turn("cuáles son sus horarios", "info"); Assert.Contains("Dato real autorizado", f.Text("info"));
-        Assert.NotNull((await f.Dialog.Context()).ReservationManagement);
-        f.Dialog.Now = f.Dialog.Now.AddMinutes(11); await f.Turn("16:00", "expired"); Assert.Contains("no es válida", f.Text("expired"));
-        Assert.Equal(start, row.StartTime); Assert.Empty(f.Events);
-        await f.Turn("quiero editar mi reserva", "new"); f.Dialog.Modules.Remove("RESERVATIONS");
-        await f.Turn("16:00", "denied"); Assert.Contains("no tiene habilitadas las reservas", f.Text("denied")); Assert.Empty(f.Events);
-        f.Dialog.Modules.Add("RESERVATIONS"); await f.Turn("asesor", "human"); await f.Turn("sí confirmo", "after-human");
-        Assert.Equal(1, f.Dialog.Handoffs); Assert.False(f.Dialog.Sent.ContainsKey("after-human")); Assert.Equal(start, row.StartTime);
+        await f.Turn("quiero editar mi reserva", "start"); await f.Turn("quiero editar mi reserva", "start");
+        Assert.Contains("verificar tu titularidad", f.Text("start")); Assert.DoesNotContain("23/10", f.Text("start"));
+        Assert.DoesNotContain("Sede Concepcion", f.Text("start")); Assert.DoesNotContain("Ana Pérez", f.Text("start"));
+        Assert.Equal(1, f.Dialog.Handoffs); Assert.Equal("Human", (await f.Dialog.Context()).Mode);
+        Assert.Equal(start, row.StartTime); Assert.Single(f.Rows); Assert.Empty(f.Events); Assert.Equal(0, f.Saves);
+        Assert.Equal(0, f.PrivateReads); Assert.Equal(0, f.Dialog.AiCalls); Assert.Empty(f.Dialog.Bookings);
     }
 
     [Fact]
-    public async Task Lost_ack_resumes_durable_receipt_and_changed_payload_conflicts_without_another_event()
+    public async Task Several_appointments_are_not_listed_without_independent_owner_authorization()
     {
-        var f = new Fixture(); var row = f.Add(); await f.Turn("quiero editar mi reserva", "start"); await f.Turn("16:00", "time");
-        f.LoseAck = true; await Assert.ThrowsAsync<TimeoutException>(() => f.Turn("sí confirmo", "confirm"));
-        Assert.Single(f.Events); Assert.Equal(1, f.Saves); f.LoseAck = false;
-        var pending = (await f.Dialog.Context()).ReservationManagement!.PendingCommand!;
-        await f.Turn("sí confirmo", "confirm"); Assert.Contains("ya fue procesada", f.Text("confirm"));
-        var conflict = await f.RealEngine!.ApplyExistingOperationAsync(pending with { ProposedUtc = pending.ProposedUtc!.Value.AddHours(1) }, default);
-        Assert.Equal("Reservation.IdempotencyConflict", conflict.Error.Code); Assert.Single(f.Events); Assert.Equal(1, f.Saves);
-        await f.Turn("quiero editar mi reserva", "next"); await f.Turn("10:00", "another-time"); await f.Turn("sí confirmo", "another-confirm");
-        Assert.Equal(2, f.Saves); Assert.Equal(2, f.Events.Count); Assert.Equal(row.Id, Assert.Single(f.Rows.Values).Id);
+        var f = new Fixture(); for (var i = 0; i < 7; i++) f.Add(day: 23 + i);
+        await f.Turn("quiero ver mis citas", "view");
+        Assert.Equal(1, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads);
+        Assert.DoesNotContain("23/10", f.Text("view")); Assert.Null((await f.Dialog.Context()).ReservationManagement);
+        Assert.Empty(f.Events); Assert.Equal(7, f.Rows.Count);
     }
 
     [Fact]
-    public async Task Unknown_delivery_and_old_replay_do_not_repeat_or_discard_a_newer_proposal()
+    public async Task Zero_foreign_and_shared_contacts_all_handoff_without_disclosing_whether_a_booking_exists()
     {
-        var f = new Fixture(); f.Add(); await f.Turn("quiero editar mi reserva", "start"); await f.Turn("16:00", "time");
-        f.Dialog.DeliveryStatus = MessageStatus.UnknownDelivery;
-        await f.Turn("sí confirmo", "confirmed"); await f.Turn("sí confirmo", "confirmed");
-        Assert.Single(f.Events); Assert.Equal(1, f.Saves); Assert.Equal(MessageStatus.UnknownDelivery, f.Dialog.Sent["confirmed"].Status);
-        await f.Turn("quiero editar mi reserva", "new-proposal"); var selected = (await f.Dialog.Context()).ReservationManagement!.Selected!.Id;
-        f.Dialog.Sent.Remove("confirmed"); // Simulates context/outbound retention boundary, not a provider resend.
-        await f.Turn("sí confirmo", "confirmed");
-        Assert.Equal(selected, (await f.Dialog.Context()).ReservationManagement!.Selected!.Id); Assert.Single(f.Events); Assert.Equal(1, f.Saves);
+        foreach (var state in new[] { "zero", "foreign", "shared", "same-name" })
+        {
+            var f = new Fixture();
+            if (state == "foreign") { f.Add(workspace: Guid.NewGuid()); f.Add(contact: "+51888888888"); }
+            if (state is "shared" or "same-name") { f.Add(); f.Add(day: 24, name: state == "shared" ? "Otra persona" : "Ana Pérez"); }
+            await f.Turn("quiero ver mis citas", "view");
+            Assert.Contains("verificar tu titularidad", f.Text("view")); Assert.Equal(1, f.Dialog.Handoffs);
+            Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events); Assert.Equal(0, f.Saves);
+        }
+    }
+
+    [Fact]
+    public async Task Cancellation_and_later_confirmation_cannot_mutate_during_human_verification()
+    {
+        var f = new Fixture(); var row = f.Add();
+        await f.Turn("quiero cancelar mi cita", "cancel"); await f.Turn("sí confirmo", "confirm");
+        Assert.Equal(ReservationStatus.Confirmed, row.Status); Assert.Empty(f.Events); Assert.Equal(0, f.Saves);
+        Assert.Equal(1, f.Dialog.Handoffs); Assert.False(f.Dialog.Sent.ContainsKey("confirm"));
+    }
+
+    [Fact]
+    public async Task Public_information_and_existing_draft_edit_remain_available_before_handoff()
+    {
+        var f = new Fixture(); f.Add(); await f.Dialog.SeedDraft("RESERVATION");
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Dialog.Context());
+        await f.Turn("cuáles son sus horarios", "hours");
+        Assert.Contains("Dato real autorizado", f.Text("hours"));
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Dialog.Context()));
+        await f.Turn("quiero editar mi reserva", "draft");
+        Assert.Equal(0, f.Dialog.Handoffs); Assert.Null((await f.Dialog.Context()).ReservationManagement);
+        Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events);
+        await f.Turn("quiero editar mi reserva confirmada", "registered");
+        Assert.Equal(1, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events);
+    }
+
+    [Fact]
+    public async Task Committed_engine_operation_replays_conflicts_on_changed_payload_and_allows_a_later_edit()
+    {
+        var f = new Fixture(); var row = f.Add(); var command = Command(f, row, "confirm", 21);
+        var committed = await f.RealEngine!.ApplyExistingOperationAsync(command, default); Assert.True(committed.IsSuccess);
+        var replay = await f.RealEngine.ApplyExistingOperationAsync(command, default);
+        Assert.True(replay.IsSuccess); Assert.Equal(row.Id, replay.Value.Id); Assert.Single(f.Events); Assert.Equal(1, f.Saves);
+        var conflict = await f.RealEngine.ApplyExistingOperationAsync(command with { ProposedUtc = command.ProposedUtc!.Value.AddHours(1) }, default);
+        Assert.Equal("Reservation.IdempotencyConflict", conflict.Error.Code); Assert.Single(f.Events);
+        var next = await f.RealEngine.ApplyExistingOperationAsync(Command(f, row, "new-confirm", 15), default);
+        Assert.True(next.IsSuccess); Assert.Equal(row.Id, next.Value.Id); Assert.Equal(2, f.Events.Count); Assert.Equal(2, f.Saves);
+    }
+
+    [Fact]
+    public async Task Old_committed_source_does_not_change_a_later_reservation_or_requeue_its_notification()
+    {
+        var f = new Fixture(); var row = f.Add(); var old = Command(f, row, "old", 21);
+        Assert.True((await f.RealEngine!.ApplyExistingOperationAsync(old, default)).IsSuccess);
+        Assert.True((await f.RealEngine.ApplyExistingOperationAsync(Command(f, row, "new", 15), default)).IsSuccess);
+        var current = row.StartTime;
+        Assert.True((await f.RealEngine.ApplyExistingOperationAsync(old, default)).IsSuccess);
+        Assert.Equal(current, row.StartTime); Assert.Equal(2, f.Events.Count); Assert.Equal(2, f.Saves);
     }
 
     [Theory]
@@ -127,88 +118,52 @@ public sealed class ExistingReservationSprint2Tests
     public async Task Receipt_committed_between_initial_lookup_and_selection_validation_is_replayed(bool cancel)
     {
         var f = new Fixture(); var row = f.Add();
-        await f.Turn(cancel ? "quiero cancelar mi cita" : "quiero editar mi reserva", "start");
-        if (!cancel) await f.Turn("16:00", "time");
-        f.LoseAck = true; await Assert.ThrowsAsync<TimeoutException>(() => f.Turn("sí confirmo", "confirmed"));
-        var command = (await f.Dialog.Context()).ReservationManagement!.PendingCommand!;
-        f.MissFirstReceiptRead = true;
-        var result = await f.RealEngine!.ApplyExistingOperationAsync(command, default);
+        var command = Command(f, row, "confirmed", 21) with { Action = cancel ? ReservationOperationKind.CancelExistingReservation : ReservationOperationKind.RescheduleExistingReservation, ProposedUtc = cancel ? null : new DateTime(2026, 10, 23, 21, 0, 0, DateTimeKind.Utc) };
+        Assert.True((await f.RealEngine!.ApplyExistingOperationAsync(command, default)).IsSuccess);
+        f.MissFirstReceiptRead = true; var result = await f.RealEngine.ApplyExistingOperationAsync(command, default);
         Assert.True(result.IsSuccess); Assert.Equal(row.Id, result.Value.Id);
         Assert.Equal(cancel ? "Cancelled" : "Confirmed", result.Value.Status);
         Assert.Single(f.Events); Assert.Equal(1, f.Saves); Assert.False(f.MissFirstReceiptRead);
     }
 
     [Fact]
-    public async Task Information_choice_does_not_confirm_an_existing_reservation_mutation()
+    public async Task Legacy_pending_management_cannot_confirm_or_disclose_private_information()
     {
-        var f = new Fixture(); f.Add(); await f.Turn("quiero editar mi reserva", "start"); await f.Turn("16:00", "time");
-        f.Dialog.KnowledgeReads.Setup(k => k.QueryAsync(f.Dialog.Workspace, It.IsAny<NexFlow.Application.Features.Knowledge.BusinessKnowledgeSnapshot>(),
-            It.IsAny<NexFlow.Application.Features.Knowledge.KnowledgeQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new NexFlow.Application.Features.Knowledge.KnowledgeResult {
-                Status = NexFlow.Application.Features.Knowledge.KnowledgeStatus.Found, Source = NexFlow.Application.Features.Knowledge.KnowledgeTopic.BusinessHours,
-                Facts = "¿De qué sede deseas horarios?", LocationChoices = [new("sede-a", "Sede Concepcion"), new("sede-b", "Sede San Jeronimo")]
-            });
-        await f.Turn("horarios generales", "info"); await f.Turn("sí confirmo", "yes-to-info");
-        Assert.Empty(f.Events); Assert.Equal(0, f.Saves); Assert.Contains("¿De qué sede", f.Text("yes-to-info"));
+        var f = new Fixture(); var row = f.Add(); var context = await f.Dialog.Context();
+        context.CurrentGoal = "RESERVATION_MANAGEMENT";
+        context.ReservationManagement = new() { WorkspaceId = f.Dialog.Workspace, ContactHash = ReservationOperationCommand.Hash(AssistantConversationTests.Fixture.Phone),
+            Operation = ReservationOperationKind.RescheduleExistingReservation, Stage = "Confirm", Selected = new(row.Id, row.LocationId, row.ServiceId, row.StartTime, row.EndTime, row.RowVersion),
+            ExpiresAt = f.Dialog.Now.AddMinutes(10), NextQuestion = "PRIVATE OLD SUMMARY" };
+        await f.Dialog.Contexts.SaveContextAsync(f.Dialog.Workspace, AssistantConversationTests.Fixture.Phone, context, default);
+        await f.Turn("sí confirmo", "old-context");
+        Assert.Equal(1, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events);
+        Assert.DoesNotContain("PRIVATE", f.Text("old-context")); Assert.Equal(15, row.StartTime.Hour);
+
+        var publicTurn = new Fixture(); var saved = await publicTurn.Dialog.Context();
+        saved.CurrentGoal = "RESERVATION_MANAGEMENT";
+        saved.ReservationManagement = context.ReservationManagement;
+        await publicTurn.Dialog.Contexts.SaveContextAsync(publicTurn.Dialog.Workspace, AssistantConversationTests.Fixture.Phone, saved, default);
+        await publicTurn.Turn("Antes dime qué servicios tienen", "public");
+        Assert.DoesNotContain("PRIVATE OLD SUMMARY", publicTurn.Text("public"));
+        Assert.Equal(0, publicTurn.Dialog.Handoffs); Assert.Equal(0, publicTurn.PrivateReads);
+        Assert.Null((await publicTurn.Dialog.Context()).ReservationManagement); Assert.Empty(publicTurn.Events);
     }
 
     [Fact]
-    public async Task Third_party_request_and_changed_contact_binding_fail_without_disclosure_or_mutation()
+    public async Task Revoked_module_is_denied_before_private_reads_or_a_reservation_handoff()
     {
-        var f = new Fixture(); f.Add(); await f.Turn("quiero revisar la cita de mi madre", "third-party");
-        Assert.Contains("verificación", f.Text("third-party")); Assert.DoesNotContain("23/10", f.Text("third-party"));
-        await f.Turn("quiero editar mi reserva", "start"); var state = await f.Dialog.Context();
-        state.ReservationManagement!.ContactHash = ReservationOperationCommand.Hash("another-contact");
-        await f.Dialog.Contexts.SaveContextAsync(f.Dialog.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
-        await f.Turn("16:00", "wrong-binding"); Assert.Contains("no es válida", f.Text("wrong-binding")); Assert.Empty(f.Events);
+        var f = new Fixture(); f.Add(); f.Dialog.Modules.Remove("RESERVATIONS");
+        await f.Turn("quiero consultar mi cita", "denied");
+        Assert.Contains("no tiene habilitadas las reservas", f.Text("denied"));
+        Assert.Equal(0, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events);
     }
 
     [Fact]
-    public async Task Slot_taken_after_summary_is_not_committed_and_returns_real_alternatives()
+    public async Task Slot_conflict_in_retained_engine_preserves_the_original_reservation_and_event_count()
     {
-        var f = new Fixture(); var original = f.Add(); await f.Turn("quiero editar mi reserva", "start"); await f.Turn("16:00", "propose");
-        f.Add(contact: "+51888888888", hour: 21);
-        f.Dialog.EngineReads.Setup(e => e.GetAvailabilityAsync(f.Dialog.Workspace, "sede-a", "service-a", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new TimeSlotDto(new(2026, 10, 23, 22, 0, 0, DateTimeKind.Utc), new(2026, 10, 23, 22, 30, 0, DateTimeKind.Utc), true) });
-        await f.Turn("sí confirmo", "confirm");
-        Assert.Empty(f.Events); Assert.Equal(0, f.Saves); Assert.Equal(15, original.StartTime.Hour);
-        Assert.Contains("17:00", f.Text("confirm")); Assert.DoesNotContain("fue reagendada", f.Text("confirm"));
-    }
-
-    [Fact]
-    public async Task Registered_management_pauses_and_restores_an_existing_draft_without_reviving_an_expired_one()
-    {
-        var f = new Fixture(); f.Add(); await f.Dialog.SeedDraft("RESERVATION");
-        await f.Turn("quiero editar mi reserva", "draft-edit");
-        Assert.Null((await f.Dialog.Context()).ReservationManagement); Assert.Empty(f.Events);
-        var old = await f.Dialog.Context(); var name = old.RealCustomerName; var service = old.SelectedServiceId;
-        f.Dialog.Now = f.Dialog.Now.AddDays(1).AddMinutes(1);
-        await f.Turn("quiero editar mi reserva confirmada", "start");
-        var active = await f.Dialog.Context(); Assert.Equal("RESERVATION_MANAGEMENT", active.CurrentGoal); Assert.Null(active.CurrentStep);
-        Assert.Equal(name, active.RealCustomerName); Assert.Equal(service, active.SelectedServiceId);
-        await f.Turn("cancelar", "leave"); var restored = await f.Dialog.Context();
-        Assert.Equal("RESERVATION", restored.CurrentGoal); Assert.Equal(old.CurrentStep, restored.CurrentStep);
-        Assert.Equal("EXPIRE", restored.PendingRecoveryAction); Assert.Equal(name, restored.RealCustomerName); Assert.Empty(f.Events);
-    }
-
-    [Fact]
-    public async Task Concurrent_management_requests_have_one_context_cas_winner_without_business_effects()
-    {
-        var f = new Fixture(); f.Add();
-        var profile = await f.Dialog.ProfileReads.Object.GetProfileAsync(f.Dialog.Workspace, default);
-        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var reads = 0;
-        f.Dialog.ProfileReads.Setup(p => p.GetProfileAsync(f.Dialog.Workspace, It.IsAny<CancellationToken>())).Returns(async () => {
-            if (Interlocked.Increment(ref reads) == 2) ready.TrySetResult();
-            await ready.Task.WaitAsync(TimeSpan.FromSeconds(10)); return profile;
-        });
-        async Task<bool> Attempt(string source)
-        {
-            try { await f.Turn("quiero editar mi reserva", source); return true; }
-            catch (NexFlow.Domain.Exceptions.ConcurrencyException) { return false; }
-        }
-        var results = await Task.WhenAll(Attempt("click-1"), Attempt("click-2"));
-        Assert.Single(results, success => success); Assert.NotNull((await f.Dialog.Context()).ReservationManagement);
-        Assert.Single(f.Rows); Assert.Empty(f.Events); Assert.Equal(0, f.Saves);
+        var f = new Fixture(); var row = f.Add(); f.Add(contact: "+51888888888", hour: 21);
+        var result = await f.RealEngine!.ApplyExistingOperationAsync(Command(f, row, "confirm", 21), default);
+        Assert.Equal("Reservation.Conflict", result.Error.Code); Assert.Empty(f.Events); Assert.Equal(0, f.Saves); Assert.Equal(15, row.StartTime.Hour);
     }
 
     [Fact]
@@ -219,12 +174,15 @@ public sealed class ExistingReservationSprint2Tests
         var normal = await f.RealEngine!.GetAvailabilityAsync(f.Dialog.Workspace, "sede-a", "service-a", date, default);
         var editing = await f.RealEngine.GetAvailabilityForExistingAsync(f.Dialog.Workspace, AssistantConversationTests.Fixture.Phone, row.Id, date, default);
         var overlappingOwn = new DateTime(2026, 10, 23, 15, 30, 0, DateTimeKind.Utc);
-        Assert.DoesNotContain(normal, s => s.StartTime == overlappingOwn);
-        Assert.Contains(editing, s => s.StartTime == overlappingOwn);
+        Assert.DoesNotContain(normal, s => s.StartTime == overlappingOwn); Assert.Contains(editing, s => s.StartTime == overlappingOwn);
         Assert.DoesNotContain(editing, s => s.StartTime == overlappingOwn.AddMinutes(30));
         Assert.Empty(await f.RealEngine.GetAvailabilityForExistingAsync(f.Dialog.Workspace, AssistantConversationTests.Fixture.Phone, f.Rows.Values.Single(r => r.Id != row.Id).Id, date, default));
         Assert.Empty(f.Events); Assert.Equal(0, f.Saves);
     }
+
+    private static ReservationOperationCommand Command(Fixture f, Reservation row, string source, int hour)
+        => new(f.Dialog.Workspace, row.Id, AssistantConversationTests.Fixture.Phone, source, ReservationOperationKind.RescheduleExistingReservation,
+            row.RowVersion, row.StartTime, new DateTime(2026, 10, 23, hour, 0, 0, DateTimeKind.Utc), ReservationOperationCommand.Hash("si confirmo"));
 
     private sealed class Fixture
     {
@@ -232,7 +190,7 @@ public sealed class ExistingReservationSprint2Tests
         internal Dictionary<Guid, Reservation> Rows { get; } = [];
         internal Dictionary<string, OutboxMessage> Events { get; } = [];
         internal int Saves { get; private set; }
-        internal bool LoseAck { get; set; }
+        internal int PrivateReads { get; private set; }
         internal bool MissFirstReceiptRead { get; set; }
         internal ReservationEngine? RealEngine { get; private set; }
         private readonly Dictionary<Guid, (DateTime Start, ReservationStatus Status)> previous = [];
@@ -255,12 +213,12 @@ public sealed class ExistingReservationSprint2Tests
             ReservationCandidate Capture(Reservation r) => new(r.Id, r.LocationId, r.ServiceId, r.StartTime, r.EndTime, r.RowVersion);
             repo.Setup(r => r.GetFutureForContactAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<ReservationCursor?>(), 5, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid w, string p, ReservationCursor? after, int size, CancellationToken _) => {
-                    var rows = Future(w, p).Where(r => after == null || r.StartTime > after.StartTime || r.StartTime == after.StartTime && r.Id.CompareTo(after.Id) > 0).OrderBy(r => r.StartTime).ThenBy(r => r.Id).Take(6).ToArray();
+                    PrivateReads++; var rows = Future(w, p).Where(r => after == null || r.StartTime > after.StartTime || r.StartTime == after.StartTime && r.Id.CompareTo(after.Id) > 0).OrderBy(r => r.StartTime).ThenBy(r => r.Id).Take(6).ToArray();
                     return new ReservationPage(rows.Take(5).Select(Capture).ToArray(), rows.Length > 5);
                 });
             repo.Setup(r => r.GetOwnedFutureAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid w, string p, Guid id, CancellationToken _) => Future(w, p).Where(r => r.Id == id).Select(Capture).SingleOrDefault());
-            repo.Setup(r => r.HasSingleFutureOwnerAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid w, string p, Guid id, CancellationToken _) => { PrivateReads++; return Future(w, p).Where(r => r.Id == id).Select(Capture).SingleOrDefault(); });
+            repo.Setup(r => r.HasUnambiguousFutureOwnerNameAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => Future(f.Workspace, AssistantConversationTests.Fixture.Phone).Select(r => r.CustomerName).Distinct().Count() == 1);
             repo.Setup(r => r.GetByIdAsync(f.Workspace, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, Guid id, CancellationToken _) => Rows.GetValueOrDefault(id));
             repo.Setup(r => r.GetReservationsForDateAsync(f.Workspace, It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
@@ -287,7 +245,7 @@ public sealed class ExistingReservationSprint2Tests
                 uow.Object, available.Object, dynamicClock.Object, outbox.Object, new Fakes.InMemoryReservationResourceCoordinator());
             f.EngineReads.Setup(e => e.ApplyExistingOperationAsync(It.IsAny<ReservationOperationCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(async (ReservationOperationCommand command, CancellationToken ct) => {
-                    var result = await RealEngine.ApplyExistingOperationAsync(command, ct); if (LoseAck && result.IsSuccess) throw new TimeoutException("synthetic commit acknowledgement lost"); return result;
+                    return await RealEngine.ApplyExistingOperationAsync(command, ct);
                 });
             f.EngineReads.Setup(e => e.GetAvailabilityForExistingAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid w, string _, Guid id, DateTime date, CancellationToken ct) => f.EngineReads.Object.GetAvailabilityAsync(w, Rows[id].LocationId, Rows[id].ServiceId, date, ct));

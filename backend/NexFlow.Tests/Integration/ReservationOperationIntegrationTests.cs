@@ -8,6 +8,8 @@ namespace NexFlow.Tests.Integration;
 
 // Opt-in only through the existing disposable PostgreSQL/Firestore harness. Not run by Sprint 2 locally:
 // fixture initialization applies historical migrations, which needs separate execution authorization.
+[Trait("Category", "Integration")]
+[Collection("RC3 isolated stores")]
 public sealed class ReservationOperationIntegrationTests
 {
     private const string Contact = "+51999999999";

@@ -30,7 +30,7 @@ public class IncomingMessageGuard : IIncomingMessageGuard
     {
         if (string.IsNullOrWhiteSpace(phone) || phone.Contains("@g.us") || phone.Contains("status@broadcast")) return string.Empty;
         var clean = new string(phone.Split('@')[0].Where(char.IsDigit).ToArray());
-        return (clean.Length >= 10 && clean.Length <= 15) ? "+" + clean : string.Empty;
+        return NexFlow.Application.Features.Reservations.ReservationContact.TryNormalize("+" + clean, null, out var canonical) ? canonical : string.Empty;
     }
 
     public async Task<(bool IsValid, Guid WorkspaceId, string NormalizedPhone)> CheckMessageAsync(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)

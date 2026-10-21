@@ -16,7 +16,7 @@ namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
 public interface IExistingReservationFlow
 {
-    Task<string?> TryHandleAsync(Guid workspace, string contact, ProcessIncomingMessageCommand request,
+    Task<RecoveryDecision?> TryHandleAsync(Guid workspace, string contact, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
 }
 
@@ -25,15 +25,24 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
     IBusinessProfileRepository profiles, ILocationRepository locations, IOfferingService offerings, IClock clock,
     IBusinessHoursRepository hours, IOptions<AssistantRecoveryOptions> options) : IExistingReservationFlow
 {
-    public async Task<string?> TryHandleAsync(Guid workspace, string contact, ProcessIncomingMessageCommand request,
+    public async Task<RecoveryDecision?> TryHandleAsync(Guid workspace, string contact, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
     {
         var text = SpanishTextNormalizer.Normalize(request.MessageText);
         var operation = ReservationOperationClassifier.Classify(text, context.ReservationManagement == null && context.CurrentGoal is "BOOKING" or "RESERVATION");
         var management = context.ReservationManagement;
         var requested = operation is ReservationOperationKind.ViewExistingReservation or ReservationOperationKind.RescheduleExistingReservation or ReservationOperationKind.CancelExistingReservation;
-        if (management != null && context.Information is { Clarification: not null }
-            && (ConversationConfirmation.IsAffirmative(request.MessageText) || ConversationRecoveryService.SelectionIndex(text) > 0)) return null;
+        if (context.Mode == "Human") throw new ConcurrencyException("Human control superseded reservation management.");
+        if (management != null)
+        {
+            // Legacy selections/summary text cannot establish authorization or leak through an informational continuation.
+            // Keep independent draft slots and SQL receipts; abandon only the unverified management proposal.
+            if (context.CurrentGoal == "RESERVATION_MANAGEMENT")
+            { context.CurrentGoal = management.SuspendedGoal; context.CurrentStep = management.SuspendedStep; }
+            if (management.SuspendedDraftExpired && context.CurrentGoal != null) context.PendingRecoveryAction = "EXPIRE";
+            context.ReservationManagement = null;
+            await contexts.SaveContextAsync(workspace, contact, context, ct);
+        }
         // Keep recovery's human/repair/information priority and the existing transactional draft.
         if (text is "asesor" or "humano" || text.Contains("asesor humano", StringComparison.Ordinal)
             || text.Contains("hablar con", StringComparison.Ordinal) || InformationalRequest.IsRepair(text)
@@ -41,10 +50,29 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
                 || text.Split(' ').Any(w => w is "precio" or "cuesta" or "cuanto" or "duracion" or "dura" or "productos" or "servicios" or "catalogo" or "pdf" or "direccion" or "ubicacion" or "donde"))) return null;
         if (management == null && !requested && !ConversationConfirmation.IsAffirmative(request.MessageText)) return null;
         var denied = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules);
-        if (denied != null) return requested || management != null ? denied : null;
+        if (denied != null) return requested || management != null ? new(Response: denied) : null;
         ReservationContact.Validate(workspace, contact);
         if (context.Mode == "Human") throw new ConcurrencyException("Human control superseded reservation management.");
 
+        // No independent owner attestation exists in the current channel/consumer contracts.
+        // A phone, matching name or saved selection is not authorization. Gate BEFORE private SQL reads.
+        // Keep the management implementation below for a future reviewed authorization contract;
+        // do not enable it with a client/context boolean or a configuration bypass.
+        if (requested || management != null)
+            return new(Response: "Para proteger los datos de tu cita, un asesor debe verificar tu titularidad. Te transfiero para continuar; no he creado, cambiado ni cancelado una reserva.",
+                Interpretation: new() { Intent = ConversationIntent.Support }, Act: DialogueAct.HumanAssistance, Operation: OperationStatus.Human);
+
+        var response = await HandleOperationAsync(workspace, contact, request, context, ct);
+        return response == null ? null : new(Response: response);
+    }
+
+    private async Task<string?> HandleOperationAsync(Guid workspace, string contact, ProcessIncomingMessageCommand request,
+        ConversationContextDto context, CancellationToken ct)
+    {
+        var text = SpanishTextNormalizer.Normalize(request.MessageText);
+        var management = context.ReservationManagement;
+        var operation = ReservationOperationClassifier.Classify(text, management == null && context.CurrentGoal is "BOOKING" or "RESERVATION");
+        var requested = operation is ReservationOperationKind.ViewExistingReservation or ReservationOperationKind.RescheduleExistingReservation or ReservationOperationKind.CancelExistingReservation;
         var receiptRow = await outbox.GetByIdAsync(workspace, ReservationOperationCommand.KeyFor(workspace, contact, request.MessageId), ct);
         if (receiptRow != null)
         {
@@ -52,7 +80,7 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
             if (receipt.ConfirmationHash != ReservationOperationCommand.Hash(text)) return "La identidad del mensaje ya fue utilizada con otro contenido. No realicé otro cambio.";
             // A replay of an older operation must not remove a newer proposal.
             if (management?.PendingCommand?.SourceMessageId == request.MessageId) { FinishManagement(); await Save(); }
-            return "Esta solicitud ya fue procesada. No se ha repetido el cambio ni su notificación.";
+            return "Esta solicitud ya fue registrada. No volví a modificar la cita ni a crear otro evento de cambio. La entrega de la notificación puede seguir pendiente.";
         }
         if (management == null && !requested) return null;
         if (ReservationOperationClassifier.RequiresHumanVerification(text))
@@ -86,7 +114,7 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
         var fresh = await reservations.GetOwnedFutureAsync(workspace, contact, selected.Id, ct);
         if (fresh == null || fresh.RowVersion != selected.RowVersion || fresh.StartTime != selected.StartTime || fresh.EndTime != selected.EndTime)
             return await Stop("La cita cambió o ya no está vigente. Vuelve a consultarla antes de realizar cambios.");
-        if (!await reservations.HasSingleFutureOwnerAsync(workspace, contact, ct)) return await Stop("Necesitamos verificar quién solicita la gestión de este contacto. Escribe asesor; no mostraré más datos de citas.");
+        if (!await reservations.HasUnambiguousFutureOwnerNameAsync(workspace, contact, ct)) return await Stop("Necesitamos verificar quién solicita la gestión de este contacto. Escribe asesor; no mostraré más datos de citas.");
         var profile = await profiles.GetProfileAsync(workspace, ct);
         TimeZoneInfo zone;
         try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(profile?.TimeZone) ? "America/Lima" : profile.TimeZone); }
@@ -162,7 +190,7 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
         {
             var page = await reservations.GetFutureForContactAsync(workspace, contact, after, 5, ct);
             if (page.Items.Count == 0) return await Stop("No identifiqué citas futuras confirmadas para el contacto verificado. Puedes solicitar un asesor.");
-            if (!await reservations.HasSingleFutureOwnerAsync(workspace, contact, ct)) return await Stop("Este contacto requiere verificación adicional antes de mostrar citas. Escribe asesor.");
+            if (!await reservations.HasUnambiguousFutureOwnerNameAsync(workspace, contact, ct)) return await Stop("Este contacto requiere verificación adicional antes de mostrar citas. Escribe asesor.");
             management!.Options = page.Items.ToList(); management.HasMore = page.HasMore;
             management.Cursor = new(page.Items[^1].StartTime, page.Items[^1].Id);
             if (page.Items.Count == 1 && after == null) return await Select(page.Items[0]);
@@ -176,7 +204,7 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
             var owned = await reservations.GetOwnedFutureAsync(workspace, contact, candidate.Id, ct);
             if (owned == null || owned.RowVersion != candidate.RowVersion || owned.StartTime != candidate.StartTime)
                 return await Stop("La selección ya no está vigente. Solicita nuevamente consultar tus citas.");
-            if (!await reservations.HasSingleFutureOwnerAsync(workspace, contact, ct))
+            if (!await reservations.HasUnambiguousFutureOwnerNameAsync(workspace, contact, ct))
                 return await Stop("Este contacto requiere verificación adicional antes de mostrar citas. Escribe asesor.");
             management!.Selected = owned; management.Options.Clear(); management.Slots.Clear();
             var profile = await profiles.GetProfileAsync(workspace, ct);

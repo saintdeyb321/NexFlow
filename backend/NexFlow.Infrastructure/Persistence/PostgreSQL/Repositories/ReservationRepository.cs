@@ -80,7 +80,7 @@ public class ReservationRepository : IReservationRepository
             .Select(r => new ReservationCandidate(r.Id, r.LocationId, r.ServiceId, r.StartTime, r.EndTime, r.RowVersion)).SingleOrDefaultAsync(ct);
     }
 
-    public async Task<bool> HasSingleFutureOwnerAsync(Guid workspaceId, string canonicalContact, CancellationToken ct)
+    public async Task<bool> HasUnambiguousFutureOwnerNameAsync(Guid workspaceId, string canonicalContact, CancellationToken ct)
     {
         ReservationContact.Validate(workspaceId, canonicalContact);
         var names = await FutureContact(workspaceId, canonicalContact).Select(r => r.CustomerName.Trim().ToLower())
@@ -88,9 +88,13 @@ public class ReservationRepository : IReservationRepository
         return names.Count == 1 && !string.IsNullOrWhiteSpace(names[0]);
     }
 
-    private IQueryable<Reservation> FutureContact(Guid workspaceId, string contact) => _context.Reservations.AsNoTracking()
-        .Where(r => r.WorkspaceId == workspaceId && r.CustomerIdentifier == contact
-            && r.Status == ReservationStatus.Confirmed && r.StartTime > _clock.UtcNow);
+    private IQueryable<Reservation> FutureContact(Guid workspaceId, string contact)
+    {
+        var aliases = ReservationContact.InternationalAliases(contact);
+        return _context.Reservations.AsNoTracking()
+            .Where(r => r.WorkspaceId == workspaceId && aliases.Contains(r.CustomerIdentifier)
+                && r.Status == ReservationStatus.Confirmed && r.StartTime > _clock.UtcNow);
+    }
 
     public async Task<Reservation?> GetActiveReservationByPhoneAsync(Guid workspaceId, string customerIdentifier, CancellationToken cancellationToken)
     {

@@ -89,7 +89,7 @@ public class ReservationEngine : IReservationEngine
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityForExistingAsync(Guid workspaceId, string canonicalContact, Guid reservationId, DateTime date, CancellationToken ct)
     {
         var owned = await _reservationRepository.GetOwnedFutureAsync(workspaceId, canonicalContact, reservationId, ct);
-        if (owned == null || !await _reservationRepository.HasSingleFutureOwnerAsync(workspaceId, canonicalContact, ct)) return [];
+        if (owned == null || !await _reservationRepository.HasUnambiguousFutureOwnerNameAsync(workspaceId, canonicalContact, ct)) return [];
         return await GetAvailabilityCoreAsync(workspaceId, owned.LocationId, owned.ServiceId, date, owned.Id, ct);
     }
 
@@ -299,7 +299,7 @@ public class ReservationEngine : IReservationEngine
                 {
                     var replay = await ReadOperationAsync(operation, cancellationToken);
                     if (replay != null) return replay;
-                    if (!await _reservationRepository.HasSingleFutureOwnerAsync(workspaceId, operation.Contact, cancellationToken))
+                    if (!await _reservationRepository.HasUnambiguousFutureOwnerNameAsync(workspaceId, operation.Contact, cancellationToken))
                         return Result<ReservationDto>.Failure(new Error("Reservation.VerificationRequired", "Este contacto requiere verificación adicional con un asesor."));
                 }
                 await _resources.ValidateAsync(resourceVersions, cancellationToken);
@@ -445,7 +445,7 @@ public class ReservationEngine : IReservationEngine
         }
     }
     private bool MatchesOperation(Domain.Entities.Reservation reservation, ReservationOperationCommand operation)
-        => reservation.WorkspaceId == operation.WorkspaceId && reservation.CustomerIdentifier == operation.Contact
+        => reservation.WorkspaceId == operation.WorkspaceId && ReservationContact.IsSameInternationalContact(reservation.CustomerIdentifier, operation.Contact)
             && reservation.Status == Domain.Enums.ReservationStatus.Confirmed && reservation.StartTime > _clock.UtcNow
             && reservation.RowVersion == operation.ExpectedVersion && reservation.StartTime == operation.ExpectedStartTime;
 
@@ -472,7 +472,7 @@ public class ReservationEngine : IReservationEngine
             using var scope = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions { IsolationLevel = IsolationLevel.Serializable, Timeout = TimeSpan.FromSeconds(15) }, TransactionScopeAsyncFlowOption.Enabled);
             var replay = await ReadOperationAsync(operation, ct);
             if (replay != null) return replay;
-            if (!await _reservationRepository.HasSingleFutureOwnerAsync(operation.WorkspaceId, operation.Contact, ct))
+            if (!await _reservationRepository.HasUnambiguousFutureOwnerNameAsync(operation.WorkspaceId, operation.Contact, ct))
                 return Result<ReservationDto>.Failure(new Error("Reservation.VerificationRequired", "Este contacto requiere verificación adicional con un asesor."));
             await _resources.ValidateAsync(versions, ct);
             reservation.Cancel();
