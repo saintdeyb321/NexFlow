@@ -102,7 +102,8 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         var date = reservation
             ? dates.ResolveReservation(text, localNow, state.CurrentStep == "COLLECT_DATE",
                 DateOnly.TryParseExact(state.TargetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.None, out var anchorDate) ? anchorDate : null, state.LastQuestion)
+                    System.Globalization.DateTimeStyles.None, out var anchorDate) ? anchorDate : null,
+                state.CurrentStep == "COLLECT_DATE" ? state.LastQuestion : null)
             : dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE");
         var result = new TurnUnderstanding(turn, names.Resolve(text, state.CurrentStep == "COLLECT_CUSTOMERNAME"),
             location, service, product, date, times.Resolve(text, state.CurrentStep == "COLLECT_TIME"))

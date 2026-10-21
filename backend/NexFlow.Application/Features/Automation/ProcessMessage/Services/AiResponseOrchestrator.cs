@@ -267,8 +267,15 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             conversation.Id, normalizedPhone, await Compose(response), SenderType.AI, request.MessageId, cancellationToken);
         async Task<MessageRecord> SendChat(ChatResponse response)
         {
+            if (response.Choices != null && _recovery != null)
+            {
+                var currentModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context,
+                    currentModules, response.Text, cancellationToken, contextual: true, choices: response.Choices);
+                response = response with { Text = clarification.Response! };
+            }
             responsePlan = new(workspaceId, request.MessageId, context.StateVersion, intent, act,
-                response.MediaUrl != null ? OperationStatus.MediaPending : response.Operation, response.Facts, [], [], null, null, null, response.Text,
+                response.MediaUrl != null ? OperationStatus.MediaPending : response.Operation, response.Facts, response.Choices == null ? [] : context.RecoveryOptions, [], null, null, null, response.Text,
                 response.MediaUrl == null && response.Operation == OperationStatus.Informational);
             var text = await Compose(response.Text, response.MediaUrl != null);
             // A module can be revoked during optional wording. Never send restricted media afterwards.

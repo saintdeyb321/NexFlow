@@ -104,7 +104,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
                 && context.OrderDraftItems.All(item => products.Any(p => p.Id == item.ProductId));
             if (!referenced && !bookingContext && !orderContext)
                 return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.General }, Response: InformationalRequest.CatalogScopeQuestion,
-                    Choices: [new("ProductQuery", "Productos", "Action"), new("ServiceQuery", "Servicios", "Action")]);
+                    Choices: InformationalRequest.CatalogScopeChoices);
             wantsServices = referenced ? reference!.Type == "SERVICE" : bookingContext;
             wantsProducts = !wantsServices;
         }

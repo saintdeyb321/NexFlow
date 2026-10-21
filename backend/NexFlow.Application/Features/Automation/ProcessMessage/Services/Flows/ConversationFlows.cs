@@ -27,6 +27,7 @@ public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, stri
 public record ChatResponse(string Text, string? MediaUrl = null, string? FileName = null, string? CatalogScope = null)
 {
     public IReadOnlyList<VerifiedFact> Facts { get; init; } = [];
+    public IReadOnlyList<ConversationMenuOption>? Choices { get; init; }
     public OperationStatus Operation { get; init; } = OperationStatus.Informational;
 }
 public interface IChatFlow { Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct); }
@@ -630,7 +631,7 @@ public class ChatFlow : IChatFlow
         if (interpretation.OfferingQuery == null && interpretation.QueryKind == OfferingQueryKind.Broad
             && modules.Contains("CATALOG") && modules.Contains("SERVICES")
             && NexFlow.Application.Features.Automation.Dialogue.Understanding.InformationalRequest.UnscopedCatalog(text))
-            return new ChatResponse(NexFlow.Application.Features.Automation.Dialogue.Understanding.InformationalRequest.CatalogScopeQuestion);
+            return new ChatResponse(InformationalRequest.CatalogScopeQuestion) { Choices = InformationalRequest.CatalogScopeChoices };
 
         if (interpretation.OfferingQuery is { } query)
         {

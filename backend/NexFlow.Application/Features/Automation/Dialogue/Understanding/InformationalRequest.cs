@@ -4,6 +4,8 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 internal static class InformationalRequest
 {
     internal const string CatalogScopeQuestion = "¿Deseas el catálogo de productos o el de servicios?";
+    internal static IReadOnlyList<NexFlow.Application.Abstractions.Cache.ConversationMenuOption> CatalogScopeChoices =>
+        [new("ProductQuery", "Productos", "Action"), new("ServiceQuery", "Servicios", "Action")];
     internal static bool UnscopedCatalog(string text) => Catalog(text)
         && !OrderMentionResolver.Words(text).Any(w => w is "producto" or "productos" or "servicio" or "servicios");
     private static readonly HashSet<string> MenuWords = new(StringComparer.Ordinal) {

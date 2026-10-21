@@ -35,12 +35,6 @@ public sealed partial class BusinessDateResolver
             || normalized.Contains("de este mes", StringComparison.Ordinal))
             return SlotResolution<DateOnly>.Missing("SemanticComposition");
         string? invalid = null;
-        var weekContext = normalized.Contains("semana", StringComparison.Ordinal) ? normalized
-            : reservation && previousQuestion != null ? SpanishTextNormalizer.Normalize(previousQuestion) : "";
-        var nextWeek = new[] { "proxima semana", "semana proxima", "semana que viene", "siguiente semana", "semana siguiente" }
-            .Any(phrase => SpanishTextNormalizer.ContainsPhrase(weekContext, phrase));
-        var thisWeek = SpanishTextNormalizer.ContainsPhrase(weekContext, "esta semana");
-        var unclearWeek = reservation && weekContext.Contains("semana", StringComparison.Ordinal) && (nextWeek == thisWeek);
         foreach (Match match in IsoDate().Matches(text))
             AddDate(Number(match, "day"), Number(match, "month"), Number(match, "year"));
         foreach (Match match in NumericDate().Matches(text))
@@ -57,7 +51,16 @@ public sealed partial class BusinessDateResolver
             dates.Add(today.AddDays(match.Value == "hoy" ? 0 : match.Value == "manana" ? 1 : 2));
         }
         var hasDateAnchor = dates.Count > 0;
-        foreach (Match match in Weekday().Matches(normalized))
+        var weekdays = Weekday().Matches(normalized);
+        // Current evidence and the durable date outrank a relative question from an earlier turn.
+        var weekContext = normalized.Contains("semana", StringComparison.Ordinal) ? normalized
+            : reservation && !contextDate.HasValue && !hasDateAnchor && previousQuestion != null
+                && weekdays.All(m => m.Groups["qualifier"].Length == 0) ? SpanishTextNormalizer.Normalize(previousQuestion) : "";
+        var nextWeek = new[] { "proxima semana", "semana proxima", "semana que viene", "siguiente semana", "semana siguiente" }
+            .Any(phrase => SpanishTextNormalizer.ContainsPhrase(weekContext, phrase));
+        var thisWeek = SpanishTextNormalizer.ContainsPhrase(weekContext, "esta semana");
+        var unclearWeek = reservation && weekContext.Contains("semana", StringComparison.Ordinal) && (nextWeek == thisWeek);
+        foreach (Match match in weekdays)
         {
             if (unclearWeek) return SlotResolution<DateOnly>.Ambiguous([], "WeekNeedsClarification");
             var day = Weekdays[match.Groups["day"].Value];
