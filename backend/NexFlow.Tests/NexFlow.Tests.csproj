@@ -9,6 +9,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Concierge/GoldenConversations.json" />
     <EmbeddedResource Include="Concierge/NaturalBookingHoldout.json" />
+    <EmbeddedResource Include="Concierge/CommercialCertificationCorpus.json" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

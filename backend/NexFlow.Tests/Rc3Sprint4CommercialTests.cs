@@ -98,7 +98,7 @@ public sealed class Rc3Sprint4CommercialTests
             await f.Catalog.SaveItemAsync(f.Workspace, changed, false, default); return old;
         });
         var repo = new FirestoreOrderRepository(f.Db.Db, offerings.Object);
-        await Assert.ThrowsAsync<ConcurrencyException>(() => repo.CreateOrderAsync(f.Workspace, Orders.Order("race"), default));
+        Assert.Equal(OrderCatalogChange.PriceOrCurrency,(await Assert.ThrowsAsync<OrderCatalogChangedException>(() => repo.CreateOrderAsync(f.Workspace, Orders.Order("race"), default))).Change);
         Assert.Null(await repo.GetOrderByIdAsync(f.Workspace, "race", default));
     }
 

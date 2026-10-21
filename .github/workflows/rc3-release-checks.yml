@@ -38,8 +38,8 @@ jobs:
           dotnet build backend/tools/CodecSmoke/NexFlow.CodecSmoke.csproj --configuration Release "-p:ApiPublishDir=$apiPublish"
           Copy-Item -LiteralPath backend/tools/CodecSmoke/bin/Release/net10.0/NexFlow.CodecSmoke.dll -Destination "$apiPublish/NexFlow.CodecSmoke.dll"
           dotnet exec --runtimeconfig "$apiPublish/NexFlow.API.runtimeconfig.json" --depsfile "$apiPublish/NexFlow.API.deps.json" "$apiPublish/NexFlow.CodecSmoke.dll"
-      - name: Execute explicit backend suite (24 external integrations excluded here)
-        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --filter 'Category!=Integration' --logger 'trx;LogFileName=rc3-unit.trx' --results-directory backend/NexFlow.Tests/TestResults
+      - name: Execute explicit backend suite (external contracts run separately)
+        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --filter 'Category!=Integration&Category!=RedisIntegration&Category!=ProviderIntegration' --logger 'trx;LogFileName=rc3-unit.trx' --results-directory backend/NexFlow.Tests/TestResults
       - name: Require complete local regression evidence
         run: |
           [xml]$result = Get-Content backend/NexFlow.Tests/TestResults/rc3-unit.trx

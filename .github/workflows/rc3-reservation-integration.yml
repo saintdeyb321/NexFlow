@@ -58,7 +58,7 @@ jobs:
           dotnet build backend/backend.slnx --no-restore
           dotnet build backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore
       - name: Preserve baseline and local safety regressions
-        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter 'Category!=Integration' --logger 'trx;LogFileName=unit.trx' --results-directory artifacts/rc3
+        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter 'Category!=Integration&Category!=RedisIntegration&Category!=ProviderIntegration' --logger 'trx;LogFileName=unit.trx' --results-directory artifacts/rc3
       - name: Reject missing or skipped local regression evidence
         shell: python
         run: |
@@ -81,7 +81,7 @@ jobs:
           root = ET.parse('artifacts/rc3/integration.trx').getroot()
           counters = root.find('.//{*}Counters')
           assert counters is not None
-          assert int(counters.attrib['total']) >= 24, 'Integration tests were not discovered'
+          assert int(counters.attrib['total']) >= 37, 'RC3 and commercial integration tests were not discovered'
           assert counters.attrib['total'] == counters.attrib['executed'] == counters.attrib['passed'], 'No skipped/failed integration is certifiable'
       - name: Upload synthetic test results only
         if: always()

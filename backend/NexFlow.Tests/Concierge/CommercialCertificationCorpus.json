@@ -1,0 +1,4128 @@
+[
+  {
+    "Id": "clinic-01",
+    "Sector": "clinic",
+    "Purpose": "Catálogo, precio y referencia",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Muéstrame su catálogo de productos, porfa",
+        "Contains": [
+          "Enjuague suave",
+          "Cepillo dental"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿cuanto kuesta ENJUAGUE SUAVE?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Cuánto cuesta ese producto?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-02",
+    "Sector": "clinic",
+    "Purpose": "Servicio, duración contextual",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Qué precio tiene Evaluación general?",
+        "Contains": [
+          "Evaluación general"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      },
+      {
+        "Text": "¿Y cuánto dura ese servicio?",
+        "Contains": [
+          "30 min"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-03",
+    "Sector": "clinic",
+    "Purpose": "Multiartículo, corrección, eliminación y envío idempotente",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera dos Enjuague suave y tres Cepillo dental, por favor",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "cambia Enjuague suave a cuatro",
+        "Quantities": {
+          "product-a": 4,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Elimina Cepillo dental por favor",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-04",
+    "Sector": "clinic",
+    "Purpose": "Hipótesis no muta cantidades",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Dame tres Enjuague suave",
+        "Quantities": {
+          "product-a": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Y si llevo cinco Enjuague suave?",
+        "Preserve": true,
+        "Contains": [
+          "No he cambiado"
+        ],
+        "Orders": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuál es el subtotal?",
+        "Preserve": true,
+        "Contains": [
+          "7.50"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "envía mi pedido por favor",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-05",
+    "Sector": "clinic",
+    "Purpose": "Interrupción de precio y reanudación",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Cepillo dental?",
+        "Preserve": true,
+        "Contains": [
+          "10.00"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Mejor cuatro Enjuague suave",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-06",
+    "Sector": "clinic",
+    "Purpose": "Nombre ambiguo, aclaración independiente",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos enjuague",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Contains": [
+          "Enjuague suave",
+          "Enjuague intenso"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Agrega dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-07",
+    "Sector": "clinic",
+    "Purpose": "Sin afirmación de stock físico",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Tienen Enjuague suave en stock?",
+        "Contains": [
+          "stock"
+        ],
+        "Orders": 0,
+        "NotContains": [
+          "quedan 5",
+          "stock disponible"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Dame dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-08",
+    "Sector": "clinic",
+    "Purpose": "Desactivación y retiro seguro",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía el pedido",
+        "Action": "deactivate",
+        "Orders": 0,
+        "Contains": [
+          "disponible"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quita Enjuague suave",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-09",
+    "Sector": "clinic",
+    "Purpose": "Reserva completa con confirmación",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Soy Carla Torres, quisiera reservar evaluación general en concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "Date": "2026-10-22",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Sí",
+        "Bookings": 1,
+        "Orders": 0,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-10",
+    "Sector": "clinic",
+    "Purpose": "Reserva incompleta, datos en turnos",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Evaluación general",
+        "Goal": "RESERVATION",
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "En Concepción",
+        "Location": "sede-a",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "pasado mañana",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "por la tarde",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Rosa Salas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí confirmo",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-11",
+    "Sector": "clinic",
+    "Purpose": "Corrección de fecha sin reserva prematura",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Evaluación general en Concepción pasado mañana por la tarde",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Mejor el 23 de octubre",
+        "Date": "2026-10-23",
+        "TimeMissing": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Luz Ramos",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-12",
+    "Sector": "clinic",
+    "Purpose": "Información durante reserva conserva contexto",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Evaluación general en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "¿Cuál es el precio de Enjuague suave?",
+        "Preserve": true,
+        "Contains": [
+          "2.50"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué horario de atención tienen?",
+        "Preserve": true,
+        "Bookings": 0,
+        "SemanticIntent": "BusinessHours",
+        "Contains": [
+          "08:00"
+        ],
+        "Intent": "BusinessHours"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Eva Rojas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-13",
+    "Sector": "clinic",
+    "Purpose": "Sedes ambiguas no se seleccionan",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Evaluación general en Centro pasado mañana",
+        "Goal": "RESERVATION",
+        "LocationMissing": true,
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Concepción",
+        "Location": "sede-a",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      }
+    ],
+    "AmbiguousLocations": true
+  },
+  {
+    "Id": "clinic-14",
+    "Sector": "clinic",
+    "Purpose": "Cancelación exige consentimiento y conserva hasta confirmar",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar",
+        "Preserve": true
+      },
+      {
+        "Text": "no",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar"
+      },
+      {
+        "Text": "sí",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Goal": null,
+        "CheckGoal": true
+      }
+    ]
+  },
+  {
+    "Id": "clinic-15",
+    "Sector": "clinic",
+    "Purpose": "Revocación no autoriza envío ni pierde borrador",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Action": "revoke",
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Enjuague suave?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-16",
+    "Sector": "clinic",
+    "Purpose": "Proveedor sin respuesta, recuperación local",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Evaluación general en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "timeout",
+        "Preserve": true,
+        "Bookings": 0,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0
+      },
+      {
+        "Text": "Mara Ponce",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "clinic-17",
+    "Sector": "clinic",
+    "Purpose": "JSON inválido no se atribuye al cliente",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Evaluación general en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "invalid-json",
+        "Preserve": true,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00"
+      },
+      {
+        "Text": "Sara Ruiz",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "clinic-18",
+    "Sector": "clinic",
+    "Purpose": "Cliente impaciente deriva por solicitud explícita",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Por favor quiero hablar con un asesor humano",
+        "Human": true,
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Envía el pedido",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        }
+      }
+    ]
+  },
+  {
+    "Id": "clinic-19",
+    "Sector": "clinic",
+    "Purpose": "Negación y ráfaga no duplican operaciones",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quiero dos Enjuague suave",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "No agregues Cepillo dental",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Orders": 0
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "clinic-20",
+    "Sector": "clinic",
+    "Purpose": "Consulta no soportada no inventa capacidad",
+    "Products": [
+      "Enjuague suave",
+      "Cepillo dental",
+      "Enjuague intenso"
+    ],
+    "Services": [
+      "Evaluación general",
+      "Evaluación completa"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Aceptan pago en bitcoins?",
+        "Orders": 0,
+        "Bookings": 0,
+        "NotContains": [
+          "aceptamos bitcoins",
+          "pago confirmado"
+        ],
+        "Intent": "General"
+      },
+      {
+        "Text": "¿Cuál es el precio de Enjuague suave?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-01",
+    "Sector": "hotel",
+    "Purpose": "Catálogo, precio y referencia",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Muéstrame su catálogo de productos, porfa",
+        "Contains": [
+          "Agua mineral",
+          "Jugo de naranja"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué precio tiene Agua mineral?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Cuánto cuesta ese producto?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-02",
+    "Sector": "hotel",
+    "Purpose": "Servicio, duración contextual",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Qué precio tiene Registro de huésped?",
+        "Contains": [
+          "Registro de huésped"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      },
+      {
+        "Text": "¿Y cuánto dura ese servicio?",
+        "Contains": [
+          "30 min"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-03",
+    "Sector": "hotel",
+    "Purpose": "Multiartículo, corrección, eliminación y envío idempotente",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera dos Agua mineral y tres Jugo de naranja, por favor",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "cambia Agua mineral a cuatro",
+        "Quantities": {
+          "product-a": 4,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Elimina Jugo de naranja por favor",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-04",
+    "Sector": "hotel",
+    "Purpose": "Hipótesis no muta cantidades",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Dame tres Agua mineral",
+        "Quantities": {
+          "product-a": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Y si llevo cinco Agua mineral?",
+        "Preserve": true,
+        "Contains": [
+          "No he cambiado"
+        ],
+        "Orders": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuál es el subtotal?",
+        "Preserve": true,
+        "Contains": [
+          "7.50"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "envía mi pedido por favor",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-05",
+    "Sector": "hotel",
+    "Purpose": "Interrupción de precio y reanudación",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿CUANTO cuesta Jugo de naranja porfa?",
+        "Preserve": true,
+        "Contains": [
+          "10.00"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Mejor cuatro Agua mineral",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-06",
+    "Sector": "hotel",
+    "Purpose": "Nombre ambiguo, aclaración independiente",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos agua",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Contains": [
+          "Agua mineral",
+          "Agua gasificada"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Agrega dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-07",
+    "Sector": "hotel",
+    "Purpose": "Sin afirmación de stock físico",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Tienen Agua mineral en stock?",
+        "Contains": [
+          "stock"
+        ],
+        "Orders": 0,
+        "NotContains": [
+          "quedan 5",
+          "stock disponible"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Dame dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-08",
+    "Sector": "hotel",
+    "Purpose": "Desactivación y retiro seguro",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía el pedido",
+        "Action": "deactivate",
+        "Orders": 0,
+        "Contains": [
+          "disponible"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quita Agua mineral",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-09",
+    "Sector": "hotel",
+    "Purpose": "Reserva completa con confirmación",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Soy Carla Torres, quisiera reservar registro de huésped en concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "Date": "2026-10-22",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Sí",
+        "Bookings": 1,
+        "Orders": 0,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-10",
+    "Sector": "hotel",
+    "Purpose": "Reserva incompleta, datos en turnos",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Registro de huésped",
+        "Goal": "RESERVATION",
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "En Concepción",
+        "Location": "sede-a",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "pasado mañana",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "por la tarde",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Rosa Salas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí confirmo",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-11",
+    "Sector": "hotel",
+    "Purpose": "Corrección de fecha sin reserva prematura",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Registro de huésped en Concepción pasado mañana por la tarde",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Mejor el 23 de octubre",
+        "Date": "2026-10-23",
+        "TimeMissing": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Luz Ramos",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-12",
+    "Sector": "hotel",
+    "Purpose": "Información durante reserva conserva contexto",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Registro de huésped en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "¿Cuál es el precio de Agua mineral?",
+        "Preserve": true,
+        "Contains": [
+          "2.50"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué horario de atención tienen?",
+        "Preserve": true,
+        "Bookings": 0,
+        "SemanticIntent": "BusinessHours",
+        "Contains": [
+          "08:00"
+        ],
+        "Intent": "BusinessHours"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Eva Rojas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-13",
+    "Sector": "hotel",
+    "Purpose": "Sedes ambiguas no se seleccionan",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Registro de huésped en Centro pasado mañana",
+        "Goal": "RESERVATION",
+        "LocationMissing": true,
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Concepción",
+        "Location": "sede-a",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      }
+    ],
+    "AmbiguousLocations": true
+  },
+  {
+    "Id": "hotel-14",
+    "Sector": "hotel",
+    "Purpose": "Cancelación exige consentimiento y conserva hasta confirmar",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar",
+        "Preserve": true
+      },
+      {
+        "Text": "no",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar"
+      },
+      {
+        "Text": "sí",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Goal": null,
+        "CheckGoal": true
+      }
+    ]
+  },
+  {
+    "Id": "hotel-15",
+    "Sector": "hotel",
+    "Purpose": "Revocación no autoriza envío ni pierde borrador",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Action": "revoke",
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Agua mineral?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-16",
+    "Sector": "hotel",
+    "Purpose": "Proveedor sin respuesta, recuperación local",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Registro de huésped en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "timeout",
+        "Preserve": true,
+        "Bookings": 0,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0
+      },
+      {
+        "Text": "Mara Ponce",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "hotel-17",
+    "Sector": "hotel",
+    "Purpose": "JSON inválido no se atribuye al cliente",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Registro de huésped en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "invalid-json",
+        "Preserve": true,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00"
+      },
+      {
+        "Text": "Sara Ruiz",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "hotel-18",
+    "Sector": "hotel",
+    "Purpose": "Cliente impaciente deriva por solicitud explícita",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Por favor quiero hablar con un asesor humano",
+        "Human": true,
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Envía el pedido",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        }
+      }
+    ]
+  },
+  {
+    "Id": "hotel-19",
+    "Sector": "hotel",
+    "Purpose": "Negación y ráfaga no duplican operaciones",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quiero dos Agua mineral",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "No agregues Jugo de naranja",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Orders": 0
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "hotel-20",
+    "Sector": "hotel",
+    "Purpose": "Consulta no soportada no inventa capacidad",
+    "Products": [
+      "Agua mineral",
+      "Jugo de naranja",
+      "Agua gasificada"
+    ],
+    "Services": [
+      "Registro de huésped",
+      "Registro temprano"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Aceptan pago en bitcoins?",
+        "Orders": 0,
+        "Bookings": 0,
+        "NotContains": [
+          "aceptamos bitcoins",
+          "pago confirmado"
+        ],
+        "Intent": "General"
+      },
+      {
+        "Text": "¿Cuál es el precio de Agua mineral?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-01",
+    "Sector": "restaurant",
+    "Purpose": "Catálogo, precio y referencia",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Muéstrame su catálogo de productos, porfa",
+        "Contains": [
+          "Arroz con pollo",
+          "Sopa de verduras"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué precio tiene Arroz con pollo?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Cuánto cuesta ese producto?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-02",
+    "Sector": "restaurant",
+    "Purpose": "Servicio, duración contextual",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Qué precio tiene Reserva de mesa?",
+        "Contains": [
+          "Reserva de mesa"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      },
+      {
+        "Text": "¿Y cuánto dura ese servicio?",
+        "Contains": [
+          "30 min"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-03",
+    "Sector": "restaurant",
+    "Purpose": "Multiartículo, corrección, eliminación y envío idempotente",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera dos Arroz con pollo y tres Sopa de verduras, por favor",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "cambia Arroz con pollo a cuatro",
+        "Quantities": {
+          "product-a": 4,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Elimina Sopa de verduras por favor",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-04",
+    "Sector": "restaurant",
+    "Purpose": "Hipótesis no muta cantidades",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Dame tres Arroz con pollo",
+        "Quantities": {
+          "product-a": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Y si llevo cinco Arroz con pollo?",
+        "Preserve": true,
+        "Contains": [
+          "No he cambiado"
+        ],
+        "Orders": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuál es el subtotal?",
+        "Preserve": true,
+        "Contains": [
+          "7.50"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "envía mi pedido por favor",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-05",
+    "Sector": "restaurant",
+    "Purpose": "Interrupción de precio y reanudación",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Sopa de verduras?",
+        "Preserve": true,
+        "Contains": [
+          "10.00"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Mejor cuatro Arroz con pollo",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-06",
+    "Sector": "restaurant",
+    "Purpose": "Nombre ambiguo, aclaración independiente",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos arroz",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Contains": [
+          "Arroz con pollo",
+          "Arroz chaufa"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Agrega dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-07",
+    "Sector": "restaurant",
+    "Purpose": "Sin afirmación de stock físico",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Tienen Arroz con pollo en stock?",
+        "Contains": [
+          "stock"
+        ],
+        "Orders": 0,
+        "NotContains": [
+          "quedan 5",
+          "stock disponible"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Dame dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-08",
+    "Sector": "restaurant",
+    "Purpose": "Desactivación y retiro seguro",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía el pedido",
+        "Action": "deactivate",
+        "Orders": 0,
+        "Contains": [
+          "disponible"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quita Arroz con pollo",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-09",
+    "Sector": "restaurant",
+    "Purpose": "Reserva completa con confirmación",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Soy Carla Torres, quisiera reservar reserva de mesa en concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "Date": "2026-10-22",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Sí",
+        "Bookings": 1,
+        "Orders": 0,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-10",
+    "Sector": "restaurant",
+    "Purpose": "Reserva incompleta, datos en turnos",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Reserva de mesa",
+        "Goal": "RESERVATION",
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "En Concepción",
+        "Location": "sede-a",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "pasado mañana",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "por la tarde",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Rosa Salas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí confirmo",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-11",
+    "Sector": "restaurant",
+    "Purpose": "Corrección de fecha sin reserva prematura",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Reserva de mesa en Concepción pasado mañana por la tarde",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Mejor el 23 de octubre",
+        "Date": "2026-10-23",
+        "TimeMissing": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Luz Ramos",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-12",
+    "Sector": "restaurant",
+    "Purpose": "Información durante reserva conserva contexto",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Reserva de mesa en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "¿Cuál es el precio de Arroz con pollo?",
+        "Preserve": true,
+        "Contains": [
+          "2.50"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué horario de atención tienen?",
+        "Preserve": true,
+        "Bookings": 0,
+        "SemanticIntent": "BusinessHours",
+        "Contains": [
+          "08:00"
+        ],
+        "Intent": "BusinessHours"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Eva Rojas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-13",
+    "Sector": "restaurant",
+    "Purpose": "Sedes ambiguas no se seleccionan",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Reserva de mesa en Centro pasado mañana",
+        "Goal": "RESERVATION",
+        "LocationMissing": true,
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Concepción",
+        "Location": "sede-a",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      }
+    ],
+    "AmbiguousLocations": true
+  },
+  {
+    "Id": "restaurant-14",
+    "Sector": "restaurant",
+    "Purpose": "Cancelación exige consentimiento y conserva hasta confirmar",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar",
+        "Preserve": true
+      },
+      {
+        "Text": "no",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar"
+      },
+      {
+        "Text": "sí",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Goal": null,
+        "CheckGoal": true
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-15",
+    "Sector": "restaurant",
+    "Purpose": "Revocación no autoriza envío ni pierde borrador",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Action": "revoke",
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Arroz con pollo?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-16",
+    "Sector": "restaurant",
+    "Purpose": "Proveedor sin respuesta, recuperación local",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Reserva de mesa en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "timeout",
+        "Preserve": true,
+        "Bookings": 0,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0
+      },
+      {
+        "Text": "Mara Ponce",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-17",
+    "Sector": "restaurant",
+    "Purpose": "JSON inválido no se atribuye al cliente",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Reserva de mesa en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "invalid-json",
+        "Preserve": true,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00"
+      },
+      {
+        "Text": "Sara Ruiz",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-18",
+    "Sector": "restaurant",
+    "Purpose": "Cliente impaciente deriva por solicitud explícita",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Por favor quiero hablar con un asesor humano",
+        "Human": true,
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Envía el pedido",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        }
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-19",
+    "Sector": "restaurant",
+    "Purpose": "Negación y ráfaga no duplican operaciones",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quiero dos Arroz con pollo",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "No agregues Sopa de verduras",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Orders": 0
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "restaurant-20",
+    "Sector": "restaurant",
+    "Purpose": "Consulta no soportada no inventa capacidad",
+    "Products": [
+      "Arroz con pollo",
+      "Sopa de verduras",
+      "Arroz chaufa"
+    ],
+    "Services": [
+      "Reserva de mesa",
+      "Reserva de salón"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Aceptan pago en bitcoins?",
+        "Orders": 0,
+        "Bookings": 0,
+        "NotContains": [
+          "aceptamos bitcoins",
+          "pago confirmado"
+        ],
+        "Intent": "General"
+      },
+      {
+        "Text": "¿Cuál es el precio de Arroz con pollo?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-01",
+    "Sector": "bakery",
+    "Purpose": "Catálogo, precio y referencia",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Muéstrame su catálogo de productos, porfa",
+        "Contains": [
+          "Rosca de anís",
+          "Empanada de queso"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué precio tiene Rosca de anís?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Cuánto cuesta ese producto?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-02",
+    "Sector": "bakery",
+    "Purpose": "Servicio, duración contextual",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Qué precio tiene Taller de panadería?",
+        "Contains": [
+          "Taller de panadería"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      },
+      {
+        "Text": "¿Y cuánto dura ese servicio?",
+        "Contains": [
+          "30 min"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-03",
+    "Sector": "bakery",
+    "Purpose": "Multiartículo, corrección, eliminación y envío idempotente",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera dos Rosca de anís y tres Empanada de queso, porfa",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "cambia Rosca de anís a cuatro",
+        "Quantities": {
+          "product-a": 4,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Elimina Empanada de queso por favor",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-04",
+    "Sector": "bakery",
+    "Purpose": "Hipótesis no muta cantidades",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Dame tres Rosca de anís",
+        "Quantities": {
+          "product-a": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Y si llevo cinco Rosca de anís?",
+        "Preserve": true,
+        "Contains": [
+          "No he cambiado"
+        ],
+        "Orders": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuál es el subtotal?",
+        "Preserve": true,
+        "Contains": [
+          "7.50"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "envía mi pedido por favor",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-05",
+    "Sector": "bakery",
+    "Purpose": "Interrupción de precio y reanudación",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Empanada de queso?",
+        "Preserve": true,
+        "Contains": [
+          "10.00"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Mejor cuatro Rosca de anís",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-06",
+    "Sector": "bakery",
+    "Purpose": "Nombre ambiguo, aclaración independiente",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos rosca",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Contains": [
+          "Rosca de anís",
+          "Rosca de canela"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Agrega dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-07",
+    "Sector": "bakery",
+    "Purpose": "Sin afirmación de stock físico",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Tienen Rosca de anís en stock?",
+        "Contains": [
+          "stock"
+        ],
+        "Orders": 0,
+        "NotContains": [
+          "quedan 5",
+          "stock disponible"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Dame dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-08",
+    "Sector": "bakery",
+    "Purpose": "Desactivación y retiro seguro",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía el pedido",
+        "Action": "deactivate",
+        "Orders": 0,
+        "Contains": [
+          "disponible"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quita Rosca de anís",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-09",
+    "Sector": "bakery",
+    "Purpose": "Reserva completa con confirmación",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Soy Carla Torres, quisiera reservar taller de panadería en concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "Date": "2026-10-22",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Sí",
+        "Bookings": 1,
+        "Orders": 0,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-10",
+    "Sector": "bakery",
+    "Purpose": "Reserva incompleta, datos en turnos",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Taller de panadería",
+        "Goal": "RESERVATION",
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "En Concepción",
+        "Location": "sede-a",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "pasado mañana",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "por la tarde",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Rosa Salas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí confirmo",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-11",
+    "Sector": "bakery",
+    "Purpose": "Corrección de fecha sin reserva prematura",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Taller de panadería en Concepción pasado mañana por la tarde",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Mejor el 23 de octubre",
+        "Date": "2026-10-23",
+        "TimeMissing": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Luz Ramos",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-12",
+    "Sector": "bakery",
+    "Purpose": "Información durante reserva conserva contexto",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Taller de panadería en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "¿Cuál es el precio de Rosca de anís?",
+        "Preserve": true,
+        "Contains": [
+          "2.50"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué horario de atención tienen?",
+        "Preserve": true,
+        "Bookings": 0,
+        "SemanticIntent": "BusinessHours",
+        "Contains": [
+          "08:00"
+        ],
+        "Intent": "BusinessHours"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Eva Rojas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-13",
+    "Sector": "bakery",
+    "Purpose": "Sedes ambiguas no se seleccionan",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Taller de panadería en Centro pasado mañana",
+        "Goal": "RESERVATION",
+        "LocationMissing": true,
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Concepción",
+        "Location": "sede-a",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      }
+    ],
+    "AmbiguousLocations": true
+  },
+  {
+    "Id": "bakery-14",
+    "Sector": "bakery",
+    "Purpose": "Cancelación exige consentimiento y conserva hasta confirmar",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar",
+        "Preserve": true
+      },
+      {
+        "Text": "no",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar"
+      },
+      {
+        "Text": "sí",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Goal": null,
+        "CheckGoal": true
+      }
+    ]
+  },
+  {
+    "Id": "bakery-15",
+    "Sector": "bakery",
+    "Purpose": "Revocación no autoriza envío ni pierde borrador",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Action": "revoke",
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Rosca de anís?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-16",
+    "Sector": "bakery",
+    "Purpose": "Proveedor sin respuesta, recuperación local",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Taller de panadería en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "timeout",
+        "Preserve": true,
+        "Bookings": 0,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0
+      },
+      {
+        "Text": "Mara Ponce",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "bakery-17",
+    "Sector": "bakery",
+    "Purpose": "JSON inválido no se atribuye al cliente",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Taller de panadería en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "invalid-json",
+        "Preserve": true,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00"
+      },
+      {
+        "Text": "Sara Ruiz",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "bakery-18",
+    "Sector": "bakery",
+    "Purpose": "Cliente impaciente deriva por solicitud explícita",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Por favor quiero hablar con un asesor humano",
+        "Human": true,
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Envía el pedido",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        }
+      }
+    ]
+  },
+  {
+    "Id": "bakery-19",
+    "Sector": "bakery",
+    "Purpose": "Negación y ráfaga no duplican operaciones",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quiero dos Rosca de anís",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "No agregues Empanada de queso",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Orders": 0
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "bakery-20",
+    "Sector": "bakery",
+    "Purpose": "Consulta no soportada no inventa capacidad",
+    "Products": [
+      "Rosca de anís",
+      "Empanada de queso",
+      "Rosca de canela"
+    ],
+    "Services": [
+      "Taller de panadería",
+      "Taller de pastelería"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Aceptan pago en bitcoins?",
+        "Orders": 0,
+        "Bookings": 0,
+        "NotContains": [
+          "aceptamos bitcoins",
+          "pago confirmado"
+        ],
+        "Intent": "General"
+      },
+      {
+        "Text": "¿Cuál es el precio de Rosca de anís?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "limited-01",
+    "Sector": "limited",
+    "Purpose": "Catálogo, precio y referencia",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Muéstrame su catálogo de productos, porfa",
+        "Contains": [
+          "Cuaderno rayado",
+          "Lapicero azul"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué precio tiene Cuaderno rayado?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Cuánto cuesta ese producto?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "limited-02",
+    "Sector": "limited",
+    "Purpose": "Servicio, duración contextual",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Qué precio tiene Orientación general?",
+        "Contains": [
+          "Orientación general"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      },
+      {
+        "Text": "¿Y cuánto dura ese servicio?",
+        "Contains": [
+          "30 min"
+        ],
+        "Orders": 0,
+        "Intent": "ServiceQuery"
+      }
+    ]
+  },
+  {
+    "Id": "limited-03",
+    "Sector": "limited",
+    "Purpose": "Multiartículo, corrección, eliminación y envío idempotente",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera dos Cuaderno rayado y tres Lapicero azul, por favor",
+        "Quantities": {
+          "product-a": 2,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "cambia Cuaderno rayado a cuatro",
+        "Quantities": {
+          "product-a": 4,
+          "product-b": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Elimina Lapicero azul por favor",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Por favor envía mi pedido",
+        "Source": "submit",
+        "Orders": 1,
+        "Bookings": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-04",
+    "Sector": "limited",
+    "Purpose": "Hipótesis no muta cantidades",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Dame tres Cuaderno rayado",
+        "Quantities": {
+          "product-a": 3
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Y si llevo cinco Cuaderno rayado?",
+        "Preserve": true,
+        "Contains": [
+          "No he cambiado"
+        ],
+        "Orders": 0,
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuál es el subtotal?",
+        "Preserve": true,
+        "Contains": [
+          "7.50"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "envía mi pedido por favor",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-05",
+    "Sector": "limited",
+    "Purpose": "Interrupción de precio y reanudación",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Lapicero azul?",
+        "Preserve": true,
+        "Contains": [
+          "10.00"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Mejor cuatro Cuaderno rayado",
+        "Quantities": {
+          "product-a": 4
+        },
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-06",
+    "Sector": "limited",
+    "Purpose": "Nombre ambiguo, aclaración independiente",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos cuaderno",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Contains": [
+          "Cuaderno rayado",
+          "Cuaderno cuadriculado"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Agrega dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-07",
+    "Sector": "limited",
+    "Purpose": "Sin afirmación de stock físico",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Tienen Cuaderno rayado en stock?",
+        "Contains": [
+          "stock"
+        ],
+        "Orders": 0,
+        "NotContains": [
+          "quedan 5",
+          "stock disponible"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "Dame dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-08",
+    "Sector": "limited",
+    "Purpose": "Desactivación y retiro seguro",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía el pedido",
+        "Action": "deactivate",
+        "Orders": 0,
+        "Contains": [
+          "disponible"
+        ],
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quita Cuaderno rayado",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-09",
+    "Sector": "limited",
+    "Purpose": "Reserva completa con confirmación",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Soy Carla Torres, quisiera reservar orientación general en concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "Date": "2026-10-22",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Sí",
+        "Bookings": 1,
+        "Orders": 0,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "limited-10",
+    "Sector": "limited",
+    "Purpose": "Reserva incompleta, datos en turnos",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Orientación general",
+        "Goal": "RESERVATION",
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "En Concepción",
+        "Location": "sede-a",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "pasado mañana",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "por la tarde",
+        "TimeMissing": true,
+        "Contains": [
+          "16:00"
+        ],
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Rosa Salas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí confirmo",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "limited-11",
+    "Sector": "limited",
+    "Purpose": "Corrección de fecha sin reserva prematura",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Orientación general en Concepción pasado mañana por la tarde",
+        "Date": "2026-10-22",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Mejor el 23 de octubre",
+        "Date": "2026-10-23",
+        "TimeMissing": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Luz Ramos",
+        "Step": "CONFIRM",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "limited-12",
+    "Sector": "limited",
+    "Purpose": "Información durante reserva conserva contexto",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Orientación general en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "¿Cuál es el precio de Cuaderno rayado?",
+        "Preserve": true,
+        "Contains": [
+          "2.50"
+        ],
+        "Intent": "ProductQuery"
+      },
+      {
+        "Text": "¿Qué horario de atención tienen?",
+        "Preserve": true,
+        "Bookings": 0,
+        "SemanticIntent": "BusinessHours",
+        "NoKnowledgeRead": true,
+        "NotContains": [
+          "08:00"
+        ],
+        "Intent": "BusinessHours"
+      },
+      {
+        "Text": "16:00",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Eva Rojas",
+        "Step": "CONFIRM",
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1,
+        "Intent": "Reservation"
+      }
+    ]
+  },
+  {
+    "Id": "limited-13",
+    "Sector": "limited",
+    "Purpose": "Sedes ambiguas no se seleccionan",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero reservar Orientación general en Centro pasado mañana",
+        "Goal": "RESERVATION",
+        "LocationMissing": true,
+        "Bookings": 0,
+        "CheckGoal": true,
+        "Intent": "Reservation"
+      },
+      {
+        "Text": "Concepción",
+        "Location": "sede-a",
+        "Bookings": 0,
+        "Intent": "Reservation"
+      }
+    ],
+    "AmbiguousLocations": true
+  },
+  {
+    "Id": "limited-14",
+    "Sector": "limited",
+    "Purpose": "Cancelación exige consentimiento y conserva hasta confirmar",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar",
+        "Preserve": true
+      },
+      {
+        "Text": "no",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "cancelar"
+      },
+      {
+        "Text": "sí",
+        "EmptyDraft": true,
+        "Orders": 0,
+        "Goal": null,
+        "CheckGoal": true
+      }
+    ]
+  },
+  {
+    "Id": "limited-15",
+    "Sector": "limited",
+    "Purpose": "Revocación no autoriza envío ni pierde borrador",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Action": "revoke",
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "¿Cuánto cuesta Cuaderno rayado?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "ProductQuery"
+      }
+    ]
+  },
+  {
+    "Id": "limited-16",
+    "Sector": "limited",
+    "Purpose": "Proveedor sin respuesta, recuperación local",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Orientación general en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "timeout",
+        "Preserve": true,
+        "Bookings": 0,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00",
+        "Bookings": 0
+      },
+      {
+        "Text": "Mara Ponce",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "limited-17",
+    "Sector": "limited",
+    "Purpose": "JSON inválido no se atribuye al cliente",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quisiera reservar Orientación general en Concepción pasado mañana por la tarde",
+        "Goal": "RESERVATION",
+        "CheckGoal": true
+      },
+      {
+        "Text": "Coordínamelo como comentamos allá",
+        "Action": "invalid-json",
+        "Preserve": true,
+        "ProviderFailure": true
+      },
+      {
+        "Text": "16:00"
+      },
+      {
+        "Text": "Sara Ruiz",
+        "Step": "CONFIRM"
+      },
+      {
+        "Text": "sí",
+        "Bookings": 1
+      }
+    ]
+  },
+  {
+    "Id": "limited-18",
+    "Sector": "limited",
+    "Purpose": "Cliente impaciente deriva por solicitud explícita",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Por favor quiero hablar con un asesor humano",
+        "Human": true,
+        "Quantities": {
+          "product-a": 2
+        }
+      },
+      {
+        "Text": "Envía el pedido",
+        "Human": true,
+        "Silent": true,
+        "Orders": 0,
+        "Quantities": {
+          "product-a": 2
+        }
+      }
+    ]
+  },
+  {
+    "Id": "limited-19",
+    "Sector": "limited",
+    "Purpose": "Negación y ráfaga no duplican operaciones",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "Quiero dos Cuaderno rayado",
+        "Source": "rapid",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Intent": "Order"
+      },
+      {
+        "Text": "No agregues Lapicero azul",
+        "Quantities": {
+          "product-a": 2
+        },
+        "Orders": 0
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      },
+      {
+        "Text": "Envía mi pedido",
+        "Source": "confirmed",
+        "Orders": 1,
+        "Intent": "Order"
+      }
+    ]
+  },
+  {
+    "Id": "limited-20",
+    "Sector": "limited",
+    "Purpose": "Consulta no soportada no inventa capacidad",
+    "Products": [
+      "Cuaderno rayado",
+      "Lapicero azul",
+      "Cuaderno cuadriculado"
+    ],
+    "Services": [
+      "Orientación general",
+      "Orientación avanzada"
+    ],
+    "Turns": [
+      {
+        "Text": "¿Aceptan pago en bitcoins?",
+        "Orders": 0,
+        "Bookings": 0,
+        "NotContains": [
+          "aceptamos bitcoins",
+          "pago confirmado"
+        ],
+        "Intent": "General"
+      },
+      {
+        "Text": "¿Cuál es el precio de Cuaderno rayado?",
+        "Contains": [
+          "2.50"
+        ],
+        "Orders": 0,
+        "Intent": "ProductQuery"
+      }
+    ]
+  }
+]

@@ -111,7 +111,8 @@ public sealed class CommerceSafetyTests
         });
         var repo=new FirestoreOrderRepository(f.Db.Db,offerings.Object);
         var order=new OrderRecord{Id="scope-race",ConsumerPhone="phone",ConversationId="chat",RequestedLocationId="requested",Items=[new(){ProductId="bread",Quantity=2}]};
-        await Assert.ThrowsAsync<ConcurrencyException>(()=>repo.CreateOrderAsync(f.Workspace,order,default));
+        var error=await Assert.ThrowsAsync<OrderCatalogChangedException>(()=>repo.CreateOrderAsync(f.Workspace,order,default));
+        Assert.Equal(OrderCatalogChange.Location,error.Change);
         Assert.Null(await repo.GetOrderByIdAsync(f.Workspace,order.Id,default));
     }
 
@@ -122,7 +123,8 @@ public sealed class CommerceSafetyTests
         await f.Catalog.SaveItemAsync(f.Workspace,new ProductDto{Id="bread",Name="Pan integral",PriceMinorUnits=999},false,default);
         var request=new OrderRecord{Id="price-race",ConsumerPhone="phone",ConversationId="chat",Items=[new(){ProductId="bread",Quantity=2}],
             ExpectedCatalog=new Dictionary<string,OrderCatalogExpectation>{["bread"]=new("Pan integral",250,"PEN")}};
-        await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Orders.CreateOrderAsync(f.Workspace,request,default));
+        var error=await Assert.ThrowsAsync<OrderCatalogChangedException>(()=>f.Orders.CreateOrderAsync(f.Workspace,request,default));
+        Assert.Equal(OrderCatalogChange.PriceOrCurrency,error.Change);
         Assert.Null(await f.Orders.GetOrderByIdAsync(f.Workspace,request.Id,default));
     }
 
@@ -143,7 +145,8 @@ public sealed class CommerceSafetyTests
     {
         var f=new Durable();await f.Seed();
         var request=new OrderRecord{Id="deleted-location",ConsumerPhone="phone",ConversationId="chat",RequestedLocationId="deleted",Items=[new(){ProductId="bread",Quantity=2}]};
-        await Assert.ThrowsAsync<ArgumentException>(()=>f.Orders.CreateOrderAsync(f.Workspace,request,default));
+        var error=await Assert.ThrowsAsync<OrderCatalogChangedException>(()=>f.Orders.CreateOrderAsync(f.Workspace,request,default));
+        Assert.Equal(OrderCatalogChange.LocationDeleted,error.Change);
         Assert.Null(await f.Orders.GetOrderByIdAsync(f.Workspace,request.Id,default));
     }
 

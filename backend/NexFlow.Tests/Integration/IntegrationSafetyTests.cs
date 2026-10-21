@@ -4,6 +4,11 @@ namespace NexFlow.Tests.Integration;
 
 public sealed class IntegrationSafetyTests
 {
+    [Theory]
+    [InlineData("production.example:6379")] [InlineData("127.0.0.1:6379")]
+    [InlineData("127.0.0.1:16379,password=secret")] [InlineData("")]
+    public void Redis_certification_rejects_application_endpoints_and_credentials(string endpoint)=>
+        Assert.Throws<InvalidOperationException>(()=>CommerceRedisIntegrationTests.Options(endpoint));
     [Fact]
     public void Accepts_only_explicit_synthetic_local_configuration()
     {

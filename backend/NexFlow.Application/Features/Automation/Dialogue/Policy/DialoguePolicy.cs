@@ -32,7 +32,8 @@ public sealed class DialoguePolicy
         if (HasContradictoryGoals(normalized)) return DialogueAct.SemanticAmbiguity;
         var reservationMention = words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita");
         var instruction = normalized.Contains("como ", StringComparison.Ordinal) || normalized.Contains("no se", StringComparison.Ordinal)
-            || words.Contains("puedo") || words.Contains("puede") || words.Contains("informacion") || words.Contains("orientacion");
+            || words.Contains("puedo") || words.Contains("puede") || words.Contains("informacion")
+            || normalized.Contains("orientacion para ",StringComparison.Ordinal) || normalized.Contains("orientacion sobre ",StringComparison.Ordinal);
         if (reservationMention && instruction) return DialogueAct.OperationInformation;
         var correction = words.Any(w => w.StartsWith("cambi", StringComparison.Ordinal) || w is "mejor" or "otra" or "otro" or "corregir");
         if (booking && correction) return DialogueAct.Correction;

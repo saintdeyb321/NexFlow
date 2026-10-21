@@ -34,15 +34,21 @@ public class FirestoreOrderRepository : IOrderRepository
                 throw new ArgumentException("Cada producto debe tener un ID de catálogo y cantidad mayor que cero.");
             var product = await _offerings.GetProductByIdAsync(workspaceId, item.ProductId, cancellationToken);
             if (product == null)
+            {
+                if (order.ExpectedCatalog != null) throw new OrderCatalogChangedException(OrderCatalogChange.ProductUnavailable, "Un producto del pedido ya no está disponible en el catálogo.");
                 throw new ArgumentException($"El producto '{item.ProductName}' no está disponible en el catálogo.");
+            }
             if (order.RequestedLocationId != null && !string.Equals(product.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
                 && (!string.Equals(product.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) || !product.LocationIds.Contains(order.RequestedLocationId)))
+            {
+                if (order.ExpectedCatalog != null) throw new OrderCatalogChangedException(OrderCatalogChange.Location, "Un producto ya no se ofrece en la sede seleccionada.");
                 throw new ArgumentException("Un producto no se ofrece en la sede seleccionada.");
+            }
             if (product.PriceMinorUnits < 0 || string.IsNullOrWhiteSpace(product.Currency))
                 throw new ArgumentException($"El producto '{product.Name}' no tiene un precio/moneda válido.");
             if (order.ExpectedCatalog != null && (!order.ExpectedCatalog.TryGetValue(item.ProductId,out var expected)
                 || expected.Name != product.Name || expected.PriceMinorUnits != product.PriceMinorUnits || expected.Currency != product.Currency))
-                throw new ConcurrencyException("El catálogo cambió después de mostrar el subtotal. Revisa los importes antes de confirmar.");
+                throw new OrderCatalogChangedException(OrderCatalogChange.PriceOrCurrency, "El catálogo cambió después de mostrar el subtotal. Revisa los importes antes de confirmar.");
             item.ProductId = product.Id;
             item.ProductName = product.Name;
             item.UnitPriceMinorUnits = product.PriceMinorUnits;
@@ -66,6 +72,7 @@ public class FirestoreOrderRepository : IOrderRepository
             { "Currency", order.Currency! },
             { "TotalAmountMinorUnits", order.TotalAmountMinorUnits! },
             { "Notes", order.Notes ?? "" },
+            { "RequestedLocationId", order.RequestedLocationId! },
             { "CreatedAt", DateTime.SpecifyKind(order.CreatedAt, DateTimeKind.Utc) },
             { "UpdatedAt", DateTime.SpecifyKind(order.UpdatedAt, DateTimeKind.Utc) },
             { "Items", order.Items.Select(i => new Dictionary<string, object>
@@ -86,7 +93,7 @@ public class FirestoreOrderRepository : IOrderRepository
             if (order.RequestedLocationId != null)
             {
                 var location = await tx.GetSnapshotAsync(docRef.Parent.Parent!.Collection("locations").Document(order.RequestedLocationId), cancellationToken);
-                if (!location.Exists) throw new ArgumentException("La sede seleccionada ya no está disponible. Elige otra sede antes de enviar.");
+                if (!location.Exists) throw new OrderCatalogChangedException(OrderCatalogChange.LocationDeleted, "La sede seleccionada ya no está disponible. Elige otra sede antes de enviar.");
             }
             // Fence the authorized snapshots against catalog edits in the same
             // Firestore transaction as creation. A changed price needs a fresh request,
@@ -95,15 +102,15 @@ public class FirestoreOrderRepository : IOrderRepository
             {
                 var product = await tx.GetSnapshotAsync(docRef.Parent.Parent!.Collection("catalogItems").Document(item.ProductId), cancellationToken);
                 if (!product.Exists || product.GetValue<string>("Type") != "PRODUCT" || !product.GetValue<bool>("IsActive"))
-                    throw new ArgumentException("Un producto del pedido ya no está disponible en el catálogo.");
+                    throw new OrderCatalogChangedException(OrderCatalogChange.ProductUnavailable, "Un producto del pedido ya no está disponible en el catálogo.");
                 if (order.RequestedLocationId != null && product.TryGetValue<string>("LocationScope", out var scope)
                     && !scope.Equals("ALL", StringComparison.OrdinalIgnoreCase)
                     && (!scope.Equals("SPECIFIC", StringComparison.OrdinalIgnoreCase) || !product.TryGetValue<List<string>>("LocationIds", out var ids) || !ids.Contains(order.RequestedLocationId)))
-                    throw new ConcurrencyException("El catálogo cambió de sede al enviar el pedido. Revisa la solicitud.");
+                    throw new OrderCatalogChangedException(OrderCatalogChange.Location, "El catálogo cambió de sede al enviar el pedido. Revisa la solicitud.");
                 if (product.GetValue<string>("Name") != item.ProductName
                     || product.GetValue<long>("PriceMinorUnits") != item.UnitPriceMinorUnits
                     || product.GetValue<string>("Currency") != item.Currency)
-                    throw new ConcurrencyException("El catálogo cambió al enviar el pedido. Revisa sus precios y vuelve a enviarlo.");
+                    throw new OrderCatalogChangedException(OrderCatalogChange.PriceOrCurrency, "El catálogo cambió al enviar el pedido. Revisa sus precios y vuelve a enviarlo.");
             }
             tx.Create(docRef, data);
             return order;
@@ -113,6 +120,7 @@ public class FirestoreOrderRepository : IOrderRepository
     private static OrderRecord ValidateReplay(OrderRecord existing, OrderRecord requested)
     {
         if (existing.ConsumerPhone != requested.ConsumerPhone || existing.ConversationId != requested.ConversationId ||
+            existing.RequestedLocationId != requested.RequestedLocationId ||
             !existing.Items.Select(i => (i.ProductId, i.Quantity)).OrderBy(i => i.ProductId, StringComparer.Ordinal)
                 .SequenceEqual(requested.Items.Select(i => (i.ProductId, i.Quantity)).OrderBy(i => i.ProductId, StringComparer.Ordinal)))
             throw new ConcurrencyException("Order identity was reused for different content.");
@@ -180,6 +188,7 @@ public class FirestoreOrderRepository : IOrderRepository
             Currency = doc.GetValue<string>("Currency"),
             TotalAmountMinorUnits = doc.GetValue<long?>("TotalAmountMinorUnits"),
             Notes = doc.TryGetValue("Notes", out string notes) ? notes : null,
+            RequestedLocationId = doc.TryGetValue("RequestedLocationId", out string? locationId) ? locationId : null,
             CreatedAt = doc.GetValue<DateTime>("CreatedAt"),
             UpdatedAt = doc.GetValue<DateTime>("UpdatedAt")
         };

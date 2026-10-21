@@ -100,7 +100,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (context.CurrentStep == "CONFIRM" && context.CurrentGoal is "BOOKING" or "RESERVATION" && Yes(text))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Confirmed = true });
         if (No(text) && context.CurrentStep == "CONFIRM") return await Remember("No he registrado la reserva. Puedes corregir la sede, servicio, fecha u hora, o escribir cancelar para dejar esta reserva en preparación.");
-        if (Regex.IsMatch(text, @"^(hola+|holi|buenas|buenos dias|buenas tardes|buenas noches|hey|ola)$"))
+        if (Regex.IsMatch(text, @"^(hola+|holi|buenas|buenos dias|buenas tardes|buenas noches|hey|ola)( (buenos dias|buenas tardes|buenas noches))?$"))
             return string.IsNullOrEmpty(context.CurrentGoal) ? await Menu("¡Hola! Puedo ayudarte con estas opciones:")
                 : await Remember((context.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "¡Hola! ") + Continuation(context));
         if (text is "adios" or "chau" or "hasta luego" or "gracias" or "muchas gracias")

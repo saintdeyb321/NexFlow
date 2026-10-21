@@ -232,6 +232,7 @@ public sealed class AssistantConversationTests
         public Dictionary<string, MessageRecord> Sent { get; } = new(); public List<(Guid Workspace, KnowledgeTopic Topic)> FactualQueries { get; } = new();
         public int AiCalls { get; private set; } public int Handoffs { get; private set; }
         public Func<Task>? DuringInterpretation { get; set; }
+        public Func<Task<AiInterpretation>>? InterpretationOverride { get; set; }
         public Func<Task>? DuringComposition { get; set; }
         public Mock<ILocationRepository> LocationReads { get; }
         public Mock<IOfferingService> OfferingReads { get; }
@@ -314,7 +315,7 @@ public sealed class AssistantConversationTests
                 r.TotalAmountMinorUnits=r.Currency == null ? null : r.Items.Sum(i => i.SubtotalMinorUnits); Orders.TryAdd(r.Id, r); return Orders[r.Id]; });
             var order = new OrderFlow(orderRepo.Object, notifications, Contexts, offerings.Object, entitlements.Object);
             var interpreter = new Mock<IAiInterpreter>(MockBehavior.Strict);
-            interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).Returns(async () => { AiCalls++; if (DuringInterpretation != null) await DuringInterpretation(); return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
+            interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).Returns(async () => { AiCalls++; if (DuringInterpretation != null) await DuringInterpretation(); if(InterpretationOverride!=null) return await InterpretationOverride(); return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
             var outbound = new Mock<IOutboundMessageService>(MockBehavior.Strict);
             Outbound = outbound;
             outbound.Setup(o => o.SendMessageAsync(Workspace, "chat", Phone, It.IsAny<string>(), SenderType.AI, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, string _, string content, SenderType _, string source, CancellationToken _) => {

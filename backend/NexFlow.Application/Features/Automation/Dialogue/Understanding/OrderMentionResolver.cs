@@ -29,9 +29,18 @@ public sealed class OrderMentionResolver
     public static bool IsCandidate(string text, ConversationContextDto state)
     {
         var words = Words(text);
+        // Explicit independent information does not need commerce reads, even with
+        // a draft/reference. Mixed questions mentioning offerings still resolve normally.
+        var commercial=words.Any(w=>w is "producto" or "productos" or "servicio" or "servicios" or "catalogo" or "precio" or "cuesta" or "cuestan" or "pedido" or "stock" or "dura" or "duracion");
+        var contextual=state.LastIntent?.StartsWith("OFFERING:v1:",StringComparison.Ordinal)==true
+            && words.Any(w=>w is "ese" or "esa" or "eso" or "esos" or "estos" or "lo" or "anterior");
+        if (!commercial && !contextual && (words.Any(w=>w is "horario" or "horarios" or "atienden" or "abren" or "cierran")
+            || words.Contains("donde") && words.Any(w=>w is "sede" or "sedes" or "local" or "negocio")
+            || words.Any(w=>w is "direccion" or "direcciones" or "ubicacion" or "ubicaciones"))) return false;
         if (state.CurrentGoal == "ORDER") return true;
         if (NexFlow.Application.Features.Automation.Dialogue.Policy.DialoguePolicy.HasContradictoryGoals(SpanishTextNormalizer.Normalize(text))) return false;
-        if (words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita")) return false;
+        if (words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita")
+            && !words.Any(w=>w is "precio" or "cuesta" or "cuestan" or "dura" or "duracion" or "compara" or "diferencia")) return false;
         return IsQuestion(text) || words.Any(w => w is "producto" or "productos" or "servicios" or "catalogo" or "pedido" or "comprar" or "agrega" or "quita" or "quiero" or "quisiera" or "necesito" or "llevo" or "dame" or "apuntas" or "apuntar" or "vendes" or "anade");
     }
     public static string[] Words(string text) => SpanishTextNormalizer.Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -134,6 +143,6 @@ public sealed class OrderMentionResolver
         var normalized = SpanishTextNormalizer.Normalize(text);
         if (products.Any(p => SpanishTextNormalizer.ContainsPhrase(normalized, SpanishTextNormalizer.Normalize(p.Name)) && p.Name.Contains(" y ", StringComparison.OrdinalIgnoreCase))) return [text];
         return Regex.Split(text, @"[,;\n]|\s+(?:y|además)\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-            .Where(p => !string.IsNullOrWhiteSpace(p)).ToArray();
+            .Where(p => !string.IsNullOrWhiteSpace(p) && SpanishTextNormalizer.Normalize(p) is not ("por favor" or "porfa" or "gracias")).ToArray();
     }
 }

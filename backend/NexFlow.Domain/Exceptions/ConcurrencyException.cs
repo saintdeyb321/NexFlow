@@ -1,3 +1,3 @@
 namespace NexFlow.Domain.Exceptions;
 
-public sealed class ConcurrencyException(string message) : Exception(message) { }
+public class ConcurrencyException(string message) : Exception(message) { }
