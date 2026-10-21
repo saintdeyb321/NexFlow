@@ -24,6 +24,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var activeOrder = context.CurrentGoal == "ORDER";
         var hypothetical = OrderMentionResolver.IsHypothetical(text);
         var catalogRequest = InformationalRequest.Catalog(text);
+        var unscopedCatalog = InformationalRequest.UnscopedCatalog(text);
+        var dualCatalog = unscopedCatalog && modules.Contains("CATALOG") && modules.Contains("SERVICES");
         var politePurchase = OrderMentionResolver.PolitePurchase(text);
         var submit = OrderMentionResolver.IsSubmit(text) || activeOrder && context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true
             && normalized is "si" or "si confirmo" or "confirmo" or "de acuerdo";
@@ -72,7 +74,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             || words.Contains("catalogo") && modules.Contains("SERVICES") && !modules.Contains("CATALOG"));
         var wantsProducts=order || hypothetical || namedProducts || (catalogRequest || words.Contains("catalogo")) && !wantsServices
             || !namedServices && anaphora && reference?.Type == "PRODUCT";
-        var catalog = await slots.ReadCommerceAsync(workspace,context,wantsProducts || !wantsServices,(!order || weakPurchase) && !hypothetical && (weakPurchase || wantsServices || !wantsProducts),order && !weakPurchase,scope,ct);
+        var catalog = await slots.ReadCommerceAsync(workspace,context,dualCatalog || wantsProducts || !wantsServices,dualCatalog || (!order || weakPurchase) && !hypothetical && (weakPurchase || wantsServices || !wantsProducts),order && !weakPurchase,scope,ct);
         var products=catalog.Products.ToArray();
         if (internalLocation && selectedLocation != null && !words.Any(w => w is "producto" or "productos") && !changingProduct(text))
             return Order(OrderTurnKind.Location, [], selectedLocation);
@@ -93,6 +95,19 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (wantsServices && !modules.Contains("SERVICES")) return Query("SERVICE", [], false, AiIntentAccess.ServicesUnavailable);
         if (wantsProducts && !modules.Contains("CATALOG")) return Query("PRODUCT", [], false, AiIntentAccess.ProductsUnavailable);
         var productMatches = OrderMentionResolver.Match(text, text, products); var serviceMatches = OrderMentionResolver.Match(text, text, services);
+        if (dualCatalog && productMatches.Count == 0 && serviceMatches.Count == 0)
+        {
+            var referenced = reference != null && reference.Ids.All(id => products.Concat(services).Any(o => o.Type == reference.Type && o.Id == id));
+            var bookingContext = context.CurrentGoal is "BOOKING" or "RESERVATION"
+                && services.Any(s => s.Id == context.SelectedServiceId);
+            var orderContext = context.CurrentGoal == "ORDER" && context.OrderDraftItems.Count > 0
+                && context.OrderDraftItems.All(item => products.Any(p => p.Id == item.ProductId));
+            if (!referenced && !bookingContext && !orderContext)
+                return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.General }, Response: InformationalRequest.CatalogScopeQuestion,
+                    Choices: [new("ProductQuery", "Productos", "Action"), new("ServiceQuery", "Servicios", "Action")]);
+            wantsServices = referenced ? reference!.Type == "SERVICE" : bookingContext;
+            wantsProducts = !wantsServices;
+        }
         var broad = (catalogRequest || words.Any(w => w is "productos" or "servicios" or "catalogo")
             && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo"))
             && !words.Contains("diferencia") && productMatches.Count == 0 && serviceMatches.Count == 0;

@@ -149,7 +149,7 @@ public class BookingFlow : IBookingFlow
             if (serviceFact != null)
             {
                 var dateText = DateOnly.TryParseExact(dateFact?.Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var knownDate)
-                    ? " para el " + knownDate.ToString("dddd d", CultureInfo.GetCultureInfo("es-PE")) : "";
+                    ? " para el " + knownDate.ToString("dddd d 'de' MMMM 'de' yyyy", CultureInfo.GetCultureInfo("es-PE")) : "";
                 response = $"Te ayudo con {serviceFact.Value}{dateText}.\n\n" + response;
             }
         }
@@ -626,6 +626,11 @@ public class ChatFlow : IChatFlow
         var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var denied = interpretation.DeniedResponse ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
         if (denied != null) return new ChatResponse(denied) { Operation = OperationStatus.Denied };
+
+        if (interpretation.OfferingQuery == null && interpretation.QueryKind == OfferingQueryKind.Broad
+            && modules.Contains("CATALOG") && modules.Contains("SERVICES")
+            && NexFlow.Application.Features.Automation.Dialogue.Understanding.InformationalRequest.UnscopedCatalog(text))
+            return new ChatResponse(NexFlow.Application.Features.Automation.Dialogue.Understanding.InformationalRequest.CatalogScopeQuestion);
 
         if (interpretation.OfferingQuery is { } query)
         {

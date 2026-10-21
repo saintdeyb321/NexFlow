@@ -99,8 +99,13 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         }
         ct.ThrowIfCancellationRequested();
         var turn = DialogueTurnContext.Capture(workspaceId, sourceMessageId, state, localNow, zone, modules);
+        var date = reservation
+            ? dates.ResolveReservation(text, localNow, state.CurrentStep == "COLLECT_DATE",
+                DateOnly.TryParseExact(state.TargetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var anchorDate) ? anchorDate : null, state.LastQuestion)
+            : dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE");
         var result = new TurnUnderstanding(turn, names.Resolve(text, state.CurrentStep == "COLLECT_CUSTOMERNAME"),
-            location, service, product, dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE"), times.Resolve(text, state.CurrentStep == "COLLECT_TIME"))
+            location, service, product, date, times.Resolve(text, state.CurrentStep == "COLLECT_TIME"))
         {
             AuthorizedLocations = authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)).ToArray(),
             AuthorizedServices = serviceOptions, AuthorizedProducts = productOptions

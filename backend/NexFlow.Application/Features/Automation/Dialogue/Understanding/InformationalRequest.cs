@@ -3,6 +3,9 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 // Recognizes request structure only. Data, options, permissions and delivery stay server-owned.
 internal static class InformationalRequest
 {
+    internal const string CatalogScopeQuestion = "¿Deseas el catálogo de productos o el de servicios?";
+    internal static bool UnscopedCatalog(string text) => Catalog(text)
+        && !OrderMentionResolver.Words(text).Any(w => w is "producto" or "productos" or "servicio" or "servicios");
     private static readonly HashSet<string> MenuWords = new(StringComparer.Ordinal) {
         "menu", "opciones", "disponibles", "disponible", "muestrame", "muestras", "mostrar", "muestra",
         "ver", "quiero", "quisiera", "necesito", "me", "que", "cuales", "son", "las", "el", "los", "la",

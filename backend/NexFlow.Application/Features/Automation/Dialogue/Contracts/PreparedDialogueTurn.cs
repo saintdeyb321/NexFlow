@@ -4,7 +4,8 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 public enum DialogueAct { Information, OperationInformation, StartOperation, RequestedData, MultipleData, Correction, InformationalInterruption, Confirmation, Cancellation, HumanAssistance, SemanticAmbiguity, ProviderFailure, BusinessUnavailable, DeclineOperation, Resume }
 
-public sealed record PreparedDialogueTurn(DialogueAct Act, AiInterpretation Interpretation, bool UsedAi = false, string? Response = null);
+public sealed record PreparedDialogueTurn(DialogueAct Act, AiInterpretation Interpretation, bool UsedAi = false, string? Response = null,
+    IReadOnlyList<NexFlow.Application.Abstractions.Cache.ConversationMenuOption>? Choices = null);
 
 // Server-owned, ephemeral proposal. Only BookingFlow applies it, using the existing context CAS.
 public sealed record BookingDraftProposal(Guid WorkspaceId, string SourceMessageId, string? ExpectedStateVersion,

@@ -98,17 +98,22 @@ public sealed class LinguisticRegression62Tests
     }
 
     [Theory]
-    [InlineData("Mándame el folleto de productos.")]
-    [InlineData("¿Me compartes su catálogo?")]
-    [InlineData("Quiero ver el catálogo completo.")]
-    [InlineData("¿Tienes una lista de precios?")]
-    [InlineData("¿Me puedes pasar el PDF?")]
-    [InlineData("¿Qué productos tienen?")]
-    public async Task Broad_document_requests_use_existing_safe_factual_fallback_without_generation(string text)
+    [InlineData("Mándame el folleto de productos.", false)]
+    [InlineData("¿Me compartes su catálogo?", true)]
+    [InlineData("Quiero ver el catálogo completo.", true)]
+    [InlineData("¿Tienes una lista de precios?", true)]
+    [InlineData("¿Me puedes pasar el PDF?", true)]
+    [InlineData("¿Qué productos tienen?", false)]
+    public async Task Broad_document_requests_use_safe_factual_fallback_after_required_scope_choice(string text, bool requiresScope)
     {
         var f = Create(); await f.HandleTurn(text, "catalog");
-        Assert.Contains("Pan integral", f.Sent["catalog"].Content);
-        Assert.Contains("2.50", f.Sent["catalog"].Content);
+        var responseSource = "catalog";
+        if (requiresScope)
+        {
+            await ChooseProducts(f, responseSource, "catalog-choice"); responseSource = "catalog-choice";
+        }
+        Assert.Contains("Pan integral", f.Sent[responseSource].Content);
+        Assert.Contains("2.50", f.Sent[responseSource].Content);
         Assert.Equal(0, f.AiCalls); Assert.Empty(f.Orders); Assert.Empty((await f.Context()).OrderDraftItems);
         Assert.DoesNotContain(f.Outbound.Invocations, i => i.Method.Name == "SendDocumentAsync");
         Assert.All(f.CatalogReads.Invocations, i => Assert.Equal("GetArtifactAsync", i.Method.Name));
@@ -135,16 +140,30 @@ public sealed class LinguisticRegression62Tests
     }
 
     [Fact]
-    public async Task Generating_pdf_keeps_verified_text_without_sending_a_previous_file()
+    public async Task Generating_pdf_after_scope_choice_keeps_verified_text_without_sending_a_previous_file()
     {
         var f = Create(); var artifact = CatalogArtifact.Initialize(f.Workspace, "PRODUCT");
         artifact.CompleteUpload("https://example.test/previous.pdf", "hash");
         artifact.MarkAsGenerating("new-source", "new-generation", ArtifactDesign.Create("MODERN", "OCEAN", "BALANCED"), f.Now);
         f.CatalogReads.Setup(c => c.GetArtifactAsync(f.Workspace, "PRODUCT", It.IsAny<CancellationToken>())).ReturnsAsync(artifact);
         await f.HandleTurn("¿Me puedes pasar el PDF?", "pdf");
-        Assert.Contains("Pan integral", f.Sent["pdf"].Content);
+        await ChooseProducts(f, "pdf", "pdf-choice");
+        Assert.Contains("Pan integral", f.Sent["pdf-choice"].Content);
         Assert.DoesNotContain(f.Outbound.Invocations, i => i.Method.Name == "SendDocumentAsync");
         Assert.All(f.CatalogReads.Invocations, i => Assert.Equal("GetArtifactAsync", i.Method.Name));
+    }
+
+    // Versioned product-policy contract: an unscoped request must be clarified before lookup.
+    // The pre-change tests and their failing TRX are retained in the closure evidence.
+    private static async Task ChooseProducts(AssistantConversationTests.Fixture f, string question, string source)
+    {
+        Assert.Contains("productos", f.Sent[question].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("servicios", f.Sent[question].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(new[] { "ProductQuery", "ServiceQuery" }, (await f.Context()).RecoveryOptions.Select(o => o.Key));
+        Assert.Empty(f.CatalogReads.Invocations);
+        Assert.DoesNotContain(f.Outbound.Invocations, i => i.Method.Name == "SendDocumentAsync");
+        Assert.Empty(f.Orders); Assert.Empty(f.Bookings);
+        await f.HandleTurn("Productos", source);
     }
 
     [Theory]
@@ -200,13 +219,13 @@ public sealed class LinguisticRegression62Tests
     }
 
     [Fact]
-    public async Task Ambiguous_weekday_waits_for_explicit_date_and_later_corrections_do_not_commit()
+    public async Task Reservation_weekday_uses_authorized_future_policy_and_later_corrections_do_not_commit()
     {
         var f = Create(); var date = new BusinessDateResolver().Resolve("el jueves", new DateTimeOffset(f.Now).ToOffset(TimeSpan.FromHours(-5)));
         Assert.Equal(NexFlow.Application.Features.Automation.Dialogue.Contracts.ResolutionStatus.Ambiguous, date.Status);
         Assert.Equal(new[] { "2026-10-22", "2026-10-29" }, date.Candidates.Select(c => c.Value.ToString("yyyy-MM-dd")));
         await f.HandleTurn("Quisiera limpieza dental en San Jerónimo el jueves por la tarde", "ambiguous");
-        Assert.Null((await f.Context()).TargetDate); Assert.Empty(f.Bookings);
+        Assert.Equal("2026-10-22", (await f.Context()).TargetDate); Assert.Empty(f.Bookings);
         await f.HandleTurn("el 22 de octubre", "date"); Assert.Equal("2026-10-22", (await f.Context()).TargetDate);
         await f.HandleTurn("mejor el 24 de octubre", "change"); Assert.Equal("2026-10-24", (await f.Context()).TargetDate); Assert.Empty(f.Bookings);
     }

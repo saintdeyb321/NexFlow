@@ -17,6 +17,14 @@ public sealed partial class BusinessDateResolver
     }
 
     public SlotResolution<DateOnly> Resolve(string text, DateTimeOffset localBusinessNow, bool dateWasRequested = false)
+        => ResolveCore(text, localBusinessNow, dateWasRequested, false, null, null);
+
+    public SlotResolution<DateOnly> ResolveReservation(string text, DateTimeOffset localBusinessNow, bool dateWasRequested = false,
+        DateOnly? contextDate = null, string? previousQuestion = null)
+        => ResolveCore(text, localBusinessNow, dateWasRequested, true, contextDate, previousQuestion);
+
+    private SlotResolution<DateOnly> ResolveCore(string text, DateTimeOffset localBusinessNow, bool dateWasRequested,
+        bool reservation, DateOnly? contextDate, string? previousQuestion)
     {
         if (text.Length > 2000) return SlotResolution<DateOnly>.Invalid("InputTooLong");
         var today = DateOnly.FromDateTime(localBusinessNow.DateTime);
@@ -27,6 +35,12 @@ public sealed partial class BusinessDateResolver
             || normalized.Contains("de este mes", StringComparison.Ordinal))
             return SlotResolution<DateOnly>.Missing("SemanticComposition");
         string? invalid = null;
+        var weekContext = normalized.Contains("semana", StringComparison.Ordinal) ? normalized
+            : reservation && previousQuestion != null ? SpanishTextNormalizer.Normalize(previousQuestion) : "";
+        var nextWeek = new[] { "proxima semana", "semana proxima", "semana que viene", "siguiente semana", "semana siguiente" }
+            .Any(phrase => SpanishTextNormalizer.ContainsPhrase(weekContext, phrase));
+        var thisWeek = SpanishTextNormalizer.ContainsPhrase(weekContext, "esta semana");
+        var unclearWeek = reservation && weekContext.Contains("semana", StringComparison.Ordinal) && (nextWeek == thisWeek);
         foreach (Match match in IsoDate().Matches(text))
             AddDate(Number(match, "day"), Number(match, "month"), Number(match, "year"));
         foreach (Match match in NumericDate().Matches(text))
@@ -42,23 +56,41 @@ public sealed partial class BusinessDateResolver
             if (match.Value == "manana" && new[] { "por la ", "en la ", "de la ", "esta " }.Any(p => prefix.EndsWith(p, StringComparison.Ordinal))) continue;
             dates.Add(today.AddDays(match.Value == "hoy" ? 0 : match.Value == "manana" ? 1 : 2));
         }
+        var hasDateAnchor = dates.Count > 0;
         foreach (Match match in Weekday().Matches(normalized))
         {
+            if (unclearWeek) return SlotResolution<DateOnly>.Ambiguous([], "WeekNeedsClarification");
             var day = Weekdays[match.Groups["day"].Value];
             var qualifier = match.Groups["qualifier"].Value;
-            if (dates.Count > 0 && qualifier.Length == 0)
+            var monday = today.AddDays(-((int)today.DayOfWeek + 6) % 7);
+            DateOnly? weekDate = reservation && (thisWeek || nextWeek)
+                ? monday.AddDays((nextWeek ? 7 : 0) + ((int)day + 6) % 7) : null;
+            if (dates.Count > 0 && (!reservation || hasDateAnchor) && qualifier.Length == 0)
             {
                 if (!dates.Any(d => d.DayOfWeek == day)) invalid = "WeekdayMismatch";
+                if (weekDate.HasValue && !dates.Contains(weekDate.Value)) invalid = "WeekMismatch";
                 continue;
             }
             var delta = ((int)day - (int)today.DayOfWeek + 7) % 7;
-            if (qualifier is "este" or "esta")
+            if (weekDate.HasValue)
             {
-                var monday = today.AddDays(-((int)today.DayOfWeek + 6) % 7);
+                if (nextWeek && qualifier is "este" or "esta") invalid = "WeekMismatch";
+                else if (weekDate.Value < today) invalid = "PastDate";
+                else dates.Add(weekDate.Value);
+            }
+            else if (qualifier is "este" or "esta")
+            {
                 var date = monday.AddDays(((int)day + 6) % 7);
                 if (date < today) invalid = "PastDate"; else dates.Add(date);
             }
             else if (qualifier.Length > 0) dates.Add(today.AddDays(delta == 0 ? 7 : delta));
+            else if (reservation && contextDate.HasValue)
+            {
+                var anchor = contextDate.Value;
+                var contextual = anchor.AddDays(-((int)anchor.DayOfWeek + 6) % 7 + ((int)day + 6) % 7);
+                if (contextual < today) invalid = "PastDate"; else dates.Add(contextual);
+            }
+            else if (reservation) dates.Add(today.AddDays(delta == 0 ? 7 : delta));
             else { dates.Add(today.AddDays(delta)); dates.Add(today.AddDays(delta + 7)); }
         }
         if (invalid != null) return SlotResolution<DateOnly>.Invalid(invalid);

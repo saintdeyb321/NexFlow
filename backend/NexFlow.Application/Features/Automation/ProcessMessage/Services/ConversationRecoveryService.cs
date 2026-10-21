@@ -20,7 +20,7 @@ public sealed record RecoveryDecision(string? Response = null, AiInterpretation?
 public interface IConversationRecoveryService
 {
     Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation, ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
-    Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false);
+    Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false, IReadOnlyList<ConversationMenuOption>? choices = null);
     Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct);
     Task<bool> AcquireAiAsync(Guid workspace, string phone, string source, CancellationToken ct);
 }
@@ -138,7 +138,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 return await ClarifyAsync(workspace, phone, request.MessageId, context, modules,
                     context.RecoveryOptions.Count == 0 ? "Necesito una respuesta concreta para el paso actual." : "Necesito que elijas una opción de la lista actual.", ct);
             var selected = context.RecoveryOptions[index - 1];
-            var available = await BuildOptions(workspace, context, modules, ct);
+            var catalogChoice = context.RecoveryOptions.All(o => o.Kind == "Action" && o.Key is "ProductQuery" or "ServiceQuery");
+            var available = await BuildOptions(workspace, context, modules, ct, paginate: !catalogChoice, catalogOnly: catalogChoice);
             if (!available.Any(o => o.Key == selected.Key && o.Kind == selected.Kind)) return await Menu("Esa opción ya no está disponible. Elige una de estas:");
             context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
             var interpretation = new AiInterpretation { Intent = selected.Kind == "Action" ? Enum.Parse<ConversationIntent>(selected.Key) : ConversationIntent.Reservation,
@@ -181,8 +182,17 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return index == 0 ? -1 : index;
     }
 
-    public async Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false)
+    public async Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false, IReadOnlyList<ConversationMenuOption>? choices = null)
     {
+        if (choices != null)
+        {
+            var available = await BuildOptions(workspace, context, modules, ct, paginate: false, catalogOnly: true);
+            context.RecoveryOptions = choices.Where(choice => available.Any(option => option.Key == choice.Key && option.Kind == choice.Kind)).ToList();
+            context.RecoveryOptionsOffset = 0; context.RecoveryHasMore = false;
+            context.RecoveryOptionsContext = Fingerprint(context);
+            var list = string.Join("\n", context.RecoveryOptions.Select((choice, i) => $"{i + 1}. {choice.Label}"));
+            return await SaveAsync(workspace, phone, source, context, new(introduction + "\n" + list), ct);
+        }
         if (++context.ClarificationAttempts >= Limits.MaxClarifications)
             return await SaveAsync(workspace, phone, source, context, new(Interpretation: new() { Intent = ConversationIntent.Support }), ct);
         if (contextual)
@@ -237,10 +247,10 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return string.Join("\n", parts);
     }
 
-    private async Task<List<ConversationMenuOption>> BuildOptions(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct, bool paginate = true)
+    private async Task<List<ConversationMenuOption>> BuildOptions(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct, bool paginate = true, bool catalogOnly = false)
     {
         var result = new List<ConversationMenuOption>();
-        if (context.CurrentGoal is "RESERVATION" or "BOOKING" && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
+        if (!catalogOnly && context.CurrentGoal is "RESERVATION" or "BOOKING" && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
         {
             if (context.CurrentStep == "COLLECT_LOCATION") result.AddRange((await locations.GetLocationsAsync(workspace, ct)).Where(l => l.Id != null).OrderBy(l => l.Name).ThenBy(l => l.Id).Select(l => new ConversationMenuOption(l.Id!, l.Name, "Location")));
             else if (context.CurrentStep == "COLLECT_SERVICE" && context.SelectedLocationId != null)
@@ -264,6 +274,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             var services = modules.Contains("SERVICES") ? (await offerings.GetServicesAsync(workspace, null, null, ct)).Where(s => s.IsActive).ToList() : new();
             if (products) result.Add(new("ProductQuery", "Consultar productos", "Action"));
             if (services.Count != 0) result.Add(new("ServiceQuery", "Consultar servicios", "Action"));
+            if (catalogOnly) return result;
             if (modules.Contains("RESERVATIONS") && services.Any(s => s.RequiresReservation && s.DurationInMinutes >= 5)) result.Add(new("Reservation", "Reservar un servicio", "Action"));
             if (modules.Contains("ORDERS") && products) result.Add(new("Order", "Preparar un pedido", "Action"));
             if (modules.Contains("LOCATIONS") && (await locations.GetLocationsAsync(workspace, ct)).Any()) result.Add(new("Location", "Consultar ubicaciones", "Action"));

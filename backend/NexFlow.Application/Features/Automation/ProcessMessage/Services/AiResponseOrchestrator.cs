@@ -95,6 +95,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (prepared?.Response != null)
         {
             var denied = AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules);
+            if (denied == null && prepared.Choices != null && _recovery != null)
+            {
+                var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context,
+                    activeModules, prepared.Response, cancellationToken, contextual: true, choices: prepared.Choices);
+                return await SendText(clarification.Response!);
+            }
             var response = denied ?? prepared.Response;
             if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal is "BOOKING" or "RESERVATION")
                 response += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
