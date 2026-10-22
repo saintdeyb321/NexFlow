@@ -646,7 +646,6 @@ public class ChatFlow : IChatFlow
             {
                 var artifact = await _catalogGeneration.GetArtifactAsync(workspaceId,query.Type,ct);
                 if (artifact != null && (artifact.WorkspaceId != workspaceId || artifact.Scope != query.Type)) throw new InvalidOperationException("Catalog artifact workspace/scope mismatch.");
-                body += "\n" + OfferingResponseFormatter.Capabilities(modules);
                 if (artifact?.Status == CatalogArtifactStatus.Current && Uri.TryCreate(artifact.PdfUrl,UriKind.Absolute,out var uri) && uri.Scheme is "https" or "http")
                     return new(body,artifact.PdfUrl,query.Type == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf",query.Type) { Facts=Array.AsReadOnly(facts), Operation=OperationStatus.MediaPending };
                 if (artifact?.Status != CatalogArtifactStatus.Generating) await _notifications.NotifyCatalogUnavailableAsync(workspaceId,query.Type,ct);
@@ -696,12 +695,13 @@ public class ChatFlow : IChatFlow
                 && pdfUri.Scheme is "https" or "http")
             {
                 var caption = scope == "PRODUCT"
-                    ? "Te comparto nuestro catálogo actualizado de productos. " + OfferingResponseFormatter.Capabilities(modules)
-                    : "Te comparto nuestro catálogo actualizado de servicios. " + OfferingResponseFormatter.Capabilities(modules);
+                    ? "Te comparto nuestro catálogo actualizado de productos."
+                    : "Te comparto nuestro catálogo actualizado de servicios.";
                 var current = await _knowledgeService.QueryAsync(workspaceId,new BusinessKnowledgeSnapshot { WorkspaceId=workspaceId },
                     new KnowledgeQuery { Topic=topic.Value, LocationId=locationId },ct);
                 caption = (current.Found ? current.Facts + "\n" : "") + caption;
                 return new ChatResponse(caption, artifact.PdfUrl, scope == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf", scope) {
+                    Information = current,
                     Facts=current.Found ? Array.AsReadOnly(new[]{new VerifiedFact(topic.Value.ToString(),current.Facts,VerifiedFactSource.BusinessRepository)}) : [],
                     Operation=OperationStatus.MediaPending
                 };
@@ -735,13 +735,12 @@ public class ChatFlow : IChatFlow
         {
             var facts = result.Found ? result.Facts : result.Status == KnowledgeStatus.Unavailable
                 ? result.ToResponse() : "No hay opciones registradas disponibles para esta consulta.";
-            var next = OfferingResponseFormatter.Capabilities(modules);
-            return Factual($"{fallbackIntroduction}\n\n{facts}\n\n{next}");
+            return Factual($"{fallbackIntroduction}\n\n{facts}");
         }
         return Factual(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());
 
         ChatResponse Factual(string response) => new(response) {
-            Information = result.Source is KnowledgeTopic.BusinessHours or KnowledgeTopic.Locations or KnowledgeTopic.Profile ? result : null,
+            Information = result.Source is KnowledgeTopic.BusinessHours or KnowledgeTopic.Locations or KnowledgeTopic.Profile or KnowledgeTopic.Products or KnowledgeTopic.Services ? result : null,
             Facts = result.Found ? Array.AsReadOnly(new[] { new VerifiedFact(result.Source.ToString(), result.Facts, VerifiedFactSource.BusinessRepository) }) : [],
             Operation = result.Found ? OperationStatus.Informational : OperationStatus.NotAvailable
         };

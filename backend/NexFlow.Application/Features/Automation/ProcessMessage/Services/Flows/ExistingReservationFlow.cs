@@ -42,6 +42,13 @@ public sealed class ExistingReservationFlow(IReservationRepository reservations,
             if (management.SuspendedDraftExpired && context.CurrentGoal != null) context.PendingRecoveryAction = "EXPIRE";
             context.ReservationManagement = null;
             await contexts.SaveContextAsync(workspace, contact, context, ct);
+            if (ConversationConfirmation.IsAffirmative(request.MessageText) || ConversationConfirmation.NeedsClarification(request.MessageText)
+                || ConversationConfirmation.IsCorrection(request.MessageText))
+                return new(Response: "La propuesta anterior ya no está activa y no se ha confirmado. Puedes consultar información pública o indicar qué deseas continuar.");
+            // Reclassify the CURRENT request against the restored draft, not the discarded management reference.
+            management = null;
+            operation = ReservationOperationClassifier.Classify(text, context.CurrentGoal is "BOOKING" or "RESERVATION");
+            requested = operation is ReservationOperationKind.ViewExistingReservation or ReservationOperationKind.RescheduleExistingReservation or ReservationOperationKind.CancelExistingReservation;
         }
         // Keep recovery's human/repair/information priority and the existing transactional draft.
         if (text is "asesor" or "humano" || text.Contains("asesor humano", StringComparison.Ordinal)

@@ -38,7 +38,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         .Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     private static bool No(string text) => text is "no" or "no gracias";
     private static string Fingerprint(ConversationContextDto c) => $"{c.CurrentGoal}:{c.CurrentStep}:{c.SelectedLocationId}:{c.SelectedServiceId}:{c.TargetDate}";
-    private static string Continuation(ConversationContextDto c) => c.ReservationManagement != null ? c.ReservationManagement.NextQuestion
+    private const string ReservationScopeQuestion = "¿Te refieres a la reserva que estamos preparando o a una cita que ya confirmaste?";
+    private static string Continuation(ConversationContextDto c) => c.PendingRecoveryAction == "RESERVATION_SCOPE" ? ReservationScopeQuestion
+        : c.ReservationManagement != null ? c.ReservationManagement.NextQuestion
         : string.IsNullOrEmpty(c.CurrentGoal) ? "¿Qué necesitas consultar?"
         : (c.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "Tu borrador sigue guardado. ") + (c.CurrentStep switch {
             "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre?", "COLLECT_LOCATION" => "¿En qué sede deseas reservar?",
@@ -65,16 +67,61 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await Remember("Solo puedo ayudarte con información y operaciones autorizadas de este negocio. " + Continuation(context));
         if (!text.Split(' ').Contains("no") && (Regex.IsMatch(text, @"\b(asesor humano|hablar con (?:un |una )?(?:asesor|persona|humano)|atencion humana)\b") || text is "asesor" or "humano"))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Support });
+        var information = context.Information is { } saved && saved.UpdatedAt >= clock.UtcNow.AddHours(-Limits.ContextExpiryHours)
+            && saved.DraftFingerprint == InformationalRequest.DraftFingerprint(context) ? saved : null;
+        if (context.PendingRecoveryAction == "RESERVATION_SCOPE")
+        {
+            var reference = ReservationOperationClassifier.ReferenceScope(text);
+            var current = booking && !expiredDraft && context.PendingReferenceExpiresAt > clock.UtcNow
+                && context.RecoveryOptionsContext == InformationalRequest.DraftFingerprint(context);
+            if (!current)
+            {
+                ClearReference();
+                if (booking && !expiredDraft)
+                {
+                    context.PendingRecoveryAction = "RESERVATION_SCOPE";
+                    context.PendingReferenceExpiresAt = clock.UtcNow.AddMinutes(10);
+                    context.RecoveryOptionsContext = InformationalRequest.DraftFingerprint(context);
+                }
+                else if (expiredDraft && context.CurrentGoal != null)
+                {
+                    context.PendingRecoveryAction = "EXPIRE";
+                    return await Remember("El borrador ha caducado. ¿Deseas descartarlo? Responde sí o no; ninguna cita registrada cambiará.");
+                }
+                return await Remember("La referencia anterior ya no está vigente. " + ReservationScopeQuestion);
+            }
+            if (text is "cancelar" or "dejar aclaracion")
+            {
+                ClearReference();
+                return await Remember("He dejado esta aclaración. Tu borrador sigue guardado; puedes continuar cuando quieras.");
+            }
+            if (reference != ReservationReferenceScope.Unclear)
+            {
+                ClearReference();
+                return await RememberInterpretation(new() { Intent = reference == ReservationReferenceScope.Registered ? ConversationIntent.Support : ConversationIntent.Reservation });
+            }
+            var publicInterruption = InformationalRequest.PublicTopic(text) != null || InformationalRequest.IsRepair(text)
+                || OrderMentionResolver.IsQuestion(request.MessageText)
+                || information?.Clarification != null && SelectionIndex(text) != 0;
+            if (!publicInterruption) return await Remember(ReservationScopeQuestion);
+        }
         if (InformationalRequest.ExistingReservation(text, booking))
             return await Remember("Todavía no puedo consultar, modificar ni cancelar una cita ya registrada por este chat. No he realizado ningún cambio. Escribe asesor para recibir atención humana."
                 + (context.CurrentGoal != null ? " Tu borrador en preparación sigue guardado." : ""));
         if (reservationOperation == ReservationOperationKind.AmbiguousReservationOperation)
-            return await Remember("¿Deseas crear una reserva nueva o revisar una cita ya registrada?" + (booking ? " Tu borrador sigue guardado." : ""));
+        {
+            if (booking && context.PendingRecoveryAction == null && !expiredDraft)
+            {
+                context.PendingRecoveryAction = "RESERVATION_SCOPE";
+                context.PendingReferenceExpiresAt = clock.UtcNow.AddMinutes(10);
+                context.RecoveryOptions.Clear(); context.RecoveryOptionsContext = InformationalRequest.DraftFingerprint(context);
+                return await Remember(ReservationScopeQuestion);
+            }
+            if (!booking) return await Remember("¿Deseas crear una reserva nueva o revisar una cita ya registrada?");
+        }
 
-        var information = context.Information is { } saved && saved.UpdatedAt >= clock.UtcNow.AddHours(-Limits.ContextExpiryHours)
-            && saved.DraftFingerprint == InformationalRequest.DraftFingerprint(context) ? saved : null;
-        var topic = InformationalRequest.PublicTopic(text);
         var repair = InformationalRequest.IsRepair(text);
+        var topic = repair ? InformationalRequest.RepairTopic(request.MessageText) : InformationalRequest.PublicTopic(text);
         if (topic != null || InformationalRequest.ScopeCorrection(text) && information != null)
         {
             if (topic == null && Enum.TryParse<KnowledgeTopic>(information!.Topic, out var previous)) topic = previous;
@@ -84,9 +131,16 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         {
             if (information != null)
             {
+                if (Enum.TryParse<KnowledgeTopic>(information.Topic, out var previousTopic)
+                    && InformationalRequest.RepairTopic(request.MessageText, rejected: true) is { } rejected && rejected != previousTopic)
+                    return await AnswerInformation(previousTopic);
+                if (text.Split(' ').Contains("sede") && text.Split(' ').Contains("otra") && Enum.TryParse<KnowledgeTopic>(information.Topic, out var scopedTopic))
+                    return await AnswerInformation(scopedTopic);
                 information.Clarification = "Topic";
                 var subject = information.Topic == nameof(KnowledgeTopic.BusinessHours) ? "los horarios de atención"
-                    : information.Topic == nameof(KnowledgeTopic.Profile) ? "la información del negocio" : "las ubicaciones";
+                    : information.Topic == nameof(KnowledgeTopic.Profile) ? "la información del negocio"
+                    : information.Topic == nameof(KnowledgeTopic.Services) ? "los servicios"
+                    : information.Topic == nameof(KnowledgeTopic.Products) ? "los productos" : "las ubicaciones";
                 return await ClarifyAsync(workspace, phone, request.MessageId, context, modules,
                     $"Estábamos consultando {subject}. ¿Qué dato necesitas corregir o consultar?" + (context.CurrentGoal != null ? " Tu borrador sigue guardado." : ""), ct, contextual: true);
             }
@@ -94,6 +148,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await ClarifyAsync(workspace, phone, request.MessageId, context, modules,
                 "Para corregir la respuesta, ¿qué información del negocio necesitas consultar?", ct, contextual: true);
         }
+        if (DialoguePolicy.IsInformationOnly(text))
+            return await Remember(information == null ? "De acuerdo, no iniciaré ninguna operación. ¿Qué información necesitas consultar?"
+                : "De acuerdo, seguimos con la consulta informativa. No he cambiado tu borrador. Indica qué dato necesitas precisar.");
         if (information is { Clarification: "Location" })
         {
             // A yes to an informational question is not consent to an older transaction summary.
@@ -116,6 +173,11 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             }
         }
         if ((context.CurrentStep == "CONFIRM" || context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true || context.PendingRecoveryAction is "CANCEL" or "EXPIRE")
+            && ConversationConfirmation.IsStatusQuestion(request.MessageText))
+            return await Remember("La propuesta todavía espera tu decisión; esta pregunta no la confirma. " + Continuation(context));
+        if (information?.Clarification == "Topic" && ConversationConfirmation.IsAffirmative(request.MessageText))
+            return await Remember("Indica qué dato deseas corregir en esta consulta; para retomar el borrador, escribe continuemos. No he confirmado ninguna operación.");
+        if ((context.CurrentStep == "CONFIRM" || context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true || context.PendingRecoveryAction is "CANCEL" or "EXPIRE")
             && ConversationConfirmation.IsNegative(request.MessageText))
         {
             context.PendingRecoveryAction = null;
@@ -126,6 +188,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await Remember("No he confirmado ni cambiado la operación. Si confirmas el resumen vigente, responde «sí confirmo»; si deseas corregirlo, indica el cambio.");
         if (context.PendingRecoveryAction != null && Regex.IsMatch(text, @"\b(que|cual|cuanto|donde|como|precio|horarios?|direccion)\b"))
             return null;
+        if (context.PendingRecoveryAction == "RESERVATION_SCOPE") return null; // Only a read-only interruption reached this point.
         if (context.PendingRecoveryAction == "REQUEST_DETAILS")
         {
             if (text is "cancelar" or "no") { context.PendingRecoveryAction = null; return await Remember("No he registrado ninguna solicitud."); }
@@ -227,6 +290,11 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return SaveAsync(workspace, phone, request.MessageId, context, new(response, Act: act, Operation: operation), ct);
         }
         Task<RecoveryDecision> RememberInterpretation(AiInterpretation interpretation) => SaveAsync(workspace, phone, request.MessageId, context, new(Interpretation: interpretation), ct);
+        void ClearReference()
+        {
+            context.PendingRecoveryAction = null; context.PendingReferenceExpiresAt = null;
+            context.RecoveryOptionsContext = null; context.RecoveryOptions.Clear();
+        }
         async Task<RecoveryDecision> Menu(string intro)
         {
             context.Information = null;
@@ -236,9 +304,17 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
 
         async Task<RecoveryDecision> AnswerInformation(KnowledgeTopic source, string? explicitLocation = null, bool resetScope = false, LocationDto[]? knownLocations = null)
         {
-            var intent = source == KnowledgeTopic.BusinessHours ? ConversationIntent.BusinessHours : source == KnowledgeTopic.Locations ? ConversationIntent.Location : ConversationIntent.General;
+            var intent = source switch {
+                KnowledgeTopic.BusinessHours => ConversationIntent.BusinessHours, KnowledgeTopic.Locations => ConversationIntent.Location,
+                KnowledgeTopic.Services => ConversationIntent.ServiceQuery, KnowledgeTopic.Products => ConversationIntent.ProductQuery, _ => ConversationIntent.General };
             var denied = AiIntentAccess.GetDeniedResponse(intent, modules);
             if (denied != null) return await SaveAsync(workspace, phone, request.MessageId, context, new(denied, new() { Intent = intent }, Operation: OperationStatus.Denied), ct);
+            if (source is KnowledgeTopic.Products or KnowledgeTopic.Services)
+            {
+                // Reuse ChatFlow's current-PDF/factual fallback and durable media lifecycle.
+                if (expiredDraft && context.CurrentGoal != null && context.PendingRecoveryAction == null) context.PendingRecoveryAction = "EXPIRE";
+                return await RememberInterpretation(new() { Intent = intent, QueryKind = OfferingQueryKind.Broad });
+            }
             string? scope = null;
             if (source == KnowledgeTopic.BusinessHours && !resetScope)
             {
@@ -249,6 +325,14 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 {
                     if (authorized.Any(l => l.Id == explicitLocation)) scope = explicitLocation;
                     // An obsolete choice is not a licence to reuse a different contextual location.
+                }
+                else if (text.Split(' ').Contains("otra") && text.Split(' ').Contains("sede"))
+                {
+                    var remaining = authorized.Where(l => l.Id != information?.LocationId).ToArray();
+                    if (information?.LocationId != null && remaining.Length == 1) scope = remaining[0].Id;
+                    else return await SaveInformation(new KnowledgeResult { Status = KnowledgeStatus.Found, Source = source,
+                        LocationChoices = remaining.Take(5).Select(l => new KnowledgeLocationChoice(l.Id!, l.Name)).ToArray(),
+                        Facts = "¿De qué sede deseas consultar los horarios?\n" + string.Join("\n", remaining.Take(5).Select((l, i) => $"{i + 1}. {l.Name}")) });
                 }
                 else
                 {

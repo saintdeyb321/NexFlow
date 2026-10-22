@@ -9,7 +9,7 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 internal static class InformationalRequest
 {
     internal static string DraftFingerprint(ConversationContextDto context)
-        => $"{context.CurrentGoal}:{context.CurrentStep}:{context.SelectedLocationId}:{context.SelectedServiceId}:{context.TargetDate}";
+        => $"{context.CurrentGoal}:{context.CurrentStep}:{context.SelectedLocationId}:{context.SelectedServiceId}:{context.TargetDate}:{context.TargetTime}";
 
     internal static KnowledgeTopic? PublicTopic(string text)
     {
@@ -34,8 +34,36 @@ internal static class InformationalRequest
     internal static bool IsRepair(string text)
     {
         var words = SpanishTextNormalizer.Normalize(text).Split(' ');
-        return words.Contains("no") && words.Any(w => w is "pedi" or "pregunte" or "solicite")
+        return words.Any(w => w is "pregunte" or "pedi" or "solicite" or "refiero")
+            || words.Contains("no") && words.Contains("eso") && words.Any(w => w is "era" or "es" or "fue" or "dije")
+            || words.Contains("hablo") && words.Contains("no")
             || ScopeCorrection(text) || words.Contains("eso") && words.Contains("ya") && words.Contains("dije");
+    }
+
+    // Resolve asserted/rejected subjects by clause, not by the first keyword in a correction.
+    internal static KnowledgeTopic? RepairTopic(string text, bool rejected = false)
+    {
+        var subjects = new HashSet<KnowledgeTopic>();
+        foreach (var clause in text.Replace(";", ",").Replace(".", ",").Split(','))
+        foreach (var part in SpanishTextNormalizer.Normalize(clause).Split(" sino ", StringSplitOptions.None))
+        {
+            var words = part.Split(' ');
+            if (words.Contains("no") != rejected) continue;
+            if (words.Any(w => w is "horario" or "horarios" or "abren" or "cierran")) subjects.Add(KnowledgeTopic.BusinessHours);
+            if (words.Any(w => w is "direccion" or "direcciones" or "ubicacion" or "ubicaciones")) subjects.Add(KnowledgeTopic.Locations);
+            if (words.Any(w => w is "servicio" or "servicios")) subjects.Add(KnowledgeTopic.Services);
+            if (words.Any(w => w is "producto" or "productos")) subjects.Add(KnowledgeTopic.Products);
+            if (words.Any(w => w is "perfil" or "empresa" or "clinica")) subjects.Add(KnowledgeTopic.Profile);
+        }
+        return subjects.Count == 1 ? subjects.Single() : null;
+    }
+
+    internal static bool DraftServicePrice(string text)
+    {
+        var words = SpanishTextNormalizer.Normalize(text).Split(' ');
+        return words.Any(w => w is "precio" or "cuesta")
+            && words.All(w => w is "antes" or "dime" or "me" or "puedes" or "decir" or "cuanto" or "cuesta" or "cual" or "es"
+                or "el" or "precio" or "que" or "tiene" or "ese" or "este" or "servicio" or "por" or "favor");
     }
 
     internal static bool ScopeCorrection(string text)

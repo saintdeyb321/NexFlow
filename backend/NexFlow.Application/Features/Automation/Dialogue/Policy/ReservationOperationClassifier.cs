@@ -6,6 +6,14 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Policy;
 // Classifies operation scope only. It cannot choose a reservation, authorize a contact or execute a mutation.
 public static class ReservationOperationClassifier
 {
+    public static ReservationReferenceScope ReferenceScope(string text)
+    {
+        var words = SpanishTextNormalizer.Normalize(text).Split(' ');
+        if (text.Contains('?') || text.Contains('¿') || words.Contains("no")) return ReservationReferenceScope.Unclear;
+        var draft = words.Any(w => w is "borrador" or "preparando" or "preparacion");
+        var registered = words.Any(w => w is "registrada" or "confirmada" or "existente" or "confirme" or "confirmaste");
+        return draft == registered ? ReservationReferenceScope.Unclear : draft ? ReservationReferenceScope.Draft : ReservationReferenceScope.Registered;
+    }
     public static bool RequiresHumanVerification(string text)
     {
         var words = SpanishTextNormalizer.Normalize(text).Split(' ');
@@ -30,7 +38,11 @@ public static class ReservationOperationClassifier
             || normalized.Contains("ya reserve", StringComparison.Ordinal);
         var draft = words.Any(w => w is "borrador" or "preparacion");
         if (draft && registered) return ReservationOperationKind.AmbiguousReservationOperation;
-        if (activeDraft && !registered && (change || cancel)) return ReservationOperationKind.EditActiveDraft;
+        if (activeDraft && !registered && (change || cancel))
+        {
+            if (draft || !noun || cancel && normalized is "cancelar reserva" or "cancela la reserva") return ReservationOperationKind.EditActiveDraft;
+            if (!words.Any(w => w is "cita" or "citas")) return ReservationOperationKind.AmbiguousReservationOperation;
+        }
         if (cancel && noun) return ReservationOperationKind.CancelExistingReservation;
         if (change && noun) return ReservationOperationKind.RescheduleExistingReservation;
         if (view && noun && (registered || words.Any(w => w is "mi" or "mis"))) return ReservationOperationKind.ViewExistingReservation;
@@ -38,3 +50,5 @@ public static class ReservationOperationClassifier
         return create ? ReservationOperationKind.CreateReservation : ReservationOperationKind.None;
     }
 }
+
+public enum ReservationReferenceScope { Unclear, Draft, Registered }

@@ -13,6 +13,93 @@ namespace NexFlow.Tests.Concierge;
 // Real handler/recovery/orchestrator/knowledge and durable context repository, synthetic RPC/data only.
 public sealed class InformationalRecoverySprint1Tests
 {
+    [Theory]
+    [InlineData("No te pregunté por las direcciones", "Horario general")]
+    [InlineData("Te pregunté por los horarios", "Horario general")]
+    [InlineData("No era eso", "Estábamos consultando los horarios")]
+    public async Task Contextual_repairs_preserve_the_factual_topic_without_ai_or_transactions(string correction, string expected)
+    {
+        var f = Create(); await f.HandleTurn("cuáles son sus horarios", "hours");
+        await f.HandleTurn(correction, "repair");
+        Assert.Contains(expected, f.Sent["repair"].Content); Assert.DoesNotContain("Dirección", f.Sent["repair"].Content);
+        Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+    }
+
+    [Fact]
+    public async Task Corrected_offering_type_does_not_choose_the_negated_type_or_mutate_a_draft()
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("No, hablo de servicios, no de productos", "correct-type");
+        Assert.Contains(f.Services[0].Name, f.Sent["correct-type"].Content);
+        Assert.Equal(nameof(KnowledgeTopic.Services), (await f.Context()).Information!.Topic);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context())); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Other_location_is_resolved_only_when_one_authorized_alternative_remains()
+    {
+        var f = Create(); await f.HandleTurn("qué horarios tienen en Concepción", "first");
+        await f.HandleTurn("Me refiero a la otra sede", "other");
+        Assert.Contains("Sede San Jeronimo", f.Sent["other"].Content);
+        Assert.Equal("sede-b", (await f.Context()).Information!.LocationId);
+        Assert.Null((await f.Context()).SelectedLocationId); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Price_interruption_and_natural_resume_keep_verified_booking_slots_without_confirmation()
+    {
+        var f = Create(); await Ready(f); var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("Antes dime cuánto cuesta", "price");
+        Assert.Contains(f.Services[0].Name, f.Sent["price"].Content); Assert.Empty(f.Bookings);
+        await f.HandleTurn("Perfecto, sigamos", "resume");
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Contains("confirm", f.Sent["resume"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
+    }
+
+    [Fact]
+    public async Task A_conditional_yes_edits_time_but_never_commits_the_old_summary()
+    {
+        var f = Create(); await Ready(f);
+        var before = await f.Context();
+        await f.HandleTurn("Sí, pero quiero otra hora", "correction");
+        var state = await f.Context(); Assert.Equal("COLLECT_TIME", state.CurrentStep);
+        Assert.Equal(before.SelectedLocationId, state.SelectedLocationId); Assert.Equal(before.SelectedServiceId, state.SelectedServiceId);
+        Assert.Equal(before.TargetDate, state.TargetDate); Assert.Equal(before.RealCustomerName, state.RealCustomerName);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Date_and_period_correction_returns_real_slots_without_inventing_an_exact_hour()
+    {
+        var f = Create(); await Ready(f);
+        await f.HandleTurn("Mejor el martes que viene por la tarde", "preference");
+        var state = await f.Context(); Assert.Equal("2026-10-27", state.TargetDate); Assert.Null(state.TargetTime);
+        Assert.NotNull(state.PreferredTime); Assert.Contains("16:00", f.Sent["preference"].Content);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Asking_about_confirmation_does_not_confirm_and_readonly_decline_preserves_the_draft()
+    {
+        var f = Create(); await Ready(f); var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("¿Ya quedó confirmada?", "question"); Assert.Empty(f.Bookings);
+        await f.HandleTurn("No quiero reservar, solo estoy preguntando", "information-only");
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Null((await f.Context()).PendingRecoveryAction); Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
+    }
+
+    [Fact]
+    public async Task Order_information_resume_keeps_items_and_does_not_submit()
+    {
+        var f = Create(); await f.SeedDraft("ORDER");
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("cuáles son sus horarios", "info"); await f.HandleTurn("Está bien, continuemos", "resume");
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Empty(f.Orders); Assert.Equal(0, f.AiCalls);
+    }
+
     private static AssistantConversationTests.Fixture Create()
     {
         var f = new AssistantConversationTests.Fixture(conciergeCatalog: true) { Now = new(2026, 10, 20, 21, 0, 0, DateTimeKind.Utc) };

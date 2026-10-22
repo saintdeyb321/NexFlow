@@ -23,12 +23,14 @@ public sealed class DialoguePolicy
         var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (IsInformationOnly(normalized)) return DialogueAct.Information;
         var booking = state.CurrentGoal is "BOOKING" or "RESERVATION";
+        if (ConversationConfirmation.IsCorrection(text)) return booking ? DialogueAct.Correction : DialogueAct.SemanticAmbiguity;
         if (ReservationOperationClassifier.Classify(text, booking) == ReservationOperationKind.EditActiveDraft)
             return DialogueAct.Correction;
         if (normalized is "quiero hablar con una persona" or "quiero hablar con alguien" or "necesito hablar con una persona") return DialogueAct.HumanAssistance;
         if (normalized is "ya no quiero continuar" or "no quiero continuar" or "no quiero seguir" or "no sigamos") return DialogueAct.Cancellation;
         if (normalized is "no quiero reservar" or "no deseo reservar" or "no necesito reservar") return DialogueAct.DeclineOperation;
-        if (booking && normalized is "esta bien sigamos" or "sigamos" or "continuemos" or "podemos continuar" or "si" or "de acuerdo" or "esta bien" or "vale" or "ok") return DialogueAct.Resume;
+        if ((booking || state.CurrentGoal == "ORDER") && IsResume(normalized)) return DialogueAct.Resume;
+        if (booking && normalized is "si" or "de acuerdo" or "esta bien" or "vale" or "ok") return DialogueAct.Resume;
         if (booking && words.Any(w => w is "pedir" or "pedido" or "comprar" or "solicitud" or "reclamo")) return DialogueAct.SemanticAmbiguity;
         // A negated clause requires semantic scope; extracted nouns must not start an operation.
         if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
@@ -47,8 +49,21 @@ public sealed class DialoguePolicy
         return booking ? DialogueAct.RequestedData : DialogueAct.SemanticAmbiguity;
     }
 
-    public static bool IsInformationOnly(string normalized) =>
-        normalized is "solo estoy preguntando" or "solamente estoy preguntando" or "solo estoy consultando" or "solo quiero informacion";
+    public static bool IsInformationOnly(string normalized)
+    {
+        var words = normalized.Split(' ');
+        return words.Any(w => w is "solo" or "solamente")
+            && words.Any(w => w is "preguntando" or "consultando" or "informacion")
+            && !words.Any(w => w is "confirma" or "confirmo" or "envia" or "envialo");
+    }
+
+    public static bool IsResume(string normalized)
+    {
+        var words = normalized.Split(' ');
+        return words.Any(w => w is "sigamos" or "continuemos" or "continuar" or "retomemos" or "prosigamos")
+            && words.All(w => w is "esta" or "bien" or "si" or "perfecto" or "excelente" or "ok" or "vale" or "de" or "acuerdo"
+                or "entonces" or "podemos" or "por" or "favor" or "sigamos" or "continuemos" or "continuar" or "retomemos" or "prosigamos");
+    }
 
     public static bool HasContradictoryGoals(string normalized)
     {

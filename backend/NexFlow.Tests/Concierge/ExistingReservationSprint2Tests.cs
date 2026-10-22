@@ -18,7 +18,7 @@ namespace NexFlow.Tests.Concierge;
 public sealed class ExistingReservationSprint2Tests
 {
     [Theory]
-    [InlineData("quiero editar mi reserva", true, ReservationOperationKind.EditActiveDraft)]
+    [InlineData("quiero editar mi reserva", true, ReservationOperationKind.AmbiguousReservationOperation)]
     [InlineData("quiero editar mi reserva", false, ReservationOperationKind.RescheduleExistingReservation)]
     [InlineData("quiero editar mi reserva confirmada", true, ReservationOperationKind.RescheduleExistingReservation)]
     [InlineData("cancelar reserva", true, ReservationOperationKind.EditActiveDraft)]
@@ -126,8 +126,11 @@ public sealed class ExistingReservationSprint2Tests
         Assert.Single(f.Events); Assert.Equal(1, f.Saves); Assert.False(f.MissFirstReceiptRead);
     }
 
-    [Fact]
-    public async Task Legacy_pending_management_cannot_confirm_or_disclose_private_information()
+    [Theory]
+    [InlineData("sí confirmo", true)]
+    [InlineData("Sí, pero quiero otra hora", true)]
+    [InlineData("Hola", false)]
+    public async Task Legacy_pending_management_cannot_confirm_or_disclose_private_information(string firstMessage, bool abandonedConfirmation)
     {
         var f = new Fixture(); var row = f.Add(); var context = await f.Dialog.Context();
         context.CurrentGoal = "RESERVATION_MANAGEMENT";
@@ -135,9 +138,12 @@ public sealed class ExistingReservationSprint2Tests
             Operation = ReservationOperationKind.RescheduleExistingReservation, Stage = "Confirm", Selected = new(row.Id, row.LocationId, row.ServiceId, row.StartTime, row.EndTime, row.RowVersion),
             ExpiresAt = f.Dialog.Now.AddMinutes(10), NextQuestion = "PRIVATE OLD SUMMARY" };
         await f.Dialog.Contexts.SaveContextAsync(f.Dialog.Workspace, AssistantConversationTests.Fixture.Phone, context, default);
-        await f.Turn("sí confirmo", "old-context");
-        Assert.Equal(1, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events);
+        await f.Turn(firstMessage, "old-context");
+        Assert.Equal(0, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events);
+        if (abandonedConfirmation) Assert.Contains("ya no está activa", f.Text("old-context"));
         Assert.DoesNotContain("PRIVATE", f.Text("old-context")); Assert.Equal(15, row.StartTime.Hour);
+        await f.Turn("Hola", "greeting");
+        Assert.Equal(0, f.Dialog.Handoffs); Assert.DoesNotContain("PRIVATE", f.Text("greeting"));
 
         var publicTurn = new Fixture(); var saved = await publicTurn.Dialog.Context();
         saved.CurrentGoal = "RESERVATION_MANAGEMENT";
@@ -147,6 +153,32 @@ public sealed class ExistingReservationSprint2Tests
         Assert.DoesNotContain("PRIVATE OLD SUMMARY", publicTurn.Text("public"));
         Assert.Equal(0, publicTurn.Dialog.Handoffs); Assert.Equal(0, publicTurn.PrivateReads);
         Assert.Null((await publicTurn.Dialog.Context()).ReservationManagement); Assert.Empty(publicTurn.Events);
+    }
+
+    [Theory]
+    [InlineData("la que estamos preparando", false)]
+    [InlineData("la que ya confirmé", true)]
+    public async Task Ambiguous_reservation_reference_is_resolved_without_private_reads(string answer, bool handoff)
+    {
+        var f = new Fixture(); f.Add(); await f.Dialog.SeedDraft("RESERVATION");
+        await f.Turn("quiero cambiar mi reserva", "scope");
+        Assert.Contains("estamos preparando", f.Text("scope")); Assert.Equal(0, f.Dialog.Handoffs);
+        Assert.Equal("RESERVATION_SCOPE", (await f.Dialog.Context()).PendingRecoveryAction);
+        await f.Turn(answer, "answer");
+        Assert.Equal(handoff ? 1 : 0, f.Dialog.Handoffs); Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events); Assert.Empty(f.Dialog.Bookings);
+        Assert.Null((await f.Dialog.Context()).PendingRecoveryAction);
+    }
+
+    [Fact]
+    public async Task An_expired_reference_question_cannot_resolve_a_newer_draft_or_trigger_handoff()
+    {
+        var f = new Fixture(); await f.Dialog.SeedDraft("RESERVATION");
+        await f.Turn("quiero cambiar mi reserva", "scope"); f.Dialog.Now = f.Dialog.Now.AddMinutes(11);
+        await f.Turn("la que ya confirmé", "old-reference");
+        Assert.Contains("no está vigente", f.Text("old-reference")); Assert.Equal(0, f.Dialog.Handoffs);
+        Assert.Equal(0, f.PrivateReads); Assert.Empty(f.Events); Assert.Equal("RESERVATION_SCOPE", (await f.Dialog.Context()).PendingRecoveryAction);
+        await f.Turn("sí confirmo", "not-a-scope");
+        Assert.Empty(f.Dialog.Bookings); Assert.Equal(0, f.Dialog.Handoffs);
     }
 
     [Fact]

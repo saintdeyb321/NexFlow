@@ -259,6 +259,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 throw new ConcurrencyException("Offering query no longer matches this turn.");
             if (query.Offerings.Count > 0) new OfferingReference(workspaceId,query.Type,query.Offerings.Select(o => o.Id).ToArray(),query.LocationId).Remember(context);
             else context.LastIntent = interpretation.Intent.ToString();
+            InformationalRequest.Remember(context, query.Type == "PRODUCT" ? NexFlow.Application.Features.Knowledge.KnowledgeTopic.Products : NexFlow.Application.Features.Knowledge.KnowledgeTopic.Services,
+                new() { LocationId = query.LocationId }, _clock?.UtcNow ?? DateTime.UtcNow);
             await _contextRecovery.SaveContextAsync(workspaceId,normalizedPhone,context,cancellationToken);
         }
         ResponsePlan Bind(string text, bool media = false) => responsePlan?.WithText(text, context.StateVersion)

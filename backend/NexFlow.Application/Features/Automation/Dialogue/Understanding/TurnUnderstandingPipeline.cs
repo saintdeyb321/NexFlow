@@ -42,12 +42,16 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(DialogueAct.Cancellation, new() { Intent = ConversationIntent.General, Directive = ConversationDirective.CancelCurrentFlow });
         if (act == DialogueAct.DeclineOperation)
             return new(act, new() { Intent = ConversationIntent.General }, Response: "De acuerdo. ¿Qué información necesitas consultar?");
-        if (act == DialogueAct.Resume) return new(act, new() { Intent = ConversationIntent.Reservation });
+        if (act == DialogueAct.Resume)
+        {
+            if (context.Information != null) context.Information.Clarification = null;
+            return new(act, new() { Intent = context.CurrentGoal == "ORDER" ? ConversationIntent.Order : ConversationIntent.Reservation });
+        }
         var normalized = SpanishTextNormalizer.Normalize(request.MessageText);
         if (DialoguePolicy.IsInformationOnly(normalized))
             return new(DialogueAct.Information, new() { Intent = ConversationIntent.General }, Response: "De acuerdo, no iniciaré ninguna operación. ¿Qué información necesitas consultar?");
         var contradictory = DialoguePolicy.HasContradictoryGoals(normalized);
-        if (context.CurrentGoal is "BOOKING" or "RESERVATION" && normalized is "cuanto cuesta" or "cuanto cuesta ese servicio" or "cual es el precio" or "que precio tiene")
+        if (context.CurrentGoal is "BOOKING" or "RESERVATION" && InformationalRequest.DraftServicePrice(request.MessageText))
         {
             if (!modules.Contains("SERVICES")) return new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery }, Response: AiIntentAccess.ServicesUnavailable);
             var id = context.SelectedServiceId ?? (context.PendingServiceIds.Count == 1 ? context.PendingServiceIds[0] : null);
@@ -73,6 +77,14 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         if (context.PendingCustomerName != null && local.Name.Code == "SurnameMissing" && context.CurrentStep == "COLLECT_CUSTOMERNAME")
             local = local with { Name = new NameSlotResolver().Resolve(context.PendingCustomerName + " " + local.Name.Candidates[0].Value, true) };
         var dataTurn = booking && act is DialogueAct.StartOperation or DialogueAct.RequestedData or DialogueAct.Correction;
+        if (booking && act == DialogueAct.Correction && ConversationConfirmation.IsCorrection(request.MessageText))
+        {
+            var words = normalized.Split(' ');
+            if (local.Time.Status == ResolutionStatus.Insufficient && words.Any(w => w is "hora" or "horario"))
+                local = local with { Time = SlotResolution<TimePreference>.Invalid("NewTimeRequired") };
+            if (local.Date.Status == ResolutionStatus.Insufficient && words.Any(w => w is "dia" or "fecha"))
+                local = local with { Date = SlotResolution<DateOnly>.Invalid("NewDateRequired") };
+        }
         var understood = local.Name.Status == ResolutionStatus.Determined || local.Location.Status == ResolutionStatus.Determined
             || local.Service.Status == ResolutionStatus.Determined || local.Date.Status == ResolutionStatus.Determined || local.Time.Status == ResolutionStatus.Determined
             || local.Location.Status == ResolutionStatus.Ambiguous || local.Service.Status == ResolutionStatus.Ambiguous
