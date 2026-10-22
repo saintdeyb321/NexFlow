@@ -3,6 +3,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Business.Offerings;
 using NexFlow.Application.Features.Business;
 using System.Text;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 namespace NexFlow.Application.Features.Knowledge;
 
@@ -50,7 +51,10 @@ public sealed class KnowledgeService : IKnowledgeService
         };
     }
 
-    public async Task<KnowledgeResult> QueryAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
+    public Task<KnowledgeResult> QueryAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
+        => ConversationDiagnostics.MeasureAsync(_logger, "KnowledgeQuery", () => QueryCoreAsync(workspaceId, snapshot, query, cancellationToken), result => result.Status.ToString());
+
+    private async Task<KnowledgeResult> QueryCoreAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
     {
         try
         {

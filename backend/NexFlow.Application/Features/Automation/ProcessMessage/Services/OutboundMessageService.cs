@@ -124,7 +124,11 @@ public class OutboundMessageService : IOutboundMessageService
         => SendMessageAsync(workspaceId, conversationId, phone,
             "No pude entregar el PDF. Puedo ayudarte por texto: indica qué producto o servicio deseas consultar.", SenderType.AI, source, ct);
 
-    private async Task<MessageRecord> SendPreparedAsync(Guid workspaceId, string phone, MessageRecord message, CancellationToken ct)
+    private Task<MessageRecord> SendPreparedAsync(Guid workspaceId, string phone, MessageRecord message, CancellationToken ct)
+        => ConversationDiagnostics.MeasureAsync(_logger, "Delivery", () => SendPreparedCoreAsync(workspaceId, phone, message, ct),
+            result => result.Status.ToString());
+
+    private async Task<MessageRecord> SendPreparedCoreAsync(Guid workspaceId, string phone, MessageRecord message, CancellationToken ct)
     {
         var id = message.Id;
         var key = message.IdempotencyKey ?? throw new InvalidOperationException("Outbound idempotency key is required.");

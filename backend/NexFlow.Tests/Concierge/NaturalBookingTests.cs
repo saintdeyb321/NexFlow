@@ -115,11 +115,19 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
     public async Task D_price_interruption_and_resume_preserve_validated_fields()
     {
         var f = Create(); await Turn(f, "quiero limpieza dental en Concepción pasado mañana por la tarde");
+        f.Services[0].PriceMinorUnits = 2500;
+        f.OfferingReads.Invocations.Clear();
         var before = Draft(await f.Context());
         await Turn(f, "¿Cuánto cuesta?");
-        Assert.Equal(before, Draft(await f.Context())); Assert.Contains("S/ 25.00", f.Sent.Values.Last().Content);
+        Assert.Equal(before, Draft(await f.Context())); Assert.Contains($"{f.Services[0].Currency} 25.00", f.Sent.Values.Last().Content);
+        // Sprint 4 reuses the current point read instead of querying the full type
+        // through KnowledgeService (whose legacy fixture returned a fixed S/25).
         f.KnowledgeReads.Verify(k => k.QueryAsync(f.Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == f.Workspace),
-            It.Is<KnowledgeQuery>(q => q.Topic == KnowledgeTopic.Services && q.SearchTerm == "Limpieza dental" && q.LocationId == "sede-a"), It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<KnowledgeQuery>(q => q.Topic == KnowledgeTopic.Services), It.IsAny<CancellationToken>()), Times.Never);
+        f.OfferingReads.Verify(o => o.GetServicesAsync(f.Workspace, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        // The second point read belongs to continuation/availability validation;
+        // keep that safety barrier rather than treating it as reusable price data.
+        f.OfferingReads.Verify(o => o.GetServiceByIdAsync(f.Workspace, "service-a", It.IsAny<CancellationToken>()), Times.Exactly(2));
         await Turn(f, "Está bien, sigamos"); Assert.Equal(before, Draft(await f.Context()));
         Assert.DoesNotContain("proveedor", f.Sent.Values.Last().Content, StringComparison.OrdinalIgnoreCase);
         await Turn(f, "16:00"); await Turn(f, "Ana Pérez"); await Turn(f, "sí"); Assert.Single(f.Bookings);

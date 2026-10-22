@@ -16,6 +16,13 @@ internal static class InformationalRequest
         var normalized = SpanishTextNormalizer.Normalize(text);
         var words = normalized.Split(' ');
         if (words.Contains("y") && words.Any(w => w is "producto" or "productos" or "servicio" or "servicios" or "pdf" or "catalogo")) return null;
+        // Bounded read-only field request. Changes, private appointments, unknown
+        // entities and mixed questions still require the existing policy/resolver.
+        if (words.Any(w => w is "direccion" or "ubicacion")
+            && words.All(w => w is "direccion" or "ubicacion" or "cual" or "es" or "la" or "el" or "de" or "del"
+                or "su" or "sus" or "que" or "tienen" or "tiene" or "negocio" or "empresa" or "local"
+                or "dime" or "me" or "puedes" or "decir" or "por" or "favor"))
+            return KnowledgeTopic.Locations;
         var hours = words.Any(w => w is "horario" or "horarios")
             && (words.Any(w => w is "que" or "cual" or "cuales" or "tienen" or "tiene" or "pregunte" or "dije" or "informacion")
                 || normalized.StartsWith("horario", StringComparison.Ordinal));

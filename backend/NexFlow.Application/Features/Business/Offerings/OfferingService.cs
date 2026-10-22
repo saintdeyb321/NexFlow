@@ -5,23 +5,28 @@ using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
 using System.Globalization;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 namespace NexFlow.Application.Features.Business.Offerings;
 
 public sealed class OfferingService : IOfferingService
 {
     private readonly ICatalogRepository _catalogRepo;
+    private readonly ILogger<OfferingService>? _logger;
 
-    public OfferingService(ICatalogRepository catalogRepo)
+    public OfferingService(ICatalogRepository catalogRepo, ILogger<OfferingService>? logger = null)
     {
         _catalogRepo = catalogRepo;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<ProductDto>> GetProductsAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct)
     {
         // 🔥 SPRINT 11 (Auditoría): Descargamos SOLO los de tipo PRODUCT directamente desde Firestore.
         // Esto evita traer 5,000 servicios a memoria solo para descartarlos.
-        var items = await _catalogRepo.GetItemsByTypeAsync(workspaceId, "PRODUCT", ct);
+        var items = await ConversationDiagnostics.MeasureAsync(_logger, "OfferingProductsRead",
+            () => _catalogRepo.GetItemsByTypeAsync(workspaceId, "PRODUCT", ct));
 
         var products = items.Where(i => i.IsActive).Select(MapToSpecific<ProductDto>);
         return FilterItems(products, locationId, query);
@@ -30,7 +35,8 @@ public sealed class OfferingService : IOfferingService
     public async Task<IEnumerable<ServiceDto>> GetServicesAsync(Guid workspaceId, string? locationId, string? query, CancellationToken ct)
     {
         // 🔥 SPRINT 11 (Auditoría): Descargamos SOLO los de tipo SERVICE directamente desde Firestore.
-        var items = await _catalogRepo.GetItemsByTypeAsync(workspaceId, "SERVICE", ct);
+        var items = await ConversationDiagnostics.MeasureAsync(_logger, "OfferingServicesRead",
+            () => _catalogRepo.GetItemsByTypeAsync(workspaceId, "SERVICE", ct));
 
         var services = items
             .Where(i => i.IsActive)
@@ -41,14 +47,16 @@ public sealed class OfferingService : IOfferingService
 
     public async Task<ProductDto?> GetProductByIdAsync(Guid workspaceId, string productId, CancellationToken ct)
     {
-        var item = await _catalogRepo.GetItemByIdAsync(workspaceId, productId, ct);
+        var item = await ConversationDiagnostics.MeasureAsync(_logger, "OfferingProductRead",
+            () => _catalogRepo.GetItemByIdAsync(workspaceId, productId, ct));
         if (item == null || item.Type != "PRODUCT" || !item.IsActive) return null;
         return MapToSpecific<ProductDto>(item);
     }
 
     public async Task<ServiceDto?> GetServiceByIdAsync(Guid workspaceId, string serviceId, CancellationToken ct)
     {
-        var item = await _catalogRepo.GetItemByIdAsync(workspaceId, serviceId, ct);
+        var item = await ConversationDiagnostics.MeasureAsync(_logger, "OfferingServiceRead",
+            () => _catalogRepo.GetItemByIdAsync(workspaceId, serviceId, ct));
         if (item == null || item.Type != "SERVICE" || !item.IsActive) return null;
         return MapToSpecific<ServiceDto>(item);
     }

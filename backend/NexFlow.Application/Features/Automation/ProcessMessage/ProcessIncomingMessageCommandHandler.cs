@@ -45,7 +45,10 @@ public class ProcessIncomingMessageCommandHandler
         _entitlementService = entitlementService;
     }
 
-    public async Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
+    public Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
+        => ConversationDiagnostics.MeasureAsync(_logger, "Turn", () => HandleCoreAsync(request, cancellationToken));
+
+    private async Task<Result> HandleCoreAsync(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
     {
         var guardResult = await _guard.CheckMessageAsync(request, cancellationToken);
         if (!guardResult.IsValid) { Trace("GuardRejected", guardResult.WorkspaceId); return Result.Success(); }

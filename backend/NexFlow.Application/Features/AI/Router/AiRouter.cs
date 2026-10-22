@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 namespace NexFlow.Application.Features.AI.Router;
 
@@ -35,7 +36,9 @@ public class AiRouter : IAiRouter
         try
         {
             _logger.LogDebug("Intentando ejecutar tarea {TaskType} con {Provider}", taskType, primaryProvider.ProviderType);
-            return await primaryProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct);
+            return await ConversationDiagnostics.MeasureAsync(_logger, "AiProvider",
+                () => primaryProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct),
+                provider: primaryProvider.ProviderType.ToString(), reason: "Primary");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) when (IsTransientError(ex))
@@ -46,7 +49,9 @@ public class AiRouter : IAiRouter
 
             try
             {
-                return await fallbackProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct);
+                return await ConversationDiagnostics.MeasureAsync(_logger, "AiProvider",
+                    () => fallbackProvider.GenerateTextAsync(systemPrompt, userPrompt, useJsonMode, ct),
+                    provider: fallbackProvider.ProviderType.ToString(), reason: FallbackReason(ex));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception fallbackEx)
@@ -76,5 +81,14 @@ public class AiRouter : IAiRouter
             http.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.RequestTimeout ||
             (int)http.StatusCode.Value >= 500,
         _ => false
+    };
+
+    private static string FallbackReason(Exception ex) => ex switch
+    {
+        TimeoutException or OperationCanceledException => "Timeout",
+        HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests } => "RateLimit",
+        HttpRequestException { StatusCode: System.Net.HttpStatusCode.RequestTimeout } => "Timeout",
+        HttpRequestException { StatusCode: null } => "Network",
+        _ => "Unavailable"
     };
 }

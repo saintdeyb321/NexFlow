@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
@@ -30,14 +31,17 @@ public interface IConversationRecoveryService
 
 public sealed class ConversationRecoveryService(IContextRecoveryService contexts, IConversationStateRepository states,
     IOfferingService offerings, ILocationRepository locations, IBusinessHoursRepository hours, IReservationEngine reservations,
-    IClock clock, IOptions<AssistantRecoveryOptions> options, IBusinessProfileRepository profiles, IKnowledgeService knowledge) : IConversationRecoveryService
+    IClock clock, IOptions<AssistantRecoveryOptions> options, IBusinessProfileRepository profiles, IKnowledgeService knowledge,
+    ILogger<ConversationRecoveryService>? logger = null) : IConversationRecoveryService
 {
     private AssistantRecoveryOptions Limits => options.Value;
     public static string Normalize(string text) => string.Join(' ', new string(text.Normalize(NormalizationForm.FormD)
         .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
         .Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     private static bool No(string text) => text is "no" or "no gracias";
-    private static string Fingerprint(ConversationContextDto c) => $"{c.CurrentGoal}:{c.CurrentStep}:{c.SelectedLocationId}:{c.SelectedServiceId}:{c.TargetDate}";
+    private static string Fingerprint(ConversationContextDto c) => JsonSerializer.Serialize(new {
+        c.CurrentGoal, c.CurrentStep, c.SelectedLocationId, c.SelectedServiceId, c.TargetDate, c.TargetTime, c.PreferredTime
+    });
     private const string ReservationScopeQuestion = "¿Te refieres a la reserva que estamos preparando o a una cita que ya confirmaste?";
     private static string Continuation(ConversationContextDto c) => c.PendingRecoveryAction == "RESERVATION_SCOPE" ? ReservationScopeQuestion
         : c.ReservationManagement != null ? c.ReservationManagement.NextQuestion
@@ -250,7 +254,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         }
         if (context.CurrentGoal == "ORDER" && context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true && ConversationConfirmation.IsAffirmative(request.MessageText)) return null;
         var index = SelectionIndex(text);
-        if (index == 0 && context.RecoveryOptionsContext == Fingerprint(context))
+        // Recognize old labels too, but let the fingerprint guard below reject
+        // them. A stale/ambiguous label must not fall through to AI selection.
+        if (index == 0)
         {
             var matches = context.RecoveryOptions.Select((o, i) => (Option: o, Index: i + 1)).Where(o => Normalize(o.Option.Label) == text).ToArray();
             index = matches.Length > 1 ? -1 : matches.Length == 1 ? matches[0].Index : 0;
@@ -494,9 +500,24 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (catalogOnly) return result;
             if (modules.Contains("RESERVATIONS") && services.Any(s => s.RequiresReservation && s.DurationInMinutes >= 5)) result.Add(new("Reservation", "Reservar un servicio", "Action"));
             if (modules.Contains("ORDERS") && products) result.Add(new("Order", "Preparar un pedido", "Action"));
-            if (modules.Contains("LOCATIONS") && (await locations.GetLocationsAsync(workspace, ct)).Any()) result.Add(new("Location", "Consultar ubicaciones", "Action"));
-            if (modules.Contains("BUSINESS_HOURS") && ((await hours.GetBusinessHoursAsync(workspace, null, ct)).Any()
-                || (await locations.GetLocationsAsync(workspace, ct)).Any())) result.Add(new("BusinessHours", "Consultar horarios", "Action"));
+            // Local to this menu construction; never reused across turns or an await
+            // that performs a business mutation. No entitlement checks are cached.
+            bool? hasLocations = null;
+            if (modules.Contains("LOCATIONS"))
+            {
+                hasLocations = (await locations.GetLocationsAsync(workspace, ct)).Any();
+                if (hasLocations.Value) result.Add(new("Location", "Consultar ubicaciones", "Action"));
+            }
+            if (modules.Contains("BUSINESS_HOURS"))
+            {
+                var hasHours = (await hours.GetBusinessHoursAsync(workspace, null, ct)).Any();
+                if (!hasHours)
+                {
+                    if (hasLocations.HasValue) ConversationDiagnostics.QueriesAvoided(logger, "MenuLocations", 1);
+                    else hasLocations = (await locations.GetLocationsAsync(workspace, ct)).Any();
+                }
+                if (hasHours || hasLocations == true) result.Add(new("BusinessHours", "Consultar horarios", "Action"));
+            }
             if (modules.Contains("REQUESTS")) result.Add(new("Request", "Registrar una solicitud", "Action"));
             result.Add(new("Support", "Hablar con un asesor", "Action"));
         }

@@ -1,6 +1,7 @@
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -16,15 +17,21 @@ public class ContextRecoveryService : IContextRecoveryService
     private readonly IConversationCache _cache;
     private readonly IConversationStateRepository _stateRepo;
     private readonly IClock? _clock;
+    private readonly ILogger<ContextRecoveryService>? _logger;
 
-    public ContextRecoveryService(IConversationCache cache, IConversationStateRepository stateRepo, IClock? clock = null)
+    public ContextRecoveryService(IConversationCache cache, IConversationStateRepository stateRepo, IClock? clock = null,
+        ILogger<ContextRecoveryService>? logger = null)
     {
         _cache = cache;
         _stateRepo = stateRepo;
         _clock = clock;
+        _logger = logger;
     }
 
-    public async Task<ConversationContextDto> GetOrRecoverContextAsync(Guid workspaceId, string phone, CancellationToken ct)
+    public Task<ConversationContextDto> GetOrRecoverContextAsync(Guid workspaceId, string phone, CancellationToken ct)
+        => ConversationDiagnostics.MeasureAsync(_logger, "ContextRecovery", () => RecoverCoreAsync(workspaceId, phone, ct));
+
+    private async Task<ConversationContextDto> RecoverCoreAsync(Guid workspaceId, string phone, CancellationToken ct)
     {
         var cached = await _cache.GetContextAsync(workspaceId, phone, ct);
         // Validate even a cache hit: a failed cache write, concurrent refill or

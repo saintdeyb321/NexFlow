@@ -7,6 +7,7 @@ using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Business.Offerings;
+using Microsoft.Extensions.Logging;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
@@ -17,9 +18,16 @@ public interface ITurnUnderstandingPipeline
 }
 
 public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, DialoguePolicy policy,
-    IAiInterpreter interpreter, IConversationRecoveryService recovery, IOfferingService offerings, ICommerceTurnResolver? commerce = null) : ITurnUnderstandingPipeline
+    IAiInterpreter interpreter, IConversationRecoveryService recovery, IOfferingService offerings, ICommerceTurnResolver? commerce = null,
+    ILogger<TurnUnderstandingPipeline>? logger = null, ILocationRepository? locationRepository = null) : ITurnUnderstandingPipeline
 {
-    public async Task<PreparedDialogueTurn> PrepareAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
+    public Task<PreparedDialogueTurn> PrepareAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
+        ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
+        => ConversationDiagnostics.MeasureAsync(logger, "Interpretation",
+            () => PrepareWithRecoveryAsync(workspace, phone, request, context, modules, ct),
+            result => result.Act.ToString());
+
+    private async Task<PreparedDialogueTurn> PrepareWithRecoveryAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
     {
         try { return await PrepareCoreAsync(workspace, phone, request, context, modules, ct); }
@@ -56,9 +64,22 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             if (!modules.Contains("SERVICES")) return new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery }, Response: AiIntentAccess.ServicesUnavailable);
             var id = context.SelectedServiceId ?? (context.PendingServiceIds.Count == 1 ? context.PendingServiceIds[0] : null);
             var selected = id == null ? null : await offerings.GetServiceByIdAsync(workspace, id, ct);
-            return selected is { IsActive: true }
-                ? new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery, SearchTerm = selected.Name })
-                : new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery }, Response: "¿Sobre qué servicio deseas consultar el precio?");
+            if (selected is not { IsActive: true, Type: "SERVICE" })
+                return new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery }, Response: "¿Sobre qué servicio deseas consultar el precio?");
+            // Keep older constructor callers on the existing knowledge path.
+            if (locationRepository == null)
+                return new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery, SearchTerm = selected.Name });
+            // Reuse only this turn's current point read. ChatFlow still rechecks the
+            // license; composition still validates StateVersion and human takeover.
+            var verified = VerifiedOffering.Capture(selected);
+            if (context.SelectedLocationId is { } locationId && (!verified.AtLocation(locationId)
+                || !(await locationRepository.GetLocationsAsync(workspace, ct)).Any(l => l.Id == locationId)))
+                return new(DialogueAct.InformationalInterruption, new() { Intent = ConversationIntent.ServiceQuery }, Response: "El servicio ya no está disponible en la sede indicada. ¿Sobre qué servicio deseas consultar el precio?");
+            return new(DialogueAct.InformationalInterruption, new() {
+                Intent = ConversationIntent.ServiceQuery, QueryKind = OfferingQueryKind.Specific,
+                OfferingQuery = new(workspace, request.MessageId, context.StateVersion, "SERVICE", OfferingQuestion.Price,
+                    Array.AsReadOnly(new[] { verified }), false, context.SelectedLocationId)
+            });
         }
         if (act == DialogueAct.OperationInformation)
             return new(act, new() { Intent = ConversationIntent.Reservation }, Response:

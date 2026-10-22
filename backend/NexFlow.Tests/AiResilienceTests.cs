@@ -90,10 +90,17 @@ public sealed class AiResilienceTests
         primary.Setup(p => p.GenerateTextAsync("system", "user", true, It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("Sensitive URL must not be logged", null, status == 0 ? null : (HttpStatusCode)status));
         var secondary = new Mock<IAiProvider>(MockBehavior.Strict); secondary.SetupGet(p => p.ProviderType).Returns(AiProviderType.Gemini);
         secondary.Setup(p => p.GenerateTextAsync("system", "user", true, It.IsAny<CancellationToken>())).ReturnsAsync("{\"Intent\":\"General\"}");
-        var router = new AiRouter(new[] { primary.Object, secondary.Object }, NullLogger<AiRouter>.Instance);
+        var logs = new List<string>();
+        var router = new AiRouter(new[] { primary.Object, secondary.Object }, new CaptureLogger<AiRouter>(logs));
         if (fallback) Assert.Contains("General", await router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "system", "user", true, default));
         else await Assert.ThrowsAsync<HttpRequestException>(() => router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "system", "user", true, default));
         secondary.Verify(p => p.GenerateTextAsync("system", "user", true, It.IsAny<CancellationToken>()), fallback ? Times.Once() : Times.Never());
+        var phases = logs.Where(l => l.StartsWith("ConversationPhase", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(fallback ? 2 : 1, phases.Length);
+        Assert.All(phases, l => { Assert.Contains("Phase=AiProvider", l); Assert.Contains("AiInvocations=1", l); });
+        Assert.Contains("Outcome=Error", phases[0]);
+        if (fallback) { Assert.Contains("Provider=Gemini", phases[1]); Assert.Contains("Outcome=Success", phases[1]); }
+        Assert.DoesNotContain(logs, l => l.Contains("Sensitive URL", StringComparison.Ordinal));
     }
 
     [Fact]

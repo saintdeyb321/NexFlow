@@ -3,16 +3,156 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Knowledge;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexFlow.Tests.Concierge;
 
 // Real handler/recovery/orchestrator/knowledge and durable context repository, synthetic RPC/data only.
-public sealed class InformationalRecoverySprint1Tests
+public sealed class InformationalRecoverySprint1Tests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData("¿Qué horarios tienen?")]
+    [InlineData("¿Cuál es la dirección del negocio?")]
+    [InlineData("¿Qué servicios ofrecen?")]
+    [InlineData("Quiero reservar una limpieza dental para mañana")]
+    public async Task Sprint4_turn_cost_records_repository_calls_without_claiming_external_latency(string message)
+    {
+        var f = Create(intelligentCommerce: true);
+        await f.HandleTurn(message, "cost");
+        output.WriteLine("Synthetic handler: Firestore read RPC={0}; commits={1}; locations={2}; offering lists={3}; offering by ID={4}; profiles={5}; hours={6}; engine={7}; entitlements={8}; AI={9}; outbound={10}",
+            f.Firestore.ReadRpcCalls, f.Firestore.CommitRpcCalls, f.LocationReads.Invocations.Count,
+            f.OfferingReads.Invocations.Count(i => i.Method.Name is "GetServicesAsync" or "GetProductsAsync"),
+            f.OfferingReads.Invocations.Count(i => i.Method.Name is "GetServiceByIdAsync" or "GetProductByIdAsync"),
+            f.ProfileReads.Invocations.Count, f.HoursReads.Invocations.Count, f.EngineReads.Invocations.Count,
+            f.EntitlementReads.Invocations.Count, f.AiCalls,
+            f.Outbound.Invocations.Count(i => i.Method.Name is "SendMessageAsync" or "SendDocumentAsync"));
+        Assert.Equal(0, f.AiCalls); Assert.Single(f.Sent); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+    }
+
+    [Fact]
+    public async Task Sprint4_referential_price_reuses_one_current_service_without_scanning_the_catalog()
+    {
+        var f = Create(); await Ready(f);
+        f.Services[0].PriceMinorUnits = 3750;
+        f.OfferingReads.Invocations.Clear();
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("Antes dime cuánto cuesta", "price-cost");
+        Assert.Contains("37.50", f.Sent["price-cost"].Content);
+        Assert.Contains(f.Services[0].Name, f.Sent["price-cost"].Content);
+        Assert.DoesNotContain(f.Services[1].Name, f.Sent["price-cost"].Content);
+        f.OfferingReads.Verify(o => o.GetServicesAsync(f.Workspace, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        f.OfferingReads.Verify(o => o.GetServiceByIdAsync(f.Workspace, "service-a", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
+    }
+
+    [Theory]
+    [InlineData("inactive")]
+    [InlineData("different-location")]
+    [InlineData("deleted-location")]
+    [InlineData("revoked")]
+    public async Task Sprint4_point_price_keeps_current_location_activity_and_license_filters(string change)
+    {
+        var f = Create(); await Ready(f); f.Services[0].PriceMinorUnits = 98765;
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        if (change == "inactive") f.Services[0].IsActive = false;
+        if (change == "different-location") { f.Services[0].LocationScope = "SPECIFIC"; f.Services[0].LocationIds = ["sede-b"]; }
+        if (change == "deleted-location") f.LocationReads.Setup(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<LocationDto>());
+        if (change == "revoked") f.Modules.Remove("SERVICES");
+        f.OfferingReads.Invocations.Clear();
+        await f.HandleTurn("Antes dime cuánto cuesta", "restricted-price");
+        Assert.DoesNotContain("987.65", f.Sent["restricted-price"].Content);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
+        if (change == "revoked") Assert.Empty(f.OfferingReads.Invocations);
+    }
+
+    [Fact]
+    public async Task Sprint4_price_replay_does_not_repeat_reads_and_revocation_before_delivery_suppresses_facts()
+    {
+        var f = Create(); await Ready(f); f.Services[0].PriceMinorUnits = 98765;
+        f.DuringComposition = () => { f.Modules.Remove("SERVICES"); return Task.CompletedTask; };
+        await f.HandleTurn("Antes dime cuánto cuesta", "price-replay");
+        Assert.DoesNotContain("987.65", f.Sent["price-replay"].Content);
+        var reads = f.OfferingReads.Invocations.Count;
+        await f.HandleTurn("Antes dime cuánto cuesta", "price-replay");
+        Assert.Equal(reads, f.OfferingReads.Invocations.Count); Assert.Single(f.Sent);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Sprint4_takeover_during_point_price_composition_prevents_automatic_delivery()
+    {
+        var f = Create(); await Ready(f);
+        f.DuringComposition = async () => {
+            var current = await f.Context(); current.Mode = "Human";
+            await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, current, default);
+        };
+        await Assert.ThrowsAsync<NexFlow.Domain.Exceptions.ConcurrencyException>(() => f.HandleTurn("Antes dime cuánto cuesta", "price-human"));
+        Assert.Empty(f.Sent); Assert.Empty(f.Bookings); Assert.Equal("Human", (await f.Context()).Mode);
+    }
+
+    [Fact]
+    public async Task Sprint4_menu_reuses_locations_only_within_its_own_construction()
+    {
+        var f = Create();
+        f.HoursReads.Setup(h => h.GetBusinessHoursAsync(f.Workspace, null, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<BusinessHoursDto>());
+        await f.HandleTurn("menú", "menu-cost");
+        f.LocationReads.Verify(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("Consultar ubicaciones", f.Sent["menu-cost"].Content);
+        await f.HandleTurn("menú", "next-menu");
+        f.LocationReads.Verify(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>()), Times.Exactly(2));
+        Assert.Equal(0, f.AiCalls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Sprint4_public_address_without_ai_still_requires_locations_and_keeps_the_draft(bool draft)
+    {
+        var f = Create(); if (draft) await f.SeedDraft("RESERVATION");
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        f.Modules.Remove("LOCATIONS");
+        await f.HandleTurn("¿Cuál es la dirección del negocio?", "denied-address");
+        Assert.Empty(f.LocationReads.Invocations); Assert.Empty(f.KnowledgeReads.Invocations);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.DoesNotContain("Dirección verificada", f.Sent["denied-address"].Content);
+        Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
+    }
+
+    [Theory]
+    [InlineData("date")]
+    [InlineData("time")]
+    [InlineData("service")]
+    [InlineData("location")]
+    [InlineData("preference")]
+    public async Task Sprint4_old_numeric_options_are_invalid_after_the_draft_scope_changes(string field)
+    {
+        var f = Create(); await Ready(f); var context = await f.Context();
+        context.CurrentStep = "COLLECT_TIME"; context.TargetTime = null;
+        await f.Recovery.DecorateAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, context, f.Modules, "Horarios disponibles", default);
+        Assert.NotEmpty(context.RecoveryOptions);
+        switch (field)
+        {
+            case "date": context.TargetDate = "2026-10-23"; break;
+            case "time": context.TargetTime = "16:00"; break;
+            case "service": context.SelectedServiceId = "service-b"; break;
+            case "location": context.SelectedLocationId = "sede-b"; break;
+            case "preference": context.PreferredTime = new(TimePreferenceKind.After, From: new(8, 0)); break;
+        }
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, context, default);
+        var decision = await f.Recovery.RecoverAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, "chat",
+            new("instance", AssistantConversationTests.Fixture.Phone, "Ana", "1", "stale-option", false, f.Workspace), context, f.Modules, default);
+        Assert.Null(decision!.Interpretation); Assert.Contains("lista actual", decision.Response);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
     [Theory]
     [InlineData("No te pregunté por las direcciones", "Horario general")]
     [InlineData("Te pregunté por los horarios", "Horario general")]
@@ -100,9 +240,9 @@ public sealed class InformationalRecoverySprint1Tests
         Assert.Empty(f.Orders); Assert.Equal(0, f.AiCalls);
     }
 
-    private static AssistantConversationTests.Fixture Create()
+    private static AssistantConversationTests.Fixture Create(bool intelligentCommerce = false)
     {
-        var f = new AssistantConversationTests.Fixture(conciergeCatalog: true) { Now = new(2026, 10, 20, 21, 0, 0, DateTimeKind.Utc) };
+        var f = new AssistantConversationTests.Fixture(conciergeCatalog: true, intelligentCommerce: intelligentCommerce) { Now = new(2026, 10, 20, 21, 0, 0, DateTimeKind.Utc) };
         f.ProfileReads.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BusinessProfileDto("Clínica autorizada", "PRIVATE-TAX-ID", "public@example.test", "51900000000", "Atención dental del negocio", "America/Lima"));
         var knowledge = new KnowledgeService(f.ProfileReads.Object, f.LocationReads.Object, f.HoursReads.Object,

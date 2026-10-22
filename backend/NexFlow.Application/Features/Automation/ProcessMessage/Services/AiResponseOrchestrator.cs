@@ -53,7 +53,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         _existingReservations = existingReservations;
     }
 
-    public async Task<MessageRecord> RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
+    public Task<MessageRecord> RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
+        => ConversationDiagnostics.MeasureAsync(_logger, "ResponseGeneration",
+            () => RespondCoreAsync(workspaceId, normalizedPhone, request, conversation, cancellationToken), result => result.Status.ToString());
+
+    private async Task<MessageRecord> RespondCoreAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
     {
         ResponsePlan? responsePlan = null;
         var intent = ConversationIntent.General;
@@ -271,9 +275,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         async Task<string> Compose(string text, bool media = false)
         {
             var plan = Bind(text, media);
+            try { _logger.LogInformation("DialogueDecision Intent={Intent} Act={Act} Operation={Operation}", plan.Intent, plan.Act, plan.Operation); }
+            catch { /* Diagnostics cannot change the business decision. */ }
             if (plan.WorkspaceId != workspaceId || plan.SourceMessageId != request.MessageId)
                 throw new ConcurrencyException("Response identity mismatch.");
-            var result = await _composer.ComposeAsync(plan, normalizedPhone, cancellationToken);
+            var result = await ConversationDiagnostics.MeasureAsync(_logger, "Composition",
+                () => _composer.ComposeAsync(plan, normalizedPhone, cancellationToken), result => result.Outcome);
             var current = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
             if (current.Mode == "Human" || current.StateVersion != plan.StateVersion)
                 throw new ConcurrencyException("Conversation changed during composition; reload before delivery.");
