@@ -202,4 +202,112 @@ public sealed class Sprint51ConversationTests
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
         return f;
     }
+
+    [Theory]
+    [InlineData("site", "San Jeronimo")]
+    [InlineData("service", "Limpieza profunda")]
+    [InlineData("service-alias", "Cuidado Integral")]
+    [InlineData("service-json-alias", "Cuidado Integral")]
+    [InlineData("product-alias", "Sonrisa Sana")]
+    public async Task Audit511_legacy_business_names_and_aliases_never_reach_creation(string kind, string name)
+    {
+        var f = await Draft("CONFIRM");
+        if (kind == "site")
+        {
+            var sites = await f.LocationReads.Object.GetLocationsAsync(f.Workspace, default);
+            f.LocationReads.Setup(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(sites.Select(l => l.Id == "sede-b" ? l with { Name = name } : l).ToArray());
+        }
+        if (kind == "service-alias") f.Services[1].Metadata["aliases"] = new[] { name };
+        if (kind == "service-json-alias") f.Services[1].Metadata["aliases"] = System.Text.Json.JsonSerializer.SerializeToElement(new[] { name });
+        if (kind == "product-alias") f.Products[0].Metadata["aliases"] = new[] { name };
+        var state = await f.Context(); state.RealCustomerName = name;
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        await f.HandleTurn("sí", "legacy-business-name");
+        f.EngineReads.Verify(e => e.CreateReservationAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
+        Assert.Empty(f.Bookings); Assert.Null((await f.Context()).RealCustomerName);
+        Assert.Equal("COLLECT_CUSTOMERNAME", (await f.Context()).CurrentStep);
+        Assert.Contains("nombre", f.Sent["legacy-business-name"].Content);
+    }
+
+    [Theory]
+    [InlineData("Jeronimo Torres")]
+    [InlineData("Carlos Integral")]
+    [InlineData("Cuidado Integral Torres")]
+    public async Task Audit511_shared_words_are_not_proof_that_a_human_name_is_a_business(string name)
+    {
+        var f = await Draft("CONFIRM"); f.Services[1].Metadata["aliases"] = new[] { "Cuidado Integral" };
+        var state = await f.Context(); state.RealCustomerName = name;
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        await f.HandleTurn("sí", "human-name");
+        Assert.Equal(name, Assert.Single(f.Bookings.Values).CustomerName); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Audit511_correct_summary_reuses_locations_and_preserves_every_business_slot()
+    {
+        var f = await Draft("CONFIRM"); var state = await f.Context(); var before = AssistantConversationTests.Fixture.BusinessDraft(state);
+        var plan = await f.Booking.ProcessPlannedAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, "chat", state,
+            new() { Intent = ConversationIntent.Reservation }, "unused", "summary-audit", DialogueAct.RequestedData, default);
+        Assert.Equal(OperationStatus.AwaitingConfirmation, plan.Operation); Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(state));
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+        f.LocationReads.Verify(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>()), Times.Once);
+        f.OfferingReads.Verify(o => o.GetServicesAsync(f.Workspace, null, null, It.IsAny<CancellationToken>()), Times.Once);
+        f.OfferingReads.Verify(o => o.GetProductsAsync(f.Workspace, null, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("¿Tienes a las 4pm?", "15:30, 16:30, 17:00")]
+    [InlineData("¿Tienes a las 11am?", "10:30, 11:30, 09:00")]
+    [InlineData("¿Hay algún espacio por la tarde?", "15:30, 16:30, 17:00")]
+    [InlineData("¿Hay algún espacio por la mañana?", "09:00, 08:00, 10:30")]
+    [InlineData("¿Hay algo después de las tres de la tarde?", "15:30, 16:30, 17:00")]
+    public async Task Audit511_alternatives_are_nearest_real_slots_with_stable_ties(string question, string expected)
+    {
+        var f = await Draft("CONFIRM"); var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        f.EngineReads.Setup(e => e.GetAvailabilityAtAsync(f.Workspace, "sede-a", "service-a", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<NexFlow.Application.Features.Reservations.TimeSlotDto>());
+        // Deliberately unordered; equal distances must not depend on provider order.
+        f.EngineReads.Setup(e => e.GetAvailabilityAsync(f.Workspace, "sede-a", "service-a", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string _, string _, DateTime d, CancellationToken _) => new[] { "17:00", "08:00", "16:30", "09:00", "11:30", "15:30", "10:30" }
+                .Select(t => { var local = d.Date.Add(TimeSpan.Parse(t)); var utc = DateTime.SpecifyKind(local.AddHours(5), DateTimeKind.Utc);
+                    return new NexFlow.Application.Features.Reservations.TimeSlotDto(utc, utc.AddMinutes(30), true); }).ToArray());
+        await f.HandleTurn(question, "nearby");
+        Assert.Contains("Horarios disponibles: " + expected + ".", f.Sent["nearby"].Content);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context())); Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Audit511_final_name_validation_is_scoped_and_does_not_read_an_unlicensed_product_catalog()
+    {
+        var f = await Draft("CONFIRM"); var other = new AssistantConversationTests.Fixture(conciergeCatalog: true);
+        other.Services[1].Metadata["aliases"] = new[] { "Persona Autorizada" };
+        f.Modules.Remove("CATALOG"); f.Products[0].Metadata["aliases"] = new[] { "Persona Autorizada" };
+        await f.HandleTurn("sí", "scoped-name");
+        Assert.Equal("Persona Autorizada", Assert.Single(f.Bookings.Values).CustomerName);
+        f.OfferingReads.Verify(o => o.GetProductsAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(other.OfferingReads.Invocations); Assert.Empty(other.Bookings);
+        Assert.All(f.OfferingReads.Invocations, call => Assert.Equal(f.Workspace, call.Arguments[0]));
+    }
+
+    [Fact]
+    public async Task Audit511_missing_authoritative_name_data_fails_without_creating_a_reservation()
+    {
+        var f = await Draft("CONFIRM"); var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        f.OfferingReads.Setup(o => o.GetServicesAsync(f.Workspace, null, null, It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("unavailable"));
+        await Assert.ThrowsAsync<HttpRequestException>(() => f.HandleTurn("sí", "name-data-unavailable"));
+        Assert.Empty(f.Bookings); Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        f.EngineReads.Verify(e => e.CreateReservationAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Audit511_ambiguous_preference_requires_clarification_before_selecting_alternatives()
+    {
+        var f = await Draft("CONFIRM"); var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("¿Hay algo después de las tres?", "ambiguous-period");
+        Assert.Contains("precisar la franja", f.Sent["ambiguous-period"].Content);
+        Assert.DoesNotContain("Horarios disponibles", f.Sent["ambiguous-period"].Content);
+        f.EngineReads.Verify(e => e.GetAvailabilityAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context())); Assert.Empty(f.Bookings);
+    }
 }

@@ -13,6 +13,7 @@ using NexFlow.Domain.Entities.Catalog;
 using NexFlow.Domain.Enums;
 using NexFlow.Domain.Exceptions;
 using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Application.Features.Shared.DTOs;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Notifications;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
@@ -289,10 +290,11 @@ public class BookingFlow : IBookingFlow
         if (!string.IsNullOrWhiteSpace(interpretation.Time))
         { context.TargetTime = interpretation.Time; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
 
+        IReadOnlyList<LocationDto> authorizedLocations = [];
         if (!string.IsNullOrWhiteSpace(context.SelectedLocationId))
         {
-            var locations = await _locationRepo.GetLocationsAsync(workspaceId, ct);
-            if (!locations.Any(l => l.Id == context.SelectedLocationId))
+            authorizedLocations = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).ToArray();
+            if (!authorizedLocations.Any(l => l.Id == context.SelectedLocationId))
             {
                 context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
                 context.PreferredTime = null; context.PendingServiceIds.Clear();
@@ -363,8 +365,7 @@ public class BookingFlow : IBookingFlow
         evidence.Facts.Add(new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id));
         evidence.Facts.Add(new("Currency", service.Currency, VerifiedFactSource.BusinessRepository, service.Id));
         evidence.Facts.Add(new("RequestedLocalTime", selectedTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), VerifiedFactSource.ValidatedConversation));
-        if (!new NameSlotResolver().ResolveEvidence(context.RealCustomerName ?? "").TryGetValue(out _)
-            || SpanishTextNormalizer.Normalize(context.RealCustomerName!) == SpanishTextNormalizer.Normalize(service.Name))
+        if (!await IsCustomerNameValidAsync(workspaceId, context.RealCustomerName, authorizedLocations, service, modules, ct))
         {
             context.RealCustomerName = null; UpdateStep(context);
             return "Necesito tu nombre y apellido para el resumen. ¿Cómo te llamas?";
@@ -372,7 +373,7 @@ public class BookingFlow : IBookingFlow
         evidence.Facts.Add(new("CustomerName", context.RealCustomerName!, VerifiedFactSource.ValidatedConversation, Sensitive: true));
         if (!interpretation.Confirmed)
         {
-            var location = (await _locationRepo.GetLocationsAsync(workspaceId, ct)).Single(l => l.Id == context.SelectedLocationId);
+            var location = authorizedLocations.Single(l => l.Id == context.SelectedLocationId);
             evidence.Operation = OperationStatus.AwaitingConfirmation;
             evidence.Set(
                 [new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id),
@@ -464,6 +465,23 @@ public class BookingFlow : IBookingFlow
         return "Sedes disponibles:\n" + string.Join("\n", locations.Select(l => $"• {l.Name}")) + "\n\n" + question;
     }
 
+    private async Task<bool> IsCustomerNameValidAsync(Guid workspace, string? name, IReadOnlyList<LocationDto> locations,
+        ServiceDto selectedService, HashSet<string> modules, CancellationToken ct)
+    {
+        if (!new NameSlotResolver().ResolveEvidence(name ?? "").TryGetValue(out _)) return false;
+        var normalized = SpanishTextNormalizer.Normalize(name!);
+        bool SameName(string label) => SpanishTextNormalizer.Normalize(label) == normalized;
+        bool MatchesOffering(BusinessOfferingDto value)
+            => SameName(value.Name) || VerifiedOffering.Capture(value).Aliases.Any(SameName);
+        // Exact normalized labels only: shared words, partial names and fuzzy
+        // similarities do not disqualify a person. Never reuse another tenant's data.
+        if (locations.Any(l => l.Id != null && SameName(l.Name)) || MatchesOffering(selectedService)) return false;
+        if ((await _offeringService.GetServicesAsync(workspace, null, null, ct))
+            .Any(s => s.IsActive && s.Type == "SERVICE" && MatchesOffering(s))) return false;
+        return !modules.Contains("CATALOG") || !(await _offeringService.GetProductsAsync(workspace, null, null, ct))
+            .Any(p => p.IsActive && p.Type == "PRODUCT" && MatchesOffering(p));
+    }
+
     private async Task<string> AnswerAvailabilityAsync(Guid workspace, ConversationContextDto context, TurnUnderstanding query, TurnEvidence evidence, CancellationToken ct)
     {
         var location = query.Location.TryGetValue(out var site) ? site.Id : context.SelectedLocationId;
@@ -492,6 +510,8 @@ public class BookingFlow : IBookingFlow
             evidence.Zone = zone.Id;
             if (query.Time.Status == ResolutionStatus.Invalid) return "Necesito precisar la hora. ¿Qué hora deseas comprobar?";
             var clocks = query.Time.Candidates.Where(c => c.Value.Kind == TimePreferenceKind.Exact).Select(c => c.Value.ExactTime!.Value).Distinct().ToArray();
+            if (query.Time.Status == ResolutionStatus.Ambiguous && clocks.Length == 0)
+                return "Necesito precisar la franja de esta consulta. ¿Qué rango de horas deseas comprobar?";
             if (clocks.Length > 1)
             {
                 var withinDay = clocks.Where(t => t >= open && t.ToTimeSpan() + TimeSpan.FromMinutes(service.DurationInMinutes.Value) <= close.ToTimeSpan()).ToArray();
@@ -522,7 +542,19 @@ public class BookingFlow : IBookingFlow
             var slots = (await _reservationEngine.GetAvailabilityAsync(workspace, location, serviceId, localDay, ct)).Where(s => s.IsAvailable);
             if (query.Time.TryGetValue(out var preference) && preference.Kind != TimePreferenceKind.Exact)
                 slots = new TimePreferenceResolver().FilterAvailableSlots(slots, date.Value, zone, preference);
-            var alternatives = slots.Take(3).Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).ToArray();
+            TimeSpan? anchor = clocks.Length == 1 ? clocks[0].ToTimeSpan() : null;
+            if (anchor == null && query.Time.TryGetValue(out var preferred))
+                anchor = preferred.Kind switch {
+                    TimePreferenceKind.After => preferred.From?.ToTimeSpan(),
+                    TimePreferenceKind.Before => preferred.Until?.ToTimeSpan(),
+                    TimePreferenceKind.Period => TimeSpan.FromTicks(((preferred.From?.ToTimeSpan().Ticks ?? 0)
+                        + (preferred.Until?.ToTimeSpan().Ticks ?? TimeSpan.TicksPerDay)) / 2),
+                    _ => null
+                };
+            var alternatives = slots.DistinctBy(s => s.StartTime)
+                .OrderBy(s => anchor.HasValue ? Math.Abs((TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).TimeOfDay - anchor.Value).Ticks) : 0)
+                .ThenBy(s => s.StartTime).Take(3)
+                .Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).ToArray();
             return introduction + (alternatives.Length == 0 ? " No encontré horarios disponibles que coincidan. ¿Qué otra fecha u hora deseas comprobar?"
                 : " Horarios disponibles: " + string.Join(", ", alternatives) + ". Escribe la hora que deseas seleccionar; no he modificado el borrador.");
         }

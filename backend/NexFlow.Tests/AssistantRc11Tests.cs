@@ -94,6 +94,7 @@ public sealed class AssistantRc11Tests
             var catalog = new Mock<ICatalogRepository>(MockBehavior.Strict);
             catalog.Setup(c => c.GetItemByIdAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), "service", default)).ReturnsAsync(service);
             _offerings.Setup(o => o.GetServiceByIdAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), "service", default)).ReturnsAsync(service);
+            _offerings.Setup(o => o.GetServicesAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), null, null, default)).ReturnsAsync(new[] { service });
             _offerings.Setup(o => o.IsServiceAvailableAtLocationAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), "service", "location", default)).ReturnsAsync(true);
             var locations = new Mock<ILocationRepository>(MockBehavior.Strict);
             locations.Setup(l => l.GetLocationsAsync(It.Is<Guid>(w => _zones.ContainsKey(w)), default)).ReturnsAsync(new[] { new LocationDto("location", "Sede real", "Dirección", null, null, true) });
