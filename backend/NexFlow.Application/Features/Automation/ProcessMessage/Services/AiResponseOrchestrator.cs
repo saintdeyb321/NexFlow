@@ -222,9 +222,10 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     responsePlan = await _bookingFlow.ProcessPlannedAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, request.MessageId, act, cancellationToken);
                     finalResponse = responsePlan.FallbackText;
                 }
-                if (_recovery != null && context.CurrentGoal is "BOOKING" or "RESERVATION" && context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE" or "COLLECT_TIME")
+                if (_recovery != null && interpretation.BookingProposal?.ReadOnly != true && context.CurrentGoal is "BOOKING" or "RESERVATION" && context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE" or "COLLECT_TIME")
                 {
-                    finalResponse = await _recovery.DecorateAsync(workspaceId, normalizedPhone, context, activeModules, finalResponse, cancellationToken);
+                    finalResponse = await _recovery.DecorateAsync(workspaceId, normalizedPhone, context, activeModules, finalResponse, cancellationToken,
+                        context.CurrentStep == "COLLECT_TIME" && responsePlan?.Choices.Count > 0 ? responsePlan.Choices : null);
                     responsePlan = responsePlan?.WithText(finalResponse, context.StateVersion, context.RecoveryOptions);
                 }
             }

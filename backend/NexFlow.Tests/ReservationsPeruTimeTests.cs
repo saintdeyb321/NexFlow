@@ -17,6 +17,40 @@ namespace NexFlow.Tests;
 public sealed class ReservationsPeruTimeTests
 {
     [Fact]
+    public async Task Free_start_outside_the_suggestion_grid_has_the_same_duration_in_query_and_creation()
+    {
+        var f = new EngineFixture(45);
+        f.Reservations.Setup(r => r.GetReservationsForDateAsync(f.Workspace, EngineFixture.Location,
+            Time("2030-07-02T05:00:00Z"), Time("2030-07-03T05:00:00Z"), default)).ReturnsAsync(Array.Empty<Reservation>());
+        var local = Time("2030-07-02T16:00:00");
+        var utc = Time("2030-07-02T21:00:00Z");
+        var suggested = await f.Engine.GetAvailabilityAsync(f.Workspace, EngineFixture.Location, EngineFixture.ServiceId, local.Date, default);
+        Assert.DoesNotContain(suggested, s => s.StartTime == utc);
+        var exact = Assert.Single(await f.Engine.GetAvailabilityAtAsync(f.Workspace, EngineFixture.Location, EngineFixture.ServiceId, local, default));
+        Assert.Equal(utc, exact.StartTime); Assert.Equal(utc.AddMinutes(45), exact.EndTime);
+        Assert.Equal(exact, Assert.Single(await f.Engine.GetAvailabilityAtAsync(f.Workspace, EngineFixture.Location, EngineFixture.ServiceId, utc, default)));
+        f.AvailableAt(utc, null); f.EnableWrites();
+        var created = await f.CreateAsync(local);
+        Assert.True(created.IsSuccess, created.Error.Description);
+        var row = Assert.Single(f.Added); Assert.Equal(exact.StartTime, row.StartTime); Assert.Equal(exact.EndTime, row.EndTime);
+        f.VerifyPersistedEvent("RESERVATION_CREATED", utc);
+    }
+
+    [Theory]
+    [InlineData("07:30", false)]
+    [InlineData("17:30", false)]
+    [InlineData("16:00", true)]
+    public async Task Exact_availability_never_ignores_occupancy_or_business_hours(string clock, bool occupied)
+    {
+        var f = new EngineFixture(45); var local = Time("2030-07-02T" + clock + ":00");
+        var utc = DateTime.SpecifyKind(local.AddHours(5), DateTimeKind.Utc);
+        var rows = occupied ? new[] { Reservation.Create(f.Workspace, EngineFixture.Location, EngineFixture.ServiceId, "other", "Other", utc, utc.AddMinutes(45)) } : [];
+        f.Reservations.Setup(r => r.GetReservationsForDateAsync(f.Workspace, EngineFixture.Location,
+            Time("2030-07-02T05:00:00Z"), Time("2030-07-03T05:00:00Z"), default)).ReturnsAsync(rows);
+        Assert.Empty(await f.Engine.GetAvailabilityAtAsync(f.Workspace, EngineFixture.Location, EngineFixture.ServiceId, local, default));
+        f.VerifyNoWrites();
+    }
+    [Fact]
     public async Task Availability_uses_peru_civil_day_and_returns_unoccupied_utc_slots()
     {
         var f = new EngineFixture();
@@ -194,9 +228,11 @@ public sealed class ReservationsPeruTimeTests
         private List<OutboxMessage> Events { get; } = new();
         public ReservationEngine Engine { get; }
 
-        public EngineFixture()
+        private readonly int _duration;
+        public EngineFixture(int duration = 30)
         {
-            var service = new ServiceDto { Id = ServiceId, Name = "Service", DurationInMinutes = 30,
+            _duration = duration;
+            var service = new ServiceDto { Id = ServiceId, Name = "Service", DurationInMinutes = duration,
                 IsActive = true, RequiresReservation = true };
             Catalog.Setup(r => r.GetItemByIdAsync(Workspace, ServiceId, default)).ReturnsAsync(service);
             Profiles.Setup(r => r.GetProfileAsync(Workspace, default))
@@ -215,7 +251,7 @@ public sealed class ReservationsPeruTimeTests
             .ReturnsAsync(new[] { new BusinessHoursDto(day, open, close, false) });
 
         public void AvailableAt(DateTime start, Guid? excluded, bool available = true) => Reservations
-            .Setup(r => r.IsTimeSlotAvailableAsync(Workspace, Location, start, start.AddMinutes(30), excluded, default))
+            .Setup(r => r.IsTimeSlotAvailableAsync(Workspace, Location, start, start.AddMinutes(_duration), excluded, default))
             .ReturnsAsync(available);
 
         public Reservation Existing()

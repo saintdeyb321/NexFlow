@@ -133,4 +133,55 @@ public sealed class ResponseComposerTests
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Composer.ComposeAsync(h.Plan(), "private-phone", cancellation.Token));
     }
+
+    private static ResponsePlan AvailabilityPlan(Harness h) => new(h.Workspace, "availability-source", "v1",
+        ConversationIntent.Reservation, DialogueAct.InformationalInterruption, OperationStatus.Informational,
+        [new("RequestedLocalTime", "22/10/2026 16:00", VerifiedFactSource.ValidatedConversation), new("Availability", "Available", VerifiedFactSource.TransactionEngine)],
+        [], [], "America/Lima", null, null, "El 22/10/2026 a las 16:00 está disponible; aún no existe una reserva confirmada.", true);
+
+    [Fact]
+    public async Task Bounded_informational_composition_keeps_the_verified_body_and_excludes_private_context()
+    {
+        var h = new Harness(); var plan = AvailabilityPlan(h); h.Return("{\"Lead\":\"Entendido, veamos esa opción.\"}");
+        var result = await h.Composer.ComposeAsync(plan, "private-phone", default);
+        Assert.True(result.UsedAi); Assert.Equal("Entendido, veamos esa opción.\n" + plan.FallbackText, result.Text);
+        var call = Assert.Single(h.Router.Invocations); var input = Assert.IsType<string>(call.Arguments[2]);
+        Assert.DoesNotContain("private-phone", input); Assert.DoesNotContain("availability-source", input);
+        Assert.DoesNotContain(h.Workspace.ToString(), input);
+        h.Budget.Verify(b => b.AcquireAiAsync(h.Workspace, "private-phone", "response-compose:v1:availability-source", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [MemberData(nameof(AdversarialOutputs))]
+    public async Task Untrusted_informational_wording_cannot_publish_a_fact_or_operation(string json)
+    {
+        var h = new Harness(); var plan = AvailabilityPlan(h); h.Return(json);
+        var result = await h.Composer.ComposeAsync(plan, "private-phone", default);
+        Assert.Equal(plan.FallbackText, result.Text); Assert.False(result.UsedAi);
+        Assert.Single(h.Router.Invocations);
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Informational_composition_timeout_or_failure_returns_the_unchanged_safe_answer(bool hangs)
+    {
+        var h = new Harness(); h.Settings.TimeoutMilliseconds = 100; var plan = AvailabilityPlan(h);
+        h.Router.Setup(r => r.ExecuteTaskAsync(AiTaskType.ComplexChat, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(hangs ? new TaskCompletionSource<string>().Task : Task.FromException<string>(new HttpRequestException("unavailable")));
+        var result = await h.Composer.ComposeAsync(plan, "private-phone", default).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(plan.FallbackText, result.Text); Assert.False(result.UsedAi);
+    }
+
+    [Theory]
+    [InlineData("license")] [InlineData("module")] [InlineData("budget")] [InlineData("dependency")]
+    public async Task Optional_composition_cannot_bypass_access_or_budget_and_does_not_break_the_factual_answer(string reason)
+    {
+        var h = new Harness(); var plan = AvailabilityPlan(h);
+        if (reason == "license") h.Access.Setup(e => e.IsLicenseValidAsync(h.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        if (reason == "module") h.Access.Setup(e => e.GetAvailableModuleCodesAsync(h.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<string>());
+        if (reason == "budget") h.Budget.Setup(b => b.AcquireAiAsync(h.Workspace, "private-phone", It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        if (reason == "dependency") h.Budget.Setup(b => b.AcquireAiAsync(h.Workspace, "private-phone", It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("unavailable"));
+        var result = await h.Composer.ComposeAsync(plan, "private-phone", default);
+        Assert.Equal(plan.FallbackText, result.Text); Assert.False(result.UsedAi); Assert.Empty(h.Router.Invocations);
+    }
 }

@@ -9,7 +9,7 @@ public sealed record PreparedDialogueTurn(DialogueAct Act, AiInterpretation Inte
 
 // Server-owned, ephemeral proposal. Only BookingFlow applies it, using the existing context CAS.
 public sealed record BookingDraftProposal(Guid WorkspaceId, string SourceMessageId, string? ExpectedStateVersion,
-    TurnUnderstanding Understanding, string? Clarification, IReadOnlyList<string> UnresolvedSlots);
+    TurnUnderstanding Understanding, string? Clarification, IReadOnlyList<string> UnresolvedSlots, bool ReadOnly = false);
 
 public sealed record SlotReadPlan(bool Locations, bool Services, bool Products)
 {

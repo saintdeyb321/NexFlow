@@ -81,7 +81,9 @@ public sealed class DialoguePolicy
             && !normalized.Contains(" en ", StringComparison.Ordinal);
         var temporal = (act is DialogueAct.RequestedData or DialogueAct.Correction)
             && (BusinessDateResolver.IsOnlyDateExpression(text) || TimePreferenceResolver.IsOnlyTimeExpression(text));
-        var detailsOnly = simple || temporal;
+        // A name-shaped answer can itself be a service/site label. At the name
+        // step keep authorized candidates available for that validation.
+        var detailsOnly = simple && state.CurrentStep != "COLLECT_CUSTOMERNAME" || temporal;
         if (state.CurrentGoal == "ORDER" || normalized.Split(' ').Any(w => w is "producto" or "productos" or "catalogo" or "comprar" or "pedido"))
             return new(false, false, true);
         return new(!detailsOnly, !detailsOnly,

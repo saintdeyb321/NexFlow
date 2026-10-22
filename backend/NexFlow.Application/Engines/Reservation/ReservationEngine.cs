@@ -86,6 +86,9 @@ public class ReservationEngine : IReservationEngine
     public Task<IEnumerable<TimeSlotDto>> GetAvailabilityAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, CancellationToken cancellationToken)
         => GetAvailabilityCoreAsync(workspaceId, locationId, serviceId, date, null, cancellationToken);
 
+    public Task<IEnumerable<TimeSlotDto>> GetAvailabilityAtAsync(Guid workspaceId, string locationId, string serviceId, DateTime requestedStart, CancellationToken ct)
+        => GetAvailabilityCoreAsync(workspaceId, locationId, serviceId, requestedStart, null, ct, exact: true);
+
     public async Task<IEnumerable<TimeSlotDto>> GetAvailabilityForExistingAsync(Guid workspaceId, string canonicalContact, Guid reservationId, DateTime date, CancellationToken ct)
     {
         var owned = await _reservationRepository.GetOwnedFutureAsync(workspaceId, canonicalContact, reservationId, ct);
@@ -93,7 +96,7 @@ public class ReservationEngine : IReservationEngine
         return await GetAvailabilityCoreAsync(workspaceId, owned.LocationId, owned.ServiceId, date, owned.Id, ct);
     }
 
-    private async Task<IEnumerable<TimeSlotDto>> GetAvailabilityCoreAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, Guid? excludeReservationId, CancellationToken cancellationToken)
+    private async Task<IEnumerable<TimeSlotDto>> GetAvailabilityCoreAsync(Guid workspaceId, string locationId, string serviceId, DateTime date, Guid? excludeReservationId, CancellationToken cancellationToken, bool exact = false)
     {
         var locations = await _locationRepository.GetLocationsAsync(workspaceId, cancellationToken);
         if (!locations.Any(l => l.Id == locationId)) return [];
@@ -111,7 +114,9 @@ public class ReservationEngine : IReservationEngine
         var slotDuration = TimeSpan.FromMinutes(targetService.DurationInMinutes.Value);
         var businessHours = await _hoursRepository.GetBusinessHoursAsync(workspaceId, locationId, cancellationToken);
 
-        var localDate = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var requestedLocal = date;
+        if (exact && !TryResolveReservationTime(date, workspaceZone, out requestedLocal, out _)) return [];
+        var localDate = DateTime.SpecifyKind((exact ? requestedLocal : date).Date, DateTimeKind.Unspecified);
         var todayHours = businessHours.FirstOrDefault(h => h.DayOfWeek == (int)localDate.DayOfWeek);
 
         if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParseExact(todayHours.OpenTime, @"hh\:mm", CultureInfo.InvariantCulture, out var openTime) || !TimeSpan.TryParseExact(todayHours.CloseTime, @"hh\:mm", CultureInfo.InvariantCulture, out var closeTime))
@@ -123,24 +128,32 @@ public class ReservationEngine : IReservationEngine
         var existingReservations = await _reservationRepository.GetReservationsForDateAsync(workspaceId, locationId, startOfDayUtc, endOfDayUtc, cancellationToken);
         var availableSlots = new List<TimeSlotDto>();
 
-        var currentSlotStartLocal = localDate.Date.Add(openTime);
+        var currentSlotStartLocal = exact ? requestedLocal : localDate.Date.Add(openTime);
         var endOfDayLocal = localDate.Date.Add(closeTime);
         var localNow = TimeZoneInfo.ConvertTimeFromUtc(_clock.UtcNow, workspaceZone);
 
         while (currentSlotStartLocal.Add(slotDuration) <= endOfDayLocal)
         {
-            var currentSlotEndLocal = currentSlotStartLocal.Add(slotDuration);
-            var utcSlotStart = TimeZoneInfo.ConvertTimeToUtc(currentSlotStartLocal, workspaceZone);
-            var utcSlotEnd = TimeZoneInfo.ConvertTimeToUtc(currentSlotEndLocal, workspaceZone);
+            if (!TryResolveReservationTime(currentSlotStartLocal, workspaceZone, out _, out var utcSlotStart))
+            { if (exact) break; currentSlotStartLocal = currentSlotStartLocal.Add(slotDuration); continue; }
+            var utcSlotEnd = utcSlotStart.Add(slotDuration);
 
             bool isOccupied = existingReservations.Any(r => r.Id != excludeReservationId && r.Status != Domain.Enums.ReservationStatus.Cancelled && r.StartTime < utcSlotEnd && r.EndTime > utcSlotStart);
             bool isPast = currentSlotStartLocal <= localNow;
 
-            if (!isOccupied && !isPast) availableSlots.Add(new TimeSlotDto(utcSlotStart, utcSlotEnd, true));
-            currentSlotStartLocal = currentSlotEndLocal;
+            if (!isOccupied && !isPast && FitsHours(currentSlotStartLocal, utcSlotEnd, workspaceZone, openTime, closeTime))
+                availableSlots.Add(new TimeSlotDto(utcSlotStart, utcSlotEnd, true));
+            if (exact) break;
+            currentSlotStartLocal = currentSlotStartLocal.Add(slotDuration);
         }
 
         return availableSlots;
+    }
+
+    private static bool FitsHours(DateTime localStart, DateTime utcEnd, TimeZoneInfo zone, TimeSpan open, TimeSpan close)
+    {
+        var localEnd = TimeZoneInfo.ConvertTimeFromUtc(utcEnd, zone);
+        return localStart.TimeOfDay >= open && localEnd.Date == localStart.Date && localEnd.TimeOfDay <= close;
     }
 
     public async Task<Result<ReservationDto>> CreateReservationAsync(Guid workspaceId, string locationId, string serviceId, string customerIdentifier, string customerName, DateTime dateTime, CancellationToken cancellationToken, string? sourceMessageId = null)
@@ -166,8 +179,6 @@ public class ReservationEngine : IReservationEngine
         if (todayHours == null || todayHours.IsClosed || !TimeSpan.TryParseExact(todayHours.OpenTime, @"hh\:mm", CultureInfo.InvariantCulture, out var openTime) || !TimeSpan.TryParseExact(todayHours.CloseTime, @"hh\:mm", CultureInfo.InvariantCulture, out var closeTime))
             return Result<ReservationDto>.Failure(new Error("Reservation.Closed", "El negocio se encuentra cerrado en el día y horario seleccionado."));
 
-        var timeOnly = localDateTime.TimeOfDay;
-
         // 🔥 SPRINT 07: Optimizamos. Traemos solo 1 servicio, no el catálogo entero.
         var targetService = await _catalogRepository.GetItemByIdAsync(workspaceId, serviceId, cancellationToken) as ServiceDto;
 
@@ -180,9 +191,7 @@ public class ReservationEngine : IReservationEngine
             return Result<ReservationDto>.Failure(new Error("Service.NotAvailable", "Servicio no disponible en esta sede."));
 
         var endTimeUtc = startTimeUtc.AddMinutes(targetService.DurationInMinutes.Value);
-        var localEndTime = TimeZoneInfo.ConvertTimeFromUtc(endTimeUtc, workspaceZone);
-
-        if (timeOnly < openTime || localEndTime.Date != localDateTime.Date || localEndTime.TimeOfDay > closeTime)
+        if (!FitsHours(localDateTime, endTimeUtc, workspaceZone, openTime, closeTime))
             return Result<ReservationDto>.Failure(new Error("Reservation.OutOfHours", "La hora solicitada está fuera del horario comercial."));
 
         Domain.Entities.Reservation? created = null;

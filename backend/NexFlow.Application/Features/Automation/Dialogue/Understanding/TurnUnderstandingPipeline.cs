@@ -85,7 +85,10 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(act, new() { Intent = ConversationIntent.Reservation }, Response:
                 AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules)
                     ?? (context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction));
-        if (commerce != null && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct) is { } commercial)
+        var readOnlyQuestion = context.CurrentGoal is "BOOKING" or "RESERVATION"
+            && (OrderMentionResolver.IsQuestion(request.MessageText) || OrderMentionResolver.IsHypothetical(request.MessageText));
+        var temporalProbe = readOnlyQuestion && new TimePreferenceResolver().Resolve(request.MessageText).Status != ResolutionStatus.Insufficient;
+        if (!temporalProbe && commerce != null && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct) is { } commercial)
             return commercial;
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION" || act == DialogueAct.StartOperation;
         var reservationCandidate = !booking && context.CurrentGoal == null && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES")
@@ -93,6 +96,14 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && normalized.Split(' ').Any(w => w is "quiero" or "quisiera" or "necesito" or "deseo");
         var purpose = booking || reservationCandidate ? SlotResolutionPurpose.Reservation : context.CurrentGoal == "ORDER" ? SlotResolutionPurpose.Order : SlotResolutionPurpose.Information;
         var local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, purpose, policy.Reads(request.MessageText, context, act), ct);
+        if (local.Time.Status == ResolutionStatus.Ambiguous && context.PreferredTime is { } preference)
+        {
+            var matching = local.Time.Candidates.Where(c => c.Value.ExactTime is { } time && TimePreferenceResolver.Matches(time, preference)).ToArray();
+            if (matching.Length == 1) local = local with { Time = SlotResolution<TimePreference>.Match(matching[0].Value, matching[0].RawText) };
+        }
+        if (readOnlyQuestion && (local.Time.Status != ResolutionStatus.Insufficient || local.Date.Status != ResolutionStatus.Insufficient)
+            && !new[] { local.Date.Code, local.Time.Code, local.Location.Code, local.Service.Code }.Any(code => code is "SemanticComposition" or "UnknownEntity"))
+            return PrepareBooking(local, DialogueAct.InformationalInterruption, false, workspace, request.MessageId, readOnly: true);
         if (reservationCandidate && act == DialogueAct.SemanticAmbiguity && local.Service.Status == ResolutionStatus.Determined)
         { booking = true; act = DialogueAct.StartOperation; }
         if (context.PendingCustomerName != null && local.Name.Code == "SurnameMissing" && context.CurrentStep == "COLLECT_CUSTOMERNAME")
@@ -111,7 +122,14 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             || local.Location.Status == ResolutionStatus.Ambiguous || local.Service.Status == ResolutionStatus.Ambiguous
             || local.Date.Status is ResolutionStatus.Ambiguous or ResolutionStatus.Invalid || local.Time.Status is ResolutionStatus.Ambiguous or ResolutionStatus.Invalid
             || local.Name.Candidates.Count > 0;
-        if (dataTurn && local.Date.Code != "SemanticComposition" && local.Time.Code != "SemanticComposition" && (understood || act == DialogueAct.StartOperation))
+        var semanticGap = new[] { local.Date.Code, local.Time.Code, local.Name.Code, local.Location.Code, local.Service.Code }
+            .Any(code => code is "SemanticComposition" or "UnknownEntity") || !understood && local.Time.Code == "TimeNotUnderstood";
+        // A partially understood compound answer can contain an unrecognized date
+        // even when a name and another slot were parsed. Give the existing semantic
+        // interpreter one pass rather than silently discarding the remainder.
+        semanticGap |= local.Name.Status == ResolutionStatus.Determined && local.Date.Status == ResolutionStatus.Insufficient
+            && (local.Time.Status == ResolutionStatus.Determined || local.Service.Status == ResolutionStatus.Determined);
+        if (dataTurn && !semanticGap && (understood || act == DialogueAct.StartOperation))
             return PrepareBooking(local, act, false, workspace, request.MessageId);
         if (!await recovery.AcquireAiAsync(workspace, phone, request.MessageId, ct))
         {
@@ -141,6 +159,13 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && !string.IsNullOrWhiteSpace(actEvidence[0].Text) && actEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(request.MessageText, actEvidence[0].Text)
             && actEvidence[0].NormalizedValue == interpretation.Act?.ToString();
+        // Load only missing authorized candidates once when semantic understanding
+        // identifies an entity that a simple-slot read deliberately omitted.
+        if (booking && interpretation.Intent == ConversationIntent.Reservation
+            && (interpretation.Service != null && local.AuthorizedServices.Count == 0 || interpretation.Location != null && local.AuthorizedLocations.Count == 0))
+            local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
+        if (booking && backedAct && interpretation.Act == DialogueAct.InformationalInterruption && interpretation.Intent == ConversationIntent.Reservation)
+            return PrepareBooking(AiEvidenceValidator.Validate(local, interpretation, request.MessageText), DialogueAct.InformationalInterruption, true, workspace, request.MessageId, readOnly: true);
         if (backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
             && !contradictory && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
         {
@@ -168,7 +193,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             if (!booking && act != DialogueAct.StartOperation)
                 return new(DialogueAct.OperationInformation, new() { Intent = ConversationIntent.Reservation }, true, DialoguePolicy.Instruction);
             // A semantic result can require entities not loaded for a simple-slot attempt.
-            if (interpretation.Service != null && local.AuthorizedServices.Count == 0 || interpretation.Location != null && local.AuthorizedLocations.Count == 0)
+            if (!booking && (interpretation.Service != null && local.AuthorizedServices.Count == 0 || interpretation.Location != null && local.AuthorizedLocations.Count == 0))
                 local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
             local = AiEvidenceValidator.Validate(local, interpretation, request.MessageText);
             return PrepareBooking(local, act, true, workspace, request.MessageId);
@@ -176,13 +201,13 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         return new(interpretation.RequiresClarification || interpretation.Intent == ConversationIntent.General ? DialogueAct.SemanticAmbiguity : act, interpretation, true);
     }
 
-    private static PreparedDialogueTurn PrepareBooking(TurnUnderstanding value, DialogueAct act, bool usedAi, Guid workspace, string source)
+    private static PreparedDialogueTurn PrepareBooking(TurnUnderstanding value, DialogueAct act, bool usedAi, Guid workspace, string source, bool readOnly = false)
     {
         var unresolved = Unresolved(value);
         var question = Question(value, unresolved.FirstOrDefault());
-        var proposal = new BookingDraftProposal(workspace, source, value.Context.StateVersion, value, question, unresolved);
+        var proposal = new BookingDraftProposal(workspace, source, value.Context.StateVersion, value, question, unresolved, readOnly);
         var count = new[] { value.Name.Status, value.Location.Status, value.Service.Status, value.Date.Status, value.Time.Status }.Count(s => s == ResolutionStatus.Determined);
-        return new(count > 1 && act != DialogueAct.Correction ? DialogueAct.MultipleData : act,
+        return new(!readOnly && count > 1 && act != DialogueAct.Correction ? DialogueAct.MultipleData : act,
             new() { Intent = ConversationIntent.Reservation, BookingProposal = proposal }, usedAi);
     }
 

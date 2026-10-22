@@ -4,6 +4,9 @@ namespace NexFlow.Application.Features.Reservations;
 
 public interface IReservationEngine
 {
+    // A requested start is checked independently of the day's suggested grid.
+    Task<IEnumerable<TimeSlotDto>> GetAvailabilityAtAsync(Guid workspaceId, string locationId, string serviceId,
+        DateTime requestedStart, CancellationToken ct);
     Task<Result<ReservationDto>> ApplyExistingOperationAsync(ReservationOperationCommand operation, CancellationToken ct);
     Task<IEnumerable<TimeSlotDto>> GetAvailabilityForExistingAsync(Guid workspaceId, string canonicalContact, Guid reservationId, DateTime date, CancellationToken ct);
     // Devuelve los bloques de tiempo libres para un día específico

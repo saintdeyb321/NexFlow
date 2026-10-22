@@ -11,6 +11,7 @@ using NexFlow.Application.Features.Requests;
 using NexFlow.Application.Features.Reservations;
 using NexFlow.Domain.Entities.Catalog;
 using NexFlow.Domain.Enums;
+using NexFlow.Domain.Exceptions;
 using NexFlow.Application.Features.Services.DTOs;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Notifications;
@@ -126,7 +127,20 @@ public class BookingFlow : IBookingFlow
             var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var denied = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules);
             if (denied != null) { evidence.Operation = OperationStatus.Denied; return Plan(denied); }
+            if (proposal.ReadOnly)
+            {
+                if (proposal.WorkspaceId != workspaceId || proposal.SourceMessageId != sourceMessageId || proposal.ExpectedStateVersion != context.StateVersion
+                    || proposal.Understanding.Context.WorkspaceId != workspaceId || proposal.Understanding.Context.SourceMessageId != sourceMessageId)
+                    throw new ConcurrencyException("Availability question no longer matches this turn.");
+                evidence.Operation = OperationStatus.Informational;
+                var answer = await AnswerAvailabilityAsync(workspaceId, context, proposal.Understanding, evidence, ct);
+                context.Information = new() { Topic = "Availability", Clarification = "Availability",
+                    DraftFingerprint = InformationalRequest.DraftFingerprint(context), UpdatedAt = proposal.Understanding.Context.LocalBusinessNow.UtcDateTime };
+                await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
+                return Plan(answer, creative: true);
+            }
             await BookingDraftMerger.ApplyAsync(workspaceId, sourceMessageId, context, proposal, _offeringService, ct);
+            if (context.Information?.Topic == "Availability") context.Information = null;
             interpretation = new() { Intent = ConversationIntent.Reservation, Confirmed = interpretation.Confirmed };
         }
         var response = await ProcessTurnAsync(workspaceId, phone, context, interpretation, sourceMessageId, evidence, ct);
@@ -319,8 +333,8 @@ public class BookingFlow : IBookingFlow
             var profile = await _profileRepo.GetProfileAsync(workspaceId, ct);
             var zone = BookingZone(profile?.TimeZone);
             evidence.Zone = zone.Id;
-            var available = await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId!, context.SelectedServiceId!,
-                requestedDate, ct);
+            var requestedStart = DateTime.SpecifyKind(DateTime.ParseExact($"{context.TargetDate} {context.TargetTime}", "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), DateTimeKind.Unspecified);
+            var available = await _reservationEngine.GetAvailabilityAtAsync(workspaceId, context.SelectedLocationId!, context.SelectedServiceId!, requestedStart, ct);
             if (!available.Any(s => s.IsAvailable && TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
                 == $"{context.TargetDate} {context.TargetTime}"))
             {
@@ -349,6 +363,12 @@ public class BookingFlow : IBookingFlow
         evidence.Facts.Add(new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id));
         evidence.Facts.Add(new("Currency", service.Currency, VerifiedFactSource.BusinessRepository, service.Id));
         evidence.Facts.Add(new("RequestedLocalTime", selectedTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), VerifiedFactSource.ValidatedConversation));
+        if (!new NameSlotResolver().ResolveEvidence(context.RealCustomerName ?? "").TryGetValue(out _)
+            || SpanishTextNormalizer.Normalize(context.RealCustomerName!) == SpanishTextNormalizer.Normalize(service.Name))
+        {
+            context.RealCustomerName = null; UpdateStep(context);
+            return "Necesito tu nombre y apellido para el resumen. ¿Cómo te llamas?";
+        }
         evidence.Facts.Add(new("CustomerName", context.RealCustomerName!, VerifiedFactSource.ValidatedConversation, Sensitive: true));
         if (!interpretation.Confirmed)
         {
@@ -444,6 +464,80 @@ public class BookingFlow : IBookingFlow
         return "Sedes disponibles:\n" + string.Join("\n", locations.Select(l => $"• {l.Name}")) + "\n\n" + question;
     }
 
+    private async Task<string> AnswerAvailabilityAsync(Guid workspace, ConversationContextDto context, TurnUnderstanding query, TurnEvidence evidence, CancellationToken ct)
+    {
+        var location = query.Location.TryGetValue(out var site) ? site.Id : context.SelectedLocationId;
+        var serviceId = query.Service.TryGetValue(out var offering) ? offering.Id : context.SelectedServiceId;
+        if (query.Location.Status is ResolutionStatus.Ambiguous or ResolutionStatus.Invalid || query.Service.Status is ResolutionStatus.Ambiguous or ResolutionStatus.Invalid)
+            return "Necesito precisar la sede o el servicio de esta consulta. Conservamos tu reserva en preparación.";
+        if (location == null || serviceId == null) return "Para comprobar esa hora necesito la sede y el servicio. ¿Cuál falta elegir?";
+        if (query.Date.Status is ResolutionStatus.Invalid or ResolutionStatus.Ambiguous) return "Necesito precisar la fecha de esta consulta. ¿Qué día y mes deseas comprobar?";
+        var date = query.Date.TryGetValue(out var requestedDate) ? requestedDate
+            : DateOnly.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var previousDate) ? previousDate : (DateOnly?)null;
+        if (date == null) return "¿Para qué fecha deseas comprobar ese horario? Tu borrador sigue guardado.";
+        try
+        {
+            var service = await _offeringService.GetServiceByIdAsync(workspace, serviceId, ct);
+            if (service is not { IsActive: true, RequiresReservation: true, DurationInMinutes: >= 5 }
+                || !await _offeringService.IsServiceAvailableAtLocationAsync(workspace, serviceId, location, ct))
+                return "El servicio no está disponible para reservar en esa sede. Conservamos tu borrador.";
+            var schedule = (await _hoursRepo.GetBusinessHoursAsync(workspace, location, ct)).ToArray();
+            var day = schedule.SingleOrDefault(h => h.DayOfWeek == (int)date.Value.DayOfWeek);
+            if (day == null) return "No hay horario configurado para ese día; no puedo comprobar disponibilidad.";
+            if (day.IsClosed) return "La sede está cerrada ese día. ¿Qué otra fecha deseas comprobar?";
+            if (!TimeOnly.TryParseExact(day.OpenTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var open)
+                || !TimeOnly.TryParseExact(day.CloseTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var close))
+                return "No puedo comprobar el horario de atención en este momento.";
+            var profile = await _profileRepo.GetProfileAsync(workspace, ct); var zone = BookingZone(profile?.TimeZone);
+            evidence.Zone = zone.Id;
+            if (query.Time.Status == ResolutionStatus.Invalid) return "Necesito precisar la hora. ¿Qué hora deseas comprobar?";
+            var clocks = query.Time.Candidates.Where(c => c.Value.Kind == TimePreferenceKind.Exact).Select(c => c.Value.ExactTime!.Value).Distinct().ToArray();
+            if (clocks.Length > 1)
+            {
+                var withinDay = clocks.Where(t => t >= open && t.ToTimeSpan() + TimeSpan.FromMinutes(service.DurationInMinutes.Value) <= close.ToTimeSpan()).ToArray();
+                if (withinDay.Length != 1) return "¿A qué hora te refieres: " + string.Join(" o ", clocks.Select(t => t.ToString("HH:mm", CultureInfo.InvariantCulture))) + "?";
+                clocks = withinDay;
+            }
+            var localDay = date.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+            var introduction = "";
+            if (clocks.Length == 1)
+            {
+                var at = date.Value.ToDateTime(clocks[0], DateTimeKind.Unspecified);
+                var label = at.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+                evidence.Facts.Add(new("RequestedLocalTime", label, VerifiedFactSource.ValidatedConversation));
+                if (!ReservationEngineTime(at, zone, out var expectedUtc)) return "Necesito una hora local válida y no ambigua. ¿Qué hora deseas comprobar?";
+                var point = (await _reservationEngine.GetAvailabilityAtAsync(workspace, location, serviceId, at, ct))
+                    .Where(s => s.IsAvailable && s.StartTime.Kind == DateTimeKind.Utc && s.StartTime == expectedUtc
+                        && s.EndTime == expectedUtc.AddMinutes(service.DurationInMinutes.Value)).ToArray();
+                if (point.Length > 0)
+                {
+                    evidence.Facts.Add(new("Availability", "Available", VerifiedFactSource.TransactionEngine));
+                    return $"Sí, el {label} está disponible para {service.Name}. No he cambiado ni confirmado tu reserva. Puedes escribir esa hora para seleccionarla.";
+                }
+                introduction = clocks[0] < open || clocks[0].ToTimeSpan() + TimeSpan.FromMinutes(service.DurationInMinutes.Value) > close.ToTimeSpan()
+                    ? $"El {label} queda fuera de la jornada de atención."
+                    : $"El {label} no está disponible para {service.Name}.";
+                evidence.Facts.Add(new("Availability", "Unavailable", VerifiedFactSource.TransactionEngine));
+            }
+            var slots = (await _reservationEngine.GetAvailabilityAsync(workspace, location, serviceId, localDay, ct)).Where(s => s.IsAvailable);
+            if (query.Time.TryGetValue(out var preference) && preference.Kind != TimePreferenceKind.Exact)
+                slots = new TimePreferenceResolver().FilterAvailableSlots(slots, date.Value, zone, preference);
+            var alternatives = slots.Take(3).Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).ToArray();
+            return introduction + (alternatives.Length == 0 ? " No encontré horarios disponibles que coincidan. ¿Qué otra fecha u hora deseas comprobar?"
+                : " Horarios disponibles: " + string.Join(", ", alternatives) + ". Escribe la hora que deseas seleccionar; no he modificado el borrador.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return "No pude comprobar la disponibilidad en este momento. Conservamos tu borrador; puedes consultar de nuevo o solicitar un asesor."; }
+    }
+
+    private static bool ReservationEngineTime(DateTime local, TimeZoneInfo zone, out DateTime utc)
+    {
+        utc = default;
+        if (zone.IsInvalidTime(local) || zone.IsAmbiguousTime(local)) return false;
+        utc = TimeZoneInfo.ConvertTimeToUtc(local, zone);
+        return true;
+    }
+
     private async Task<string> ServiceOptionsAsync(Guid workspaceId, string locationId, CancellationToken ct, TurnEvidence? evidence = null, int offset = 0)
     {
         var services = await ReservableServicesAsync(workspaceId, locationId, ct);
@@ -517,9 +611,10 @@ public class BookingFlow : IBookingFlow
         }
         if (evidence != null) { evidence.Zone = zone.Id; evidence.Set(
             slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(),
-            "¿Qué horario prefieres?", slots.Take(8).Select(s => {
+            "¿Qué horario prefieres?", slots.Select(s => {
                 var label = TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture);
                 return new ConversationMenuOption(label, label, "Time"); }).ToArray()); }
+        if (evidence != null) return $"Horarios disponibles para el {date:dd/MM/yyyy}:\n\n¿Cuál horario prefieres?";
         return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
             string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
             (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +

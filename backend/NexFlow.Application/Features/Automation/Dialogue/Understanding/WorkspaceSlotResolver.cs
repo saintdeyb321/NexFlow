@@ -98,14 +98,27 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
             product = offeringMentions.Resolve(text, productOptions);
         }
         ct.ThrowIfCancellationRequested();
-        var turn = DialogueTurnContext.Capture(workspaceId, sourceMessageId, state, localNow, zone, modules);
+        var turn = DialogueTurnContext.Capture(workspaceId, sourceMessageId, state, localNow, zone, modules) with {
+            LocationHints = authorizedLocations.Where(l => l.Id != null).Select(l => l.Name).Take(12).ToArray(),
+            ServiceHints = serviceOptions.Select(s => s.Name).Take(12).ToArray()
+        };
         var date = reservation
             ? dates.ResolveReservation(text, localNow, state.CurrentStep == "COLLECT_DATE",
                 DateOnly.TryParseExact(state.TargetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.None, out var anchorDate) ? anchorDate : null,
                 state.CurrentStep == "COLLECT_DATE" ? state.LastQuestion : null)
             : dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE");
-        var result = new TurnUnderstanding(turn, names.Resolve(text, state.CurrentStep == "COLLECT_CUSTOMERNAME"),
+        var name = names.Resolve(text, state.CurrentStep == "COLLECT_CUSTOMERNAME", compoundAnswer: reservation);
+        if (name.Status is ResolutionStatus.Determined or ResolutionStatus.Ambiguous && name.Candidates.Count > 0)
+        {
+            var businessNames = serviceOptions.Concat(productOptions).Concat(authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)))
+                .SelectMany(e => new[] { e.Name }.Concat(e.Aliases ?? [])).Select(label => string.Concat(SpanishTextNormalizer.Terms(label))).ToHashSet(StringComparer.Ordinal);
+            var people = name.Candidates.Where(candidate => !businessNames.Contains(string.Concat(SpanishTextNormalizer.Terms(candidate.Value)))).ToArray();
+            name = people.Length == 0 ? SlotResolution<string>.Invalid("BusinessEntityNotPerson")
+                : people.Length == 1 ? SlotResolution<string>.Match(people[0].Value, people[0].RawText, source: people[0].Source)
+                : SlotResolution<string>.Ambiguous(people, name.Code);
+        }
+        var result = new TurnUnderstanding(turn, name,
             location, service, product, date, times.Resolve(text, state.CurrentStep == "COLLECT_TIME"))
         {
             AuthorizedLocations = authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)).ToArray(),

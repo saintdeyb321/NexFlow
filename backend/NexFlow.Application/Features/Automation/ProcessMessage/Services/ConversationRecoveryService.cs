@@ -25,7 +25,7 @@ public interface IConversationRecoveryService
 {
     Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation, ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
     Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false, IReadOnlyList<ConversationMenuOption>? choices = null);
-    Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct);
+    Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null);
     Task<bool> AcquireAiAsync(Guid workspace, string phone, string source, CancellationToken ct);
 }
 
@@ -131,6 +131,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (topic == null && Enum.TryParse<KnowledgeTopic>(information!.Topic, out var previous)) topic = previous;
             if (topic != null) return await AnswerInformation(topic.Value, resetScope: InformationalRequest.ScopeCorrection(text));
         }
+        if (information?.Clarification == "Availability" && context.PendingRecoveryAction == null
+            && (ConversationConfirmation.IsAffirmative(request.MessageText) || repair))
+            return await Remember("No he cambiado ni confirmado tu reserva. Indica la hora que deseas seleccionar, o escribe continuemos para retomar el borrador.");
         if (repair)
         {
             if (information != null)
@@ -427,17 +430,18 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return await SaveAsync(workspace, phone, source, context, new(await PrepareOptionsAsync(workspace, context, modules, introduction, ct)), ct);
     }
 
-    public async Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct)
+    public async Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null)
     {
-        var decorated = await PrepareOptionsAsync(workspace, context, modules, response, ct, replacePicker: true);
+        var decorated = await PrepareOptionsAsync(workspace, context, modules, response, ct, replacePicker: true, verifiedChoices: verifiedChoices);
         await contexts.SaveContextAsync(workspace, phone, context, ct);
         return decorated;
     }
 
-    private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, bool replacePicker = false)
+    private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, bool replacePicker = false, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null)
     {
         if (context.RecoveryOptionsContext != Fingerprint(context)) context.RecoveryOptionsOffset = 0;
-        var available = await BuildOptions(workspace, context, modules, ct, paginate: false);
+        var available = verifiedChoices?.ToList() ?? await BuildOptions(workspace, context, modules, ct, paginate: false);
+        context.RecoveryHasMore = context.RecoveryOptionsOffset + 5 < available.Count;
         context.RecoveryOptions = available.Skip(context.RecoveryOptionsOffset).Take(5).ToList();
         context.RecoveryOptionsContext = Fingerprint(context);
         var noOptions = context.CurrentStep is "COLLECT_CUSTOMERNAME" or "COLLECT_DATE" or "CONFIRM" ? Continuation(context)

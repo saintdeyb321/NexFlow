@@ -23,26 +23,40 @@ internal static class AiEvidenceValidator
             if (local.Status is ResolutionStatus.Determined or ResolutionStatus.Ambiguous || extracted == null || local.Code == "ModuleDenied") return local;
             var evidence = Evidence(slot, extracted);
             var candidate = new OfferingMentionResolver().Resolve(evidence?.Text ?? (Supplied(extracted) ? extracted : ""), allowed, true);
+            if (evidence != null && candidate.Status is ResolutionStatus.Invalid or ResolutionStatus.Insufficient)
+            {
+                var matches = allowed.Where(o => new[] { o.Name }.Concat(o.Aliases ?? [])
+                    .Any(label => SurfaceEquivalent(evidence.Text, label))).DistinctBy(o => o.Id).ToArray();
+                if (matches.Length > 1) return SlotResolution<ResolvedBusinessEntity>.Ambiguous(matches.Select(o =>
+                    new SlotCandidate<ResolvedBusinessEntity>(new(o.Id, o.Name, o.LocationId), evidence.Text, EvidenceSource.ValidatedLlm, o.Id)), "MultipleEntities");
+                if (matches.Length == 1) candidate = SlotResolution<ResolvedBusinessEntity>.Match(new(matches[0].Id, matches[0].Name, matches[0].LocationId), evidence.Text, matches[0].Id, EvidenceSource.ValidatedLlm);
+            }
             if (!candidate.TryGetValue(out var entity)) return candidate;
-            return SpanishTextNormalizer.Normalize(extracted) == SpanishTextNormalizer.Normalize(entity.Name) || extracted == entity.Id ? candidate
+            return string.Concat(SpanishTextNormalizer.Terms(extracted)) == string.Concat(SpanishTextNormalizer.Terms(entity.Name)) || extracted == entity.Id ? candidate
                 : SlotResolution<ResolvedBusinessEntity>.Invalid("UnsubstantiatedEntity");
         }
         var name = value.Name;
-        if (name.Status == ResolutionStatus.Insufficient && name.Candidates.Count == 0 && ai.CustomerName != null)
+        if (name.Status is ResolutionStatus.Insufficient or ResolutionStatus.Invalid && name.Candidates.Count == 0 && ai.CustomerName != null
+            && name.Code is not ("NegatedPresentation" or "BusinessEntityNotPerson"))
         {
             var evidence = Evidence("Name", ai.CustomerName);
-            var span = evidence?.Text ?? (Supplied(ai.CustomerName) ? ai.CustomerName : "");
-            var resolved = new NameSlotResolver().Resolve(span, true);
+            var span = evidence?.Text ?? (HasFragment(original, ai.CustomerName) ? ai.CustomerName : "");
+            var resolved = new NameSlotResolver().ResolveEvidence(span);
             name = resolved.TryGetValue(out var candidate) && SpanishTextNormalizer.Normalize(candidate) == SpanishTextNormalizer.Normalize(ai.CustomerName)
                 ? resolved : SlotResolution<string>.Invalid("UnsubstantiatedName");
         }
+        if (name.TryGetValue(out var person) && value.AuthorizedLocations.Concat(value.AuthorizedServices).Concat(value.AuthorizedProducts)
+            .Any(option => new[] { option.Name }.Concat(option.Aliases ?? []).Any(label =>
+                string.Concat(SpanishTextNormalizer.Terms(label)) == string.Concat(SpanishTextNormalizer.Terms(person)))))
+            name = SlotResolution<string>.Invalid("BusinessEntityNotPerson");
         var date = value.Date;
         if (date.Status == ResolutionStatus.Insufficient && ai.Date != null)
         {
             var evidence = Evidence("Date", ai.Date);
             var span = evidence?.Text ?? (Supplied(ai.Date) ? ai.Date : "");
             var resolver = new BusinessDateResolver();
-            var resolved = resolver.ResolveEvidence(span, value.Context.LocalBusinessNow);
+            var canonical = evidence?.CanonicalText;
+            var resolved = resolver.ResolveEvidence(canonical is { Length: > 0 and <= 100 } && SurfaceEquivalent(span, canonical) ? canonical : span, value.Context.LocalBusinessNow);
             var remainder = span.Length > 0 ? resolver.Resolve(original.Replace(span, " ", StringComparison.OrdinalIgnoreCase), value.Context.LocalBusinessNow) : date;
             date = resolved.TryGetValue(out var candidate) && candidate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) == ai.Date
                 && remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition"
@@ -72,5 +86,32 @@ internal static class AiEvidenceValidator
                 && (offset == 0 || !char.IsLetterOrDigit(source[offset - 1]))
                 && (offset + fragment.Length == source.Length || !char.IsLetterOrDigit(source[offset + fragment.Length]))) return true;
         return false;
+    }
+
+    private static bool SurfaceEquivalent(string source, string canonical)
+    {
+        var a = SpanishTextNormalizer.Terms(source); var b = SpanishTextNormalizer.Terms(canonical);
+        if (string.Concat(a) == string.Concat(b)) return true;
+        if (a.Length != b.Length || a.Length == 0) return false;
+        var changed = 0;
+        for (var i = 0; i < a.Length; i++)
+        {
+            if (a[i] == b[i]) continue;
+            if (++changed > 1) return false;
+            // A bounded spelling edit, or a consonantal abbreviation of that same
+            // word. This validates a supplied semantic reference, never an invented ID.
+            if (a[i].Length >= 3 && new string(b[i].Where(c => !"aeiou".Contains(c)).ToArray()) == a[i]) continue;
+            if (Math.Max(a[i].Length, b[i].Length) < 7 || Math.Abs(a[i].Length - b[i].Length) > 1) return false;
+            var left = a[i]; var right = b[i]; var x = 0; var y = 0; var edits = 0;
+            while (x < left.Length && y < right.Length)
+            {
+                if (left[x] == right[y]) { x++; y++; continue; }
+                if (++edits > 1) return false;
+                if (left.Length >= right.Length) x++;
+                if (right.Length >= left.Length) y++;
+            }
+            if (edits + left.Length - x + right.Length - y > 1) return false;
+        }
+        return true;
     }
 }

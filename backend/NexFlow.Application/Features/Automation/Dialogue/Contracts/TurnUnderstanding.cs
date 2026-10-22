@@ -50,10 +50,13 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
     string? StateVersion, string? SelectedLocationId, string? LastQuestion, DateTimeOffset LocalBusinessNow,
     string TimeZoneId, IReadOnlySet<string> EnabledModules)
 {
+    public IReadOnlyList<string> LocationHints { get; init; } = [];
+    public IReadOnlyList<string> ServiceHints { get; init; } = [];
+    public string? DraftDate { get; init; }
     public static DialogueTurnContext Capture(Guid workspace, string source, ConversationContextDto state,
         DateTimeOffset localNow, TimeZoneInfo zone, IEnumerable<string> modules) => new(workspace, source,
             state.CurrentGoal, state.CurrentStep, state.StateVersion, state.SelectedLocationId, state.LastQuestion,
-            localNow, zone.Id, modules.ToFrozenSet(StringComparer.OrdinalIgnoreCase));
+            localNow, zone.Id, modules.ToFrozenSet(StringComparer.OrdinalIgnoreCase)) { DraftDate = state.TargetDate };
 }
 
 public sealed record TurnUnderstanding(DialogueTurnContext Context, SlotResolution<string> Name,

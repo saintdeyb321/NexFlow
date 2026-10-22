@@ -14,9 +14,19 @@ internal static class EntityMentionMatcher
         IEnumerable<string> Keys(BusinessEntityOption option) => new[] { option.Name }.Concat(option.Aliases ?? []).Select(Key).Where(k => k.Length > 0);
         var term = Key(text);
         var exact = entities.Where(o => string.Equals(text.Trim(), o.Id, StringComparison.Ordinal) || Keys(o).Contains(term, StringComparer.Ordinal)).ToArray();
-        if (exact.Length > 0) return Result(exact);
         var full = entities.Where(o => Keys(o).Any(k => SpanishTextNormalizer.ContainsPhrase(term, k))).ToArray();
-        if (full.Length > 0) return Result(full);
+        // Removing word boundaries is not a fuzzy identity guess. Preserve every
+        // collision, including names which differ only in spacing.
+        var fragments = term.Split(' ');
+        var compactFragments = new HashSet<string>(StringComparer.Ordinal);
+        for (var start = 0; start < fragments.Length; start++)
+        {
+            var joined = "";
+            for (var end = start; end < Math.Min(start + 8, fragments.Length); end++)
+            { joined += fragments[end]; compactFragments.Add(joined); }
+        }
+        var compact = entities.Where(o => Keys(o).Any(k => compactFragments.Contains(k.Replace(" ", "")))).ToArray();
+        if (exact.Length > 0 || full.Length > 0 || compact.Length > 0) return Result(exact.Concat(full).Concat(compact));
         var tokens = SpanishTextNormalizer.Terms(text).Where(t => t.Length >= 3).ToHashSet(StringComparer.Ordinal);
         var partial = tokens.Count == 0 ? [] : entities.Where(o => Keys(o).Any(k => tokens.IsSubsetOf(k.Split(' ')))).ToArray();
         if (partial.Length > 0) return Result(partial);
