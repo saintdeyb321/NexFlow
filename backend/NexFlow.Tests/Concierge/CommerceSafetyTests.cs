@@ -159,6 +159,37 @@ public sealed class CommerceSafetyTests
         Assert.Equal(2,Assert.Single((await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).OrderDraftItems).Quantity);
     }
 
+    [Fact]
+    public async Task Reauthorization_after_a_revoked_commit_requires_consent_to_the_updated_quote()
+    {
+        var f = new Durable();
+        await f.Seed();
+        var originalQuote = await f.Turn("Quiero dos panes integrales", "draft");
+        Assert.Contains("5.00", originalQuote);
+        var checks = 0;
+        f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++checks == 1 ? new[] { "CATALOG", "ORDERS" } : []);
+
+        await f.Turn("envía el pedido", "revoked-commit");
+        Assert.Equal(2, checks);
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
+        Assert.Equal(2, Assert.Single((await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).OrderDraftItems).Quantity);
+
+        f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "CATALOG", "ORDERS" });
+        await f.Catalog.SaveItemAsync(f.Workspace,
+            new ProductDto { Id = "bread", Name = "Pan integral", PriceMinorUnits = 300 }, false, default);
+
+        var response = await f.Turn("envía el pedido", "restored-commit");
+        var records = (await f.Orders.GetOrdersAsync(f.Workspace, null, default)).ToArray();
+        Assert.True(records.Length == 0,
+            $"A changed quote requires renewed review before creating an order; actual orders={records.Length}, total minor units={records.FirstOrDefault()?.TotalAmountMinorUnits}.");
+        Assert.Contains("6.00", response);
+        Assert.StartsWith("ORDER_CONFIRM:", (await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).CurrentStep);
+        f.Notifications.Verify(n => n.NotifyOnceAsync(f.Workspace, "ORDERS", NotificationType.NewCommercialRequest,
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), "/orders", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData("ORDER_REVIEW:private-fingerprint")] [InlineData("ORDER_CONFIRM:private-fingerprint")]
     public async Task Internal_price_consent_fingerprints_are_not_sent_to_a_provider(string step)
