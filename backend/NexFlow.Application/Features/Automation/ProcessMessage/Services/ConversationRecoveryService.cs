@@ -54,7 +54,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             _ => c.LastQuestion ?? "Puedes continuar o escribir cancelar para descartar el borrador." });
 
     public Task<bool> AcquireAiAsync(Guid workspace, string phone, string source, CancellationToken ct)
-        => states.TryConsumeAiBudgetAsync(workspace, phone, source, clock.UtcNow, Limits.ClientAiCallsPerMinute, Limits.WorkspaceAiCallsPerMinute, ct);
+        => ConversationDiagnostics.MeasureAsync(logger, "BudgetAdmission",
+            () => states.TryConsumeAiBudgetAsync(workspace, phone, source, clock.UtcNow, Limits.ClientAiCallsPerMinute, Limits.WorkspaceAiCallsPerMinute, ct),
+            admitted => admitted ? "Admitted" : "Denied");
 
     public async Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation,
         ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
@@ -453,6 +455,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             var list = string.Join("\n", context.RecoveryOptions.Select((choice, i) => $"{i + 1}. {choice.Label}"));
             return await SaveAsync(workspace, phone, source, context, new(introduction + "\n" + list, Expected: ExpectedReply.Selection), ct);
         }
+        ConversationDiagnostics.Count("Clarification", context.ClarificationAttempts > 0 ? "Repeated" : "First");
         if (++context.ClarificationAttempts >= Limits.MaxClarifications)
             return await SaveAsync(workspace, phone, source, context, new(Interpretation: new() { Intent = ConversationIntent.Support }), ct);
         if (contextual)

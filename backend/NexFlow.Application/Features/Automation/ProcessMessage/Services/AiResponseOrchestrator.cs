@@ -287,6 +287,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, _clock?.UtcNow ?? DateTime.UtcNow);
             await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             var plan = Bind(text, media);
+            ConversationDiagnostics.Count("BusinessResult", plan.Operation.ToString());
             try { _logger.LogInformation("DialogueDecision Intent={Intent} Act={Act} Operation={Operation}", plan.Intent, plan.Act, plan.Operation); }
             catch { /* Diagnostics cannot change the business decision. */ }
             if (plan.WorkspaceId != workspaceId || plan.SourceMessageId != request.MessageId)
@@ -307,7 +308,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (response.Information != null)
             {
                 InformationalRequest.Remember(context, response.Information.Source, response.Information, _clock?.UtcNow ?? DateTime.UtcNow);
-                await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
+                // Without a clarification, Compose immediately saves these facts and
+                // the current question together by CAS, before any optional writer.
+                if (response.Choices != null) await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             }
             if (response.Choices != null && _recovery != null)
             {
@@ -319,7 +322,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             }
             responsePlan = new(workspaceId, request.MessageId, context.StateVersion, intent, act,
                 response.MediaUrl != null ? OperationStatus.MediaPending : response.Operation, response.Facts, response.Choices == null ? [] : context.RecoveryOptions, [], null, null, null, response.Text,
-                response.MediaUrl == null && response.Operation == OperationStatus.Informational);
+                response.MediaUrl == null && response.Operation == OperationStatus.Informational) { Realization = response.Realization };
             var text = await Compose(response.Text, response.MediaUrl != null);
             // A module can be revoked during optional wording. Never send restricted media afterwards.
             var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);

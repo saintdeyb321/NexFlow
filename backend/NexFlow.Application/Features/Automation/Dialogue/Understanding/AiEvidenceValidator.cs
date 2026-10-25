@@ -75,8 +75,12 @@ internal static class AiEvidenceValidator
                 && remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition"
                 ? resolved : resolved.Status == ResolutionStatus.Ambiguous ? resolved : SlotResolution<TimePreference>.Invalid("UnsubstantiatedTime");
         }
-        return value with { Name = name, Location = Entity("Location", value.Location, ai.Location, value.AuthorizedLocations),
+        var validated = value with { Name = name, Location = Entity("Location", value.Location, ai.Location, value.AuthorizedLocations),
             Service = Entity("Service", value.Service, ai.Service, value.AuthorizedServices), Date = date, Time = time };
+        if (new[] { validated.Name.Code, validated.Location.Code, validated.Service.Code, validated.Date.Code, validated.Time.Code }
+            .Any(code => code.StartsWith("Unsubstantiated", StringComparison.Ordinal)))
+            NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationDiagnostics.Count("SemanticEvidence", "Rejected");
+        return validated;
     }
 
     internal static bool HasFragment(string source, string fragment)

@@ -12,6 +12,20 @@ namespace NexFlow.Tests.Concierge;
 
 public sealed class RuntimeReadToolsTests
 {
+    [Fact]
+    public async Task Source_denial_remains_denial_and_discards_every_payload_field()
+    {
+        var f = new AssistantConversationTests.Fixture();
+        f.KnowledgeReads.Setup(k => k.QueryAsync(f.Workspace, It.IsAny<BusinessKnowledgeSnapshot>(),
+            It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>())).ReturnsAsync(new KnowledgeResult {
+                Source = KnowledgeTopic.Faqs, Status = KnowledgeStatus.Denied, Facts = "must not escape"
+            });
+        var tools = new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object);
+        var result = await tools.ReadAsync(tools.Open(f.Workspace), new KnowledgeRead(KnowledgeTopic.Faqs), default);
+        Assert.Equal(BusinessReadStatus.Denied, result.Status);
+        Assert.Empty(result.Facts); Assert.Null(result.Knowledge); Assert.Null(result.Slots);
+    }
+
     private static BusinessReadTools Tools(AssistantConversationTests.Fixture f, Mock<IFaqRepository>? faqs = null) => new(
         new KnowledgeService(f.ProfileReads.Object, f.LocationReads.Object, f.HoursReads.Object,
             (faqs ?? new Mock<IFaqRepository>(MockBehavior.Strict)).Object, f.OfferingReads.Object, NullLogger<KnowledgeService>.Instance),

@@ -23,6 +23,7 @@ public sealed class ResponsePlan
     public string? NextQuestion { get; }
     public string FallbackText { get; }
     public bool AllowCreativeParaphrase { get; }
+    public VerifiedResponseLayout? Realization { get; init; }
 
     public ResponsePlan(Guid workspaceId, string sourceMessageId, string? stateVersion, ConversationIntent intent,
         DialogueAct act, OperationStatus operation, IEnumerable<VerifiedFact> facts, IEnumerable<ConversationMenuOption> choices,
@@ -38,5 +39,7 @@ public sealed class ResponsePlan
     }
 
     public ResponsePlan WithText(string text, string? stateVersion = null, IEnumerable<ConversationMenuOption>? choices = null) => new(WorkspaceId, SourceMessageId, stateVersion ?? StateVersion,
-        Intent, Act, Operation, Facts, choices ?? Choices, NeededData, TimeZone, Currency, NextQuestion, text, AllowCreativeParaphrase);
+        Intent, Act, Operation, Facts, choices ?? Choices, NeededData, TimeZone, Currency, NextQuestion, text, AllowCreativeParaphrase) {
+            Realization = text == FallbackText ? Realization : null
+        };
 }

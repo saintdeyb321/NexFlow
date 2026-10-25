@@ -73,6 +73,7 @@ public sealed class BusinessReadTools(IKnowledgeService knowledge, IEntitlementS
             {
                 var value = await knowledge.QueryAsync(turn.WorkspaceId, new() { WorkspaceId = turn.WorkspaceId },
                     new() { Topic = read.Topic, LocationId = read.LocationId, SearchTerm = read.SearchTerm, Offset = read.Offset, Limit = read.Limit }, deadline.Token).WaitAsync(deadline.Token);
+                if (value.Status == KnowledgeStatus.Denied) return Empty(BusinessReadStatus.Denied);
                 if (value.Source != read.Topic || read.LocationId != null && value.LocationId != read.LocationId || value.Facts.Length > 6000)
                     return Empty(BusinessReadStatus.Unavailable);
                 var facts = value.Offerings.SelectMany(o => new[] {

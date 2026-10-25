@@ -4,16 +4,25 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Composition;
 
 public static class OfferingResponseFormatter
 {
+    public static VerifiedResponseLayout? Realization(OfferingQueryPlan query)
+        => query.Question == OfferingQuestion.Comparison && !query.Broad && query.Clarification == null
+            && query.Offerings.Count is >= 2 and <= 5 && query.Offerings.All(p => string.IsNullOrWhiteSpace(p.Description))
+                ? new("Estas son sus características registradas:", query.Offerings.Select((p, i) =>
+                    new VerifiedResponseBlock("f" + i, Line(p, query.Broad))), "No hay otras diferencias verificadas que pueda afirmar.") : null;
+
+    private static string Line(VerifiedOffering p, bool broad)
+    {
+        var line = $"• {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m:0.00}";
+        if (p.DurationMinutes.HasValue) line += $"; duración: {p.DurationMinutes.Value} min";
+        if (!string.IsNullOrWhiteSpace(p.Description) && !broad) line += ". " + p.Description;
+        return line;
+    }
+
     public static string Format(OfferingQueryPlan query)
     {
         if (query.Clarification != null) return query.Clarification;
         if (query.Offerings.Count == 0) return "No tengo una opción activa registrada que coincida con tu consulta.";
-        var facts = query.Offerings.Take(5).Select(p => {
-            var line = $"• {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m:0.00}";
-            if (p.DurationMinutes.HasValue) line += $"; duración: {p.DurationMinutes.Value} min";
-            if (!string.IsNullOrWhiteSpace(p.Description) && !query.Broad) line += ". " + p.Description;
-            return line;
-        });
+        var facts = query.Offerings.Take(5).Select(p => Line(p, query.Broad));
         var text = string.Join("\n", facts);
         if (query.Question is OfferingQuestion.Stock || query.Question == OfferingQuestion.Availability && query.Type == "PRODUCT")
             text += "\nEsto confirma su presencia en el catálogo, no existencias de stock ni una entrega garantizada; el negocio debe confirmarlas.";

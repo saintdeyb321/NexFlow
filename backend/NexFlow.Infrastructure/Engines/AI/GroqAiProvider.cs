@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
+using NexFlow.Application.Features.AI.Router;
 
 namespace NexFlow.Infrastructure.Engines.AI;
 
@@ -58,7 +59,8 @@ public class GroqAiProvider : IAiProvider
 
         try
         {
-            using var response = await _httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken);
+            using var response = await AiTelemetry.SendAsync(ProviderType, false,
+                () => _httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken), _logger, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -70,6 +72,7 @@ public class GroqAiProvider : IAiProvider
 
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var json = JsonDocument.Parse(responseString);
+            AiTelemetry.Usage(ProviderType, json.RootElement, _logger);
             if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("choices", out var choices)
                 && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0 && choices[0].ValueKind == JsonValueKind.Object
                 && choices[0].TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object

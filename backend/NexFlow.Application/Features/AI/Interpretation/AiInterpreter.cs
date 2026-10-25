@@ -98,6 +98,7 @@ public class AiInterpreter : IAiInterpreter, IContextualAiInterpreter
     private async Task<AiInterpretation> InterpretAtBusinessTimeAsync(Guid workspaceId, string userMessage, string currentGoal, string? currentStep,
         HashSet<string> activeModules, DateTime localBusinessTime, CancellationToken ct, DialogueTurnContext? turn = null)
     {
+        using var telemetry = AiTelemetry.Begin(workspaceId, AiTaskType.IntentExtraction);
         var activeModulesList = string.Join(", ", activeModules);
         // Internal price-consent fingerprints are not linguistic context for a provider.
         var linguisticStep = currentStep?.StartsWith("ORDER_",StringComparison.Ordinal) == true ? currentStep.Split(':',2)[0] : currentStep;
@@ -211,6 +212,7 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
         {
+            NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationDiagnostics.Count("InterpretationFailure", nameof(AiFailureKind.RateLimit));
             _logger.LogWarning("Rate Limit alcanzado en el proveedor de IA para workspace {WorkspaceId}.", workspaceId);
             return new AiInterpretation { Intent = ConversationIntent.RateLimited, Failure = AiFailureKind.RateLimit };
         }
@@ -225,6 +227,7 @@ RESPONDE ÚNICAMENTE CON EL JSON. Asegúrate de que el campo Intent coincida exa
                 HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest } => AiFailureKind.Rejected,
                 _ => AiFailureKind.Unavailable };
             _logger.LogWarning("Interpretación IA no disponible en workspace {WorkspaceId}: {Failure}.", workspaceId, failure);
+            NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationDiagnostics.Count("InterpretationFailure", failure.ToString());
             return new AiInterpretation { Intent = ConversationIntent.ProviderUnavailable, Failure = failure };
         }
     }

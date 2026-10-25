@@ -28,6 +28,7 @@ public interface IRequestFlow { Task<string> ProcessAsync(Guid workspaceId, stri
 public interface ISupportFlow { Task<string> ProcessAsync(Guid workspaceId, string conversationId, CancellationToken ct); }
 public record ChatResponse(string Text, string? MediaUrl = null, string? FileName = null, string? CatalogScope = null)
 {
+    public VerifiedResponseLayout? Realization { get; init; }
     public IReadOnlyList<VerifiedFact> Facts { get; init; } = [];
     public IReadOnlyList<ConversationMenuOption>? Choices { get; init; }
     public KnowledgeResult? Information { get; init; }
@@ -798,7 +799,8 @@ public class ChatFlow : IChatFlow
                     return new(body,artifact.PdfUrl,query.Type == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf",query.Type) { Facts=Array.AsReadOnly(facts), Operation=OperationStatus.MediaPending };
                 if (artifact?.Status != CatalogArtifactStatus.Generating) await _notifications.NotifyCatalogUnavailableAsync(workspaceId,query.Type,ct);
             }
-            return new(body) { Facts=Array.AsReadOnly(facts), Operation=query.Offerings.Count == 0 ? OperationStatus.NotAvailable : OperationStatus.Informational };
+            return new(body) { Facts=Array.AsReadOnly(facts), Realization=OfferingResponseFormatter.Realization(query),
+                Operation=query.Offerings.Count == 0 ? OperationStatus.NotAvailable : OperationStatus.Informational };
         }
 
         KnowledgeTopic? topic = interpretation.Intent switch

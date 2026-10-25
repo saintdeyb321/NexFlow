@@ -7,7 +7,8 @@ namespace NexFlow.Application.Features.AI.Router;
 public enum AiTaskType
 {
     IntentExtraction, // Rápido, barato
-    ComplexChat       // Contexto amplio, conversacional
+    ComplexChat,       // Contexto amplio, conversacional
+    ResponseComposition
 }
 
 public interface IAiRouter
@@ -28,6 +29,7 @@ public class AiRouter : IAiRouter
 
     public async Task<string> ExecuteTaskAsync(AiTaskType taskType, string systemPrompt, string userPrompt, bool useJsonMode, CancellationToken ct)
     {
+        using var taskScope = AiTelemetry.TaskScope(taskType);
         // 🔥 SPRINT 10: Enrutamiento seguro por Enum, inmune a refactorizaciones de clases
         IAiProvider primaryProvider = taskType == AiTaskType.IntentExtraction
             ? GetProvider(AiProviderType.Groq)

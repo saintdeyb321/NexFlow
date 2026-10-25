@@ -25,7 +25,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
         => ConversationDiagnostics.MeasureAsync(logger, "Interpretation",
             () => PrepareWithRecoveryAsync(workspace, phone, request, context, modules, ct),
-            result => result.Act.ToString());
+            result => { ConversationDiagnostics.Count("UnderstandingRoute", result.UsedAi ? "Semantic" : "Local"); return result.Act.ToString(); });
 
     private async Task<PreparedDialogueTurn> PrepareWithRecoveryAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)

@@ -36,7 +36,7 @@ public class ContextRecoveryService : IContextRecoveryService
         var cached = await _cache.GetContextAsync(workspaceId, phone, ct);
         // Validate even a cache hit: a failed cache write, concurrent refill or
         // restart must never make an older Redis value authoritative.
-        var durable = await _stateRepo.GetStateAsync(workspaceId, phone, ct);
+        var durable = await ConversationDiagnostics.MeasureAsync(_logger, "ContextStateRead", () => _stateRepo.GetStateAsync(workspaceId, phone, ct));
         if (durable == null)
         {
             if (cached != null) await _cache.DeleteContextAsync(workspaceId, phone, ct);
@@ -52,7 +52,9 @@ public class ContextRecoveryService : IContextRecoveryService
     public async Task SaveContextAsync(Guid workspaceId, string phone, ConversationContextDto context, CancellationToken ct)
     {
         context.LastUpdated = _clock?.UtcNow ?? DateTime.UtcNow;
-        await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct);
+        await ConversationDiagnostics.MeasureAsync(_logger, "ContextStateWrite", async () => {
+            await _stateRepo.UpsertStateAsync(workspaceId, phone, context, ct); return true;
+        });
         await _cache.SetContextAsync(workspaceId, phone, context, ct);
     }
 

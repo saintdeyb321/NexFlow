@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Diagnostics.Metrics;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -97,7 +99,7 @@ public sealed class AiResilienceTests
         secondary.Verify(p => p.GenerateTextAsync("system", "user", true, It.IsAny<CancellationToken>()), fallback ? Times.Once() : Times.Never());
         var phases = logs.Where(l => l.StartsWith("ConversationPhase", StringComparison.Ordinal)).ToArray();
         Assert.Equal(fallback ? 2 : 1, phases.Length);
-        Assert.All(phases, l => { Assert.Contains("Phase=AiProvider", l); Assert.Contains("AiInvocations=1", l); });
+        Assert.All(phases, l => { Assert.Contains("Phase=AiProvider", l); Assert.Contains("ProviderInvocations=1", l); });
         Assert.Contains("Outcome=Error", phases[0]);
         if (fallback) { Assert.Contains("Provider=Gemini", phases[1]); Assert.Contains("Outcome=Success", phases[1]); }
         Assert.DoesNotContain(logs, l => l.Contains("Sensitive URL", StringComparison.Ordinal));
@@ -193,13 +195,93 @@ public sealed class AiResilienceTests
     }
     private sealed class Transport(int status, string response) : HttpMessageHandler
     {
+        public Func<int, (int Status, string Body)>? ResponseAt { get; set; }
+        public int DelayMilliseconds { get; set; }
         public int Calls { get; private set; } public string? Url { get; private set; } public bool HasGeminiKeyHeader { get; private set; } public string? Body { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Calls++; Url = request.RequestUri!.ToString(); HasGeminiKeyHeader = request.Headers.Contains("x-goog-api-key");
             Body = await request.Content!.ReadAsStringAsync(ct);
+            if (DelayMilliseconds > 0) await Task.Delay(DelayMilliseconds, ct);
             if (status == 0) await Task.Delay(Timeout.Infinite, ct);
-            return new((HttpStatusCode)status) { Content = new StringContent(response, Encoding.UTF8, "application/json") };
+            var current = ResponseAt?.Invoke(Calls) ?? (status, response);
+            return new((HttpStatusCode)current.Item1) { Content = new StringContent(current.Item2, Encoding.UTF8, "application/json") };
         }
+    }
+
+    [Theory]
+    [InlineData("Groq", true)] [InlineData("Gemini", true)]
+    [InlineData("Groq", false)] [InlineData("Gemini", false)]
+    public async Task Physical_attempts_and_reported_usage_are_distinct_safe_and_workspace_scoped(string provider, bool usage)
+    {
+        var body = provider == "Groq"
+            ? """{"choices":[{"message":{"content":"safe answer"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"""
+            : """{"candidates":[{"content":{"parts":[{"text":"safe answer"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""";
+        if (!usage) body = body.Replace(":10", ":-1").Replace(":5", ":\"unknown\"").Replace(":15", ":null");
+        var workspace = Guid.NewGuid(); var logs = new List<string>();
+        var measurements = new System.Collections.Concurrent.ConcurrentQueue<(string Name, long Value, string Tags)>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, owner) => { if (instrument.Meter.Name == AiTelemetry.MeterName) owner.EnableMeasurementEvents(instrument); };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) => measurements.Enqueue((instrument.Name, value,
+            string.Join(";", tags.ToArray().Select(t => t.Key + "=" + t.Value)))));
+        listener.Start();
+        using var transport = new Transport(200, body); using var http = new HttpClient(transport);
+        using (AiTelemetry.Begin(workspace, AiTaskType.IntentExtraction))
+            Assert.Equal("safe answer", await Provider(provider, http, Config(), logs).GenerateTextAsync("sensitive-system", "private-name private-phone", true));
+        Assert.Equal(1, transport.Calls);
+        Assert.Single(logs, line => line.StartsWith("AiHttpAttempt", StringComparison.Ordinal));
+        var report = Assert.Single(logs, line => line.StartsWith("AiUsage", StringComparison.Ordinal));
+        Assert.Contains("Available=" + usage, report);
+        if (usage) { Assert.Contains("InputTokens=10", report); Assert.Contains("OutputTokens=5", report); Assert.Contains("TotalTokens=15", report); }
+        Assert.Contains(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(workspace.ToString("N"))))[..16], report);
+        var text = string.Join("\n", logs);
+        foreach (var secret in new[] { workspace.ToString(), "test-only-secret", "sensitive-system", "private-name", "private-phone", "safe answer" }) Assert.DoesNotContain(secret, text);
+        Assert.Contains(measurements, m => m.Name == "nexflow.ai.http.attempts" && m.Value == 1);
+        Assert.DoesNotContain(measurements, m => m.Tags.Contains(workspace.ToString()) || m.Tags.Contains("private-phone"));
+    }
+
+    [Fact]
+    public async Task One_router_invocation_can_mean_two_real_http_attempts_without_an_unbounded_retry()
+    {
+        var logs = new List<string>(); using var transport = new Transport(200, "");
+        transport.ResponseAt = call => call == 1 ? (429, "private error must stay private")
+            : (200, """{"candidates":[{"content":{"parts":[{"text":"safe"}]}}],"usageMetadata":{"totalTokenCount":9}}""");
+        using var http = new HttpClient(transport); var config = Config(); config["Gemini:FallbackModel"] = "explicit-alternate";
+        var provider = new GeminiAiProvider(http, config, new CaptureLogger<GeminiAiProvider>(logs));
+        var router = new AiRouter([provider], new CaptureLogger<AiRouter>(logs));
+        using (AiTelemetry.Begin(Guid.NewGuid(), AiTaskType.ResponseComposition))
+            Assert.Equal("safe", await router.ExecuteTaskAsync(AiTaskType.ResponseComposition, "system", "private message", true, default));
+        Assert.Equal(2, transport.Calls);
+        Assert.Equal(2, logs.Count(l => l.StartsWith("AiHttpAttempt", StringComparison.Ordinal)));
+        Assert.Single(logs, l => l.StartsWith("ConversationPhase", StringComparison.Ordinal) && l.Contains("ProviderInvocations=1"));
+        Assert.Contains(logs, l => l.Contains("Role=Alternate") && l.Contains("Task=ResponseComposition"));
+        Assert.DoesNotContain("private message", string.Join("\n", logs)); Assert.DoesNotContain("private error", string.Join("\n", logs));
+    }
+
+    [Fact]
+    public async Task Concurrent_diagnostic_scopes_never_mix_workspace_usage_and_throwing_observers_do_not_fail_a_response()
+    {
+        async Task<(Guid Workspace, List<string> Logs)> Run()
+        {
+            var workspace = Guid.NewGuid(); var logs = new List<string>();
+            using var transport = new Transport(200, """{"choices":[{"message":{"content":"safe"}}],"usage":{"total_tokens":3}}""") { DelayMilliseconds = 10 };
+            using var http = new HttpClient(transport);
+            using (AiTelemetry.Begin(workspace, AiTaskType.IntentExtraction))
+                Assert.Equal("safe", await Provider("Groq", http, Config(), logs).GenerateTextAsync("system", "private", true));
+            return (workspace, logs);
+        }
+        var result = await Task.WhenAll(Run(), Run());
+        for (var i = 0; i < 2; i++)
+        {
+            string Key(Guid w) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(w.ToString("N"))))[..16];
+            Assert.Contains(Key(result[i].Workspace), string.Join("\n", result[i].Logs));
+            Assert.DoesNotContain(Key(result[1-i].Workspace), string.Join("\n", result[i].Logs));
+        }
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, owner) => { if (instrument.Meter.Name == AiTelemetry.MeterName) owner.EnableMeasurementEvents(instrument); };
+        listener.SetMeasurementEventCallback<long>((_, _, _, _) => throw new InvalidOperationException("synthetic observer failure")); listener.Start();
+        using var transport2 = new Transport(200, """{"choices":[{"message":{"content":"safe"}}],"usage":{"total_tokens":3}}""");
+        using var http2 = new HttpClient(transport2);
+        Assert.Equal("safe", await Provider("Groq", http2, Config()).GenerateTextAsync("system", "private", true));
     }
 }

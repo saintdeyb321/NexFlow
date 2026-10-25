@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Engines.AI;
+using NexFlow.Application.Features.AI.Router;
 
 namespace NexFlow.Infrastructure.Engines.AI;
 
@@ -123,7 +124,8 @@ public class GeminiAiProvider : IAiProvider
     {
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(modelName)}:generateContent";
         using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-        using var response = await _httpClient.PostAsync(url, content, cancellationToken);
+        using var response = await AiTelemetry.SendAsync(ProviderType, modelName != _primaryModel,
+            () => _httpClient.PostAsync(url, content, cancellationToken), _logger, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("Gemini API Error {StatusCode}.", response.StatusCode);
@@ -133,6 +135,7 @@ public class GeminiAiProvider : IAiProvider
         {
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var json = JsonDocument.Parse(responseString);
+            AiTelemetry.Usage(ProviderType, json.RootElement, _logger);
             if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("candidates", out var candidates) && candidates.ValueKind == JsonValueKind.Array
                 && candidates.GetArrayLength() > 0 && candidates[0].ValueKind == JsonValueKind.Object && candidates[0].TryGetProperty("content", out var candidate) && candidate.ValueKind == JsonValueKind.Object
                 && candidate.TryGetProperty("parts", out var parts) && parts.ValueKind == JsonValueKind.Array
