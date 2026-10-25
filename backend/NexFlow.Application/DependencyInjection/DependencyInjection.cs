@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.AI.Interpretation;
@@ -69,6 +69,7 @@ public static class DependencyInjection
         services.AddScoped<ReactivateClientCommandHandler>();
         services.AddScoped<DeleteClientCommandHandler>();
         services.AddScoped<IKnowledgeService, KnowledgeService>();
+        services.AddScoped<IBusinessReadTools, BusinessReadTools>();
         services.AddScoped<IOfferingService, OfferingService>();
         services.AddScoped<IAiInterpreter, AiInterpreter>();
         services.AddScoped<ILocationAvailabilityService, LocationAvailabilityService>();
@@ -94,3 +95,4 @@ public static class DependencyInjection
         return services;
     }
 }
+

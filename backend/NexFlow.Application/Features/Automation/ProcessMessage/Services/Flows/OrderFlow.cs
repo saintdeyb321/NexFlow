@@ -77,6 +77,15 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         if (proposal?.Kind == OrderTurnKind.Clarify) return await Remember(proposal.Clarification ?? "¿Cuál producto deseas agregar o cambiar?");
         var products = (await offerings.GetProductsAsync(workspaceId, proposal?.LocationId ?? context.SelectedLocationId,null,ct))
             .Where(p => p.IsActive).Select(VerifiedOffering.Capture).ToArray();
+        if (proposal?.Kind == OrderTurnKind.Start)
+        {
+            if (products.Length == 0)
+                return await Remember("No hay productos activos para preparar una solicitud en este momento. Puedes solicitar asistencia humana.", OperationStatus.NotAvailable);
+            context.CurrentGoal = "ORDER";
+            context.CurrentStep = "ORDER_COLLECT_ITEMS";
+            context.LastQuestion = "¿Qué productos y cantidades deseas solicitar? Puedes consultar el catálogo antes de elegir.";
+            return await Remember(context.LastQuestion);
+        }
         if (proposal == null)
         {
             var result = new OrderMentionResolver().Resolve(messageText,products,context,OfferingReference.Read(workspaceId,context));
@@ -187,3 +196,4 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         }
     }
 }
+

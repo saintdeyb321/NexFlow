@@ -153,7 +153,9 @@ public sealed class Sprint51ConversationTests
         var f = await Draft("COLLECT_TIME"); var state = await f.Context(); state.TargetTime = null;
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
         await f.HandleTurn("por la tarde", "options");
-        var content = f.Sent["options"].Content;
+        Assert.DoesNotContain("16:00", f.Sent["options"].Content);
+        await f.HandleTurn("muéstrame opciones", "explicit-options");
+        var content = f.Sent["explicit-options"].Content;
         Assert.Equal(1, content.Split("16:00").Length - 1); Assert.Equal(1, content.Count(c => c == '?'));
         f.EngineReads.Verify(e => e.GetAvailabilityAsync(f.Workspace, "sede-a", "service-a", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings);
@@ -313,3 +315,4 @@ public sealed class Sprint51ConversationTests
         Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context())); Assert.Empty(f.Bookings);
     }
 }
+

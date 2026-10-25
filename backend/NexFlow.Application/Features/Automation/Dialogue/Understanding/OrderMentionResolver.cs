@@ -163,3 +163,4 @@ public sealed class OrderMentionResolver
             .Where(p => !string.IsNullOrWhiteSpace(p) && SpanishTextNormalizer.Normalize(p) is not ("por favor" or "porfa" or "gracias")).ToArray();
     }
 }
+

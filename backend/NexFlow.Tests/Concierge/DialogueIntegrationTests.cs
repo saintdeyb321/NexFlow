@@ -188,7 +188,9 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
         Assert.Equal("sede-a", state.SelectedLocationId); Assert.Equal("service-a", state.SelectedServiceId);
         Assert.Equal("2026-10-22", state.TargetDate); Assert.Null(state.TargetTime);
         Assert.Equal(TimePreferenceKind.Period, state.PreferredTime!.Kind);
-        Assert.Contains("16:00", f.Sent["start"].Content); Assert.DoesNotContain("10:00", f.Sent["start"].Content);
+        Assert.Contains("hora", f.Sent["start"].Content); Assert.DoesNotContain("16:00", f.Sent["start"].Content);
+        await f.HandleTurn("muéstrame opciones", "explicit-options");
+        Assert.Contains("16:00", f.Sent["explicit-options"].Content); Assert.DoesNotContain("10:00", f.Sent["explicit-options"].Content);
         Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls); Cost(f, "multi-slot");
         await f.HandleTurn("16:00", "time"); Assert.Empty(f.Bookings);
         Assert.Equal("CONFIRM", (await f.Context()).CurrentStep); Assert.Contains("confirm", f.Sent["time"].Content, StringComparison.OrdinalIgnoreCase);
@@ -524,3 +526,4 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
     private void Cost(AssistantConversationTests.Fixture f, string scenario) => output.WriteLine(
         $"{scenario}: profile={f.ProfileReads.Invocations.Count}, locations={f.LocationReads.Invocations.Count}, services={CatalogCalls(f, "GetServicesAsync")}, products={CatalogCalls(f, "GetProductsAsync")}, serviceById={CatalogCalls(f, "GetServiceByIdAsync")}, serviceAtLocation={CatalogCalls(f, "IsServiceAvailableAtLocationAsync")}, ai={f.AiCalls}. Logical repository invocations; not physical Firestore document billing.");
 }
+

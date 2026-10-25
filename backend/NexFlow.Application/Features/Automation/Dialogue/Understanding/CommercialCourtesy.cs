@@ -9,11 +9,14 @@ internal static class CommercialCourtesy
     private static readonly string[][] Endings = [["por", "favor"], ["si", "puedes"], ["porfa"], ["gracias"]];
 
     internal static string Trim(string text, IReadOnlyList<VerifiedOffering> offerings)
+        => TrimNames(text, offerings.SelectMany(o => new[] { o.Name }.Concat(o.Aliases)));
+
+    internal static string TrimNames(string text, IEnumerable<string> protectedNames)
     {
         var spans = Regex.Matches(text, @"[\p{L}\p{M}\p{N}]+", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
         var tokens = spans.Select(m => SpanishTextNormalizer.Normalize(m.Value)).ToArray();
         var protectedTokens = new bool[tokens.Length];
-        foreach (var name in offerings.SelectMany(o => new[] { o.Name }.Concat(o.Aliases)))
+        foreach (var name in protectedNames)
         {
             var words = OrderMentionResolver.Words(name);
             if (words.Length == 0) continue;
@@ -32,3 +35,4 @@ internal static class CommercialCourtesy
         return end == tokens.Length ? text : end == 0 ? "" : text[..(spans[end - 1].Index + spans[end - 1].Length)];
     }
 }
+

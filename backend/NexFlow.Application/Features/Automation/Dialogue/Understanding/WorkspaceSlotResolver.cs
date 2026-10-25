@@ -108,7 +108,23 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
                     System.Globalization.DateTimeStyles.None, out var anchorDate) ? anchorDate : null,
                 state.CurrentStep == "COLLECT_DATE" ? state.LastQuestion : null)
             : dates.Resolve(text, localNow, state.CurrentStep == "COLLECT_DATE");
-        var name = names.Resolve(text, state.CurrentStep == "COLLECT_CUSTOMERNAME", compoundAnswer: reservation);
+        var nameText = CommercialCourtesy.TrimNames(text, serviceOptions.Concat(productOptions)
+            .SelectMany(o => new[] { o.Name }.Concat(o.Aliases ?? [] )).Concat(authorizedLocations.Select(l => l.Name)));
+        var name = names.Resolve(nameText, state.CurrentStep == "COLLECT_CUSTOMERNAME", compoundAnswer: reservation);
+        if (reservation && name.Status == ResolutionStatus.Insufficient && nameText.IndexOfAny([',', '\n', ';']) >= 0)
+        {
+            // A compound personal span is supported by other resolved fields, not capitalization.
+            // Never choose a name arbitrarily from two unknown prose fragments.
+            var parts = nameText.Split([',', '\n', ';'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            bool Known(string part) => dates.ResolveReservation(part, localNow).Status == ResolutionStatus.Determined
+                || times.Resolve(part, state.CurrentStep == "COLLECT_TIME").Status == ResolutionStatus.Determined
+                || locationMentions.Resolve(part, authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)).ToArray()).Status == ResolutionStatus.Determined
+                || offeringMentions.Resolve(part, serviceOptions.Concat(productOptions).ToArray()).Status == ResolutionStatus.Determined;
+            var free = parts.Where(part => !Known(part)).ToArray();
+            name = free.Length == 1 && free.Length < parts.Length ? names.Resolve(free[0], true)
+                : free.Any(part => names.Resolve(part, true).Status == ResolutionStatus.Determined)
+                    ? SlotResolution<string>.Missing("SemanticComposition") : SlotResolution<string>.Missing();
+        }
         if (name.Status is ResolutionStatus.Determined or ResolutionStatus.Ambiguous && name.Candidates.Count > 0)
         {
             var businessNames = serviceOptions.Concat(productOptions).Concat(authorizedLocations.Where(l => l.Id != null).Select(l => new BusinessEntityOption(l.Id!, l.Name)))
@@ -143,3 +159,4 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         && (scope == null || string.Equals(offering.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
             || string.Equals(offering.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && offering.LocationIds.Contains(scope));
 }
+

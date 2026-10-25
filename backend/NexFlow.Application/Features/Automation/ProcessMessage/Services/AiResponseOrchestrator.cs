@@ -134,7 +134,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         else if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) act = DialogueAct.Cancellation;
         if (context.PendingRecoveryAction != null && interpretation.Intent != ConversationIntent.Support
             && (interpretation.Directive != ConversationDirective.None
-                || interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)))
+                || interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Profile or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)))
             return await SendText("Antes de continuar, confirma la decisión pendiente: responde sí o no, o escribe asesor para recibir ayuda.");
 
         if (context.CurrentGoal is "BOOKING" or "RESERVATION" && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Request
@@ -187,7 +187,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 _ => interpretation.Intent
             };
             var informational = interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.ProductQuery
-                or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq;
+                or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Profile;
             var activeFlowDenied = AiIntentAccess.GetDeniedResponse(effectiveIntent, activeModules);
             var deniedResponse = interpretation.Intent == ConversationIntent.Support ? null : interpretation.DeniedResponse
                 ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules)
@@ -202,7 +202,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 finalResponse = await _supportFlow.ProcessAsync(workspaceId, conversation.Id, cancellationToken);
             }
             else if (context.CurrentGoal is "ORDER" or "BOOKING" or "RESERVATION" && interpretation.Directive == ConversationDirective.None
-                && interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq)
+                && interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Profile)
             {
                 var answer = await _chatFlow.ProcessAsync(workspaceId, request.MessageText, interpretation, context.SelectedLocationId, cancellationToken);
                 var continuation = activeFlowDenied != null ? "Conservamos lo que has indicado. " + activeFlowDenied
@@ -225,7 +225,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     responsePlan = await _bookingFlow.ProcessPlannedAsync(workspaceId, normalizedPhone, conversation.Id, context, interpretation, request.CustomerName, request.MessageId, act, cancellationToken);
                     finalResponse = responsePlan.FallbackText;
                 }
-                if (_recovery != null && interpretation.BookingProposal?.ReadOnly != true && context.CurrentGoal is "BOOKING" or "RESERVATION" && context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE" or "COLLECT_TIME")
+                if (_recovery != null && interpretation.BookingProposal?.ReadOnly != true && context.CurrentGoal is "BOOKING" or "RESERVATION"
+                    && (context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE" || context.CurrentStep == "COLLECT_TIME" && responsePlan?.Choices.Count > 0))
                 {
                     finalResponse = await _recovery.DecorateAsync(workspaceId, normalizedPhone, context, activeModules, finalResponse, cancellationToken,
                         context.CurrentStep == "COLLECT_TIME" && responsePlan?.Choices.Count > 0 ? responsePlan.Choices : null);
@@ -274,7 +275,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         ResponsePlan Bind(string text, bool media = false) => responsePlan?.WithText(text, context.StateVersion)
             ?? new(workspaceId, request.MessageId, context.StateVersion, intent, act,
                 media ? OperationStatus.MediaPending : operation, [], context.RecoveryOptions, [], null, null, null, text,
-                !media && intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.Faq or ConversationIntent.Location or ConversationIntent.BusinessHours);
+                !media && intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.Faq or ConversationIntent.Profile or ConversationIntent.Location or ConversationIntent.BusinessHours);
 
         async Task<string> Compose(string text, bool media = false)
         {
@@ -334,3 +335,4 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 response.FileName!, response.CatalogScope!, sourceMessageId, ct)
             : _outboundMessageService.SendMessageAsync(workspaceId, conversationId, phone, response.Text, SenderType.AI, sourceMessageId, ct);
 }
+

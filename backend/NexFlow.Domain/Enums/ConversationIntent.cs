@@ -15,5 +15,6 @@ public enum ConversationIntent
 
     // 🔥 SPRINT 05: Intenciones exclusivas de sistema para manejar caídas y errores sin alucinar
     ProviderUnavailable,
-    RateLimited
+    RateLimited,
+    Profile
 }

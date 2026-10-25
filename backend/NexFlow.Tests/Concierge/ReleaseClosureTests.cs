@@ -88,7 +88,9 @@ public sealed class ReleaseClosureTests
         Assert.NotNull(state.PreferredTime); Assert.Contains("22 de octubre de 2026", f.Sent["booking"].Content);
         Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
         await f.HandleTurn("en Concepción", "location");
-        Assert.Contains("16:00", f.Sent["location"].Content); Assert.Null((await f.Context()).TargetTime);
+        Assert.DoesNotContain("16:00", f.Sent["location"].Content); Assert.Null((await f.Context()).TargetTime);
+        await f.HandleTurn("muéstrame opciones", "explicit-options");
+        Assert.Contains("16:00", f.Sent["explicit-options"].Content);
         await f.HandleTurn("16:00", "time"); Assert.Empty(f.Bookings);
         await f.HandleTurn("mejor el viernes", "correction");
         Assert.Equal("2026-10-23", (await f.Context()).TargetDate);
@@ -220,3 +222,4 @@ public sealed class ReleaseClosureTests
         Assert.All(f.CatalogReads.Invocations, i => { Assert.Equal("GetArtifactAsync", i.Method.Name); Assert.Equal(f.Workspace, i.Arguments[0]); Assert.Equal(scope, i.Arguments[1]); });
     }
 }
+

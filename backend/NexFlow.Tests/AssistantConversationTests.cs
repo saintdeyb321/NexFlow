@@ -132,7 +132,7 @@ public sealed class AssistantConversationTests
         await f.Turn("1"); Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);
         await f.Turn("la segunda"); Assert.Equal("service-b", (await f.Context()).SelectedServiceId);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Date = "2026-10-20" }); await f.Turn("el 20 de octubre");
-        await f.Turn("1"); Assert.Empty(f.Bookings); Assert.Equal("CONFIRM", (await f.Context()).CurrentStep);
+        await f.Turn("10:00"); Assert.Empty(f.Bookings); Assert.Equal("CONFIRM", (await f.Context()).CurrentStep);
         await f.Turn("¿dónde están?"); Assert.Empty(f.Bookings); Assert.Equal("service-b", (await f.Context()).SelectedServiceId);
         await f.Turn("sí", source: "information-reply"); Assert.Empty(f.Bookings);
         await f.Turn("continuemos", source: "resume-summary");
@@ -310,7 +310,7 @@ public sealed class AssistantConversationTests
             var knowledge = new Mock<IKnowledgeService>(MockBehavior.Strict);
             KnowledgeReads = knowledge;
             knowledge.Setup(k => k.QueryAsync(Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == Workspace), It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid w, BusinessKnowledgeSnapshot _, KnowledgeQuery q, CancellationToken _) => {
-                FactualQueries.Add((w, q.Topic)); return new KnowledgeResult { Status = KnowledgeStatus.Found, Source = q.Topic, Facts = "Dato real autorizado del negocio: S/ 25.00, sede y horario registrados." }; });
+                FactualQueries.Add((w, q.Topic)); return new KnowledgeResult { Status = KnowledgeStatus.Found, Source = q.Topic, LocationId = q.LocationId, Facts = "Dato real autorizado del negocio: S/ 25.00, sede y horario registrados." }; });
             var notifications = Mock.Of<INotificationService>();
             var booking = new BookingFlow(offerings.Object, new LocationResolverService(locations.Object), engine.Object, locations.Object, hours.Object, entitlements.Object, Contexts, reservationRepo.Object, profiles.Object, knowledge.Object);
             Booking = booking;
@@ -398,3 +398,4 @@ public sealed class AssistantConversationTests
         }
     }
 }
+

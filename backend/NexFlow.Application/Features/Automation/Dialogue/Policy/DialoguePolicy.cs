@@ -8,6 +8,7 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Policy;
 public sealed class DialoguePolicy
 {
     public static DialogueAct OrderAct(OrderTurnKind kind, IReadOnlyList<OrderEdit> edits, ConversationContextDto state) => kind switch {
+        OrderTurnKind.Start => DialogueAct.StartOperation,
         OrderTurnKind.Summary or OrderTurnKind.Hypothetical => DialogueAct.Information,
         OrderTurnKind.Submit => DialogueAct.Confirmation,
         OrderTurnKind.Clarify => DialogueAct.SemanticAmbiguity,
@@ -106,3 +107,4 @@ public sealed class DialoguePolicy
         return slots.FirstOrDefault(s => s.Missing || state.PendingDialogueSlots.Contains(s.Slot)).Step ?? "CONFIRM";
     }
 }
+

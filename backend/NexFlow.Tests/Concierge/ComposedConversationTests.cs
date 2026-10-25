@@ -76,6 +76,8 @@ public sealed class ComposedConversationTests(ITestOutputHelper output)
                 Assert.Contains("Limpieza dental", f.Sent.Values.Last().Content); Assert.Contains("jueves 22", f.Sent.Values.Last().Content); break;
             case 5:
                 await Turn("Quiero reservar limpieza dental para pasado mañana"); await Turn("En Concepción, mejor por la tarde");
+                Assert.DoesNotContain("16:00", f.Sent.Values.Last().Content);
+                await Turn("muéstrame opciones");
                 Assert.Equal("sede-a", (await f.Context()).SelectedLocationId); Assert.Contains("16:00", f.Sent.Values.Last().Content); break;
             case 6: case 7: case 8:
                 await Turn("quiero limpieza dental en Concepción pasado mañana por la tarde"); await Turn("16:00");
@@ -174,3 +176,4 @@ public sealed class ComposedConversationTests(ITestOutputHelper output)
         Assert.Equal("2026-10-22", (await first.Context()).TargetDate); Assert.Equal("2026-10-21", (await second.Context()).TargetDate);
     }
 }
+

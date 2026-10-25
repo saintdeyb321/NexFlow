@@ -152,11 +152,12 @@ public sealed class AssistantLicenseBudgetTests
     {
         var allowed = Guid.NewGuid(); var denied = Guid.NewGuid();
         var entitlements = new Mock<IEntitlementService>(MockBehavior.Strict);
-        entitlements.Setup(e => e.GetAvailableModuleCodesAsync(allowed, default)).ReturnsAsync(new[] { "LOCATIONS", "BUSINESS_HOURS" });
-        entitlements.Setup(e => e.GetAvailableModuleCodesAsync(denied, default)).ReturnsAsync(new[] { "SERVICES", "RESERVATIONS" });
+        entitlements.Setup(e => e.GetAvailableModuleCodesAsync(allowed, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { "LOCATIONS", "BUSINESS_HOURS" });
+        entitlements.Setup(e => e.GetAvailableModuleCodesAsync(denied, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { "SERVICES", "RESERVATIONS" });
         var knowledge = new Mock<IKnowledgeService>(MockBehavior.Strict);
-        knowledge.Setup(k => k.QueryAsync(allowed, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == allowed), It.IsAny<KnowledgeQuery>(), default))
-            .ReturnsAsync(new KnowledgeResult { Status = KnowledgeStatus.Found, Facts = "Authorized workspace facts" });
+        knowledge.Setup(k => k.QueryAsync(allowed, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == allowed), It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, BusinessKnowledgeSnapshot _, KnowledgeQuery q, CancellationToken _) =>
+                new KnowledgeResult { Status = KnowledgeStatus.Found, Source = q.Topic, LocationId = q.LocationId, Facts = "Authorized workspace facts" });
         var chat = new ChatFlow(knowledge.Object, entitlements.Object, Mock.Of<ILocationResolverService>(),
             NullLogger<ChatFlow>.Instance, Mock.Of<ICatalogGenerationService>(), Mock.Of<INotificationService>());
         Assert.Contains("Authorized workspace facts", (await chat.ProcessAsync(allowed, "consulta", new() { Intent = intent }, null, default)).Text);
@@ -190,7 +191,7 @@ public sealed class AssistantLicenseBudgetTests
         await f.Turn("1"); Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);
         await f.Turn("2"); Assert.Equal("service-b", (await f.Context()).SelectedServiceId);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Date = "2026-10-20" }); await f.Turn("el 20 de octubre");
-        await f.Turn("1"); Assert.Equal("COLLECT_CUSTOMERNAME", (await f.Context()).CurrentStep);
+        await f.Turn("10:00"); Assert.Equal("COLLECT_CUSTOMERNAME", (await f.Context()).CurrentStep);
         await f.Turn("Ana Pérez"); Assert.Equal("CONFIRM", (await f.Context()).CurrentStep);
         await f.Turn("sí", "commit"); await f.Turn("sí", "commit");
         var booking = Assert.Single(f.Bookings.Values);
@@ -198,3 +199,4 @@ public sealed class AssistantLicenseBudgetTests
         Assert.Equal(new DateTime(2026, 10, 20, 15, 0, 0, DateTimeKind.Utc), booking.StartTime);
     }
 }
+

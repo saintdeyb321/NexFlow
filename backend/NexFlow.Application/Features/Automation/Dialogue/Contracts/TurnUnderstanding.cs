@@ -54,11 +54,13 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
     public IReadOnlyList<string> ServiceHints { get; init; } = [];
     public string? DraftDate { get; init; }
     public DialogueQuestionContext? Question { get; init; }
+    public ReservationTimeReference? AvailabilityReference { get; init; }
     public static DialogueTurnContext Capture(Guid workspace, string source, ConversationContextDto state,
         DateTimeOffset localNow, TimeZoneInfo zone, IEnumerable<string> modules) => new(workspace, source,
             state.CurrentGoal, state.CurrentStep, state.StateVersion, state.SelectedLocationId, state.LastQuestion,
             localNow, zone.Id, modules.ToFrozenSet(StringComparer.OrdinalIgnoreCase)) {
                 DraftDate = state.TargetDate,
+                AvailabilityReference = ReservationTimeReference.Current(workspace, state, localNow.UtcDateTime),
                 Question = ConversationQuestion.Current(workspace, state, localNow.UtcDateTime) is { } question
                     ? new(question.Expected, question.Intent, question.LinguisticQuestion(state), question.Expected != ExpectedReply.Information ? null : question.Intent switch {
                         ConversationIntent.Reservation when state.Information?.Topic == "Availability" => "Availability",
@@ -70,6 +72,15 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
 }
 
 public sealed record DialogueQuestionContext(ExpectedReply Expected, ConversationIntent Intent, string Prompt, string? InformationTopic);
+
+public sealed record ReservationTimeReference(Guid WorkspaceId, string LocationId, string ServiceId, string Date, string Time, DateTime ObservedAt)
+{
+    public static ReservationTimeReference? Current(Guid workspace, ConversationContextDto state, DateTime now)
+        => state.CurrentGoal is "BOOKING" or "RESERVATION" && state.Information is { Topic: "Availability", AvailabilityReference: { } reference }
+            && reference.WorkspaceId == workspace && reference.ObservedAt <= now && reference.ObservedAt > now.AddMinutes(-10)
+            && ConversationQuestion.Current(workspace, state, now) is { Expected: ExpectedReply.Information, Intent: ConversationIntent.Reservation }
+            ? reference : null;
+}
 
 public sealed record TurnUnderstanding(DialogueTurnContext Context, SlotResolution<string> Name,
     SlotResolution<ResolvedBusinessEntity> Location, SlotResolution<ResolvedBusinessEntity> Service,

@@ -137,6 +137,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 expected: denied == null ? question.Expected : ExpectedReply.Information, referenceIntent: question.Intent);
         }
         var repair = InformationalRequest.IsRepair(text);
+        if (booking && context.CurrentStep == "COLLECT_TIME" && context.PendingRecoveryAction == null && !expiredDraft && InformationalRequest.Menu(text))
+            return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Directive = ConversationDirective.ShowOptions });
         var topic = repair ? InformationalRequest.RepairTopic(request.MessageText) : InformationalRequest.PublicTopic(text);
         if (topic != null || InformationalRequest.ScopeCorrection(text) && information != null)
         {
@@ -569,3 +571,4 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         await contexts.SaveContextAsync(workspace, phone, context, ct); return decision;
     }
 }
+

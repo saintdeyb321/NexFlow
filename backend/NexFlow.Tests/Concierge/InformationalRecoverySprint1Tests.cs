@@ -216,7 +216,9 @@ public sealed class InformationalRecoverySprint1Tests(ITestOutputHelper output)
         var f = Create(); await Ready(f);
         await f.HandleTurn("Mejor el martes que viene por la tarde", "preference");
         var state = await f.Context(); Assert.Equal("2026-10-27", state.TargetDate); Assert.Null(state.TargetTime);
-        Assert.NotNull(state.PreferredTime); Assert.Contains("16:00", f.Sent["preference"].Content);
+        Assert.NotNull(state.PreferredTime); Assert.DoesNotContain("16:00", f.Sent["preference"].Content);
+        await f.HandleTurn("muéstrame opciones", "explicit-options");
+        Assert.Contains("16:00", f.Sent["explicit-options"].Content);
         Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
     }
 
@@ -509,3 +511,4 @@ public sealed class InformationalRecoverySprint1Tests(ITestOutputHelper output)
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
     }
 }
+

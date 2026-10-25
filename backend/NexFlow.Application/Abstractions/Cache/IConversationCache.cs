@@ -58,6 +58,7 @@ public sealed record ConversationMenuOption(string Key, string Label, string Kin
 
 public sealed class ConversationInformationContext
 {
+    public NexFlow.Application.Features.Automation.Dialogue.Contracts.ReservationTimeReference? AvailabilityReference { get; set; }
     public string Topic { get; set; } = string.Empty;
     public string? LocationId { get; set; }
     public string? Clarification { get; set; }
@@ -79,3 +80,4 @@ public interface IConversationCache
     Task<ConversationContextDto?> GetContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken);
     Task DeleteContextAsync(Guid workspaceId, string customerPhone, CancellationToken cancellationToken);
 }
+

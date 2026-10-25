@@ -19,7 +19,13 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
     public async Task<PreparedDialogueTurn?> ResolveAsync(Guid workspace, string source, string text, ConversationContextDto context,
         HashSet<string> modules, CancellationToken ct, AiInterpretation? semantic = null)
     {
-        if (!OrderMentionResolver.IsCandidate(text, context)) return null;
+        var semanticEvidence = semantic?.Evidence?.Where(e => e != null && e.Slot == "Act").ToArray() ?? [];
+        var semanticStart = semantic is { Intent: ConversationIntent.Order, Act: DialogueAct.StartOperation, RequiresClarification: false }
+            && semanticEvidence.Length == 1 && semanticEvidence[0].NormalizedValue == nameof(DialogueAct.StartOperation)
+            && !string.IsNullOrWhiteSpace(semanticEvidence[0].Text) && semanticEvidence[0].Text.Length <= 300
+            && AiEvidenceValidator.HasFragment(text, semanticEvidence[0].Text)
+            && !OrderMentionResolver.IsQuestion(text) && !OrderMentionResolver.IsHypothetical(text);
+        if (!semanticStart && !OrderMentionResolver.IsCandidate(text, context)) return null;
         var words = OrderMentionResolver.Words(text); var normalized = SpanishTextNormalizer.Normalize(text);
         var activeOrder = context.CurrentGoal == "ORDER";
         var hypothetical = OrderMentionResolver.IsHypothetical(text);
@@ -32,13 +38,13 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var summary = activeOrder && !hypothetical && (words.Any(w => w is "total" or "subtotal") || normalized is "cuanto seria" or "cuanto es" or "mostrar pedido" or "listar pedido" or "ver pedido" or "mi pedido");
         var changing = words.Any(w => w is "agrega" or "agregar" or "quita" or "quitar" or "elimina" or "eliminar" or "saca" or "cambia" or "mejor" or "pon");
         var polite = !hypothetical && !words.Contains("no") && (politePurchase || changing && words.Contains("puedes") || words.Contains("me") && words.Any(w=>w is "apuntas" or "vendes"));
-        var buying = !catalogRequest && (politePurchase || words.Any(w => w is "quiero" or "quisiera" or "necesito" or "comprar" or "llevo" or "dame" or "agrega" or "agregar" or "anade" or "apuntas" or "apuntar" or "vendes" or "pedir"))
+        var buying = !catalogRequest && (semanticStart || politePurchase || words.Any(w => w is "quiero" or "quisiera" or "necesito" or "comprar" or "llevo" or "dame" or "agrega" or "agregar" or "anade" or "apuntas" or "apuntar" or "vendes" or "pedir"))
             && !words.Contains("no") && (!OrderMentionResolver.IsQuestion(text) || polite);
         var internalLocation = activeOrder && (context.CurrentStep == "ORDER_LOCATION" || words.Any(w => w is "sede" or "en" or "cambia")) && !OrderMentionResolver.IsQuestion(text);
         if (changing && OrderMentionResolver.IsQuestion(text) && !hypothetical && !polite)
             return new(DialogueAct.Information, new() { Intent=ConversationIntent.Order }, Response: "¿Deseas modificar el pedido o solo consultar esa posibilidad?");
         var readOnly = !submit && !summary && !polite && (catalogRequest || hypothetical || OrderMentionResolver.IsQuestion(text)) && !changing;
-        var explicitOrder=politePurchase || words.Any(w=>w is "comprar" or "pedido" or "producto" or "productos" or "agrega" or "agregar" or "anade" or "dame" or "llevo" or "apuntas" or "vendes");
+        var explicitOrder=semanticStart || politePurchase || words.Any(w=>w is "comprar" or "pedido" or "producto" or "productos" or "agrega" or "agregar" or "anade" or "dame" or "llevo" or "apuntas" or "vendes");
         var weakPurchase=buying && !activeOrder && !explicitOrder;
         if (weakPurchase && !modules.Contains("CATALOG")) return null;
         var order = activeOrder && !readOnly || buying || submit;
@@ -88,6 +94,11 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             if (result.Edits.Count == 0 && weakPurchase && semantic == null && result.Error?.StartsWith("Hay varias opciones:",StringComparison.Ordinal) != true) return null;
             if (AiIntentAccess.GetDeniedResponse(ConversationIntent.Order,modules) is { } unavailable)
                 return new(DialogueAct.Information,new(){Intent=ConversationIntent.Order},Response:unavailable);
+            // Starting preparation does not require an item. Unknown items are never
+            // inserted: the same draft will collect validated catalog edits later.
+            if (!activeOrder && buying && !hypothetical && !changing && result.Edits.Count == 0
+                && OrderMentionResolver.Match(text, text, products).Count == 0)
+                return Order(OrderTurnKind.Start, []);
             return Order(hypothetical ? OrderTurnKind.Hypothetical : result.Error == null ? OrderTurnKind.Edit : OrderTurnKind.Clarify,
                 result.Edits, selectedLocation, result.Error);
         }
@@ -150,3 +161,4 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         static bool changingProduct(string text) => OrderMentionResolver.Words(text).Any(w => w is "por" or "producto" or "productos") && !text.EndsWith("por favor", StringComparison.OrdinalIgnoreCase);
     }
 }
+

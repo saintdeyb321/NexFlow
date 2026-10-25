@@ -11,8 +11,9 @@ public sealed partial class NameSlotResolver
         if (text.Length > 2000) return SlotResolution<string>.Invalid("InputTooLong");
         var presentations = Presentation().Matches(text);
         if (presentations.Count > 1) return SlotResolution<string>.Ambiguous([], "MultiplePresentations");
-        if (presentations.Count == 0 && !nameWasRequested && !(compoundAnswer && text.IndexOfAny([',', '\n', ';']) >= 0)) return SlotResolution<string>.Missing();
-        if (presentations.Count == 0 && compoundAnswer && text.IndexOfAny([',', '\n', ';']) >= 0)
+        if (presentations.Count == 0 && !nameWasRequested)
+            return SlotResolution<string>.Missing();
+        if (presentations.Count == 0 && nameWasRequested && compoundAnswer && text.IndexOfAny([',', '\n', ';']) >= 0)
         {
             var parts = text.Split([',', '\n', ';'], StringSplitOptions.RemoveEmptyEntries)
                 .Select(part => Resolve(part.Trim(), true)).ToArray();
@@ -30,9 +31,11 @@ public sealed partial class NameSlotResolver
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (raw.Length > 120 || !NameCharacters().IsMatch(raw) || tokens.Any(NonNames.Contains))
             return SlotResolution<string>.Invalid("NotAPersonName");
-        if (tokens.Any(w => w is "me" or "mi" or "es" or "soy" or "llamo" or "nombre")
-            || presentations.Count == 0 && tokens.Length > 1 && !raw.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .All(w => char.IsUpper(w[0]) || w is "de" or "del" or "la" or "las" or "los"))
+        if (tokens.Any(w => w is "me" or "mi" or "es" or "soy" or "llamo" or "nombre"))
+            return SlotResolution<string>.Missing("SemanticComposition");
+        // Referential/relational prose is not an unequivocal bare personal answer.
+        // An explicit presentation can still contain a legitimate surname with such a particle.
+        if (presentations.Count == 0 && tokens.Any(w => w is "eso" or "esto" or "ese" or "esa" or "lo" or "que" or "para" or "con"))
             return SlotResolution<string>.Missing("SemanticComposition");
         if (tokens.Length == 1) return SlotResolution<string>.Incomplete(raw, raw, "SurnameMissing");
         if (tokens.Length > 8) return SlotResolution<string>.Invalid("NameTooLong");
@@ -56,3 +59,4 @@ public sealed partial class NameSlotResolver
     [GeneratedRegex(@"^[\p{L}\p{M}]+(?:['’ -][\p{L}\p{M}]+)*$", RegexOptions.CultureInvariant, 100)]
     private static partial Regex NameCharacters();
 }
+

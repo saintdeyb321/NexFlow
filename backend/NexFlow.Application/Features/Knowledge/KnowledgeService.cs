@@ -59,6 +59,8 @@ public sealed class KnowledgeService : IKnowledgeService
         try
         {
             if (snapshot.WorkspaceId != workspaceId) throw new InvalidOperationException("Knowledge workspace mismatch.");
+            if (query.Limit is < 1 or > 5 || query.Offset is < 0 or > 500 || query.SearchTerm?.Length > 200)
+                throw new ArgumentException("Invalid bounded knowledge query.");
             var locationId = query.LocationId;
             List<LocationDto>? locations = snapshot.CurrentQueryLocations?.ToList();
             if (query.Topic == KnowledgeTopic.Locations || !string.IsNullOrWhiteSpace(locationId))
@@ -71,23 +73,26 @@ public sealed class KnowledgeService : IKnowledgeService
             switch (query.Topic)
             {
                 case KnowledgeTopic.Locations:
-                    facts = QueryLocations(locations!, locationId);
-                    break;
+                    var locationsPage = locations!.Where(l => locationId == null || l.Id == locationId)
+                        .OrderBy(l => l.Id, StringComparer.Ordinal).Skip(query.Offset).Take(query.Limit + 1).ToArray();
+                    return new KnowledgeResult { Source = query.Topic, LocationId = locationId,
+                        Status = locationsPage.Length == 0 ? KnowledgeStatus.NotFound : KnowledgeStatus.Found,
+                        Facts = QueryLocations(locationsPage.Take(query.Limit), locationId), HasMore = locationsPage.Length > query.Limit,
+                        References = locationsPage.Take(query.Limit).Where(l => l.Id != null).Select(l => new KnowledgeLocationChoice(l.Id!, l.Name)).ToArray() };
                 case KnowledgeTopic.BusinessHours:
                     return await QueryBusinessHoursAsync(workspaceId, query, locations, cancellationToken);
                 case KnowledgeTopic.Faqs:
-                    facts = QueryFaqs((await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList(), query.SearchTerm);
+                    facts = QueryFaqs((await _faqRepo.GetFaqsAsync(workspaceId, cancellationToken)).ToList(), query.SearchTerm, query.Offset, query.Limit);
                     break;
                 case KnowledgeTopic.Profile:
-                    facts = QueryProfile(await _profileRepo.GetProfileAsync(workspaceId, cancellationToken));
-                    break;
+                    var profile = await _profileRepo.GetProfileAsync(workspaceId, cancellationToken);
+                    return new KnowledgeResult { Source = query.Topic, Status = profile == null ? KnowledgeStatus.NotFound : KnowledgeStatus.Found,
+                        Facts = QueryProfile(profile), Profile = profile == null ? null : new(profile.CommercialName, profile.Description,
+                            profile.ContactEmail, profile.WhatsAppNumber, profile.TimeZone) };
                 case KnowledgeTopic.Products:
                 case KnowledgeTopic.Offerings: // Existing callers used Offerings for products.
-                    facts = await QueryProductsAsync(workspaceId, locationId, query.SearchTerm, cancellationToken);
-                    break;
                 case KnowledgeTopic.Services:
-                    facts = await QueryServicesAsync(workspaceId, locationId, query.SearchTerm, cancellationToken);
-                    break;
+                    return await QueryOfferingsAsync(workspaceId, query, cancellationToken);
                 default:
                     return Result(query, locationId);
             }
@@ -121,29 +126,25 @@ public sealed class KnowledgeService : IKnowledgeService
         return sb.ToString().Trim();
     }
 
-    private async Task<string> QueryProductsAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
+    private async Task<KnowledgeResult> QueryOfferingsAsync(Guid workspaceId, KnowledgeQuery query, CancellationToken ct)
     {
-        var products = await _offeringService.GetProductsAsync(workspaceId, locationId, searchTerm, ct);
+        var service = query.Topic == KnowledgeTopic.Services;
+        IEnumerable<NexFlow.Application.Features.Shared.DTOs.BusinessOfferingDto> values = service
+            ? await _offeringService.GetServicesAsync(workspaceId, query.LocationId, query.SearchTerm, ct)
+            : await _offeringService.GetProductsAsync(workspaceId, query.LocationId, query.SearchTerm, ct);
+        var page = values.Where(v => v.IsActive && v.Type == (service ? "SERVICE" : "PRODUCT"))
+            .OrderBy(v => v.Id, StringComparer.Ordinal).Skip(query.Offset).Take(query.Limit + 1).ToArray();
+        var selected = page.Take(query.Limit).ToArray();
         var sb = new StringBuilder();
-        foreach (var item in products.Take(5))
+        foreach (var item in selected)
         {
-            sb.AppendLine($"- Producto: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
-            if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
+            sb.AppendLine($"- {(service ? "Servicio" : "Producto")}: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
+            if (item is NexFlow.Application.Features.Services.DTOs.ServiceDto { DurationInMinutes: { } duration }) sb.AppendLine($"  Duración: {duration} min");
+            if (!string.IsNullOrWhiteSpace(query.SearchTerm) && !string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
         }
-        return sb.ToString().Trim();
-    }
-
-    private async Task<string> QueryServicesAsync(Guid workspaceId, string? locationId, string? searchTerm, CancellationToken ct)
-    {
-        var services = await _offeringService.GetServicesAsync(workspaceId, locationId, searchTerm, ct);
-        var sb = new StringBuilder();
-        foreach (var item in services.Take(5))
-        {
-            sb.AppendLine($"- Servicio: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
-            if (item.DurationInMinutes.HasValue) sb.AppendLine($"  Duración: {item.DurationInMinutes} min");
-            if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
-        }
-        return sb.ToString().Trim();
+        return new KnowledgeResult { Source = query.Topic, LocationId = query.LocationId, Status = selected.Length == 0 ? KnowledgeStatus.NotFound : KnowledgeStatus.Found,
+            Facts = sb.ToString().Trim(), HasMore = page.Length > query.Limit,
+            Offerings = Array.AsReadOnly(selected.Select(NexFlow.Application.Features.Automation.Dialogue.Contracts.VerifiedOffering.Capture).ToArray()) };
     }
 
     private async Task<KnowledgeResult> QueryBusinessHoursAsync(Guid workspaceId, KnowledgeQuery query, List<LocationDto>? locations, CancellationToken ct)
@@ -179,7 +180,7 @@ public sealed class KnowledgeService : IKnowledgeService
         };
     }
 
-    private static string QueryFaqs(IEnumerable<FaqDto> faqs, string? searchTerm)
+    private static string QueryFaqs(IEnumerable<FaqDto> faqs, string? searchTerm, int offset, int limit)
     {
         var active = faqs.Where(f => f.IsActive && !string.IsNullOrWhiteSpace(f.Answer));
         if (!string.IsNullOrWhiteSpace(searchTerm))
@@ -187,7 +188,7 @@ public sealed class KnowledgeService : IKnowledgeService
             var term = Normalize(searchTerm);
             active = active.Where(f => Normalize(f.Question).Contains(term) || Normalize(f.Answer).Contains(term));
         }
-        return string.Join("\n\n", active.Take(5).Select(f => $"P: {f.Question}\nR: {f.Answer}"));
+        return string.Join("\n\n", active.OrderBy(f => f.Id, StringComparer.Ordinal).Skip(offset).Take(limit).Select(f => $"P: {f.Question}\nR: {f.Answer}"));
     }
 
     private static string QueryProfile(BusinessProfileDto? profile)
@@ -205,3 +206,4 @@ public sealed class KnowledgeService : IKnowledgeService
         .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
         .ToArray()).ToLowerInvariant().Trim().Trim('¿', '?', '¡', '!').Trim();
 }
+

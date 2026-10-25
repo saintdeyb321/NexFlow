@@ -55,7 +55,9 @@ public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, s
         ExpectedReply.RequestedData => state.CurrentStep switch {
             "COLLECT_LOCATION" => "¿En qué sede deseas reservar?", "COLLECT_SERVICE" => "¿Qué servicio deseas reservar?",
             "COLLECT_DATE" => "¿Para qué fecha?", "COLLECT_TIME" => "¿Qué hora prefieres?",
+            "ORDER_COLLECT_ITEMS" => "¿Qué productos y cantidades deseas solicitar?",
             "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre y apellido?", _ => "¿Qué dato deseas aportar al borrador?" },
         _ => "¿Qué dato necesitas precisar en la consulta informativa?"
     };
 }
+

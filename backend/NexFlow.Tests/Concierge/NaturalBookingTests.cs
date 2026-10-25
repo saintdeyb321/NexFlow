@@ -76,7 +76,9 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
     {
         var f = Create();
         await f.HandleTurn("Quiero limpieza dental en Concepción pasado mañana por la tarde", "start");
-        Assert.Contains("16:00", f.Sent["start"].Content);
+        Assert.Contains("hora", f.Sent["start"].Content); Assert.DoesNotContain("16:00", f.Sent["start"].Content);
+        await f.HandleTurn("muéstrame opciones", "explicit-options");
+        Assert.Contains("16:00", f.Sent["explicit-options"].Content);
         Assert.DoesNotContain("nombre", f.Sent["start"].Content, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("COLLECT_TIME", (await f.Context()).CurrentStep); Assert.Empty(f.Bookings);
     }
@@ -101,6 +103,8 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
         await Turn(f, (earlyName ? "Soy Ana Pérez, " : "") + "quiero limpieza dental en Concepción pasado mañana por la tarde");
         Assert.Equal("2026-10-22", (await f.Context()).TargetDate); Assert.Equal("service-a", (await f.Context()).SelectedServiceId);
         Assert.Null((await f.Context()).TargetTime); Assert.Empty(f.Bookings);
+        Assert.Empty(f.Plans.Last().Choices);
+        await Turn(f, "muéstrame opciones");
         var plan = f.Plans.Last();
         Assert.Contains(plan.Facts, fact => fact.Key == "AvailableStartUtc");
         Assert.All(plan.Facts.Where(fact => fact.Key == "AvailableStartUtc"), fact => Assert.Equal(VerifiedFactSource.TransactionEngine, fact.Source));
@@ -290,6 +294,7 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
             .ReturnsAsync((Guid _, string _, string _, DateTime d, CancellationToken _) => d.Day == 22 ? [] : new[] {
                 new TimeSlotDto(DateTime.SpecifyKind(d.AddHours(21), DateTimeKind.Utc), DateTime.SpecifyKind(d.AddHours(21.5), DateTimeKind.Utc), true) });
         await Turn(f, "quiero limpieza dental en Concepción pasado mañana");
+        await Turn(f, "10:00"); // Trigger a point check before suggesting another day.
         Assert.Equal("2026-10-22", (await f.Context()).TargetDate); Assert.Null((await f.Context()).TargetTime);
         Assert.Contains("23/10/2026", f.Sent.Values.Last().Content); Assert.Contains("16:00", f.Sent.Values.Last().Content);
         Assert.Empty(f.Bookings); Assert.Contains(f.Plans.Last().Facts, fact => fact.Key == "AvailableStartUtc"); Assert.All(f.Plans.Last().Facts.Where(fact => fact.Key == "AvailableStartUtc"), fact => Assert.Contains("2026-10-23", fact.Value));
@@ -408,3 +413,4 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
     private static string Draft(ConversationContextDto state) => JsonSerializer.Serialize(new { state.CurrentGoal, state.CurrentStep, state.SelectedLocationId,
         state.SelectedServiceId, state.TargetDate, state.TargetTime, state.RealCustomerName, state.PendingServiceIds, state.PendingDialogueSlots, state.PreferredTime, state.Mode });
 }
+

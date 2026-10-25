@@ -159,6 +159,16 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && !string.IsNullOrWhiteSpace(actEvidence[0].Text) && actEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(request.MessageText, actEvidence[0].Text)
             && actEvidence[0].NormalizedValue == interpretation.Act?.ToString();
+        if (interpretation.Directive == ConversationDirective.SelectReferencedTime)
+        {
+            var reference = ReservationTimeReference.Current(workspace, context, local.Context.LocalBusinessNow.UtcDateTime);
+            if (!booking || interpretation.Intent != ConversationIntent.Reservation || !backedAct || interpretation.Act != DialogueAct.Correction
+                || OrderMentionResolver.IsQuestion(request.MessageText) || OrderMentionResolver.IsHypothetical(request.MessageText) || reference == null)
+                return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.Reservation }, true,
+                    "Indica la hora que deseas seleccionar; no hay una referencia inequívoca vigente para esa petición. Conservamos tu borrador.");
+            return new(DialogueAct.RequestedData, new() { Intent = ConversationIntent.Reservation,
+                Location = reference.LocationId, Service = reference.ServiceId, Date = reference.Date, Time = reference.Time }, true);
+        }
         // Load only missing authorized candidates once when semantic understanding
         // identifies an entity that a simple-slot read deliberately omitted.
         if (booking && interpretation.Intent == ConversationIntent.Reservation
@@ -178,7 +188,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         }
         // Informational interruptions never turn extracted entities into mutations of a business draft.
         if (interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.ProductQuery
-            or ConversationIntent.ServiceQuery or ConversationIntent.Location or ConversationIntent.BusinessHours or ConversationIntent.Faq)
+            or ConversationIntent.ServiceQuery or ConversationIntent.Location or ConversationIntent.BusinessHours or ConversationIntent.Faq or ConversationIntent.Profile)
             return new(booking ? DialogueAct.InformationalInterruption : DialogueAct.Information, interpretation, true);
         if (act == DialogueAct.SemanticAmbiguity && (contradictory || normalized.Split(' ').Contains("no")))
             return new(act, new() { Intent = ConversationIntent.General, RequiresClarification = true }, true);
@@ -238,3 +248,4 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
     };
 
 }
+

@@ -137,6 +137,14 @@ public class BookingFlow : IBookingFlow
                 var answer = await AnswerAvailabilityAsync(workspaceId, context, proposal.Understanding, evidence, ct);
                 context.Information = new() { Topic = "Availability", Clarification = "Availability",
                     DraftFingerprint = InformationalRequest.DraftFingerprint(context), UpdatedAt = proposal.Understanding.Context.LocalBusinessNow.UtcDateTime };
+                if (evidence.Facts.Any(f => f.Key == "Availability" && f.Value == "Available")
+                    && DateTime.TryParseExact(evidence.Facts.FirstOrDefault(f => f.Key == "RequestedLocalTime")?.Value,
+                        "dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var availableAt))
+                    context.Information.AvailabilityReference = new(workspaceId,
+                        proposal.Understanding.Location.TryGetValue(out var site) ? site.Id : context.SelectedLocationId!,
+                        proposal.Understanding.Service.TryGetValue(out var service) ? service.Id : context.SelectedServiceId!,
+                        availableAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), availableAt.ToString("HH:mm", CultureInfo.InvariantCulture),
+                        proposal.Understanding.Context.LocalBusinessNow.UtcDateTime);
                 await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
                 return Plan(answer, creative: true);
             }
@@ -218,6 +226,7 @@ public class BookingFlow : IBookingFlow
             else if (interpretation.Directive == ConversationDirective.ShowOptions
                 || (interpretation.Intent == ConversationIntent.ServiceQuery && interpretation.QueryKind == OfferingQueryKind.Broad))
             {
+                if (context.CurrentStep == "COLLECT_TIME") return await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence);
                 if (string.IsNullOrWhiteSpace(context.SelectedLocationId))
                     return await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas consultar los servicios reservables?", ct);
                 var services = await ReservableServicesAsync(workspaceId, context.SelectedLocationId, ct);
@@ -288,7 +297,10 @@ public class BookingFlow : IBookingFlow
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date)) context.PendingDialogueSlots.Remove("Date");
         if (!string.IsNullOrWhiteSpace(interpretation.Time))
-        { context.TargetTime = interpretation.Time; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
+        {
+            context.TargetTime = interpretation.Time; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time");
+            if (context.Information?.Topic == "Availability") context.Information = null;
+        }
 
         IReadOnlyList<LocationDto> authorizedLocations = [];
         if (!string.IsNullOrWhiteSpace(context.SelectedLocationId))
@@ -447,7 +459,7 @@ public class BookingFlow : IBookingFlow
             "COLLECT_SERVICE" when !string.IsNullOrWhiteSpace(context.SelectedLocationId)
                 => await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct, evidence, context.ReservationServiceOffset),
             "COLLECT_DATE" => "¿Para qué fecha deseas reservar? Puedes indicar el día o escribir 'mañana'.",
-            "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct, evidence),
+            "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct, evidence, showOptions: false),
             "CONFIRM" => $"Tu reserva para el {context.TargetDate} a las {context.TargetTime} está pendiente de confirmación. ¿Confirmas? Responde sí o no.",
             _ => "¿Qué servicio deseas reservar?"
         };
@@ -601,7 +613,7 @@ public class BookingFlow : IBookingFlow
         return $"Horario de atención de {location.Name}:\n" + BusinessHoursFormatter.Format(hours);
     }
 
-    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct, TurnEvidence? evidence = null)
+    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct, TurnEvidence? evidence = null, bool showOptions = true)
     {
         if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
         {
@@ -622,6 +634,14 @@ public class BookingFlow : IBookingFlow
             if (!preserveDraft) { context.TargetTime = null; UpdateStep(context); }
             return "Esta sede no atiende ese día.\n\n" + BusinessHoursFormatter.Format(hours) +
                 "\n\nDime otra combinación de día y hora para verificar su disponibilidad.";
+        }
+        if (!showOptions)
+        {
+            if (!preserveDraft) { context.RecoveryOptions.Clear(); context.RecoveryOptionsContext = null; }
+            var question = context.PreferredTime == null ? "¿Qué horario prefieres? Puedes indicar una hora en formato 12 o 24 horas; verificaré su disponibilidad."
+                : "¿Qué hora prefieres dentro de esa franja? Verificaré su disponibilidad.";
+            if (evidence != null) evidence.Question = question;
+            return $"Para el {date:dd/MM/yyyy}, {question}";
         }
         var slots = (await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId, context.SelectedServiceId, date, ct))
             .Where(s => s.IsAvailable).OrderBy(s => s.StartTime).ToList();
@@ -731,7 +751,7 @@ public class SupportFlow : ISupportFlow
 
 public class ChatFlow : IChatFlow
 {
-    private readonly IKnowledgeService _knowledgeService;
+    private readonly IBusinessReadTools _readTools;
     private readonly ILocationResolverService _locationResolver;
     private readonly ILogger<ChatFlow> _logger;
     private readonly IEntitlementService _entitlementService;
@@ -740,9 +760,9 @@ public class ChatFlow : IChatFlow
 
     public ChatFlow(IKnowledgeService knowledgeService, IEntitlementService entitlementService,
         ILocationResolverService locationResolver, ILogger<ChatFlow> logger,
-        ICatalogGenerationService catalogGeneration, INotificationService notifications)
+        ICatalogGenerationService catalogGeneration, INotificationService notifications, IBusinessReadTools? readTools = null)
     {
-        _knowledgeService = knowledgeService;
+        _readTools = readTools ?? new BusinessReadTools(knowledgeService, entitlementService);
         _locationResolver = locationResolver;
         _logger = logger;
         _entitlementService = entitlementService;
@@ -752,6 +772,7 @@ public class ChatFlow : IChatFlow
 
     public async Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct)
     {
+        var readTurn = _readTools.Open(workspaceId);
         var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var denied = interpretation.DeniedResponse ?? AiIntentAccess.GetDeniedResponse(interpretation.Intent, modules);
         if (denied != null) return new ChatResponse(denied) { Operation = OperationStatus.Denied };
@@ -788,6 +809,7 @@ public class ChatFlow : IChatFlow
             ConversationIntent.Location => KnowledgeTopic.Locations,
             ConversationIntent.BusinessHours => KnowledgeTopic.BusinessHours,
             ConversationIntent.General => modules.Contains("FAQ") ? KnowledgeTopic.Faqs : KnowledgeTopic.Profile,
+            ConversationIntent.Profile => KnowledgeTopic.Profile,
             _ => null
         };
         if (!topic.HasValue) return new ChatResponse("No puedo resolver esa consulta con la información disponible.");
@@ -824,8 +846,7 @@ public class ChatFlow : IChatFlow
                 var caption = scope == "PRODUCT"
                     ? "Te comparto nuestro catálogo actualizado de productos."
                     : "Te comparto nuestro catálogo actualizado de servicios.";
-                var current = await _knowledgeService.QueryAsync(workspaceId,new BusinessKnowledgeSnapshot { WorkspaceId=workspaceId },
-                    new KnowledgeQuery { Topic=topic.Value, LocationId=locationId },ct);
+                var current = await Read(new KnowledgeQuery { Topic=topic.Value, LocationId=locationId });
                 caption = (current.Found ? current.Facts + "\n" : "") + caption;
                 return new ChatResponse(caption, artifact.PdfUrl, scope == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf", scope) {
                     Information = current,
@@ -841,18 +862,17 @@ public class ChatFlow : IChatFlow
                 fallbackIntroduction = "Nuestro catálogo completo todavía no está disponible en PDF. Mientras tanto, te comparto algunas opciones:";
             }
         }
-        var snapshot = new BusinessKnowledgeSnapshot { WorkspaceId = workspaceId };
-        var result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery
+        var result = await Read(new KnowledgeQuery
         {
             Topic = topic.Value,
             LocationId = locationId,
             SearchTerm = interpretation.Intent is ConversationIntent.Faq or ConversationIntent.General
                 ? interpretation.SearchTerm ?? text : interpretation.SearchTerm
-        }, ct);
+        });
 
         if (interpretation.Intent == ConversationIntent.General && result.Status == KnowledgeStatus.NotFound)
         {
-            result = await _knowledgeService.QueryAsync(workspaceId, snapshot, new KnowledgeQuery { Topic = KnowledgeTopic.Profile }, ct);
+            result = await Read(new KnowledgeQuery { Topic = KnowledgeTopic.Profile });
             if (result.Found) return Factual($"Esta es la información registrada del negocio:\n{result.Facts}\nSi necesitas otro dato, indícame cuál.");
         }
 
@@ -866,6 +886,13 @@ public class ChatFlow : IChatFlow
         }
         return Factual(result.Status == KnowledgeStatus.NotFound ? "No tengo información registrada que coincida con tu consulta." : result.ToResponse());
 
+        async Task<KnowledgeResult> Read(KnowledgeQuery query)
+        {
+            var read = await _readTools.ReadAsync(readTurn, new KnowledgeRead(query.Topic, query.LocationId, query.SearchTerm), ct);
+            return read.Knowledge ?? new KnowledgeResult { Source = query.Topic, LocationId = query.LocationId,
+                Status = read.Status == BusinessReadStatus.Denied ? KnowledgeStatus.Denied : KnowledgeStatus.Unavailable };
+        }
+
         ChatResponse Factual(string response) => new(response) {
             Information = result.Source is KnowledgeTopic.BusinessHours or KnowledgeTopic.Locations or KnowledgeTopic.Profile or KnowledgeTopic.Products or KnowledgeTopic.Services ? result : null,
             Facts = result.Found ? Array.AsReadOnly(new[] { new VerifiedFact(result.Source.ToString(), result.Facts, VerifiedFactSource.BusinessRepository) }) : [],
@@ -873,4 +900,5 @@ public class ChatFlow : IChatFlow
         };
     }
 }
+
 

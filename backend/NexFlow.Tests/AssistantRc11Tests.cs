@@ -120,7 +120,7 @@ public sealed class AssistantRc11Tests
             var slots = (await _engine.GetAvailabilityAsync(workspace, "location", "service", DateTime.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture), default)).ToArray();
             Assert.Equal(expectedUtc, slots[0].StartTime);
             var original = await _booking.GetContinuationAsync(workspace, c, default);
-            Assert.Contains("• 09:00", original);
+            Assert.Contains("horario", original); Assert.DoesNotContain("• 09:00", original);
             var decorated = await _recovery.DecorateAsync(workspace, Phone, c, _modules, original, default);
             Assert.Contains("1. 09:00", decorated); Assert.Equal("09:00", c.RecoveryOptions[0].Key);
             var selection = await _recovery.RecoverAsync(workspace, Phone, "chat", new("instance", Phone, "Ana", "1", $"select-{workspace}", false, workspace), c, _modules, default);
@@ -135,3 +135,4 @@ public sealed class AssistantRc11Tests
         }
     }
 }
+

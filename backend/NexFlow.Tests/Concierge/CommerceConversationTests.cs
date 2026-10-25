@@ -182,7 +182,8 @@ public sealed class CommerceConversationTests(ITestOutputHelper output)
     {
         var f=Create();f.Modules.Clear();f.Modules.UnionWith(["SERVICES","RESERVATIONS"]);
         await f.HandleTurn("quiero limpieza dental en Concepción pasado mañana por la tarde","start");
-        Assert.Equal("RESERVATION",(await f.Context()).CurrentGoal);Assert.Contains("16:00",f.Sent["start"].Content);
+        Assert.Equal("RESERVATION",(await f.Context()).CurrentGoal);Assert.DoesNotContain("16:00",f.Sent["start"].Content);
+        await f.HandleTurn("muéstrame opciones","explicit-options");Assert.Contains("16:00",f.Sent["explicit-options"].Content);
         await f.HandleTurn("16:00","time");await f.HandleTurn("Ana Pérez","name");await f.HandleTurn("sí","yes");
         Assert.Single(f.Bookings);Assert.Empty(f.Orders);Assert.Equal(0,f.AiCalls);
     }
@@ -266,3 +267,4 @@ public sealed class CommerceConversationTests(ITestOutputHelper output)
         Assert.Empty(f.Orders);Assert.Empty(f.Bookings);
     }
 }
+
