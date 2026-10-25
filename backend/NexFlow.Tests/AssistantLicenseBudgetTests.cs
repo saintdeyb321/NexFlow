@@ -15,6 +15,51 @@ namespace NexFlow.Tests;
 
 public sealed class AssistantLicenseBudgetTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Handler_never_reads_faqs_without_a_current_license_including_after_revocation(bool initiallyLicensed)
+    {
+        var f = new AssistantConversationTests.Fixture();
+        var faqs = new Mock<IFaqRepository>(MockBehavior.Strict);
+        faqs.Setup(r => r.GetFaqsAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new FaqDto { Question = "consulta sobre condiciones de atención", Answer = "Hecho FAQ autorizado", IsActive = true } });
+        var knowledge = new KnowledgeService(f.ProfileReads.Object, f.LocationReads.Object, f.HoursReads.Object,
+            faqs.Object, f.OfferingReads.Object, NullLogger<KnowledgeService>.Instance);
+        f.KnowledgeReads.Setup(k => k.QueryAsync(f.Workspace, It.IsAny<BusinessKnowledgeSnapshot>(), It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid w, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken ct) => knowledge.QueryAsync(w, snapshot, query, ct));
+        if (initiallyLicensed)
+        {
+            f.Modules.Add("FAQ");
+            f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Faq });
+            await f.HandleTurn("consulta sobre condiciones de atención", "licensed");
+            Assert.Contains("Hecho FAQ autorizado", f.Sent["licensed"].Content);
+            faqs.Verify(r => r.GetFaqsAsync(f.Workspace, It.IsAny<CancellationToken>()), Times.Once);
+            faqs.Invocations.Clear();
+        }
+        f.Modules.Remove("FAQ");
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Faq });
+        await f.HandleTurn("consulta sobre condiciones de atención", "unlicensed");
+        faqs.VerifyNoOtherCalls();
+        Assert.DoesNotContain("Hecho FAQ autorizado", f.Sent["unlicensed"].Content);
+        Assert.Contains("No hay información", f.Sent["unlicensed"].Content);
+        Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+    }
+
+    [Fact]
+    public async Task General_chat_fallback_does_not_read_unlicensed_faqs_or_block_public_profile_information()
+    {
+        var f = new AssistantConversationTests.Fixture(); f.Modules.Remove("FAQ");
+        var faqs = new Mock<IFaqRepository>(MockBehavior.Strict);
+        var knowledge = new KnowledgeService(f.ProfileReads.Object, f.LocationReads.Object, f.HoursReads.Object,
+            faqs.Object, f.OfferingReads.Object, NullLogger<KnowledgeService>.Instance);
+        var chat = new ChatFlow(knowledge, f.EntitlementReads.Object, Mock.Of<ILocationResolverService>(),
+            NullLogger<ChatFlow>.Instance, f.CatalogReads.Object, Mock.Of<INotificationService>());
+        Assert.Contains("Negocio real", (await chat.ProcessAsync(f.Workspace, "consulta", new() { Intent = ConversationIntent.General }, null, default)).Text);
+        Assert.Contains("No hay información", (await chat.ProcessAsync(f.Workspace, "consulta", new() { Intent = ConversationIntent.Faq }, null, default)).Text);
+        faqs.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task Greeting_natural_product_query_then_numeric_selection_use_a_valid_budget_document()
     {

@@ -14,6 +14,7 @@ internal static class InformationalRequest
     internal static KnowledgeTopic? PublicTopic(string text)
     {
         var normalized = SpanishTextNormalizer.Normalize(text);
+        if (ShortcutTopic(normalized) is { } shortcut) return shortcut;
         var words = normalized.Split(' ');
         if (words.Contains("y") && words.Any(w => w is "producto" or "productos" or "servicio" or "servicios" or "pdf" or "catalogo")) return null;
         // Bounded read-only field request. Changes, private appointments, unknown
@@ -34,6 +35,12 @@ internal static class InformationalRequest
         return null;
     }
 
+    internal static KnowledgeTopic? ShortcutTopic(string normalized) => normalized switch {
+        "donde estan" or "ubicacion" or "direccion" or "sedes" or "sucursal" or "como llego" or "donde atienden" => KnowledgeTopic.Locations,
+        "horario" or "horarios" or "que horario tienen" or "que horarios tienen" or "dias de atencion" or "cuando abren" or "hasta que hora" or "cuando cierran" => KnowledgeTopic.BusinessHours,
+        _ => null
+    };
+
     internal static bool ExistingReservation(string text, bool draft)
         => ReservationOperationClassifier.Classify(text, draft) is ReservationOperationKind.ViewExistingReservation
             or ReservationOperationKind.RescheduleExistingReservation or ReservationOperationKind.CancelExistingReservation;
@@ -44,7 +51,7 @@ internal static class InformationalRequest
         return words.Any(w => w is "pregunte" or "pedi" or "solicite" or "refiero")
             || words.Contains("no") && words.Contains("eso") && words.Any(w => w is "era" or "es" or "fue" or "dije")
             || words.Contains("hablo") && words.Contains("no")
-            || ScopeCorrection(text) || words.Contains("eso") && words.Contains("ya") && words.Contains("dije");
+            || ScopeCorrection(text) || words.Contains("ya") && words.Contains("dije");
     }
 
     // Resolve asserted/rejected subjects by clause, not by the first keyword in a correction.

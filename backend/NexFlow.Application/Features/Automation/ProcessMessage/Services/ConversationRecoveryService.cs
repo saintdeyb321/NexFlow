@@ -20,7 +20,8 @@ using NexFlow.Application.Features.Business;
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 public sealed record RecoveryDecision(string? Response = null, AiInterpretation? Interpretation = null,
-    DialogueAct Act = DialogueAct.Information, OperationStatus Operation = OperationStatus.Informational);
+    DialogueAct Act = DialogueAct.Information, OperationStatus Operation = OperationStatus.Informational,
+    ExpectedReply Expected = ExpectedReply.Information);
 public interface IConversationRecoveryService
 {
     Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation, ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
@@ -60,7 +61,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
     {
         var expiredDraft = !string.IsNullOrWhiteSpace(context.CurrentGoal) && context.LastUpdated < clock.UtcNow.AddHours(-Limits.ContextExpiryHours);
         if (context.RecoveryLastMessageId == request.MessageId)
-            return new(context.RecoveryLastResponse, context.RecoveryLastInterpretation == null ? null : JsonSerializer.Deserialize<AiInterpretation>(context.RecoveryLastInterpretation));
+            return new(context.RecoveryLastResponse, context.RecoveryLastInterpretation == null ? null : JsonSerializer.Deserialize<AiInterpretation>(context.RecoveryLastInterpretation),
+                Expected: context.CurrentQuestion?.SourceMessageId == request.MessageId ? context.CurrentQuestion.Expected : ExpectedReply.Information);
         if (request.MessageText.Length > Limits.MaxInputCharacters)
             return await Remember("Tu mensaje es demasiado largo. Envíalo en partes más cortas y plantea una consulta por vez.");
         var greeting = GreetingRecognizer.Parse(request.MessageText);
@@ -124,6 +126,16 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (!booking) return await Remember("¿Deseas crear una reserva nueva o revisar una cita ya registrada?");
         }
 
+        var question = ConversationQuestion.Current(workspace, context, clock.UtcNow);
+        if (text == "que" && question != null)
+        {
+            var denied = AiIntentAccess.GetDeniedResponse(question.Intent, modules);
+            var previousResponse = context.CurrentGoal == "ORDER"
+                ? question.SourceMessageId == context.OrderLastSourceMessageId ? context.OrderLastResponse : question.LinguisticQuestion(context)
+                : context.LastQuestion;
+            return await Remember(denied ?? previousResponse ?? question.LinguisticQuestion(context),
+                expected: denied == null ? question.Expected : ExpectedReply.Information, referenceIntent: question.Intent);
+        }
         var repair = InformationalRequest.IsRepair(text);
         var topic = repair ? InformationalRequest.RepairTopic(request.MessageText) : InformationalRequest.PublicTopic(text);
         if (topic != null || InformationalRequest.ScopeCorrection(text) && information != null)
@@ -232,8 +244,25 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Esto no cancela ninguna reserva registrada."
                 : "¿Quieres descartar el borrador actual? Responde sí o no. Esto no cancela una reserva o pedido ya registrado.", DialogueAct.Cancellation, OperationStatus.AwaitingConfirmation);
         }
-        if (context.CurrentStep == "CONFIRM" && context.CurrentGoal is "BOOKING" or "RESERVATION" && ConversationConfirmation.IsAffirmative(request.MessageText))
-            return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Confirmed = true });
+        if (context.PendingRecoveryAction == null && ConversationConfirmation.IsAffirmative(request.MessageText) && context.CurrentQuestion != null)
+        {
+            if (question == null)
+                return booking && context.CurrentStep == "CONFIRM"
+                    ? await RememberInterpretation(new() { Intent = ConversationIntent.Reservation })
+                    : await Remember("La pregunta anterior ya no está vigente. " + Continuation(context));
+            if (question.Expected == ExpectedReply.StartReservation)
+            {
+                var denied = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules);
+                return denied != null ? await Remember(denied)
+                    : await RememberInterpretation(new() { Intent = ConversationIntent.Reservation });
+            }
+            if (question.Expected == ExpectedReply.Information)
+                return await Remember("Seguimos con la consulta informativa; no he confirmado ninguna operación. "
+                    + (context.CurrentGoal != null ? "Escribe continuemos para retomar el borrador." : "¿Qué dato necesitas precisar?"));
+        }
+        if (context.CurrentStep == "CONFIRM" && booking && ConversationConfirmation.IsAffirmative(request.MessageText))
+            return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation,
+                Confirmed = ConversationQuestion.CanConfirmReservation(workspace, context, request.MessageText, clock.UtcNow) });
         if (No(text) && context.CurrentStep == "CONFIRM") return await Remember("No he registrado la reserva. Puedes corregir la sede, servicio, fecha u hora, o escribir cancelar para dejar esta reserva en preparación.");
         if (greeting.HasGreeting && text.Length == 0)
             return await Remember(context.CurrentGoal != null ? Continuation(context)
@@ -259,7 +288,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         var index = SelectionIndex(text);
         // Recognize old labels too, but let the fingerprint guard below reject
         // them. A stale/ambiguous label must not fall through to AI selection.
-        if (index == 0)
+        if (index == 0 && (context.CurrentQuestion == null || question?.Expected == ExpectedReply.Selection))
         {
             var matches = context.RecoveryOptions.Select((o, i) => (Option: o, Index: i + 1)).Where(o => Normalize(o.Option.Label) == text).ToArray();
             index = matches.Length > 1 ? -1 : matches.Length == 1 ? matches[0].Index : 0;
@@ -268,6 +297,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (text is "la otra" or "otra" or "esa otra") index = -1;
         if (index != 0)
         {
+            if (context.CurrentQuestion != null && question?.Expected != ExpectedReply.Selection)
+                return await Remember("La lista anterior no corresponde a la pregunta vigente. "
+                    + (question?.LinguisticQuestion(context) ?? Continuation(context)), expected: question?.Expected ?? ExpectedReply.Information);
             if (context.LastUpdated < clock.UtcNow.AddHours(-Limits.ContextExpiryHours))
                 return await Menu("La lista anterior ha caducado. Elige una opción vigente:");
             if (context.RecoveryOptionsContext != Fingerprint(context) || index < 1 || index > context.RecoveryOptions.Count)
@@ -288,15 +320,15 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await RememberInterpretation(interpretation);
         }
         if (No(text)) return await Remember(Continuation(context));
-        if (text.Contains("horario") && (text.Contains("que") || text.Contains("cual") || text == "horarios")) return await RememberInterpretation(new() { Intent = ConversationIntent.BusinessHours });
-        if (text is "ubicacion" or "direccion" || text.Contains("donde estan") || text.Contains("donde atienden")) return await RememberInterpretation(new() { Intent = ConversationIntent.Location });
         return null;
 
-        Task<RecoveryDecision> Remember(string response, DialogueAct act = DialogueAct.Information, OperationStatus operation = OperationStatus.Informational)
+        Task<RecoveryDecision> Remember(string response, DialogueAct act = DialogueAct.Information, OperationStatus operation = OperationStatus.Informational,
+            ExpectedReply expected = ExpectedReply.Information, ConversationIntent? referenceIntent = null)
         {
             // An informational interruption must not renew the validity of an already expired draft.
             if (expiredDraft && context.CurrentGoal != null && context.PendingRecoveryAction == null) context.PendingRecoveryAction = "EXPIRE";
-            return SaveAsync(workspace, phone, request.MessageId, context, new(response, Act: act, Operation: operation), ct);
+            return SaveAsync(workspace, phone, request.MessageId, context, new(response,
+                referenceIntent is { } referenced ? new() { Intent = referenced } : null, Act: act, Operation: operation, Expected: expected), ct);
         }
         Task<RecoveryDecision> RememberInterpretation(AiInterpretation interpretation) => SaveAsync(workspace, phone, request.MessageId, context, new(Interpretation: interpretation), ct);
         void ClearReference()
@@ -308,7 +340,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         {
             context.Information = null;
             var response = await PrepareOptionsAsync(workspace, context, modules, intro, ct);
-            return await Remember(response);
+            return await Remember(response, expected: ExpectedReply.Selection);
         }
 
         async Task<RecoveryDecision> AnswerInformation(KnowledgeTopic source, string? explicitLocation = null, bool resetScope = false, LocationDto[]? knownLocations = null)
@@ -417,7 +449,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             context.RecoveryOptionsOffset = 0; context.RecoveryHasMore = false;
             context.RecoveryOptionsContext = Fingerprint(context);
             var list = string.Join("\n", context.RecoveryOptions.Select((choice, i) => $"{i + 1}. {choice.Label}"));
-            return await SaveAsync(workspace, phone, source, context, new(introduction + "\n" + list), ct);
+            return await SaveAsync(workspace, phone, source, context, new(introduction + "\n" + list, Expected: ExpectedReply.Selection), ct);
         }
         if (++context.ClarificationAttempts >= Limits.MaxClarifications)
             return await SaveAsync(workspace, phone, source, context, new(Interpretation: new() { Intent = ConversationIntent.Support }), ct);
@@ -427,7 +459,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             context.RecoveryOptions.Clear(); context.RecoveryOptionsContext = null;
             return await SaveAsync(workspace, phone, source, context, new(introduction), ct);
         }
-        return await SaveAsync(workspace, phone, source, context, new(await PrepareOptionsAsync(workspace, context, modules, introduction, ct)), ct);
+        return await SaveAsync(workspace, phone, source, context, new(await PrepareOptionsAsync(workspace, context, modules, introduction, ct), Expected: ExpectedReply.Selection), ct);
     }
 
     public async Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null)

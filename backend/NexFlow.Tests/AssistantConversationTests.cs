@@ -134,6 +134,8 @@ public sealed class AssistantConversationTests
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Date = "2026-10-20" }); await f.Turn("el 20 de octubre");
         await f.Turn("1"); Assert.Empty(f.Bookings); Assert.Equal("CONFIRM", (await f.Context()).CurrentStep);
         await f.Turn("¿dónde están?"); Assert.Empty(f.Bookings); Assert.Equal("service-b", (await f.Context()).SelectedServiceId);
+        await f.Turn("sí", source: "information-reply"); Assert.Empty(f.Bookings);
+        await f.Turn("continuemos", source: "resume-summary");
         await f.Turn("sí", source: "confirm-booking"); await f.Turn("sí", source: "confirm-booking");
         var created = Assert.Single(f.Bookings.Values); Assert.Equal(f.Workspace, created.WorkspaceId);
         Assert.Equal("service-b", created.ServiceId); Assert.Equal(new DateTime(2026, 10, 20, 15, 0, 0, DateTimeKind.Utc), created.StartTime);
@@ -227,7 +229,7 @@ public sealed class AssistantConversationTests
         public IContextRecoveryService Contexts { get; }
         public ConversationRecoveryService Recovery { get; }
         public IBookingFlow Booking { get; }
-        public HashSet<string> Modules { get; } = new(["CATALOG", "SERVICES", "RESERVATIONS", "ORDERS", "REQUESTS", "LOCATIONS", "BUSINESS_HOURS"], StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> Modules { get; } = new(["CATALOG", "SERVICES", "RESERVATIONS", "ORDERS", "REQUESTS", "LOCATIONS", "BUSINESS_HOURS", "FAQ"], StringComparer.OrdinalIgnoreCase);
         public Queue<AiInterpretation> Interpretations { get; } = new();
         public Dictionary<string, Reservation> Bookings { get; } = new(); public Dictionary<string, OrderRecord> Orders { get; } = new();
         public Dictionary<string, MessageRecord> Sent { get; } = new(); public List<(Guid Workspace, KnowledgeTopic Topic)> FactualQueries { get; } = new();

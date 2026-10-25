@@ -25,6 +25,158 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
     { Now = new DateTime(2026, 10, 20, 21, 0, 0, DateTimeKind.Utc) };
 
     [Theory]
+    [InlineData("sí")]
+    [InlineData("De acuerdo")]
+    public async Task Runtime_invitation_yes_prepares_only_the_invited_reservation_without_ai_or_effects(string answer)
+    {
+        var f = Create();
+        await f.HandleTurn("No sé cómo hacer una reserva", "invitation");
+        var question = (await f.Context()).CurrentQuestion!;
+        Assert.Equal(ExpectedReply.StartReservation, question.Expected);
+        var restored = JsonSerializer.Deserialize<ConversationContextDto>(JsonSerializer.Serialize(await f.Context()))!;
+        Assert.Equal(question, ConversationQuestion.Current(f.Workspace, restored, f.Now));
+        await f.HandleTurn(answer, "accept-invitation");
+        Assert.Equal("RESERVATION", (await f.Context()).CurrentGoal);
+        Assert.Equal("COLLECT_LOCATION", (await f.Context()).CurrentStep);
+        Assert.Contains("sede", f.Sent["accept-invitation"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(f.Bookings); Assert.Empty(f.Orders); Assert.Equal(0, f.AiCalls);
+        await f.HandleTurn(answer, "accept-invitation");
+        Assert.Equal(2, f.Sent.Count);
+    }
+
+    [Theory]
+    [InlineData("workspace")]
+    [InlineData("expiry")]
+    [InlineData("draft")]
+    [InlineData("options")]
+    public async Task Runtime_invalid_reference_cannot_select_or_start_an_operation(string invalidation)
+    {
+        var f = Create(); await f.HandleTurn("menú", "menu");
+        var state = await f.Context();
+        state.CurrentQuestion = invalidation switch {
+            "workspace" => state.CurrentQuestion! with { WorkspaceId = Guid.NewGuid() },
+            "expiry" => state.CurrentQuestion! with { ExpiresAt = f.Now },
+            _ => state.CurrentQuestion
+        };
+        if (invalidation == "draft") state.TargetDate = "2026-10-24";
+        if (invalidation == "options") state.RecoveryOptions.Reverse();
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        var before = Draft(state);
+        await f.HandleTurn("sí", "stale-yes");
+        Assert.Equal(before, Draft(await f.Context()));
+        Assert.Contains("ya no está vigente", f.Sent["stale-yes"].Content);
+        Assert.Empty(f.FactualQueries); Assert.Empty(f.Bookings); Assert.Empty(f.Orders); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_invitation_rechecks_license_and_repair_preserves_data_already_supplied()
+    {
+        var f = Create(); await f.HandleTurn("No sé cómo hacer una reserva", "invite");
+        f.Modules.Remove("RESERVATIONS"); f.OfferingReads.Invocations.Clear();
+        await f.HandleTurn("sí", "revoked-invite");
+        Assert.Null((await f.Context()).CurrentGoal); Assert.Empty(f.OfferingReads.Invocations);
+        Assert.Contains("no tiene habilitadas las reservas", f.Sent["revoked-invite"].Content);
+        f.Modules.Add("RESERVATIONS"); await f.SeedDraft("RESERVATION");
+        var before = Draft(await f.Context());
+        await f.HandleTurn("ya te lo dije", "repair-known-data");
+        Assert.Equal(before, Draft(await f.Context())); Assert.Contains("fecha", f.Sent["repair-known-data"].Content);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_old_menu_cannot_override_a_new_invitation_even_if_the_draft_is_unchanged()
+    {
+        var f = Create();
+        await f.HandleTurn("menú", "old-menu");
+        await f.HandleTurn("No sé cómo hacer una reserva", "new-question");
+        await f.HandleTurn("1", "old-choice");
+        Assert.Empty(f.FactualQueries);
+        Assert.Null((await f.Context()).CurrentGoal);
+        Assert.Contains("vigente", f.Sent["old-choice"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_old_menu_is_not_rebound_as_a_new_date_question()
+    {
+        var f = Create(); await f.HandleTurn("menú", "old-list");
+        await f.HandleTurn("Quiero reservar limpieza dental en Concepción", "date-question");
+        var state = await f.Context();
+        Assert.Equal("COLLECT_DATE", state.CurrentStep);
+        Assert.Equal(ExpectedReply.RequestedData, state.CurrentQuestion!.Expected);
+        var before = Draft(state);
+        await f.HandleTurn("1", "obsolete-number");
+        Assert.Equal(before, Draft(await f.Context())); Assert.Empty(f.FactualQueries);
+        Assert.Contains("pregunta vigente", f.Sent["obsolete-number"].Content);
+        Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_yes_after_an_information_question_never_confirms_the_previous_summary()
+    {
+        var f = Create(); await Ready(f);
+        await f.HandleTurn("Antes dime cuánto cuesta", "price");
+        var before = Draft(await f.Context());
+        await f.HandleTurn("sí", "informational-yes");
+        Assert.Empty(f.Bookings); Assert.Equal(before, Draft(await f.Context()));
+        await f.HandleTurn("continuemos", "resume-summary");
+        Assert.Contains("Reserva por confirmar", f.Sent["resume-summary"].Content);
+        await f.HandleTurn("sí confirmo", "current-consent");
+        await f.HandleTurn("sí confirmo", "current-consent");
+        Assert.Single(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_what_repeats_the_current_availability_reference_without_reset_or_ai()
+    {
+        var f = Create(); await Ready(f);
+        await f.HandleTurn("¿Hay a las 4 de la tarde?", "availability");
+        var before = Draft(await f.Context()); var calls = f.AiCalls;
+        await f.HandleTurn("¿Qué?", "reference-repair");
+        Assert.Contains("16:00", f.Sent["reference-repair"].Content);
+        Assert.Equal(before, Draft(await f.Context())); Assert.Equal(calls, f.AiCalls);
+        Assert.Empty(f.Bookings);
+    }
+
+    [Fact]
+    public async Task Runtime_repeating_the_current_summary_keeps_its_consent_reference()
+    {
+        var f = Create(); await Ready(f);
+        await f.HandleTurn("continuemos", "summary");
+        await f.HandleTurn("¿Qué?", "repeat-summary");
+        Assert.Contains("Reserva por confirmar", f.Sent["repeat-summary"].Content);
+        Assert.Empty(f.Bookings);
+        await f.HandleTurn("sí confirmo", "consent-after-repeat");
+        Assert.Single(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_legacy_confirmation_revalidates_the_summary_before_accepting_consent()
+    {
+        var f = Create(); await Ready(f);
+        Assert.Null((await f.Context()).CurrentQuestion);
+        await f.HandleTurn("sí confirmo", "legacy-answer");
+        Assert.Empty(f.Bookings);
+        Assert.Contains("Reserva por confirmar", f.Sent["legacy-answer"].Content);
+        Assert.Equal(ExpectedReply.ConfirmReservation, (await f.Context()).CurrentQuestion!.Expected);
+        await f.HandleTurn("sí confirmo", "fresh-consent");
+        Assert.Single(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    [Fact]
+    public async Task Runtime_question_binding_preserves_the_existing_order_continuation_contract()
+    {
+        var f = new AssistantConversationTests.Fixture(conciergeCatalog: true, intelligentCommerce: true);
+        await f.HandleTurn("Quiero dos panes integrales", "order-draft");
+        var state = await f.Context(); var question = state.LastQuestion;
+        Assert.Contains("¿Deseas agregar o cambiar", question); Assert.DoesNotContain("5.00", question);
+        var before = Draft(state);
+        await f.HandleTurn("¿Qué horarios tienen?", "order-info");
+        Assert.Equal(question, (await f.Context()).LastQuestion);
+        Assert.Equal(before, Draft(await f.Context())); Assert.Empty(f.Orders); Assert.Empty(f.Bookings);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Multi_slot_start_keeps_afternoon_as_a_preference_and_commits_once_only_after_explicit_confirmation(bool reservationOnly)
@@ -243,6 +395,54 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Runtime_semantic_projection_has_a_verified_question_but_no_history_customer_or_summary()
+    {
+        var f = new ConciergeFixture(); var state = new ConversationContextDto {
+            CurrentGoal = "RESERVATION", CurrentStep = "COLLECT_DATE", RealCustomerName = "Private Person",
+            Information = new() { Topic = "Availability" }
+        };
+        ConversationQuestion.Remember(f.Workspace, "private-source", state, ExpectedReply.Information,
+            ConversationIntent.Reservation, "Private summary with customer and contact", f.Now);
+        string? prompt = null;
+        var router = new Mock<IAiRouter>(MockBehavior.Strict);
+        router.Setup(r => r.ExecuteTaskAsync(AiTaskType.IntentExtraction, It.IsAny<string>(), "¿Y en relación a eso?", true, It.IsAny<CancellationToken>()))
+            .Callback<AiTaskType, string, string, bool, CancellationToken>((_, system, _, _, _) => prompt = system)
+            .ReturnsAsync("""{"Intent":"General","RequiresClarification":true}""");
+        var interpreter = new AiInterpreter(router.Object, Mock.Of<IClock>(c => c.UtcNow == f.Now), f.Profiles.Object, NullLogger<AiInterpreter>.Instance);
+        var turn = DialogueTurnContext.Capture(f.Workspace, "semantic-followup", state, new DateTimeOffset(f.Now),
+            TimeZoneInfo.Utc, f.Modules);
+        var result = await interpreter.InterpretAsync("¿Y en relación a eso?", turn, default);
+        Assert.Equal(ConversationIntent.General, result.Intent); Assert.True(result.RequiresClarification);
+        Assert.Contains("\"Expected\":\"Information\"", prompt); Assert.Contains("Availability", prompt);
+        Assert.DoesNotContain("Private Person", prompt); Assert.DoesNotContain("Private summary", prompt);
+        Assert.DoesNotContain("private-source", prompt); Assert.DoesNotContain(f.Workspace.ToString(), prompt);
+        Assert.Contains("Private summary", state.LastQuestion); // Stored history is not used as provider context.
+        router.Verify(r => r.ExecuteTaskAsync(AiTaskType.IntentExtraction, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        f.Profiles.VerifyNoOtherCalls();
+        state.CurrentQuestion = state.CurrentQuestion! with { ExpiresAt = f.Now };
+        Assert.Null(DialogueTurnContext.Capture(f.Workspace, "expired", state, new DateTimeOffset(f.Now), TimeZoneInfo.Utc, f.Modules).Question);
+    }
+
+    [Fact]
+    public async Task Runtime_semantic_request_about_a_service_never_becomes_a_reservation()
+    {
+        var f = new ConciergeFixture();
+        const string text = "Registra una solicitud sobre limpieza dental";
+        var interpreter = new Mock<IAiInterpreter>(MockBehavior.Strict);
+        interpreter.Setup(i => i.InterpretAsync(f.Workspace, text, "", null, It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiInterpretation { Intent = ConversationIntent.Request, Act = DialogueAct.StartOperation,
+                Evidence = [new("Act", text, nameof(DialogueAct.StartOperation))] });
+        var recovery = new Mock<IConversationRecoveryService>(MockBehavior.Strict);
+        recovery.Setup(r => r.AcquireAiAsync(f.Workspace, "phone", "request", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var pipeline = new TurnUnderstandingPipeline(f.Resolver, new DialoguePolicy(), interpreter.Object, recovery.Object, f.Offerings.Object);
+        var result = await pipeline.PrepareAsync(f.Workspace, "phone", new("instance", "phone", "Ana", text, "request", false, f.Workspace),
+            new(), f.Modules, default);
+        Assert.Equal(ConversationIntent.Request, result.Interpretation.Intent);
+        Assert.Null(result.Interpretation.BookingProposal);
+        Assert.Equal(DialogueAct.StartOperation, result.Act);
+    }
+
+    [Fact]
     public async Task Existing_change_location_directive_and_numeric_menu_clear_pending_dependencies()
     {
         var f = Create(); await Ready(f);
@@ -309,6 +509,7 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
         var state = JsonSerializer.Deserialize<ConversationContextDto>("""{"StateVersion":"legacy","CurrentGoal":"RESERVATION","SelectedLocationId":"sede-a"}""")!;
         Assert.Equal("legacy", state.StateVersion); Assert.Equal("sede-a", state.SelectedLocationId);
         Assert.Empty(state.PendingServiceIds); Assert.Empty(state.PendingDialogueSlots); Assert.Null(state.PreferredTime);
+        Assert.Null(state.CurrentQuestion);
     }
 
     private static async Task Ready(AssistantConversationTests.Fixture f)

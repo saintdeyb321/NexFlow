@@ -787,7 +787,7 @@ public class ChatFlow : IChatFlow
             ConversationIntent.Faq => KnowledgeTopic.Faqs,
             ConversationIntent.Location => KnowledgeTopic.Locations,
             ConversationIntent.BusinessHours => KnowledgeTopic.BusinessHours,
-            ConversationIntent.General => KnowledgeTopic.Faqs,
+            ConversationIntent.General => modules.Contains("FAQ") ? KnowledgeTopic.Faqs : KnowledgeTopic.Profile,
             _ => null
         };
         if (!topic.HasValue) return new ChatResponse("No puedo resolver esa consulta con la información disponible.");

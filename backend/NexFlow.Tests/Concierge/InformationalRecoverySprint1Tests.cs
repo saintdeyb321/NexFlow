@@ -448,6 +448,8 @@ public sealed class InformationalRecoverySprint1Tests(ITestOutputHelper output)
     public async Task Exact_consent_commits_current_summary_once_and_does_not_confirm_without_a_summary()
     {
         var f = Create(); await Ready(f);
+        // A legacy draft has no verifiable question yet; present its current summary first.
+        await f.HandleTurn("continuemos", "current-summary"); Assert.Empty(f.Bookings);
         await f.HandleTurn("Sí, confirmo", "confirm"); await f.HandleTurn("Sí, confirmo", "confirm");
         Assert.Single(f.Bookings); Assert.Equal(0, f.AiCalls);
         await f.HandleTurn("Sí, confirmo", "no-summary"); Assert.Single(f.Bookings);

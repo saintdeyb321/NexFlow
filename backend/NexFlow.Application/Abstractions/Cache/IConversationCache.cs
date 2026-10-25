@@ -3,6 +3,8 @@ namespace NexFlow.Application.Abstractions.Cache;
 public class ConversationContextDto
 {
     public string? StateVersion { get; set; }
+    // Additive inside contextJson; absent in legacy documents. Never a second state store.
+    public NexFlow.Application.Features.Automation.Dialogue.Contracts.ConversationQuestion? CurrentQuestion { get; set; }
     public List<ConversationMenuOption> RecoveryOptions { get; set; } = new();
     public string? RecoveryOptionsContext { get; set; }
     public int RecoveryOptionsOffset { get; set; }

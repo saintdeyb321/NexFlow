@@ -17,6 +17,29 @@ It is NOT an ERP, POS, inventory, accounting, payment, stock-management or logis
 - Backend is the security and business-rule authority.
 - Frontend permissions never replace backend authorization.
 
+## NexFlow Agent Runtime 4.0
+
+- Preserve the existing AiRouter and AI provider abstraction.
+- Use one shared agent runtime with isolated context per workspace.
+- Business-specific knowledge, permissions and conversation state
+  must remain scoped to the authorized workspace.
+- AI handles semantic interpretation and may compose natural
+  responses from verified facts.
+- Deterministic backend services remain the sole authority for
+  business operations, validation, permissions and persistence.
+- Do not build large keyword trees, synonym dictionaries or
+  hardcoded conversation branches to simulate intelligence.
+- Explicit menus are optional aids, not mandatory conversation paths.
+- Prefer natural questions that let customers provide information
+  freely, including their preferred reservation time.
+- ORDERS creates commercial requests and notifies the business
+  for review and customer coordination. It does not process payments
+  or guarantee stock availability.
+- Refactor conversational orchestration when justified by the
+  current phase, without redesigning unrelated hardened components.
+- The future employee-management module is outside the scope
+  of Agent Runtime 4.0 and must not be exposed as AI knowledge.
+
 ## Backend baseline
 
 Backend hardening A-H is considered stable.
@@ -112,4 +135,13 @@ Final response should contain only:
 - build results;
 - real blocker if any.
 
+For audit-only phases:
+- Do not modify application code.
+- Do not run builds unless explicitly requested.
+- Deliver the requested diagnostic Markdown document.
+- Report confirmed findings, hypotheses, severity, affected
+  components, architectural recommendations and blockers.
+- Stop before implementing the next phase.
+
 Keep the final response concise.
+

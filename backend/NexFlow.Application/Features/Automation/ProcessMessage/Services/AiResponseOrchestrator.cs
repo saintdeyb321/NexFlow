@@ -5,7 +5,6 @@ using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Engines.AI;
-using System.Text.RegularExpressions;
 using NexFlow.Domain.Exceptions;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Automation.Dialogue.Composition;
@@ -63,6 +62,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         var intent = ConversationIntent.General;
         var act = DialogueAct.Information;
         var operation = OperationStatus.Informational;
+        var expectedReply = ExpectedReply.Information;
         var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
         if (context.Mode == "Human" || conversation.Mode == ConversationMode.Human)
             throw new ConcurrencyException("Conversation is under human control; reload its state before processing.");
@@ -92,7 +92,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (managed?.Response != null) { intent = ConversationIntent.Reservation; return await SendText(managed.Response); }
         }
         var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
-        if (recovery?.Response != null) { intent = recovery.Interpretation?.Intent ?? ConversationIntent.General; act = recovery.Act; operation = recovery.Operation; return await SendText(recovery.Response); }
+        if (recovery?.Response != null) { intent = recovery.Interpretation?.Intent ?? ConversationIntent.General; act = recovery.Act; operation = recovery.Operation; expectedReply = recovery.Expected; return await SendText(recovery.Response); }
         AiInterpretation interpretation;
         PreparedDialogueTurn? prepared = null;
         if (recovery?.Interpretation != null) interpretation = recovery.Interpretation;
@@ -105,7 +105,6 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         act = prepared?.Act ?? (interpretation.Intent == ConversationIntent.Reservation
             ? context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialogueAct.RequestedData : DialogueAct.StartOperation
             : DialogueAct.Information);
-        var normalized = ConversationRecoveryService.Normalize(request.MessageText);
         // A manual takeover while the provider was running invalidates this turn.
         var latest = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
         if (latest.Mode == "Human" || latest.StateVersion != context.StateVersion)
@@ -118,14 +117,18 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             {
                 var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context,
                     activeModules, prepared.Response, cancellationToken, contextual: true, choices: prepared.Choices);
+                expectedReply = clarification.Expected;
                 return await SendText(clarification.Response!);
             }
             var response = denied ?? prepared.Response;
+            if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal == null
+                && interpretation.Intent == ConversationIntent.Reservation)
+                expectedReply = ExpectedReply.StartReservation;
             if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal is "BOOKING" or "RESERVATION")
                 response += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
             return await SendText(response);
         }
-        interpretation.Confirmed = context.CurrentStep == "CONFIRM" && ConversationConfirmation.IsAffirmative(request.MessageText);
+        interpretation.Confirmed = ConversationQuestion.CanConfirmReservation(workspaceId, context, request.MessageText, _clock?.UtcNow ?? DateTime.UtcNow);
         if (interpretation.Confirmed) act = DialogueAct.Confirmation;
         else if (interpretation.Intent == ConversationIntent.Support) act = DialogueAct.HumanAssistance;
         else if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) act = DialogueAct.Cancellation;
@@ -145,9 +148,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         if (_recovery != null && interpretation.Intent is not (ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             && (interpretation.RequiresClarification || interpretation.Intent is ConversationIntent.General
-            || recovery?.Interpretation == null && interpretation.BookingProposal == null && interpretation.OrderProposal == null && string.IsNullOrEmpty(context.CurrentGoal) && ((interpretation.Intent == ConversationIntent.Reservation && !Regex.IsMatch(normalized, @"\b(reserv|agend|cita)"))
-                || (interpretation.Intent == ConversationIntent.Order && !Regex.IsMatch(normalized, @"\b(compr|pedid|pedir|llevar|orden)"))
-                || (interpretation.Intent == ConversationIntent.Request && !Regex.IsMatch(normalized, @"\b(solicit|reclamo|queja|cotiz|registr|tramite|soporte)")))))
+            || recovery?.Interpretation == null && interpretation.BookingProposal == null && interpretation.OrderProposal == null
+                && string.IsNullOrEmpty(context.CurrentGoal) && interpretation.Intent is ConversationIntent.Reservation or ConversationIntent.Order or ConversationIntent.Request
+                && prepared?.Act != DialogueAct.StartOperation))
         {
             if (context.CurrentGoal is "BOOKING" or "RESERVATION")
                 return await SendText(AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, activeModules)
@@ -275,6 +278,13 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         async Task<string> Compose(string text, bool media = false)
         {
+            var expected = context.PendingRecoveryAction != null ? ExpectedReply.RecoveryDecision
+                : responsePlan?.Operation == OperationStatus.AwaitingConfirmation && intent == ConversationIntent.Reservation ? ExpectedReply.ConfirmReservation
+                : responsePlan?.Operation == OperationStatus.AwaitingConfirmation && intent == ConversationIntent.Order ? ExpectedReply.ConfirmOrder
+                : responsePlan?.Operation == OperationStatus.Collecting ? context.RecoveryOptions.Count > 0 ? ExpectedReply.Selection : ExpectedReply.RequestedData
+                : expectedReply;
+            ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, _clock?.UtcNow ?? DateTime.UtcNow);
+            await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             var plan = Bind(text, media);
             try { _logger.LogInformation("DialogueDecision Intent={Intent} Act={Act} Operation={Operation}", plan.Intent, plan.Act, plan.Operation); }
             catch { /* Diagnostics cannot change the business decision. */ }
@@ -303,6 +313,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 var currentModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context,
                     currentModules, response.Text, cancellationToken, contextual: true, choices: response.Choices);
+                expectedReply = clarification.Expected;
                 response = response with { Text = clarification.Response! };
             }
             responsePlan = new(workspaceId, request.MessageId, context.StateVersion, intent, act,

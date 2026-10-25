@@ -166,7 +166,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
         if (booking && backedAct && interpretation.Act == DialogueAct.InformationalInterruption && interpretation.Intent == ConversationIntent.Reservation)
             return PrepareBooking(AiEvidenceValidator.Validate(local, interpretation, request.MessageText), DialogueAct.InformationalInterruption, true, workspace, request.MessageId, readOnly: true);
-        if (backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
+        if (interpretation.Intent == ConversationIntent.Reservation && backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
             && !contradictory && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
         {
             // Semantic intent can start a draft; only licensed, reservable entities
@@ -184,6 +184,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(act, new() { Intent = ConversationIntent.General, RequiresClarification = true }, true);
         if (interpretation.Intent == ConversationIntent.Support) return new(DialogueAct.HumanAssistance, interpretation, true);
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) return new(DialogueAct.Cancellation, interpretation, true);
+        if (interpretation.Intent == ConversationIntent.Request && context.CurrentGoal == null
+            && backedAct && interpretation.Act == DialogueAct.StartOperation)
+            return new(DialogueAct.StartOperation, interpretation, true);
         if (booking && (interpretation.Directive == ConversationDirective.ChangeLocation && local.Location.Status != ResolutionStatus.Determined
             || interpretation.Directive == ConversationDirective.ChangeService && local.Service.Status != ResolutionStatus.Determined
             || interpretation.Directive == ConversationDirective.ShowOptions))

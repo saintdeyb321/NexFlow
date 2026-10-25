@@ -239,6 +239,7 @@ public sealed class Sprint51ConversationTests
         var f = await Draft("CONFIRM"); f.Services[1].Metadata["aliases"] = new[] { "Cuidado Integral" };
         var state = await f.Context(); state.RealCustomerName = name;
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        await f.HandleTurn("continuemos", "current-name-summary"); Assert.Empty(f.Bookings);
         await f.HandleTurn("sí", "human-name");
         Assert.Equal(name, Assert.Single(f.Bookings.Values).CustomerName); Assert.Equal(0, f.AiCalls);
     }
@@ -283,6 +284,7 @@ public sealed class Sprint51ConversationTests
         var f = await Draft("CONFIRM"); var other = new AssistantConversationTests.Fixture(conciergeCatalog: true);
         other.Services[1].Metadata["aliases"] = new[] { "Persona Autorizada" };
         f.Modules.Remove("CATALOG"); f.Products[0].Metadata["aliases"] = new[] { "Persona Autorizada" };
+        await f.HandleTurn("continuemos", "current-scoped-summary"); Assert.Empty(f.Bookings);
         await f.HandleTurn("sí", "scoped-name");
         Assert.Equal("Persona Autorizada", Assert.Single(f.Bookings.Values).CustomerName);
         f.OfferingReads.Verify(o => o.GetProductsAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);

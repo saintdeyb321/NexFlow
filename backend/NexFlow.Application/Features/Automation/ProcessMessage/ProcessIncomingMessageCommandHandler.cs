@@ -7,6 +7,7 @@ using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
@@ -94,17 +95,8 @@ public class ProcessIncomingMessageCommandHandler
     private async Task<bool> TryHandleZeroTokenKnowledgeAsync(Guid workspaceId, string phone, string message, string sourceMessageId, ConversationRecord conversation, CancellationToken ct)
     {
         if (message.Length > 8000) return false;
-        var normalizedText = message.ToLowerInvariant()
-            .Replace("á", "a").Replace("é", "e").Replace("í", "i").Replace("ó", "o").Replace("ú", "u")
-            .Replace("¿", "").Replace("?", "").Trim();
-
-        KnowledgeTopic? topic = null;
-        var locationKeywords = new[] { "donde estan", "ubicacion", "direccion", "sedes", "sucursal", "como llego", "donde atienden" };
-        var hoursKeywords = new[] { "horario", "horarios", "que horario tienen", "que horarios tienen", "dias de atencion", "cuando abren", "hasta que hora", "cuando cierran" };
-
         // Only unambiguous complete shortcuts bypass recovery/handoff interpretation.
-        if (locationKeywords.Contains(normalizedText)) topic = KnowledgeTopic.Locations;
-        else if (hoursKeywords.Contains(normalizedText)) topic = KnowledgeTopic.BusinessHours;
+        var topic = InformationalRequest.ShortcutTopic(ConversationRecoveryService.Normalize(message));
 
         if (topic.HasValue)
         {
@@ -143,6 +135,7 @@ public class ProcessIncomingMessageCommandHandler
             }
 
             InformationalRequest.Remember(context, topic.Value, result, DateTime.UtcNow);
+            ConversationQuestion.Remember(workspaceId, sourceMessageId, context, ExpectedReply.Information, intent, result.ToResponse(), DateTime.UtcNow);
             await _contextRecovery.SaveContextAsync(workspaceId, phone, context, ct);
             var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone,
                 result.ToResponse(), SenderType.AI, sourceMessageId, ct);

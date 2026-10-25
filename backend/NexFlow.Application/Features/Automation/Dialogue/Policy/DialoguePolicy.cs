@@ -30,7 +30,8 @@ public sealed class DialoguePolicy
         if (normalized is "ya no quiero continuar" or "no quiero continuar" or "no quiero seguir" or "no sigamos") return DialogueAct.Cancellation;
         if (normalized is "no quiero reservar" or "no deseo reservar" or "no necesito reservar") return DialogueAct.DeclineOperation;
         if ((booking || state.CurrentGoal == "ORDER") && IsResume(normalized)) return DialogueAct.Resume;
-        if (booking && normalized is "si" or "de acuerdo" or "esta bien" or "vale" or "ok") return DialogueAct.Resume;
+        if (booking && state.CurrentQuestion?.Expected is not (ExpectedReply.Information or ExpectedReply.StartReservation)
+            && normalized is "si" or "de acuerdo" or "esta bien" or "vale" or "ok") return DialogueAct.Resume;
         if (booking && words.Any(w => w is "pedir" or "pedido" or "comprar" or "solicitud" or "reclamo")) return DialogueAct.SemanticAmbiguity;
         // A negated clause requires semantic scope; extracted nouns must not start an operation.
         if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
