@@ -101,9 +101,9 @@ public sealed class Rc3Sprint4IntegrityTests
         {
             var controller = new ReservationsController(f.Engine, f.Reservations.Object,
                 Mock.Of<IWorkspaceContext>(w => w.CurrentWorkspaceId == f.Workspace), f.Entitlements.Object);
-            var response = Assert.IsType<ObjectResult>(await controller.CreateReservation(new("location", "service", "customer", "Customer", Fixture.Day.AddHours(15)), default));
+            var response = Assert.IsType<ObjectResult>(await controller.CreateReservation(new("location", "service", "+51987654321", "Customer", Fixture.Day.AddHours(15)), default));
             Assert.Equal(400, response.StatusCode);
-            Assert.Contains("Service.Inactive", System.Text.Json.JsonSerializer.Serialize(response.Value));
+            Assert.Equal("Service.Inactive", System.Text.Json.JsonSerializer.SerializeToElement(response.Value).GetProperty("code").GetString());
         }
         Assert.Empty(f.Rows);
     }

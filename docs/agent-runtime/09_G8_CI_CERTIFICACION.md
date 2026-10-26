@@ -1,5 +1,7 @@
 # G8 — Contrato estricto de certificación CI de Agent Runtime 4.0
 
+**Actualización G8.10:** los cuatro fallos de preparación/aserciones fueron corregidos bajo autorización separada, sin cambios productivos ni en el gate. Resultado local vigente **1491/1491**, F7 **984/984**, históricos **130/118/12 exactos**, validador **7/7**, build correcto. GO técnico local para auditoría; CI remoto sigue pendiente. El registro G8 original siguiente se conserva como evidencia histórica y su NO-GO queda sucedido por la sección «G8.10 — Corrección de cuatro regresiones vigentes» al final.
+
 ## Identidad y dictamen
 
 Referencia local main leída directamente de HEAD/ref: **664ad0e5810e99f21641fb0fbe83929de3ad787e**, coincidente con el encargo. Sin comandos Git, consulta remota, publicación o dispatch. El árbol previo no se presume limpio; se capturó el contenido inicial de los tres workflows para revisar exclusivamente el cambio propio.
@@ -165,3 +167,111 @@ Enlaces para ejecución/revisión manual:
 - [Redis aislado](https://github.com/saintdeyb321/NexFlow/actions/workflows/concierge-redis-integration.yml).
 
 **Detención para auditoría externa. No se publica ni se despliega nada.**
+
+## G8.10 — Corrección de cuatro regresiones vigentes
+
+### Identidad, alcance y reproducción inicial
+
+HEAD/ref local main leído sin comandos Git: **19d2d0c8734c52374b910fd2bab6d03edd49c25b**, coincidente con el commit publicado indicado. Los tres workflows coinciden con las capturas del cierre G8 anterior; g8_certification.py conserva MIN_CURRENT=1491, MIN_RUNTIME=984 y sus hashes congelados. No se presupone árbol limpio ni se certifica remoto. La ejecución corresponde al checkout efectivo más este diff local de tres archivos de pruebas y este informe; todavía no es una nueva revisión publicada.
+
+Se leyeron AGENTS y el encargo G8.10. Se capturaron los originales intervenidos para revisar sólo el diff propio. Antes de corregir se ejecutaron los cuatro métodos dirigidos: **5 casos, 1 aprobado, 4 fallidos, 0 omitidos**. La teoría de servicio inactivo aporta dos casos; bot=True ya estaba aprobado. Evidencia nueva preservada: backend/NexFlow.Tests/TestResults/g8-10/directed-before.trx y .log. No se sobreescriben tampoco los TRX G8 anteriores.
+
+| Caso | Fallo inicial exacto | Causa contrastada en producción, sin modificarla |
+|---|---|---|
+| Secuencia de cinco mensajes | Assert.Contains: no encuentra '1. Consultar productos' en la respuesta informativa | InformationalRequest.PublicTopic, :31–35, clasifica información general como Profile; Recovery.AnswerInformation/SaveInformation consulta el conocimiento autorizado. Ocurre antes de la rama de menú. Es información sin selección obligatoria, no silencio ni una transacción |
+| NF05, selección de menú | Assert.NotNull: decision.Interpretation es null | Se arrancaba también con 'Quiero informacion', sin crear menú. Recovery exige referencia Selection y huella vigente antes de interpretar un índice; no debe seleccionar sobre una pregunta informativa |
+| Recuperación de notificación de pedido | Assert.Throws: no se lanza IOException | Se inyectaba ORDER con artículos y CurrentStep=null. OrderFlow.ProcessPlannedAsync:111–122 exige resumen revisado y devuelve ORDER_CONFIRM sin crear/notificar. Por tanto no se alcanzaba el fallo simulado de notificación; F7-01 funcionaba correctamente |
+| Servicio inactivo, rama web | Assert.IsType: esperaba ObjectResult, recibió BadRequestObjectResult | ReservationsController.CreateReservation:194–195 rechaza 'customer' como Reservation.InvalidContact antes del motor. No se estaba probando Service.Inactive. El resultado de negocio posterior se mapea mediante ReservationError:240–245 |
+
+Rutas productivas del cuadro bajo backend/NexFlow.Application/Features/Automation/Dialogue/Understanding, ProcessMessage/Services y backend/NexFlow.API/Controllers/Business, según clase. ReservationEngine.CreateReservationAsync:186 devuelve Service.Inactive para el servicio real inactivo. No se demostró un defecto productivo en estos cuatro casos; no se modificó producción.
+
+### Diferencias mínimas y garantías conservadas
+
+**1. Rc3Sprint0IncidentTests.Incident_sequence_with_healthy_simulated_dependencies_replies_five_times_and_hola_uses_no_ai**
+
+Se sustituye únicamente la expectativa obsoleta de menú por comprobaciones de respuesta factual y lectura Profile del workspace correcto, con cero IA y borrador idéntico. Se mantienen los cinco mensajes originales y las cinco respuestas, instrucción local de reserva, saludo sin otra interpretación, una interpretación total para la consulta comercial natural, lectura Products, estado del borrador y ausencia de reservas/pedidos.
+
+Antes del quinto mensaje se comprueba que no hay opciones y que la pregunta vigente es Information. La selección se aclara por no corresponder a la pregunta vigente; no se fuerza un menú ficticio. Se comprueba nuevamente el borrador, y se repite el mismo SourceMessageId para exigir que siga habiendo exactamente cinco respuestas con las cinco claves esperadas. Cada respuesta conserva Sent y texto no vacío. No se afirma entrega real WhatsApp: es el fixture de orquestación existente.
+
+**2. Rc3Sprint0IncidentTests.NF05_an_explicit_option_phrase_under_a_current_menu_must_select_without_ai**
+
+El setup llama al runtime real del fixture con 'menú'. Se verifican StateVersion persistida, pregunta Selection válida, huella de borrador, huella de opciones, pertenencia al workspace y rechazo de esa referencia para otro workspace. Se localiza ProductQuery en las opciones reales y se exige que sea la primera; se comprueba que su etiqueta apareció en el mensaje mostrado. Por eso se conserva efectivamente 'Escojo la opción 1', construida desde ese índice verificado, sin inventar un selector.
+
+Se mantienen interpretación ProductQuery, cero IA, cero reservas/pedidos y se añade QueryKind.Broad, cambio de StateVersion y lista consumida vacía. No se inyecta una respuesta/menú ni una huella manual; las obtiene la transición existente. Las regresiones de menús obsoletos/CAS/tenant del gate completo permanecen aprobadas.
+
+**3. Rc3Sprint4CommercialTests.Order_flow_recovers_notification_after_business_commit_without_losing_draft_or_creating_second_order**
+
+El flujo real del fixture presenta primero la cotización con identidad **review**. La validación positiva F7-01 produce y persiste ORDER_CONFIRM, artículos y PEN 5.00, todavía sin pedido ni aviso. El consentimiento posterior usa **source**, distinto de review; tanto el reintento como el replay final usan ese mismo source.
+
+Se conserva Assert.ThrowsAsync<IOException>, ahora alcanzada después del pedido durable. Se refuerza exactamente un pedido **PendingReview**, cantidad dos en borrador durante el fallo, recuperación con respuesta estable, sólo dos intentos de aviso y mismo identificador lógico created.Id: primer intento fallido, segundo recuperado. Tras éxito, borrador vacío y un único pedido; el replay no añade aviso ni efecto. No se simula una segunda compra ni se modifica OrderFlow. Los controles de ausencia de resumen, cotización cambiada y consentimiento inválido continúan cubiertos por CommerceSafetyTests, incluidos F7-01 y el handler real.
+
+**4. Rc3Sprint4IntegrityTests.Web_and_bot_creation_share_inactive_service_rules**
+
+Sólo en la solicitud web se sustituye 'customer' por el teléfono internacional ficticio **+51987654321**. Se conserva **Assert.IsType<ObjectResult>**, no una comprobación permisiva del subtipo de contacto inválido. Se conserva HTTP 400 y se refuerza la antigua búsqueda de substring por igualdad exacta del campo JSON code con **Service.Inactive**. Así se acredita que llegó a la validación del motor y no se acepta Reservation.InvalidContact por error.
+
+La rama bot=True conserva íntegros su setup y aserciones; ambas ramas exigen cero filas nuevas. La batería completa conserva además los contratos separados de normalización/rechazo de contacto inválido: no se desactiva esa validación para llegar al servicio.
+
+### Compilación, comandos y evidencia final real
+
+Directorio: **backend/NexFlow.Tests/TestResults/g8-10/**. Pruebas locales con fakes, SQLite y transporte simulado existentes; no Oracle, PostgreSQL/Firestore/Redis reales, Firebase, proveedores IA o WhatsApp.
+
+Filtro dirigido ejecutado antes/después sobre backend/NexFlow.Tests/NexFlow.Tests.csproj con --no-restore:
+
+~~~text
+FullyQualifiedName~Rc3Sprint0IncidentTests.Incident_sequence_with_healthy_simulated_dependencies_replies_five_times_and_hola_uses_no_ai|FullyQualifiedName~Rc3Sprint0IncidentTests.NF05_an_explicit_option_phrase_under_a_current_menu_must_select_without_ai|FullyQualifiedName~Rc3Sprint4CommercialTests.Order_flow_recovers_notification_after_business_commit_without_losing_draft_or_creating_second_order|FullyQualifiedName~Rc3Sprint4IntegrityTests.Web_and_bot_creation_share_inactive_service_rules
+~~~
+
+Comandos finales desde raíz, sin cambios en filtros/hashes del runner:
+
+~~~powershell
+dotnet build backend/backend.slnx --no-restore
+python -B .github/workflows/g8_certification.py run current --trx backend/NexFlow.Tests/TestResults/g8-10/current.trx
+python -B .github/workflows/g8_certification.py run historical --trx backend/NexFlow.Tests/TestResults/g8-10/historical.trx
+python -B -m unittest discover -s .github/workflows -p test_g8_certification.py -v
+~~~
+
+| Evidencia | Ejecutadas | Aprobadas | Fallidas | Omitidas | Resultado |
+|---|---:|---:|---:|---:|---|
+| directed-before.trx | 5 | 1 | 4 | 0 | Rojo inicial conservado |
+| directed-after.trx | 5 | 5 | 0 | 0 | Cuatro correcciones y bot=True aprobados |
+| current.trx / current.g8.json | **1491** | **1491** | **0** | **0** | Runner PASS, dotnet/runner exit 0 |
+| Subconjunto F7 dentro de current.trx | **984** | **984** | **0** | **0** | Mismo alcance dirigido, sin casos nuevos |
+| historical.trx / historical.g8.json | **130** | **118** | **12** | **0** | Incompatibilidades EXACTAS; dotnet exit 1, verificador exit 0 autorizado |
+| python-validator.log | **7** | **7** | **0** | **0** | Validador original aprobado |
+
+Build backend: **correcto, salida 0, 0 errores y 0 advertencias incrementales**, build.log. La compilación inicial de pruebas mostró las tres advertencias preexistentes CS8981/CS8602 documentadas antes; no se corrigieron archivos ajenos. No restore ni dependencias nuevas.
+
+Los 12 históricos conservan sus identidades, motivos VerifiedFact y los cuatro hashes congelados. Ni corpus ni evaluadores fueron editados. Se conserva el TRX Failed y JSON EXPECTED_HISTORICAL_INCOMPATIBILITIES; no se presenta 130/130 verde. Actual + histórico: **1621 ejecutadas, 1609 aprobadas, 12 fallidas históricas, cero omisiones**; no se suman reejecuciones ni subconjuntos.
+
+Suites pertinentes ya ejecutadas dentro de current.trx, sin repetirlas innecesariamente:
+
+| Clase | Ejecutadas/aprobadas |
+|---|---:|
+| Rc3Sprint0IncidentTests | 5/5 |
+| Rc3Sprint4CommercialTests | 16/16 |
+| Rc3Sprint4IntegrityTests | 17/17 |
+| CommerceSafetyTests | 36/36 |
+| AssistantRc1ConcurrencyTests | 14/14 |
+| AssistantDurabilityTests | 9/9 |
+| ReservationsApiTests | 55/55 |
+| ReservationsRepositoryTests | 26/26 |
+| RuntimeF3ContractV2Tests | 12/12 |
+
+La suite completa incluye además los controles locales existentes de permisos, aislamiento, Outbox, entrega incierta y modo humano. No se ejecutaron categorías externas: sus resultados de GitHub Actions permanecen pendientes y no equivalen a estas cero omisiones.
+
+### Archivos, revisión y decisión
+
+Modificados exclusivamente:
+
+- backend/NexFlow.Tests/Rc3Sprint0IncidentTests.cs.
+- backend/NexFlow.Tests/Rc3Sprint4CommercialTests.cs.
+- backend/NexFlow.Tests/Rc3Sprint4IntegrityTests.cs.
+- docs/agent-runtime/09_G8_CI_CERTIFICACION.md, actualización con registro anterior conservado.
+
+No se añadieron/eliminaron casos, Skip ni exclusiones. No se cambian código productivo, workflows, g8_certification.py, sus hashes ni corpus/evaluadores. Se cotejaron huellas antes/después de OrderFlow, ConversationFlows, ReservationEngine, ReservationsController y ambos scripts Python: sin cambios. Los tres workflows siguen coincidiendo con la captura G8 anterior. Se revisa el diff propio contra las capturas de inicio, sin afirmar limpieza global del repositorio.
+
+**Gates G8.10 locales: OK. GO técnico local para auditoría externa y preparación de una nueva candidata.** Ya no hay cuatro bloqueos vigentes en esta ejecución; no se ha descubierto un nuevo defecto productivo. Persisten las doce incompatibilidades históricas autorizadas, explícitamente visibles.
+
+**CI remoto PENDIENTE / no certificado**: falta publicar manualmente el diff aprobado, fijar el nuevo SHA y ejecutar los workflows con Run ID, run_attempt y artefactos coincidentes. No atribuir a 19d2d0c los resultados de cambios locales aún no publicados. Conservar el procedimiento manual de la sección G8; no se ejecutó dispatch, commit/push, despliegue o SSH.
+
+El piloto/producción y la aprobación comercial son decisiones separadas. ARM64/servicios/backups referidos por el propietario no se reejecutaron aquí; no se modifica Oracle, Firebase Spark ni su política de backups. La calidad real de proveedores/canal/evaluación humana no se certifica con mocks. **Detención para auditoría externa, sin publicación ni despliegue.**

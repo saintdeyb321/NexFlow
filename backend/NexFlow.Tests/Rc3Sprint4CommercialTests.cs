@@ -171,12 +171,20 @@ public sealed class Rc3Sprint4CommercialTests
         var access = new Mock<IEntitlementService>();
         access.Setup(e => e.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { "ORDERS", "CATALOG" });
         var flow = new OrderFlow(f.Repository, notifications.Object, contexts.Object, new OfferingService(f.Catalog), access.Object);
+        var quote = await flow.ProcessAsync(f.Workspace, "phone", "conversation", "Customer", "enviar pedido", new AiInterpretation(), "review", default);
+        Assert.Contains("PEN 5.00", quote); Assert.StartsWith("ORDER_CONFIRM:", durable.CurrentStep);
+        Assert.Equal("review", durable.OrderLastSourceMessageId);
+        Assert.Empty(await f.Repository.GetOrdersAsync(f.Workspace, null, default)); Assert.Equal(0, attempts);
         Task<string> Send() => flow.ProcessAsync(f.Workspace, "phone", "conversation", "Customer", "enviar pedido", new AiInterpretation(), "source", default);
         await Assert.ThrowsAsync<IOException>(Send);
-        Assert.Single(await f.Repository.GetOrdersAsync(f.Workspace, null, default)); Assert.Single(durable.OrderDraftItems);
+        var created = Assert.Single(await f.Repository.GetOrdersAsync(f.Workspace, null, default));
+        Assert.Equal(NexFlow.Domain.Enums.OrderStatus.PendingReview, created.Status);
+        Assert.Equal(2, Assert.Single(durable.OrderDraftItems).Quantity);
         var response = await Send(); Assert.Equal(response, await Send());
         Assert.Equal(2, attempts); Assert.Empty(durable.OrderDraftItems);
         Assert.Single(await f.Repository.GetOrdersAsync(f.Workspace, null, default));
+        notifications.Verify(n => n.NotifyOnceAsync(f.Workspace, "ORDERS", NotificationType.NewCommercialRequest,
+            created.Id, It.IsAny<string>(), It.IsAny<string>(), "/orders", default), Times.Exactly(2));
     }
 
     [Theory]

@@ -10,6 +10,8 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.AI.Router;
 using NexFlow.Application.Features.Automation.ProcessMessage;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Entities;
 using NexFlow.Domain.Entities.System;
 using NexFlow.Domain.Enums;
@@ -29,7 +31,12 @@ public sealed class Rc3Sprint0IncidentTests
     public async Task Incident_sequence_with_healthy_simulated_dependencies_replies_five_times_and_hola_uses_no_ai()
     {
         var f = new AssistantConversationTests.Fixture();
-        await f.Turn("Quiero informacion", "incident-1"); Assert.Contains("1. Consultar productos", f.Sent["incident-1"].Content);
+        var initialDraft = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.Turn("Quiero informacion", "incident-1");
+        Assert.Contains("Dato real autorizado del negocio", f.Sent["incident-1"].Content);
+        Assert.Contains(f.FactualQueries, q => q.Workspace == f.Workspace && q.Topic == KnowledgeTopic.Profile);
+        Assert.Equal(initialDraft, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        Assert.Empty((await f.Context()).RecoveryOptions); Assert.Equal(0, f.AiCalls);
         await f.Turn("Como puedo hacer una reserva?", "incident-2");
         Assert.Contains("Para reservar", f.Sent["incident-2"].Content); Assert.Equal(0, f.AiCalls);
         Assert.Null((await f.Context()).CurrentGoal);
@@ -39,10 +46,17 @@ public sealed class Rc3Sprint0IncidentTests
         await f.Turn("Que productos tienen", "incident-4");
         Assert.Contains(f.FactualQueries, q => q.Topic == NexFlow.Application.Features.Knowledge.KnowledgeTopic.Products);
         Assert.Equal(draft, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        var information = await f.Context();
+        Assert.Empty(information.RecoveryOptions);
+        Assert.Equal(ExpectedReply.Information, ConversationQuestion.Current(f.Workspace, information, f.Now)?.Expected);
         await f.Turn("Escojo la opción 1", "incident-5");
+        Assert.Contains("pregunta vigente", f.Sent["incident-5"].Content);
+        Assert.Equal(draft, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+        await f.Turn("Escojo la opción 1", "incident-5"); // Replay cannot add a sixth response.
         // Strict selection now clarifies the absent/current picker deterministically.
         // Reservation instructions are now local; only the natural product query uses AI.
         Assert.Equal(5, f.Sent.Count); Assert.Equal(1, f.AiCalls);
+        Assert.Equal(Enumerable.Range(1, 5).Select(i => $"incident-{i}").ToArray(), f.Sent.Keys.OrderBy(key => key).ToArray());
         Assert.All(f.Sent.Values, response => { Assert.Equal(MessageStatus.Sent, response.Status); Assert.False(string.IsNullOrWhiteSpace(response.Content)); });
         Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }
@@ -80,10 +94,23 @@ public sealed class Rc3Sprint0IncidentTests
     [Trait("RC3", "Sprint2Pending")]
     public async Task NF05_an_explicit_option_phrase_under_a_current_menu_must_select_without_ai()
     {
-        var f = new AssistantConversationTests.Fixture(); await f.Turn("Quiero informacion"); var c = await f.Context();
+        var f = new AssistantConversationTests.Fixture(); await f.Turn("menú", "menu"); var c = await f.Context();
+        Assert.False(string.IsNullOrWhiteSpace(c.StateVersion));
+        var question = ConversationQuestion.Current(f.Workspace, c, f.Now);
+        Assert.NotNull(question); Assert.Equal(ExpectedReply.Selection, question.Expected);
+        Assert.Equal(ConversationQuestion.Fingerprint(c), question.DraftFingerprint);
+        Assert.False(string.IsNullOrWhiteSpace(question.OptionsFingerprint));
+        Assert.Null(ConversationQuestion.Current(Guid.NewGuid(), c, f.Now));
+        var index = c.RecoveryOptions.FindIndex(o => o.Kind == "Action" && o.Key == nameof(ConversationIntent.ProductQuery));
+        Assert.Equal(0, index); // Real persisted menu: products is the first option.
+        Assert.Contains($"{index + 1}. {c.RecoveryOptions[index].Label}", f.Sent["menu"].Content);
+        var version = c.StateVersion;
         var decision = await f.Recovery.RecoverAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, "chat",
-            new("instance", AssistantConversationTests.Fixture.Phone, "Cliente", "Escojo la opción 1", "selection", false, f.Workspace), c, f.Modules, default);
+            new("instance", AssistantConversationTests.Fixture.Phone, "Cliente", $"Escojo la opción {index + 1}", "selection", false, f.Workspace), c, f.Modules, default);
         Assert.NotNull(decision?.Interpretation); Assert.Equal(ConversationIntent.ProductQuery, decision.Interpretation.Intent);
+        var selected = await f.Context();
+        Assert.NotEqual(version, selected.StateVersion); Assert.Empty(selected.RecoveryOptions);
+        Assert.Equal(OfferingQueryKind.Broad, decision.Interpretation.QueryKind);
         Assert.Equal(0, f.AiCalls); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }
 
