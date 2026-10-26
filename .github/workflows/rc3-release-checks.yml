@@ -60,6 +60,8 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           if (!(Test-Path 'C:/Program Files/Google/Chrome/Application/chrome.exe') -and !(Test-Path 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe')) { throw 'Installed Chromium is required.' }
+          $browser = @('C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe') | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          Write-Host "Chromium startup candidate: $([IO.Path]::GetFileName($browser)); version: $((Get-Item -LiteralPath $browser).VersionInfo.ProductVersion)"
           New-Item -ItemType Directory -Force node_modules/.tmp | Out-Null
           node --import ./tests/reservations-loader.mjs --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=node_modules/.tmp/rc3-typescript.xml tests/*.test.ts
           node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=node_modules/.tmp/rc3-browser.xml tests/*.test.mjs
@@ -79,6 +81,7 @@ jobs:
             backend/NexFlow.Tests/TestResults/rc3-historical.g8.json
             frontend/node_modules/.tmp/rc3-typescript.xml
             frontend/node_modules/.tmp/rc3-browser.xml
+            frontend/node_modules/.tmp/artifacts-browser-startup.json
           retention-days: 7
           if-no-files-found: warn
           # Only explicit synthetic test evidence/identity paths, never env/cache trees.

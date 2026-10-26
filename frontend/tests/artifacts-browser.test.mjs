@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { resolve, join, basename } from 'node:path';
 import { startPreview } from './artifacts-preview.server.mjs';
 
 // Real Chromium rendering/keyboard + localhost fixture; no production identity or external API.
@@ -34,18 +34,74 @@ const capture = async name => {
 const metrics = width => send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
 const weeklyReads = () => evaluate("window.reservationAudit.calls.filter(call=>call.path==='/reservations'&&call.method==='get')");
 
+// Startup only: never collect environment, command-line arguments, profile contents or page traffic.
+const observeBrowserStartup = (process, executable, root) => {
+  const started = performance.now();
+  const diagnostic = {
+    browser: basename(executable), node: globalThis.process.version,
+    platform: globalThis.process.platform, arch: globalThis.process.arch,
+    pid: process.pid ?? null, deadlineMs: 8_000, stage: 'starting',
+    exitCode: null, signal: null, spawnError: null, stderr: '',
+  };
+  const safeStderr = text => text
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .replace(/(?:https?|wss?|file):\/\/\S+/gi, '[url]')
+    .replace(/(?:[A-Z]:[\\/]|\\\\)[^\r\n"<>]+/gi, '[path]')
+    .replace(/\/(?:Users|home|tmp|var)\/[^\s"<>]+/g, '[path]')
+    .replace(/\b(?:Bearer\s+\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|eyJ[\w.-]+)\b/gi, '[redacted]')
+    .replace(/\b(?:token|api[-_]?key|password|authorization|cookie)\s*[:=]\s*\S+/gi, '[redacted]')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+  let stderr = '';
+  const capture = chunk => { stderr = (stderr + chunk.toString()).slice(-4096); };
+  process.stderr.on('data', capture);
+  const save = () => {
+    diagnostic.stderr = safeStderr(stderr);
+    writeFileSync(join(root, 'artifacts-browser-startup.json'), JSON.stringify(diagnostic, null, 2));
+  };
+  // Record even an early exit/error; waiting for a missing port must not disguise a dead process.
+  const exited = new Promise(done => {
+    process.once('error', error => { diagnostic.spawnError = error.code ?? 'SPAWN_ERROR'; save(); done(); });
+    process.once('exit', (code, signal) => {
+      diagnostic.exitCode = code; diagnostic.signal = signal;
+      diagnostic.exitAfterMs = Math.round(performance.now() - started); save(); done();
+    });
+  });
+  return { exited, async waitForPort(activePort) {
+    try {
+      while (performance.now() - started < diagnostic.deadlineMs) {
+        if (diagnostic.spawnError || process.exitCode !== null || process.signalCode !== null) break;
+        if (existsSync(activePort)) {
+          const port = readFileSync(activePort, 'utf8').split('\n')[0].trim();
+          if (/^\d+$/.test(port) && Number(port) > 0 && Number(port) <= 65535) {
+            diagnostic.stage = 'port-ready'; return port;
+          }
+        }
+        await wait(50);
+      }
+      diagnostic.stage = diagnostic.spawnError ? 'spawn-error'
+        : process.exitCode !== null || process.signalCode !== null ? 'exited-before-port' : 'port-deadline';
+      throw new Error(`Chromium startup failed: ${diagnostic.stage}; see artifacts-browser-startup.json`);
+    } finally {
+      diagnostic.elapsedMs = Math.round(performance.now() - started);
+      diagnostic.activePortExists = existsSync(activePort);
+      diagnostic.aliveAtPortCheck = process.exitCode === null && process.signalCode === null && !diagnostic.spawnError;
+      process.stderr.off('data', capture); // No stderr from tests or application navigation.
+      save(); console.info(`[artifacts-browser startup] ${JSON.stringify(diagnostic)}`);
+    }
+  } };
+};
+
 before(async () => {
   preview = await startPreview();
   const root = resolve('node_modules/.tmp'); mkdirSync(root, { recursive: true });
   profile = mkdtempSync(join(root, 'pdf-recovery-browser-'));
   const executable = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
   assert.ok(executable, 'Installed Chromium browser required; no packages are installed by this test.');
-  browser = spawn(executable, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-  exit = new Promise(done => browser.once('exit', done));
+  browser = spawn(executable, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update', 'about:blank'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const startup = observeBrowserStartup(browser, executable, root);
+  exit = startup.exited;
   const activePort = join(profile, 'DevToolsActivePort');
-  for (let step = 0; !existsSync(activePort) && step < 160; step++) await wait(50);
-  assert.ok(existsSync(activePort), 'Headless browser did not expose its local debugging port.');
-  const port = readFileSync(activePort, 'utf8').split('\n')[0];
+  const port = await startup.waitForPort(activePort);
   const page = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' }).then(result => result.json());
   socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((done, reject) => { socket.addEventListener('open', done, { once: true }); socket.addEventListener('error', reject, { once: true }); });
