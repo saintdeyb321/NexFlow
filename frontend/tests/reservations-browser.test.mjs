@@ -435,8 +435,10 @@ test('contexto y formularios no cruzan workspace/cuenta/permisos ni respuestas a
 });
 
 test('render DST New York conserva ambas 01:30 y semana octubre/noviembre', async () => {
-  await resetAgenda({ timeZone: 'America/New_York' }); await agendaReady();
-  await evaluate("(()=>{const a=window.reservationAudit;const rows=a.rowsFor('workspace-zone-a','2026-10-26').slice(0,2);rows[0].dateTime='2026-11-01T05:30:00Z';rows[1].dateTime='2026-11-01T06:30:00Z';a.fixture.rows=rows})()");
+  // Seed before the first read, isolated from other tests when this is the current cached week.
+  const rows = await evaluate("(()=>{const rows=window.reservationAudit.rowsFor('workspace-zone-dst','2026-10-26').slice(0,2);rows[0].dateTime='2026-11-01T05:30:00Z';rows[1].dateTime='2026-11-01T06:30:00Z';return rows})()");
+  await resetAgenda({ workspace: 'workspace-zone-dst', timeZone: 'America/New_York', rows });
+  await until("document.body.textContent.includes('Zona horaria: America/New_York')&&[...document.querySelectorAll('label')].some(e=>e.textContent.trim()==='Ir a fecha')", 'DST agenda context did not load.');
   await change('Ir a fecha', '2026-11-01');
   await until("document.querySelectorAll('th[scope=row]').length===1&&document.querySelector('th[scope=row]').textContent==='01:30'", 'Repeated DST hour missing.');
   assert.deepEqual((await weeklyReads()).at(-1).params, { locationId: 'all', from: '2026-10-26', to: '2026-11-02', timeZone: 'America/New_York' });

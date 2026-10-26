@@ -1,0 +1,225 @@
+name: Agent Runtime isolated ARM64 certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Approved full SHA; must equal the selected workflow ref SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-arm64-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      PUBLIC_REPOSITORY: ${{ !github.event.repository.private }}
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      BUILDX_METADATA_PROVENANCE: max
+    steps:
+      - name: Require an approved SHA on a native public ARM64 runner
+        shell: python
+        run: |
+          import os, platform, re
+          sha = os.environ['RELEASE_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', sha) or sha != os.environ['GITHUB_SHA']:
+              raise SystemExit('NO-GO: select the workflow ref matching the approved full SHA.')
+          if os.environ['PUBLIC_REPOSITORY'] != 'true':
+              raise SystemExit('NO-GO: this proposal permits only the standard public-repository runner.')
+          if platform.system() != 'Linux' or platform.machine().lower() not in ('aarch64', 'arm64'):
+              raise SystemExit('NO-GO: native Linux ARM64 required; no emulation or production host.')
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.release_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: 10.0.401
+
+      - name: Prepare versioned allowlist context without operational configuration
+        id: context
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, shutil, stat, subprocess
+          os.umask(0o077)
+          sha = os.environ['RELEASE_SHA']
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == sha
+          assert not subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip()
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / ('nexflow-arm64-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'])
+          root.mkdir(exist_ok=False)
+          context = root / 'context'
+          context.mkdir()
+          evidence = pathlib.Path('artifacts/arm64')
+          evidence.mkdir(parents=True, exist_ok=False)
+          projects = ('NexFlow.Domain', 'NexFlow.Application', 'NexFlow.Infrastructure', 'NexFlow.API', 'NexFlow.Migrator')
+          exact = {'backend/Dockerfile', 'backend/.dockerignore', 'backend/backend.slnx', 'backend/NexFlow.API/appsettings.json'}
+          paths = subprocess.check_output(['git', 'ls-tree', '-rz', '--name-only', sha, '--', 'backend/']).decode().split('\0')
+          selected = []
+          for name in filter(None, paths):
+              p = pathlib.PurePosixPath(name)
+              project_source = len(p.parts) > 2 and p.parts[1] in projects and p.suffix.lower() in ('.cs', '.csproj', '.sql')
+              if name not in exact and not project_source:
+                  continue
+              assert not any(part.lower() in ('bin', 'obj', '.git', 'secrets', 'credentials') or part.lower().startswith('.env') for part in p.parts)
+              source = pathlib.Path(name)
+              assert stat.S_ISREG(source.lstat().st_mode) and not source.is_symlink()
+              target = context.joinpath(*p.parts[1:])
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(source, target)
+              selected.append({'path': str(p), 'sha256': hashlib.sha256(source.read_bytes()).hexdigest()})
+          assert exact <= {x['path'] for x in selected}
+          config = json.loads((context / 'NexFlow.API/appsettings.json').read_text())
+          def reject_credentials(value, path=''):
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      reject_credentials(child, path + '.' + key.lower())
+              elif isinstance(value, list):
+                  for child in value:
+                      reject_credentials(child, path)
+              elif value and any(k in path for k in ('apikey', 'secret', 'password', 'token', 'credential', 'connectionstrings')):
+                  raise SystemExit('NO-GO: nonempty credential-like public configuration; review privately.')
+          reject_credentials(config)
+          # The harness has no package references, host startup or configuration loading.
+          for name in ('Program.cs', 'NexFlow.CodecSmoke.csproj'):
+              source = pathlib.Path('backend/tools/CodecSmoke') / name
+              subprocess.run(['git', 'ls-files', '--error-unmatch', str(source)], check=True, stdout=subprocess.DEVNULL)
+              target = root / 'codec' / name
+              target.parent.mkdir(exist_ok=True)
+              shutil.copyfile(source, target)
+          identity = {k: os.environ[k] for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
+          identity.update(platform='linux/arm64', runner='ubuntu-24.04-arm', release_sha=sha, status='PREPARED', image_published=False)
+          (evidence / 'identity.json').write_text(json.dumps(identity, indent=2) + '\n')
+          (evidence / 'context-manifest.json').write_text(json.dumps(selected, indent=2) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as target:
+              target.write('ARM64_ROOT=' + str(root) + '\n')
+          print('PASS: identity and versioned source allowlist; no credentials forwarded.')
+
+      - name: Build both targets and verify permissions and codecs without starting NexFlow
+        id: smoke
+        shell: python
+        run: |
+          import json, os, pathlib, re, subprocess
+          root = pathlib.Path(os.environ['ARM64_ROOT'])
+          evidence = pathlib.Path('artifacts/arm64')
+          sha = os.environ['RELEASE_SHA']
+          results = {}
+          def run(args, log):
+              p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1200)
+              (evidence / log).write_text(p.stdout)
+              if p.returncode:
+                  raise SystemExit('NO-GO: ' + log + ' exit=' + str(p.returncode) + '; inspect synthetic evidence.')
+              return p.stdout.strip()
+          run(['docker', 'buildx', 'version'], 'buildx-version.log')
+          run(['dotnet', '--info'], 'sdk-info.log')
+          permissions = r'''
+          set -eu
+          test "$(id -u)" = 1654
+          test "$(id -g)" = 1654
+          test -x /app
+          for suffix in dll deps.json runtimeconfig.json; do
+            file="/app/$ASSEMBLY.$suffix"
+            test -r "$file"
+            test "$(stat -c %u:%g "$file")" = 1654:1654
+          done
+          if test "$ASSEMBLY" = NexFlow.API; then
+            test -r /app/appsettings.json
+            test "$(stat -c %u:%g /app/appsettings.json)" = 1654:1654
+          fi
+          test -z "$(find /app -type d ! -executable -print -quit)"
+          test -z "$(find /app -type f ! -readable -print -quit)"
+          printf 'PASS UID/GID 1654 and published file access: %s\n' "$ASSEMBLY"
+          '''
+          # No env files, connection strings, SaaS credentials, ports or host networking.
+          restricted = ['--rm', '--pull=never', '--platform', 'linux/arm64', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '512m', '--cpus', '1']
+          for target, kind, assembly in (('final', 'api', 'NexFlow.API'), ('migrator', 'migrator', 'NexFlow.Migrator')):
+              tag = 'nexflow-ci-' + kind + ':' + sha
+              metadata = root / (kind + '-build.json')
+              run(['docker', 'buildx', 'build', '--platform', 'linux/arm64', '--target', target, '--load', '--label', 'org.opencontainers.image.revision=' + sha, '--metadata-file', str(metadata), '--tag', tag, '--file', str(root / 'context/Dockerfile'), str(root / 'context')], kind + '-build.log')
+              image = json.loads(subprocess.check_output(['docker', 'image', 'inspect', tag], text=True))[0]
+              assert image['Os'] == 'linux' and image['Architecture'] == 'arm64' and image['Config']['User'] == '1654'
+              assert image['Config']['Labels']['org.opencontainers.image.revision'] == sha
+              build = json.loads(metadata.read_text())
+              materials = build.get('buildx.build.provenance', {}).get('materials', [])
+              assert any('mcr.microsoft.com/dotnet/sdk' in m['uri'] and m.get('digest') for m in materials), 'SDK provenance missing'
+              assert any('mcr.microsoft.com/dotnet/aspnet' in m['uri'] and m.get('digest') for m in materials), 'Runtime provenance missing'
+              manifest = build.get('containerimage.digest', '')
+              assert re.fullmatch(r'sha256:[0-9a-f]{64}', manifest), 'Build manifest digest missing'
+              image_id = image['Id']
+              results[kind] = {'id': image_id, 'build_manifest_digest': manifest, 'registry_digests': image.get('RepoDigests', []), 'architecture': 'arm64', 'os': 'linux', 'user': image['Config']['User'], 'bases': materials}
+              (evidence / 'images.json').write_text(json.dumps(results, indent=2) + '\n')
+              run(['docker', 'run', *restricted, '--env', 'ASSEMBLY=' + assembly, '--entrypoint', '/bin/sh', image_id, '-ec', permissions], kind + '-permissions.log')
+              # chmod only, no chown: never mask incorrect ownership in the approved image.
+              variant = root / ('restrictive-' + kind)
+              variant.mkdir()
+              (variant / 'Dockerfile').write_text('FROM ' + tag + '\nUSER root\nRUN find /app -mindepth 1 -type d -exec chmod 700 {} + && find /app -type f -exec chmod 600 {} +\nUSER 1654\n')
+              variant_tag = 'nexflow-ci-restrictive-' + kind + ':' + sha
+              run(['docker', 'build', '--pull=false', '--network=none', '--tag', variant_tag, str(variant)], kind + '-restrictive-build.log')
+              variant_id = subprocess.check_output(['docker', 'image', 'inspect', variant_tag, '--format', '{{.Id}}'], text=True).strip()
+              run(['docker', 'run', *restricted, '--env', 'ASSEMBLY=' + assembly, '--entrypoint', '/bin/sh', variant_id, '-ec', permissions], kind + '-restrictive-permissions.log')
+              for allowed in (True, False):
+                  secret = root / (kind + ('-allowed' if allowed else '-denied'))
+                  secret.write_text('synthetic-permission-probe\n')
+                  secret.chmod(0o640 if allowed else 0o600)
+                  subprocess.run(['sudo', '-n', 'chown', '0:1654' if allowed else '0:0', str(secret)], check=True)
+                  check = 'test -r /run/nexflow-smoke; test ! -w /run/nexflow-smoke' if allowed else 'test ! -r /run/nexflow-smoke'
+                  run(['docker', 'run', *restricted, '--mount', 'type=bind,source=' + str(secret) + ',target=/run/nexflow-smoke,readonly', '--entrypoint', '/bin/sh', image_id, '-ec', check + '; echo PASS synthetic secret permissions'], kind + ('-mount-allowed.log' if allowed else '-mount-denied.log'))
+              results[kind].update(permissions='PASS', restrictive_permissions='PASS', synthetic_mount='PASS', appsettings_required=(kind == 'api'))
+              (evidence / 'images.json').write_text(json.dumps(results, indent=2) + '\n')
+          image_id = results['api']['id']
+          reference = root / 'image-reference'
+          reference.mkdir()
+          # Stopped container only. Neither API nor migrator entrypoint is ever invoked.
+          container = subprocess.check_output(['docker', 'create', '--network', 'none', '--entrypoint', '/bin/true', image_id], text=True).strip()
+          try:
+              run(['docker', 'cp', container + ':/app/SkiaSharp.dll', str(reference / 'SkiaSharp.dll')], 'codec-reference.log')
+          finally:
+              subprocess.run(['docker', 'rm', container], check=True, stdout=subprocess.DEVNULL)
+          run(['dotnet', 'build', str(root / 'codec/NexFlow.CodecSmoke.csproj'), '--configuration', 'Release', '-p:ApiPublishDir=' + str(reference)], 'codec-build.log')
+          dll = root / 'codec/bin/Release/net10.0/NexFlow.CodecSmoke.dll'
+          dll.chmod(0o444)
+          output = run(['docker', 'run', *restricted, '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m', '--env', 'DOTNET_EnableDiagnostics=0', '--mount', 'type=bind,source=' + str(dll) + ',target=/app/NexFlow.CodecSmoke.dll,readonly', '--entrypoint', 'dotnet', image_id, 'exec', '--runtimeconfig', '/app/NexFlow.API.runtimeconfig.json', '--depsfile', '/app/NexFlow.API.deps.json', '/app/NexFlow.CodecSmoke.dll', '--require-arm64'], 'codec-arm64.log')
+          assert all('PASS ' + fmt + ': encode/decode/normalize' in output for fmt in ('Png', 'Jpeg', 'Webp'))
+          results['api']['codec'] = {'image_id': image_id, 'exit_code': 0, 'png': 'PASS', 'jpeg': 'PASS', 'webp': 'PASS'}
+          (evidence / 'images.json').write_text(json.dumps(results, indent=2) + '\n')
+          print('PASS: native ARM64 final/migrator builds, UID/GID, permissions, synthetic mounts and API codecs. No image published.')
+
+      - name: Record actual gate outcomes without configuration payloads
+        if: always()
+        env:
+          CONTEXT_OUTCOME: ${{ steps.context.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib
+          evidence = pathlib.Path('artifacts/arm64')
+          evidence.mkdir(parents=True, exist_ok=True)
+          identity_file = evidence / 'identity.json'
+          identity = json.loads(identity_file.read_text()) if identity_file.exists() else {k: os.environ[k] for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
+          identity.update(context_outcome=os.environ['CONTEXT_OUTCOME'], smoke_outcome=os.environ['SMOKE_OUTCOME'], image_published=False, image_retained=False)
+          identity['status'] = 'PASS' if identity['context_outcome'] == identity['smoke_outcome'] == 'success' else 'NO-GO'
+          identity_file.write_text(json.dumps(identity, indent=2) + '\n')
+          hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in evidence.iterdir() if p.is_file() and p.name != 'sha256.json'}
+          (evidence / 'sha256.json').write_text(json.dumps(hashes, indent=2) + '\n')
+
+      - name: Upload only synthetic certification evidence, never images or configuration
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: agent-runtime-arm64-evidence
+          path: artifacts/arm64/
+          retention-days: 7
+          if-no-files-found: error
+
+# Proposal only: no push/login/deploy, service credentials, production networking,
+# migration execution, API startup or automatic dispatch. Images expire with the runner.
