@@ -106,6 +106,12 @@ public sealed class AssistantRc1ConcurrencyTests
     public async Task Order_commit_followed_by_context_failure_recovers_the_same_order_after_restart()
     {
         var f = new AssistantConversationTests.Fixture(); await f.SeedDraft("ORDER");
+        // The injected legacy draft has no reviewed quote. Present it before
+        // exercising a crash after the separately authorized business effect.
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order });
+        await f.Turn("enviar pedido", "review");
+        Assert.Empty(f.Orders); Assert.StartsWith("ORDER_CONFIRM:", (await f.Context()).CurrentStep);
+        Assert.Single(f.Sent); f.Sent.Clear();
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order });
         f.Firestore.BeforeCommit = commit => f.Orders.Count > 0 && commit.Writes.Any(w => w.Update?.Fields.TryGetValue("contextJson", out var json) == true && json.StringValue.Contains("\"OrderLastSourceMessageId\":\"finish\""))
             ? new IOException("Crash after order persistence") : null;

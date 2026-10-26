@@ -146,6 +146,9 @@ public sealed class AssistantConversationTests
     public async Task Order_does_not_finalize_from_a_model_sentinel_without_explicit_user_command()
     {
         var f = new Fixture(); await f.SeedDraft("ORDER");
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order });
+        await f.Turn("enviar pedido", source: "review");
+        Assert.Empty(f.Orders); Assert.StartsWith("ORDER_CONFIRM:", (await f.Context()).CurrentStep);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, SearchTerm = "FINALIZAR_PEDIDO" }); await f.Turn("todavía estoy pensando");
         Assert.Empty(f.Orders); Assert.Single((await f.Context()).OrderDraftItems);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, SearchTerm = "FINALIZAR_PEDIDO" }); await f.Turn("enviar pedido", source: "finish");

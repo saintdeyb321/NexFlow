@@ -27,7 +27,8 @@ public sealed class CatalogRecoveryTests
     [InlineData("SERVICE")]
     public async Task Deadline_is_five_minutes_preserves_pdf_and_allows_retry_without_refund(string scope)
     {
-        var f = new CatalogFixture();
+        // This case tests a retry within one daily quota window, not its reset at midnight.
+        var f = new CatalogFixture { Now = DateTime.UtcNow.Date.AddHours(12) };
         var old = await f.SeedCurrent(scope);
         var active = await f.Generate(scope);
         f.Now = active.GenerationStartedAt!.Value.AddMinutes(5).AddTicks(-1);

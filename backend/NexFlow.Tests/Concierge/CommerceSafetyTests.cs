@@ -191,6 +191,149 @@ public sealed class CommerceSafetyTests
     }
 
     [Theory]
+    [InlineData(null)] [InlineData("ORDER_COLLECT_ITEMS")]
+    [InlineData("ORDER_REVIEW:")] [InlineData("ORDER_REVIEW:invalid")]
+    [InlineData("ORDER_CONFIRM:")] [InlineData("ORDER_CONFIRM:obsolete")]
+    [InlineData("ORDER_COMMIT:")] [InlineData("ORDER_COMMIT:obsolete")]
+    public async Task Missing_or_stale_quote_requires_review_before_a_new_effect(string? step)
+    {
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
+        state.CurrentStep = step; state.OrderLastSourceMessageId = "retry"; state.OrderLastResponse = null;
+        await f.Context.SaveContextAsync(f.Workspace, "phone", state, default);
+        var answer = await f.Turn("envía el pedido", "retry");
+        Assert.Equal(answer, await f.Turn("envía el pedido", "retry"));
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
+        f.Notifications.VerifyNoOtherCalls();
+        var reviewed = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
+        Assert.StartsWith("ORDER_CONFIRM:", reviewed.CurrentStep); Assert.Contains("¿Confirmas", reviewed.LastQuestion);
+        Assert.Equal(2, Assert.Single(reviewed.OrderDraftItems).Quantity); Assert.Contains("PEN 5.00", answer);
+        await f.Turn("envía el pedido", "fresh-consent");
+        await f.Turn("envía el pedido", "fresh-consent");
+        Assert.Equal(500, Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)).TotalAmountMinorUnits);
+        Assert.Single(f.Notifications.Invocations);
+    }
+
+    [Theory]
+    [InlineData(1)] [InlineData(2)]
+    public async Task Revocation_invalidates_review_even_if_the_price_does_not_change(int revokeAt)
+    {
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var checks = 0;
+        f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++checks == revokeAt ? [] : new[] { "CATALOG", "ORDERS" });
+        await f.Turn("envía el pedido", "revoked");
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
+        var denied = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
+        Assert.Null(denied.CurrentStep); Assert.Equal(2, Assert.Single(denied.OrderDraftItems).Quantity);
+        f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "CATALOG", "ORDERS" });
+        Assert.Contains("5.00", await f.Turn("envía el pedido", "restored"));
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
+        Assert.StartsWith("ORDER_CONFIRM:", (await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).CurrentStep);
+        await f.Turn("envía el pedido", "fresh");
+        Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Single(f.Notifications.Invocations);
+    }
+
+    [Theory]
+    [InlineData("quantity")] [InlineData("location")] [InlineData("workspace")]
+    public async Task Quote_identity_covers_quantities_location_and_workspace(string change)
+    {
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
+        if (change == "quantity") state.OrderDraftItems[0].Quantity = 3;
+        if (change == "location") {
+            f.Db.Seed($"workspaces/{f.Workspace}/locations/site", new Dictionary<string, Value>());
+            state.SelectedLocationId = "site";
+        }
+        if (change == "workspace") {
+            var other = new Durable(); await other.Seed(); await other.Turn("Quiero dos panes integrales", "other-draft");
+            state.CurrentStep = (await other.Context.GetOrRecoverContextAsync(other.Workspace, "phone", default)).CurrentStep;
+        }
+        await f.Context.SaveContextAsync(f.Workspace, "phone", state, default);
+        var answer = await f.Turn("envía el pedido", "changed");
+        Assert.Contains(change == "quantity" ? "7.50" : "5.00", answer);
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
+        Assert.StartsWith("ORDER_CONFIRM:", (await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).CurrentStep);
+        await f.Turn("envía el pedido", "fresh");
+        var record = Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
+        Assert.Equal(change == "quantity" ? 750 : 500, record.TotalAmountMinorUnits);
+        Assert.Equal(change == "location" ? "site" : null, record.RequestedLocationId);
+    }
+
+    [Fact]
+    public async Task A_submit_proposal_cannot_replace_explicit_consent()
+    {
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
+        var proposal = new OrderDraftProposal(f.Workspace, "question", state.StateVersion, OrderTurnKind.Submit, []);
+        var plan = await f.Flow.ProcessPlannedAsync(f.Workspace, "phone", "chat", "Consumer", "¿Ya se enviaría?",
+            new() { Intent = ConversationIntent.Order, OrderProposal = proposal }, "question", DialogueAct.Confirmation, default);
+        Assert.Equal(OperationStatus.AwaitingConfirmation, plan.Operation);
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
+        await f.Turn("envía el pedido", "fresh"); Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
+    }
+
+    [Fact]
+    public async Task Revocation_during_catalog_recovery_requires_a_new_review_after_restoration()
+    {
+        var db = new InMemoryFirestore(); var f = new CommerceCertificationFixture(db.Db, db.Resources, Guid.NewGuid());
+        await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var checks = 0;
+        f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++checks == 3 ? [] : new[] { "CATALOG", "ORDERS" });
+        f.AfterReadProduct = async _ => {
+            f.AfterReadProduct = null;
+            await f.Db.Collection("workspaces").Document(f.Workspace.ToString()).Collection("catalogItems").Document("bread").UpdateAsync("PriceMinorUnits", 300L);
+        };
+        await f.Turn("envía el pedido", "revoked");
+        Assert.Equal(3, checks); Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
+        Assert.Empty(f.Notifications.Invocations); Assert.Null((await f.State()).CurrentStep);
+        Assert.Contains("6.00", await f.Turn("envía el pedido", "restored"));
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
+        await f.Turn("envía el pedido", "fresh");
+        Assert.Equal(600, Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)).TotalAmountMinorUnits);
+    }
+
+    [Fact]
+    public async Task Handler_requires_renewed_quote_after_revocation_during_the_commit()
+    {
+        var f = new AssistantConversationTests.Fixture(intelligentCommerce: true);
+        await f.HandleTurn("Quiero dos panes integrales", "draft");
+        f.Firestore.BeforeCommit = request => {
+            if (request.Writes.Any(w => w.Update?.Fields.TryGetValue("contextJson", out var json) == true
+                && json.StringValue.Contains("ORDER_COMMIT:", StringComparison.Ordinal))) {
+                f.Firestore.BeforeCommit = null; f.Modules.Remove("ORDERS");
+            }
+            return null;
+        };
+        await f.HandleTurn("envía el pedido", "revoked"); Assert.Empty(f.Orders);
+        Assert.Equal(2, Assert.Single((await f.Context()).OrderDraftItems).Quantity);
+        f.Modules.Add("ORDERS"); f.Products[0].PriceMinorUnits = 300;
+        await f.HandleTurn("envía el pedido", "restored"); Assert.Empty(f.Orders);
+        Assert.Contains("6.00", f.Sent["restored"].Content);
+        Assert.StartsWith("ORDER_CONFIRM:", (await f.Context()).CurrentStep);
+        Assert.Equal(ExpectedReply.ConfirmOrder, ConversationQuestion.Current(f.Workspace, await f.Context(), f.Now)?.Expected);
+        await f.HandleTurn("sí", "fresh"); await f.HandleTurn("sí", "fresh");
+        Assert.Equal(600, Assert.Single(f.Orders.Values).TotalAmountMinorUnits);
+    }
+
+    [Fact]
+    public async Task A_matching_pending_checkpoint_resumes_only_its_original_source_once()
+    {
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
+        state.CurrentStep = state.CurrentStep!.Replace("ORDER_REVIEW:", "ORDER_COMMIT:", StringComparison.Ordinal);
+        state.OrderLastSourceMessageId = "commit"; state.OrderLastResponse = null;
+        await f.Context.SaveContextAsync(f.Workspace, "phone", state, default);
+        await Assert.ThrowsAsync<ConcurrencyException>(() => f.Turn("envía el pedido", "another"));
+        Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
+        await f.Turn("envía el pedido", "commit"); await f.Turn("envía el pedido", "commit");
+        Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Single(f.Notifications.Invocations);
+        Assert.Empty((await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).OrderDraftItems);
+    }
+
+    [Theory]
     [InlineData("ORDER_REVIEW:private-fingerprint")] [InlineData("ORDER_CONFIRM:private-fingerprint")]
     public async Task Internal_price_consent_fingerprints_are_not_sent_to_a_provider(string step)
     {

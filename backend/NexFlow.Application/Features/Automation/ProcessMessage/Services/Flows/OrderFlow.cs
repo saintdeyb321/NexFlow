@@ -63,7 +63,10 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         var modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (AiIntentAccess.GetDeniedResponse(ConversationIntent.Order,modules) is { } denied)
         {
-            if (context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true && context.OrderLastSourceMessageId == sourceMessageId)
+            // TryResume already checked this source for a durable effect. Preserve a
+            // different pending source until its own recovery can establish the outcome.
+            if (context.OrderDraftItems.Count > 0 && (context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) != true
+                || context.OrderLastSourceMessageId == sourceMessageId))
             { context.CurrentStep=null;return await Remember(denied,OperationStatus.Denied); }
             return Plan(denied,OperationStatus.Denied);
         }
@@ -105,10 +108,18 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
             {
                 if (!quote.Complete) return await Remember(quote.Text + "\n¿Qué producto deseas corregir o quitar?",OperationStatus.NotAvailable,quote);
                 if (needsLocation) { context.CurrentStep="ORDER_LOCATION"; return await Remember(quote.Text + "\n¿En cuál sede deseas solicitar estos productos?",quote:quote); }
-                if (context.CurrentStep?.StartsWith("ORDER_COMMIT:",StringComparison.Ordinal) == true && context.CurrentStep != "ORDER_COMMIT:" + quote.Fingerprint
-                    || context.CurrentStep?.StartsWith("ORDER_REVIEW:",StringComparison.Ordinal) == true && context.CurrentStep != "ORDER_REVIEW:" + quote.Fingerprint
-                    || context.CurrentStep?.StartsWith("ORDER_CONFIRM:",StringComparison.Ordinal) == true && context.CurrentStep != "ORDER_CONFIRM:" + quote.Fingerprint)
-                { context.CurrentStep="ORDER_CONFIRM:" + quote.Fingerprint; return await Remember("El catálogo cambió.\n" + quote.Text + "\n¿Confirmas que la enviemos al negocio con estos importes?",OperationStatus.AwaitingConfirmation,quote); }
+                var reviewed = context.CurrentGoal == "ORDER" && (context.CurrentStep == "ORDER_REVIEW:" + quote.Fingerprint
+                    || context.CurrentStep == "ORDER_CONFIRM:" + quote.Fingerprint
+                    || resuming && context.CurrentStep == "ORDER_COMMIT:" + quote.Fingerprint);
+                var consent = OrderMentionResolver.IsSubmit(messageText)
+                    || context.CurrentStep == "ORDER_CONFIRM:" + quote.Fingerprint && ConversationConfirmation.IsAffirmative(messageText);
+                if (!reviewed || !consent)
+                {
+                    context.CurrentGoal="ORDER";
+                    context.CurrentStep="ORDER_CONFIRM:" + quote.Fingerprint;
+                    context.LastQuestion="¿Confirmas que la enviemos al negocio con estos importes?";
+                    return await Remember("Revisa el resumen vigente de tu solicitud.\n" + quote.Text + "\n" + context.LastQuestion,OperationStatus.AwaitingConfirmation,quote);
+                }
                 return await Submit(quote);
             }
             if (proposal.Kind is OrderTurnKind.Edit or OrderTurnKind.Location)
