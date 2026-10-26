@@ -7,6 +7,18 @@ on:
         description: Approved full SHA; must equal the selected workflow ref SHA
         required: true
         type: string
+      retain_api_image:
+        description: Retain the tested API for one day (requires approved storage quota)
+        type: boolean
+        default: false
+      storage_quota_confirmed:
+        description: Owner verified available artifact quota and spending controls
+        type: boolean
+        default: false
+      artifact_budget_mib:
+        description: Approved total image payload budget, 2-512 MiB; 0 disables retention
+        type: string
+        default: '0'
 
 permissions:
   contents: read
@@ -19,8 +31,16 @@ jobs:
   certify:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
+    outputs:
+      api_artifact_id: ${{ steps.archive_upload.outputs.artifact-id }}
+      expected_image_id: ${{ steps.custody_export.outputs.image_id }}
+      expected_archive_sha256: ${{ steps.custody_export.outputs.archive_sha256 }}
+      expected_manifest_sha256: ${{ steps.custody_export.outputs.manifest_sha256 }}
     env:
       RELEASE_SHA: ${{ inputs.release_sha }}
+      RETAIN_API_IMAGE: ${{ inputs.retain_api_image }}
+      STORAGE_QUOTA_CONFIRMED: ${{ inputs.storage_quota_confirmed }}
+      ARTIFACT_BUDGET_MIB: ${{ inputs.artifact_budget_mib }}
       PUBLIC_REPOSITORY: ${{ !github.event.repository.private }}
       DOTNET_NOLOGO: 'true'
       DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
@@ -42,6 +62,12 @@ jobs:
         with:
           ref: ${{ inputs.release_sha }}
           persist-credentials: false
+
+      - name: Validate optional image custody authorization and storage budget
+        shell: python
+        run: |
+          import subprocess
+          subprocess.run(['python', '-B', '.github/workflows/arm64_image_custody.py', 'preflight'], check=True)
 
       - uses: actions/setup-dotnet@v4.3.1
         with:
@@ -105,12 +131,12 @@ jobs:
               target.write('ARM64_ROOT=' + str(root) + '\n')
           print('PASS: identity and versioned source allowlist; no credentials forwarded.')
 
-      - name: Verify provenance parser before building images
+      - name: Verify provenance and custody contracts before building images
         id: parser
         shell: python
         run: |
           import pathlib, subprocess
-          result = subprocess.run(['python', '-B', '-m', 'unittest', 'discover', '-s', '.github/workflows', '-p', 'test_arm64_provenance.py'], capture_output=True, text=True)
+          result = subprocess.run(['python', '-B', '-m', 'unittest', 'discover', '-s', '.github/workflows', '-p', 'test_arm64*.py'], capture_output=True, text=True)
           output = result.stdout + result.stderr
           pathlib.Path('artifacts/arm64/provenance-parser-tests.log').write_text(output)
           print(output)
@@ -254,12 +280,35 @@ jobs:
           (evidence / 'images.json').write_text(json.dumps(results, indent=2) + '\n')
           print('PASS: native ARM64 final/migrator builds, UID/GID, permissions, synthetic mounts and API codecs. No image published.')
 
+      - name: Export only the API Image ID that passed every smoke
+        id: custody_export
+        if: ${{ success() && inputs.retain_api_image }}
+        shell: python
+        run: |
+          import subprocess
+          subprocess.run(['python', '-B', '.github/workflows/arm64_image_custody.py', 'export'], check=True)
+
+      - name: Retain the bounded image archive for one day
+        id: archive_upload
+        if: ${{ success() && inputs.retain_api_image && steps.custody_export.outcome == 'success' }}
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: nexflow-api-arm64-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/api-image/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
       - name: Record actual gate outcomes without configuration payloads
         if: always()
         env:
           CONTEXT_OUTCOME: ${{ steps.context.outcome }}
           PARSER_OUTCOME: ${{ steps.parser.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          EXPORT_OUTCOME: ${{ steps.custody_export.outcome }}
+          ARCHIVE_UPLOAD_OUTCOME: ${{ steps.archive_upload.outcome }}
+          API_ARTIFACT_ID: ${{ steps.archive_upload.outputs.artifact-id }}
+          API_ARTIFACT_DIGEST: ${{ steps.archive_upload.outputs.artifact-digest }}
         shell: python
         run: |
           import hashlib, json, os, pathlib
@@ -269,9 +318,16 @@ jobs:
           identity = json.loads(identity_file.read_text()) if identity_file.exists() else {k: os.environ[k] for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
           identity.update(context_outcome=os.environ['CONTEXT_OUTCOME'], parser_outcome=os.environ['PARSER_OUTCOME'], smoke_outcome=os.environ['SMOKE_OUTCOME'], image_published=False, image_retained=False)
           identity['status'] = 'PASS' if identity['context_outcome'] == identity['parser_outcome'] == identity['smoke_outcome'] == 'success' else 'NO-GO'
+          requested = os.environ['RETAIN_API_IMAGE'] == 'true'
+          retained = os.environ['EXPORT_OUTCOME'] == os.environ['ARCHIVE_UPLOAD_OUTCOME'] == 'success' and os.environ['API_ARTIFACT_ID'].isdigit()
+          identity.update(custody_requested=requested, image_retained=retained, image_registry_published=False, image_artifact_uploaded=retained, api_artifact_id=os.environ['API_ARTIFACT_ID'], api_artifact_digest=os.environ['API_ARTIFACT_DIGEST'], custody_status='PENDING_ISOLATED_IMPORT' if retained else 'NOT_RETAINED')
+          if requested and not retained:
+              identity['status'] = 'NO-GO'
           identity_file.write_text(json.dumps(identity, indent=2) + '\n')
           hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in evidence.iterdir() if p.is_file() and p.name != 'sha256.json'}
           (evidence / 'sha256.json').write_text(json.dumps(hashes, indent=2) + '\n')
+          if requested and not retained:
+              raise SystemExit('NO-GO: requested archive custody did not produce a valid Artifact ID.')
 
       - name: Upload only synthetic certification evidence, never images or configuration
         if: always()
@@ -282,5 +338,43 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-# Proposal only: no push/login/deploy, service credentials, production networking,
-# migration execution, API startup or automatic dispatch. Images expire with the runner.
+  verify_archive:
+    # Independent GitHub VM/daemon: the source image cannot satisfy the import check.
+    needs: certify
+    if: ${{ inputs.retain_api_image && needs.certify.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RETAIN_API_IMAGE: ${{ inputs.retain_api_image }}
+      STORAGE_QUOTA_CONFIRMED: ${{ inputs.storage_quota_confirmed }}
+      ARTIFACT_BUDGET_MIB: ${{ inputs.artifact_budget_mib }}
+      EXPECTED_IMAGE_ID: ${{ needs.certify.outputs.expected_image_id }}
+      EXPECTED_ARCHIVE_SHA256: ${{ needs.certify.outputs.expected_archive_sha256 }}
+      EXPECTED_MANIFEST_SHA256: ${{ needs.certify.outputs.expected_manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.certify.outputs.api_artifact_id }}
+          merge-multiple: true
+          path: artifacts/api-image/
+      - name: Verify checksums and load into an independent daemon without starting NexFlow
+        shell: python
+        run: |
+          import subprocess
+          subprocess.run(['python', '-B', '.github/workflows/arm64_image_custody.py', 'verify'], check=True)
+      - name: Preserve isolated import result (not another image copy)
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: agent-runtime-arm64-import-evidence-${{ github.run_attempt }}
+          path: artifacts/api-import/
+          retention-days: 7
+          if-no-files-found: error
+
+# No push/login/deploy, production credentials/networking, migration/API startup
+# or automatic dispatch. Image storage is opt-in, quota-attested, bounded and temporary.
