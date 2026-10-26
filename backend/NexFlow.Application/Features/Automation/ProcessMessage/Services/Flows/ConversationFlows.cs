@@ -810,6 +810,10 @@ public class ChatFlow : IChatFlow
             ConversationIntent.Faq => KnowledgeTopic.Faqs,
             ConversationIntent.Location => KnowledgeTopic.Locations,
             ConversationIntent.BusinessHours => KnowledgeTopic.BusinessHours,
+            // A general informational introduction uses the public profile. An
+            // incidental FAQ text match must not replace the business identity.
+            // Specific FAQ requests keep their explicit Faq route above.
+            ConversationIntent.General when interpretation.Act == DialogueAct.Information => KnowledgeTopic.Profile,
             ConversationIntent.General => modules.Contains("FAQ") ? KnowledgeTopic.Faqs : KnowledgeTopic.Profile,
             ConversationIntent.Profile => KnowledgeTopic.Profile,
             _ => null

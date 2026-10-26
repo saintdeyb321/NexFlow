@@ -25,6 +25,26 @@ namespace NexFlow.Tests;
 public sealed class BusinessProfileApiTests
 {
     [Theory]
+    [InlineData("Clínica sintética", "Atención preventiva sintética")]
+    [InlineData("Comercio sintético", "Productos sintéticos para solicitud")]
+    [InlineData("Negocio mixto sintético", "Servicios y productos sintéticos")]
+    public async Task Mvp_onboarding_uses_the_existing_authorized_profile_configuration(string name, string description)
+    {
+        await using var f = new ApiFixture();
+        var client = await f.StartAsync();
+        var payload = Payload("America/Lima"); payload["commercialName"] = name; payload["description"] = description;
+        using var response = await client.PutAsJsonAsync("/api/business/profile", payload);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        f.Profiles.Verify(p => p.SaveProfileAsync(f.Workspace.Id,
+            It.Is<BusinessProfileDto>(p => p.CommercialName == name && p.Description == description && p.TimeZone == "America/Lima"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(name, f.Workspace.Name);
+        f.Workspaces.Verify(w => w.GetByIdAsync(f.Workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        f.UnitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        f.Profiles.VerifyNoOtherCalls(); f.Workspaces.VerifyNoOtherCalls(); f.UnitOfWork.VerifyNoOtherCalls();
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData(" ")]

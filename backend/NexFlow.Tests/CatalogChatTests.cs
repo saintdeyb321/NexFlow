@@ -17,6 +17,26 @@ namespace NexFlow.Tests;
 public sealed class CatalogChatTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Foreign_artifact_identity_cannot_publish_a_pdf_for_another_workspace_or_scope(bool foreignWorkspace)
+    {
+        var workspace = Guid.NewGuid();
+        var foreign = CatalogArtifact.Initialize(foreignWorkspace ? Guid.NewGuid() : workspace, foreignWorkspace ? "SERVICE" : "PRODUCT");
+        foreign.CompleteUpload("https://storage.example.test/other-workspace-or-scope.pdf", "hash");
+        var catalog = new Mock<ICatalogGenerationService>(MockBehavior.Strict);
+        catalog.Setup(s => s.GetArtifactAsync(workspace, "SERVICE", It.IsAny<CancellationToken>())).ReturnsAsync(foreign);
+        var knowledge = new Mock<IKnowledgeService>(MockBehavior.Strict);
+        var access = new Mock<IEntitlementService>(MockBehavior.Strict);
+        access.Setup(s => s.GetAvailableModuleCodesAsync(workspace, It.IsAny<CancellationToken>())).ReturnsAsync(["SERVICES"]);
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        var flow = new ChatFlow(knowledge.Object, access.Object, Mock.Of<ILocationResolverService>(), NullLogger<ChatFlow>.Instance, catalog.Object, notifications.Object);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => flow.ProcessAsync(workspace, "muéstrame servicios", new() {
+            Intent = ConversationIntent.ServiceQuery, QueryKind = OfferingQueryKind.Broad }, null, default));
+        knowledge.VerifyNoOtherCalls(); notifications.VerifyNoOtherCalls();
+    }
+
+    [Theory]
     [InlineData("PRODUCT", CatalogArtifactStatus.Current, true)]
     [InlineData("PRODUCT", CatalogArtifactStatus.Generating, false)]
     [InlineData("PRODUCT", CatalogArtifactStatus.Failed, false)]

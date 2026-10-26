@@ -25,6 +25,20 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             && !string.IsNullOrWhiteSpace(semanticEvidence[0].Text) && semanticEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(text, semanticEvidence[0].Text)
             && !OrderMentionResolver.IsQuestion(text) && !OrderMentionResolver.IsHypothetical(text);
+        if (semantic is { Intent: ConversationIntent.Order, Act: DialogueAct.OperationInformation, RequiresClarification: false,
+                Directive: ConversationDirective.None }
+            && semanticEvidence.Length == 1 && semanticEvidence[0].NormalizedValue == nameof(DialogueAct.OperationInformation)
+            && !string.IsNullOrWhiteSpace(semanticEvidence[0].Text) && semanticEvidence[0].Text.Length <= 300
+            && AiEvidenceValidator.HasFragment(text, semanticEvidence[0].Text))
+        {
+            var denial = AiIntentAccess.GetDeniedResponse(ConversationIntent.Order, modules);
+            if (denial != null) return new(DialogueAct.OperationInformation, new() { Intent = ConversationIntent.Order }, Response: denial);
+            var available = await slots.ReadCommerceAsync(workspace, context, true, false, true, context.SelectedLocationId, ct);
+            return new(DialogueAct.OperationInformation, new() { Intent = ConversationIntent.Order }, Response:
+                available.Products.Count == 0
+                    ? "No hay productos activos para preparar una solicitud en este momento. Puedes solicitar asistencia humana."
+                    : "Puedes preparar una solicitud de pedido con los productos del catálogo y sus cantidades. El negocio la revisará para coordinar contigo; no confirma stock ni procesa pagos. Para comenzar, indica que deseas hacer un pedido.");
+        }
         if (!semanticStart && !OrderMentionResolver.IsCandidate(text, context)) return null;
         var words = OrderMentionResolver.Words(text); var normalized = SpanishTextNormalizer.Normalize(text);
         var activeOrder = context.CurrentGoal == "ORDER";
@@ -138,6 +152,10 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (matches.Length == 0 && comparison && words.Contains("y"))
             matches = text.Split(" y ", StringSplitOptions.RemoveEmptyEntries).SelectMany(p => OrderMentionResolver.Match(p, p, products.Concat(services).ToArray())).DistinctBy(p => p.Id).ToArray();
         if (matches.Length == 0 && words.Contains("recomiendas")) return Query("SERVICE", services.Take(5).ToArray(), false);
+        // A question with no factual entity or live reference may be about the
+        // operation itself. Let the existing interpreter distinguish it from a
+        // catalog search instead of returning a false entity-not-found answer.
+        if (matches.Length == 0 && readOnly && !catalogRequest && !anaphora && !comparison && semantic == null) return null;
         if (matches.Length == 0)
             return wantsProducts || wantsServices ? Query(wantsServices ? "SERVICE" : "PRODUCT", [], false, "No encontré una opción activa inequívoca. ¿Cuál producto o servicio deseas consultar?") : null;
         if (matches.Length > 1 && !comparison) return Query(matches[0].Type, [], false, "Hay varias opciones: " + string.Join(", ", matches.Take(5).Select(p => p.Name)) + ". ¿Cuál deseas consultar?");

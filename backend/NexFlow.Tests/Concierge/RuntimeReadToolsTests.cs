@@ -5,14 +5,92 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Business.Offerings;
+using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Enums;
+using NexFlow.Infrastructure.Persistence.Firestore;
+using NexFlow.Tests.Fakes;
 using Xunit;
 
 namespace NexFlow.Tests.Concierge;
 
 public sealed class RuntimeReadToolsTests
 {
+    [Fact]
+    public async Task Shared_store_and_shared_tools_keep_businesses_contacts_modules_and_ids_separate()
+    {
+        var a = new AssistantConversationTests.Fixture(); var b = new AssistantConversationTests.Fixture();
+        Assert.NotEqual(a.Workspace, b.Workspace);
+        a.Modules.IntersectWith(["SERVICES", "RESERVATIONS", "FAQ"]);
+        b.Modules.IntersectWith(["CATALOG", "ORDERS", "FAQ"]);
+        a.EntitlementReads.Setup(r => r.GetAvailableModuleCodesAsync(b.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(() => b.Modules.ToArray());
+        var store = new CatalogFixture(useRealSources: true);
+        var profiles = new FirestoreBusinessProfileRepository(store.Firestore.Db);
+        var catalog = new FirestoreCatalogRepository(store.Firestore.Db, store.Firestore.Resources);
+        var locations = new FirestoreLocationRepository(store.Firestore.Db, store.Firestore.Resources);
+        var hours = new FirestoreBusinessHoursRepository(store.Firestore.Db);
+        var faqs = new FirestoreFaqRepository(store.Firestore.Db);
+        var offerings = new OfferingService(catalog);
+        await profiles.SaveProfileAsync(a.Workspace, new("Clínica A", "", "", "", "Actividad A"), default);
+        await profiles.SaveProfileAsync(b.Workspace, new("Comercio B", "", "", "", "Actividad B"), default);
+        await catalog.SaveItemAsync(a.Workspace, new ServiceDto { Id = "same-id", Name = "Servicio A", RequiresReservation = true, DurationInMinutes = 30 }, true, default);
+        await catalog.SaveItemAsync(b.Workspace, new ProductDto { Id = "same-id", Name = "Producto B", PriceMinorUnits = 1250 }, true, default);
+        foreach (var f in new[] { a, b })
+            await faqs.SaveFaqAsync(f.Workspace, new() { Id = "same-faq", Question = "Consulta", Answer = f == a ? "Dato A" : "Dato B", IsActive = true }, true, default);
+        var knowledge = new KnowledgeService(profiles, locations, hours, faqs, offerings, NullLogger<KnowledgeService>.Instance);
+        var tools = new BusinessReadTools(knowledge, a.EntitlementReads.Object);
+        Assert.Equal("Clínica A", (await tools.ReadAsync(tools.Open(a.Workspace), new KnowledgeRead(KnowledgeTopic.Profile), default)).Knowledge!.Profile!.Name);
+        Assert.Equal("Comercio B", (await tools.ReadAsync(tools.Open(b.Workspace), new KnowledgeRead(KnowledgeTopic.Profile), default)).Knowledge!.Profile!.Name);
+        Assert.Equal("Servicio A", Assert.Single((await tools.ReadAsync(tools.Open(a.Workspace), new KnowledgeRead(KnowledgeTopic.Services), default)).Knowledge!.Offerings).Name);
+        Assert.Equal("Producto B", Assert.Single((await tools.ReadAsync(tools.Open(b.Workspace), new KnowledgeRead(KnowledgeTopic.Products), default)).Knowledge!.Offerings).Name);
+        Assert.Null(await offerings.GetServiceByIdAsync(b.Workspace, "same-id", default));
+        Assert.Null(await offerings.GetProductByIdAsync(a.Workspace, "same-id", default));
+        var before = store.Firestore.ReadRpcCalls;
+        Assert.Equal(BusinessReadStatus.Denied, (await tools.ReadAsync(tools.Open(a.Workspace), new KnowledgeRead(KnowledgeTopic.Products), default)).Status);
+        b.Modules.Remove("FAQ");
+        Assert.Equal(BusinessReadStatus.Denied, (await tools.ReadAsync(tools.Open(b.Workspace), new KnowledgeRead(KnowledgeTopic.Faqs), default)).Status);
+        Assert.Equal(before, store.Firestore.ReadRpcCalls);
+        var states = new FirestoreConversationStateRepository(store.Firestore.Db);
+        await states.UpsertStateAsync(a.Workspace, "synthetic-contact-a", new() { CurrentGoal = "RESERVATION", SelectedServiceId = "same-id" }, default);
+        await states.UpsertStateAsync(b.Workspace, "synthetic-contact-b", new() { CurrentGoal = "ORDER", Mode = "Human" }, default);
+        Assert.Null(await states.GetStateAsync(a.Workspace, "synthetic-contact-b", default));
+        Assert.Null(await states.GetStateAsync(b.Workspace, "synthetic-contact-a", default));
+        Assert.Equal("RESERVATION", (await states.GetStateAsync(a.Workspace, "synthetic-contact-a", default))!.CurrentGoal);
+        Assert.Equal("Human", (await states.GetStateAsync(b.Workspace, "synthetic-contact-b", default))!.Mode);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Mvp_general_information_does_not_let_a_faq_replace_the_public_profile(bool matching)
+    {
+        const string text = "¿De qué trata este negocio?";
+        foreach (var label in new[] { "Clínica sintética", "Comercio sintético" })
+        {
+            var f = new AssistantConversationTests.Fixture(); var faq = UseRealKnowledge(f);
+            faq.Setup(r => r.GetFaqsAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync([
+                new FaqDto { Id = "faq", Question = matching ? text : "Otra consulta", Answer = "FAQ sintética", IsActive = true }]);
+            f.ProfileReads.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new BusinessProfileDto(label, "PRIVATE-TAX", "", "", "Actividad pública vigente", "America/Lima"));
+            f.Interpretations.Enqueue(new() { Intent = ConversationIntent.General, Act = DialogueAct.Information,
+                Evidence = [new("Act", text, nameof(DialogueAct.Information))] });
+            await f.HandleTurn(text, "general-profile");
+            Assert.Contains(label, f.Sent["general-profile"].Content);
+            Assert.Contains("Actividad pública vigente", f.Sent["general-profile"].Content);
+            Assert.DoesNotContain("PRIVATE-TAX", f.Sent["general-profile"].Content);
+            Assert.DoesNotContain("FAQ sintética", f.Sent["general-profile"].Content);
+            Assert.All(f.FactualQueries, q => Assert.Equal(f.Workspace, q.Workspace));
+            Assert.Null((await f.Context()).CurrentGoal); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+            // An explicit FAQ intent must still consult this workspace's FAQ.
+            f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Faq, SearchTerm = matching ? text : "Otra consulta" });
+            await f.HandleTurn("¿Cuál es la respuesta a mi consulta frecuente?", "explicit-faq");
+            Assert.Contains("FAQ sintética", f.Sent["explicit-faq"].Content);
+            Assert.All(faq.Invocations, call => Assert.Equal(f.Workspace, call.Arguments[0]));
+        }
+    }
+
     [Theory]
     [InlineData("¿De qué trata este negocio?", ConversationIntent.General)]
     [InlineData("¿Qué actividad realizan aquí?", ConversationIntent.General)]
@@ -72,7 +150,7 @@ public sealed class RuntimeReadToolsTests
         Assert.Empty(f.Bookings); Assert.Empty(f.Orders); Assert.Null((await f.Context()).CurrentGoal);
     }
 
-    private static Mock<IFaqRepository> UseRealKnowledge(AssistantConversationTests.Fixture f)
+    internal static Mock<IFaqRepository> UseRealKnowledge(AssistantConversationTests.Fixture f)
     {
         var faq = new Mock<IFaqRepository>(MockBehavior.Strict);
         faq.Setup(r => r.GetFaqsAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FaqDto>());

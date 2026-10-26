@@ -52,7 +52,7 @@ public sealed class KnowledgeService : IKnowledgeService
     }
 
     public Task<KnowledgeResult> QueryAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
-        => ConversationDiagnostics.MeasureAsync(_logger, "KnowledgeQuery", () => QueryCoreAsync(workspaceId, snapshot, query, cancellationToken), result => result.Status.ToString());
+        => ConversationDiagnostics.MeasureAsync(_logger, "KnowledgeQuery", () => QueryCoreAsync(workspaceId, snapshot, query, cancellationToken), result => result.Status.ToString(), reason: query.Topic.ToString());
 
     private async Task<KnowledgeResult> QueryCoreAsync(Guid workspaceId, BusinessKnowledgeSnapshot snapshot, KnowledgeQuery query, CancellationToken cancellationToken)
     {

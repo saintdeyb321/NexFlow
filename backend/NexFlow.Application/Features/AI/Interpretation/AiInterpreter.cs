@@ -132,6 +132,7 @@ PASO ACTUAL: {linguisticStep ?? "NINGUNO"}
 - RequiresClarification: true si hay acciones contradictorias, varias operaciones distintas o una referencia sin contexto inequívoco. Usa General sin entidades ni directivas y pide una sola aclaración; nunca elijas arbitrariamente una de las acciones.
 
 El objetivo activo NO reemplaza la intención de una pregunta informativa. Si pregunta explícitamente horarios, Intent = BusinessHours; si pregunta ubicación o dirección, Intent = Location; si pregunta un dato frecuente, Intent = Faq. En estas interrupciones no extraigas cambios del draft ni nombres, fechas u horas como respuestas al paso actual.
+Las preguntas sobre si se pueden preparar pedidos o cómo solicitarlos usan Intent=Order, Act=OperationInformation y evidencia literal Act; no inician ni envían un pedido. La identidad o actividad del negocio usa Profile, no una FAQ elegida por coincidencia textual.
 Si dice 'quiero cambiar de sede', 'puedo cambiar de sede', 'otra sede': Directive = ChangeLocation. No lo confundas con una consulta de dirección.
 Si pide cambiar el servicio: Directive = ChangeService.
 Si pregunta 'no tiene más servicios?', 'qué otros servicios hay?', 'qué servicios tienen aquí?' durante RESERVATION/BOOKING: Intent = ServiceQuery, Directive = ShowOptions, QueryKind = Broad.

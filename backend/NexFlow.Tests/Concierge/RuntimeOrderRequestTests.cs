@@ -10,6 +10,85 @@ public sealed class RuntimeOrderRequestTests
 {
     private static AssistantConversationTests.Fixture Create() => new(conciergeCatalog: true, intelligentCommerce: true);
 
+    [Theory]
+    [InlineData("¿Se puede hacer un pedido?")]
+    [InlineData("¿Venden por WhatsApp?")]
+    [InlineData("¿Cómo encargo productos?")]
+    public async Task Mvp_order_capability_is_information_followed_by_explicit_preparation(string text)
+    {
+        var f = Create();
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, Act = DialogueAct.OperationInformation,
+            Evidence = [new("Act", text, nameof(DialogueAct.OperationInformation))] });
+        await f.HandleTurn(text, "capability");
+        Assert.Contains("solicitud de pedido", f.Sent["capability"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Null((await f.Context()).CurrentGoal); Assert.Empty((await f.Context()).OrderDraftItems); Assert.Empty(f.Orders);
+        await f.HandleTurn("quiero hacer un pedido", "explicit-start");
+        Assert.Equal("ORDER", (await f.Context()).CurrentGoal); Assert.Empty((await f.Context()).OrderDraftItems);
+        Assert.Empty(f.Orders); Assert.Contains("cantidades", f.Sent["explicit-start"].Content);
+    }
+
+    [Theory]
+    [InlineData("ORDERS", "no tiene habilitados los pedidos")]
+    [InlineData("CATALOG", "No hay información de productos disponible en este momento.")]
+    [InlineData("services-only", "no tiene habilitados los pedidos")]
+    [InlineData("empty", "No hay productos activos")]
+    [InlineData("location", "No hay productos activos")]
+    public async Task Mvp_order_capability_reflects_license_and_current_location_catalog(string unavailable, string expected)
+    {
+        var f = Create();
+        if (unavailable == "services-only") f.Modules.IntersectWith(["SERVICES", "RESERVATIONS"]);
+        if (unavailable is "ORDERS" or "CATALOG") f.Modules.Remove(unavailable);
+        if (unavailable == "empty") f.Products.Clear();
+        if (unavailable == "location")
+        {
+            foreach (var p in f.Products) { p.LocationScope = "SPECIFIC"; p.LocationIds = ["sede-b"]; }
+            var state = await f.Context(); state.SelectedLocationId = "sede-a";
+            await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        }
+        const string text = "¿Se puede hacer un pedido?";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, Act = DialogueAct.OperationInformation,
+            Evidence = [new("Act", text, nameof(DialogueAct.OperationInformation))] });
+        await f.HandleTurn(text, "no-capability");
+        Assert.Contains(expected, f.Sent["no-capability"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Null((await f.Context()).CurrentGoal); Assert.Empty((await f.Context()).OrderDraftItems); Assert.Empty(f.Orders);
+        if (unavailable == "CATALOG") f.OfferingReads.Verify(o => o.GetProductsAsync(f.Workspace,
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.All(f.OfferingReads.Invocations, i => Assert.Equal(f.Workspace, i.Arguments[0]));
+    }
+
+    [Fact]
+    public async Task Mvp_capability_revocation_and_booking_interruption_preserve_existing_draft()
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        const string text = "¿Se puede hacer un pedido?";
+        foreach (var source in new[] { "before-revocation", "after-revocation" })
+        {
+            f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, Act = DialogueAct.OperationInformation,
+                Evidence = [new("Act", text, nameof(DialogueAct.OperationInformation))] });
+            await f.HandleTurn(text, source);
+            Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
+            if (source == "before-revocation") Assert.Contains("solicitud de pedido", f.Sent[source].Content);
+            else Assert.Contains("no tiene habilitados los pedidos", f.Sent[source].Content);
+            f.Modules.Remove("ORDERS");
+        }
+        Assert.Empty(f.Orders); Assert.Empty(f.Bookings);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Mvp_information_proposal_cannot_prepare_or_submit_an_order(bool backed)
+    {
+        var f = Create(); const string text = "¿Cómo coordino una compra?";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, Act = DialogueAct.OperationInformation,
+            Evidence = backed ? [new("Act", text, nameof(DialogueAct.OperationInformation))] : [] });
+        await f.HandleTurn(text, "query-only");
+        Assert.Null((await f.Context()).CurrentGoal); Assert.Empty((await f.Context()).OrderDraftItems); Assert.Empty(f.Orders);
+        if (backed) Assert.Contains("solicitud de pedido", f.Sent["query-only"].Content);
+        else Assert.DoesNotContain("solicitud de pedido", f.Sent["query-only"].Content);
+    }
+
     [Fact]
     public async Task Empty_start_is_persistent_replay_safe_and_information_does_not_discard_it()
     {
