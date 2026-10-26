@@ -105,6 +105,17 @@ jobs:
               target.write('ARM64_ROOT=' + str(root) + '\n')
           print('PASS: identity and versioned source allowlist; no credentials forwarded.')
 
+      - name: Verify provenance parser before building images
+        id: parser
+        shell: python
+        run: |
+          import pathlib, subprocess
+          result = subprocess.run(['python', '-B', '-m', 'unittest', 'discover', '-s', '.github/workflows', '-p', 'test_arm64_provenance.py'], capture_output=True, text=True)
+          output = result.stdout + result.stderr
+          pathlib.Path('artifacts/arm64/provenance-parser-tests.log').write_text(output)
+          print(output)
+          raise SystemExit(result.returncode)
+
       - name: Build both targets and verify permissions and codecs without starting NexFlow
         id: smoke
         shell: python
@@ -114,6 +125,57 @@ jobs:
           evidence = pathlib.Path('artifacts/arm64')
           sha = os.environ['RELEASE_SHA']
           results = {}
+          # BEGIN provenance parser (also exercised directly by the unit tests)
+          def parse_base_materials(build):
+              import re
+              from urllib.parse import parse_qs, unquote, urlsplit
+              if not isinstance(build, dict):
+                  raise ValueError('Invalid build metadata.')
+              keys = [k for k in ('buildx.build.provenance', 'buildx.build.provenance/linux/arm64') if k in build]
+              if len(keys) != 1 or not isinstance(build[keys[0]], dict):
+                  raise ValueError('Missing, malformed or ambiguous ARM64 provenance.')
+              record = build[keys[0]]
+              schema = record.get('predicateType')
+              if 'predicate' in record:
+                  if schema not in ('https://slsa.dev/provenance/v0.2', 'https://slsa.dev/provenance/v1') or 'materials' in record or 'buildDefinition' in record:
+                      raise ValueError('Unsupported or ambiguous provenance envelope.')
+                  record = record['predicate']
+              if not isinstance(record, dict):
+                  raise ValueError('Invalid provenance predicate.')
+              definition = record.get('buildDefinition', {})
+              v02 = 'materials' in record
+              v1 = isinstance(definition, dict) and 'resolvedDependencies' in definition
+              if v02 == v1 or (schema is not None and schema != ('https://slsa.dev/provenance/v0.2' if v02 else 'https://slsa.dev/provenance/v1')):
+                  raise ValueError('Unsupported or ambiguous provenance schema.')
+              materials = record['materials'] if v02 else definition['resolvedDependencies']
+              if not isinstance(materials, list):
+                  raise ValueError('Invalid provenance dependencies.')
+              expected = ('mcr.microsoft.com/dotnet/sdk', 'mcr.microsoft.com/dotnet/aspnet')
+              bases = {}
+              for material in materials:
+                  if not isinstance(material, dict) or not isinstance(material.get('uri'), str):
+                      raise ValueError('Malformed provenance material.')
+                  uri = material['uri']
+                  if not uri.startswith('pkg:docker/'):
+                      continue
+                  parsed = urlsplit(uri)
+                  name, separator, version = unquote(parsed.path[len('docker/'):]).partition('@')
+                  if name not in expected:
+                      continue
+                  qualifiers = parse_qs(parsed.query, strict_parsing=True)
+                  if not separator or not version or parsed.fragment or set(qualifiers) - {'platform'} or qualifiers.get('platform', ['linux/arm64']) != ['linux/arm64']:
+                      raise ValueError('Invalid ARM64 base image reference.')
+                  digest = material.get('digest')
+                  value = digest.get('sha256') if isinstance(digest, dict) else None
+                  if not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value):
+                      raise ValueError('Base image requires an immutable SHA256 digest.')
+                  if name in bases and bases[name]['digest']['sha256'] != value:
+                      raise ValueError('Conflicting base image digests.')
+                  bases[name] = {'uri': uri, 'digest': {'sha256': value}}
+              if set(bases) != set(expected):
+                  raise ValueError('SDK and ASP.NET base digests are both required.')
+              return [bases[name] for name in expected]
+          # END provenance parser
           def run(args, log):
               p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1200)
               (evidence / log).write_text(p.stdout)
@@ -150,9 +212,7 @@ jobs:
               assert image['Os'] == 'linux' and image['Architecture'] == 'arm64' and image['Config']['User'] == '1654'
               assert image['Config']['Labels']['org.opencontainers.image.revision'] == sha
               build = json.loads(metadata.read_text())
-              materials = build.get('buildx.build.provenance', {}).get('materials', [])
-              assert any('mcr.microsoft.com/dotnet/sdk' in m['uri'] and m.get('digest') for m in materials), 'SDK provenance missing'
-              assert any('mcr.microsoft.com/dotnet/aspnet' in m['uri'] and m.get('digest') for m in materials), 'Runtime provenance missing'
+              materials = parse_base_materials(build)
               manifest = build.get('containerimage.digest', '')
               assert re.fullmatch(r'sha256:[0-9a-f]{64}', manifest), 'Build manifest digest missing'
               image_id = image['Id']
@@ -198,6 +258,7 @@ jobs:
         if: always()
         env:
           CONTEXT_OUTCOME: ${{ steps.context.outcome }}
+          PARSER_OUTCOME: ${{ steps.parser.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
         shell: python
         run: |
@@ -206,8 +267,8 @@ jobs:
           evidence.mkdir(parents=True, exist_ok=True)
           identity_file = evidence / 'identity.json'
           identity = json.loads(identity_file.read_text()) if identity_file.exists() else {k: os.environ[k] for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
-          identity.update(context_outcome=os.environ['CONTEXT_OUTCOME'], smoke_outcome=os.environ['SMOKE_OUTCOME'], image_published=False, image_retained=False)
-          identity['status'] = 'PASS' if identity['context_outcome'] == identity['smoke_outcome'] == 'success' else 'NO-GO'
+          identity.update(context_outcome=os.environ['CONTEXT_OUTCOME'], parser_outcome=os.environ['PARSER_OUTCOME'], smoke_outcome=os.environ['SMOKE_OUTCOME'], image_published=False, image_retained=False)
+          identity['status'] = 'PASS' if identity['context_outcome'] == identity['parser_outcome'] == identity['smoke_outcome'] == 'success' else 'NO-GO'
           identity_file.write_text(json.dumps(identity, indent=2) + '\n')
           hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in evidence.iterdir() if p.is_file() and p.name != 'sha256.json'}
           (evidence / 'sha256.json').write_text(json.dumps(hashes, indent=2) + '\n')
