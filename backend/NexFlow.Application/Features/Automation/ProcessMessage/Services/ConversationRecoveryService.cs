@@ -148,8 +148,15 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (topic != null) return await AnswerInformation(topic.Value, resetScope: InformationalRequest.ScopeCorrection(text));
         }
         if (information?.Clarification == "Availability" && context.PendingRecoveryAction == null
-            && (ConversationConfirmation.IsAffirmative(request.MessageText) || repair))
-            return await Remember("No he cambiado ni confirmado tu reserva. Indica la hora que deseas seleccionar, o escribe continuemos para retomar el borrador.");
+            && (ConversationConfirmation.IsAffirmative(request.MessageText) || DialoguePolicy.IsAcknowledgement(text) || repair))
+        {
+            var reference = ReservationTimeReference.Current(workspace, context, clock.UtcNow);
+            var continuation = reference == null
+                ? "Indica la fecha y hora que deseas seleccionar, o escribe continuemos para retomar el borrador."
+                : $"Consultamos el {DateOnly.ParseExact(reference.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture):dd/MM/yyyy} a las {reference.Time}. "
+                    + $"¿Qué hora deseas seleccionar? Puedes escribir «{reference.Time}» para elegir esa combinación; volveré a verificarla.";
+            return await Remember("No he cambiado ni confirmado tu reserva. " + continuation, referenceIntent: ConversationIntent.Reservation);
+        }
         if (repair)
         {
             if (information != null)

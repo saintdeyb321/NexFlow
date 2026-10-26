@@ -148,6 +148,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         }
         if (_recovery != null && interpretation.Intent is not (ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             && (interpretation.RequiresClarification || interpretation.Intent is ConversationIntent.General
+                && !(context.CurrentGoal == null && prepared?.Act == DialogueAct.Information)
             || recovery?.Interpretation == null && interpretation.BookingProposal == null && interpretation.OrderProposal == null
                 && string.IsNullOrEmpty(context.CurrentGoal) && interpretation.Intent is ConversationIntent.Reservation or ConversationIntent.Order or ConversationIntent.Request
                 && prepared?.Act != DialogueAct.StartOperation))

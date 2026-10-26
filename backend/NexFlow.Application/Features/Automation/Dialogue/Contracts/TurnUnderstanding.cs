@@ -78,6 +78,10 @@ public sealed record ReservationTimeReference(Guid WorkspaceId, string LocationI
     public static ReservationTimeReference? Current(Guid workspace, ConversationContextDto state, DateTime now)
         => state.CurrentGoal is "BOOKING" or "RESERVATION" && state.Information is { Topic: "Availability", AvailabilityReference: { } reference }
             && reference.WorkspaceId == workspace && reference.ObservedAt <= now && reference.ObservedAt > now.AddMinutes(-10)
+            && state.Information.DraftFingerprint == Understanding.InformationalRequest.DraftFingerprint(state)
+            && !string.IsNullOrWhiteSpace(reference.LocationId) && !string.IsNullOrWhiteSpace(reference.ServiceId)
+            && DateOnly.TryParseExact(reference.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)
+            && TimeOnly.TryParseExact(reference.Time, "HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)
             && ConversationQuestion.Current(workspace, state, now) is { Expected: ExpectedReply.Information, Intent: ConversationIntent.Reservation }
             ? reference : null;
 }

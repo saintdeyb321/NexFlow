@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.AI.Interpretation;
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Domain.Enums;
@@ -12,6 +13,79 @@ namespace NexFlow.Tests.Concierge;
 
 public sealed class RuntimeReadToolsTests
 {
+    [Theory]
+    [InlineData("¿De qué trata este negocio?", ConversationIntent.General)]
+    [InlineData("¿Qué actividad realizan aquí?", ConversationIntent.General)]
+    [InlineData("¿A qué se dedican?", ConversationIntent.Profile)]
+    public async Task Mvp_backed_business_information_reaches_public_workspace_facts(string text, ConversationIntent intent)
+    {
+        foreach (var label in new[] { "Clínica sintética", "Consultorio sintético" })
+        {
+            var f = new AssistantConversationTests.Fixture(conciergeCatalog: true);
+            var faq = UseRealKnowledge(f);
+            f.ProfileReads.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new BusinessProfileDto(label, "PRIVATE-TAX", "public@example.test", "", "Atención odontológica preventiva", "America/Lima"));
+            f.Interpretations.Enqueue(new() { Intent = intent, Act = DialogueAct.Information,
+                Evidence = [new("Act", text, nameof(DialogueAct.Information))] });
+            await f.HandleTurn(text, "public-profile");
+            Assert.Contains(label, f.Sent["public-profile"].Content);
+            Assert.Contains("Atención odontológica preventiva", f.Sent["public-profile"].Content);
+            Assert.DoesNotContain("PRIVATE-TAX", f.Sent["public-profile"].Content);
+            Assert.All(f.FactualQueries, q => Assert.Equal(f.Workspace, q.Workspace));
+            Assert.Contains(f.FactualQueries, q => q.Topic == KnowledgeTopic.Profile);
+            Assert.All(faq.Invocations, call => Assert.Equal(f.Workspace, call.Arguments[0]));
+            Assert.Null((await f.Context()).CurrentGoal); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+        }
+    }
+
+    [Theory]
+    [InlineData("ambiguous")]
+    [InlineData("unbacked")]
+    [InlineData("provider")]
+    [InlineData("rate")]
+    public async Task Mvp_uncertainty_is_not_business_absence_or_transaction_consent(string reason)
+    {
+        var f = new AssistantConversationTests.Fixture(conciergeCatalog: true); UseRealKnowledge(f);
+        const string text = "¿De qué trata este negocio?";
+        f.Interpretations.Enqueue(new() { Intent = reason == "provider" ? ConversationIntent.ProviderUnavailable
+            : reason == "rate" ? ConversationIntent.RateLimited : ConversationIntent.General,
+            Act = DialogueAct.Information, RequiresClarification = reason == "ambiguous",
+            Evidence = reason == "unbacked" ? [] : [new("Act", text, nameof(DialogueAct.Information))] });
+        await f.HandleTurn(text, "uncertain");
+        Assert.DoesNotContain("No tengo información registrada", f.Sent["uncertain"].Content);
+        Assert.DoesNotContain(f.FactualQueries, q => q.Topic == KnowledgeTopic.Faqs);
+        Assert.Null((await f.Context()).CurrentGoal); Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+    }
+
+    [Theory]
+    [InlineData(false, "No tengo información registrada")]
+    [InlineData(true, "No puedo consultar la información")]
+    public async Task Mvp_profile_absence_and_repository_failure_have_distinct_factual_responses(bool unavailable, string expected)
+    {
+        var f = new AssistantConversationTests.Fixture(conciergeCatalog: true); UseRealKnowledge(f);
+        if (unavailable) f.ProfileReads.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("synthetic unavailable"));
+        else f.ProfileReads.Setup(p => p.GetProfileAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync((BusinessProfileDto?)null);
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Profile });
+        await f.HandleTurn("¿A qué se dedican?", "missing-profile");
+        Assert.Contains(expected, f.Sent["missing-profile"].Content);
+        Assert.Empty(f.Bookings); Assert.Empty(f.Orders); Assert.Null((await f.Context()).CurrentGoal);
+    }
+
+    private static Mock<IFaqRepository> UseRealKnowledge(AssistantConversationTests.Fixture f)
+    {
+        var faq = new Mock<IFaqRepository>(MockBehavior.Strict);
+        faq.Setup(r => r.GetFaqsAsync(f.Workspace, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FaqDto>());
+        var real = new KnowledgeService(f.ProfileReads.Object, f.LocationReads.Object, f.HoursReads.Object,
+            faq.Object, f.OfferingReads.Object, NullLogger<KnowledgeService>.Instance);
+        f.KnowledgeReads.Setup(k => k.QueryAsync(f.Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == f.Workspace),
+            It.IsAny<KnowledgeQuery>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid w, BusinessKnowledgeSnapshot s, KnowledgeQuery q, CancellationToken ct) => {
+                f.FactualQueries.Add((w, q.Topic)); return real.QueryAsync(w, s, q, ct);
+            });
+        return faq;
+    }
+
     [Fact]
     public async Task Source_denial_remains_denial_and_discards_every_payload_field()
     {

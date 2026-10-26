@@ -3,6 +3,8 @@ using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Reservations;
+using NexFlow.Application.Features.Services.DTOs;
+using NexFlow.Domain.Enums;
 using Xunit;
 
 namespace NexFlow.Tests.Concierge;
@@ -109,5 +111,109 @@ public sealed class RuntimeNaturalBookingTests
         var resolved = new NexFlow.Application.Features.Automation.Dialogue.Understanding.NameSlotResolver()
             .Resolve("revisemos eso, continúa tranquilo", false, compoundAnswer: true);
         Assert.NotEqual(ResolutionStatus.Determined, resolved.Status);
+    }
+
+    [Theory]
+    [InlineData(false, "10:00")]
+    [InlineData(true, "10:00")]
+    [InlineData(true, "quiero esa hora")]
+    public async Task Mvp_reference_without_draft_date_survives_ack_and_selects_only_before_separate_consent(bool acknowledge, string selection)
+    {
+        var f = Create(); f.Now = new(2026, 10, 26, 14, 0, 0, DateTimeKind.Utc);
+        await f.SeedDraft("RESERVATION");
+        var before = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());
+        await f.HandleTurn("¿Está disponible pasado mañana a las 10?", "query-mvp");
+        var queried = await f.Context();
+        Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(queried));
+        var reference = Assert.IsType<ReservationTimeReference>(ReservationTimeReference.Current(f.Workspace, queried, f.Now));
+        Assert.Equal("2026-10-28", reference.Date); Assert.Equal("10:00", reference.Time); Assert.Empty(f.Bookings);
+        if (acknowledge)
+        {
+            await f.HandleTurn("vale", "ack-mvp");
+            var acknowledged = await f.Context();
+            Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(acknowledged));
+            Assert.Equal(reference, ReservationTimeReference.Current(f.Workspace, acknowledged, f.Now));
+            Assert.Contains("28/10/2026", f.Sent["ack-mvp"].Content);
+            Assert.Contains("10:00", f.Sent["ack-mvp"].Content); Assert.Equal(0, f.AiCalls);
+        }
+        if (selection == "quiero esa hora") f.Interpretations.Enqueue(new() {
+            Intent = ConversationIntent.Reservation, Directive = ConversationDirective.SelectReferencedTime,
+            Act = DialogueAct.Correction, Evidence = [new("Act", selection, nameof(DialogueAct.Correction))] });
+        await f.HandleTurn(selection, "select-mvp");
+        var selected = await f.Context();
+        Assert.Equal("2026-10-28", selected.TargetDate); Assert.Equal("10:00", selected.TargetTime);
+        Assert.Equal(ExpectedReply.ConfirmReservation, selected.CurrentQuestion?.Expected); Assert.Empty(f.Bookings);
+        await f.HandleTurn("vale", "not-consent-mvp"); Assert.Empty(f.Bookings);
+        await f.HandleTurn("sí confirmo", "consent-mvp"); await f.HandleTurn("sí confirmo", "consent-mvp");
+        var created = Assert.Single(f.Bookings.Values); Assert.Equal(new DateTime(2026, 10, 28, 15, 0, 0, DateTimeKind.Utc), created.StartTime);
+        f.EngineReads.Verify(e => e.CreateReservationAsync(f.Workspace, "sede-a", "service-a", AssistantConversationTests.Fixture.Phone,
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), "consent-mvp"), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("workspace")]
+    [InlineData("changed-site")]
+    [InlineData("occupied")]
+    public async Task Mvp_reference_never_selects_an_obsolete_foreign_or_occupied_slot(string reason)
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        await f.HandleTurn("¿Hay pasado mañana a las 10:00?", "query-guard");
+        var state = await f.Context(); Assert.NotNull(state.Information?.AvailabilityReference);
+        if (reason == "expired") f.Now = f.Now.AddMinutes(11);
+        if (reason == "workspace") {
+            state.Information!.AvailabilityReference = state.Information.AvailabilityReference! with { WorkspaceId = Guid.NewGuid() };
+            await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        }
+        if (reason == "changed-site") await f.HandleTurn("quiero cambiar de sede", "site-change");
+        if (reason == "occupied") f.EngineReads.Setup(e => e.GetAvailabilityAtAsync(f.Workspace, It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<TimeSlotDto>());
+        const string selection = "quiero esa hora";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Directive = ConversationDirective.SelectReferencedTime,
+            Act = DialogueAct.Correction, Evidence = [new("Act", selection, nameof(DialogueAct.Correction))] });
+        await f.HandleTurn(selection, "invalid-reference");
+        Assert.Null((await f.Context()).TargetTime); Assert.Empty(f.Bookings);
+        f.EngineReads.Verify(e => e.CreateReservationAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Mvp_service_typo_uses_existing_literal_evidence_instead_of_picking_another_offering(bool backed)
+    {
+        var f = Create(); SetMvpServices(f); await f.SeedDraft("RESERVATION");
+        var state = await f.Context(); state.SelectedServiceId = null; state.CurrentStep = "COLLECT_SERVICE";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Service = "Evaluación odontológica",
+            Evidence = backed ? [new("Service", "evaluación odontologixa", "Evaluación odontológica")] : [] });
+        await f.HandleTurn("quiero una evaluación odontologixa", "typo-mvp");
+        Assert.Equal(backed ? "evaluation" : null, (await f.Context()).SelectedServiceId); Assert.Empty(f.Bookings);
+        Assert.Equal(1, f.AiCalls); Assert.DoesNotContain(f.Bookings.Values, r => r.ServiceId == "cleaning");
+    }
+
+    [Theory]
+    [InlineData("la 2", "evaluation")]
+    [InlineData("la 4", "cleaning")]
+    public async Task Mvp_numbers_select_the_id_in_the_real_current_menu_not_the_pdf(string choice, string expected)
+    {
+        var f = Create(); SetMvpServices(f); await f.SeedDraft("RESERVATION");
+        var state = await f.Context(); state.SelectedServiceId = null; state.CurrentStep = "COLLECT_SERVICE";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        await f.HandleTurn("continuemos", "menu-mvp");
+        state = await f.Context(); Assert.Equal(ExpectedReply.Selection, state.CurrentQuestion?.Expected);
+        Assert.Equal("evaluation", state.RecoveryOptions[1].Key); Assert.Equal("cleaning", state.RecoveryOptions[3].Key);
+        Assert.Contains("2. Evaluación odontológica", f.Sent["menu-mvp"].Content);
+        Assert.Contains("4. Limpieza dental", f.Sent["menu-mvp"].Content);
+        await f.HandleTurn(choice, "number-mvp");
+        Assert.Equal(expected, (await f.Context()).SelectedServiceId); Assert.Empty(f.Bookings); Assert.Equal(0, f.AiCalls);
+    }
+
+    private static void SetMvpServices(AssistantConversationTests.Fixture f)
+    {
+        f.Services.Clear();
+        foreach (var (id, name) in new[] { ("advice", "Asesoría preventiva"), ("evaluation", "Evaluación odontológica"),
+            ("fluoride", "Fluorización"), ("cleaning", "Limpieza dental"), ("restoration", "Restauración con resina simple") })
+            f.Services.Add(new ServiceDto { Id = id, Name = name, RequiresReservation = id != "restoration", DurationInMinutes = id == "restoration" ? null : 30 });
     }
 }

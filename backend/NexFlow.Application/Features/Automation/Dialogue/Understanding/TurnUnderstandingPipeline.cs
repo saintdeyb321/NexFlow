@@ -104,6 +104,14 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         if (readOnlyQuestion && (local.Time.Status != ResolutionStatus.Insufficient || local.Date.Status != ResolutionStatus.Insufficient)
             && !new[] { local.Date.Code, local.Time.Code, local.Location.Code, local.Service.Code }.Any(code => code is "SemanticComposition" or "UnknownEntity"))
             return PrepareBooking(local, DialogueAct.InformationalInterruption, false, workspace, request.MessageId, readOnly: true);
+        // An explicit literal choice of the just-verified time selects that whole
+        // date/time reference. A question or acknowledgement never takes this path.
+        if (booking && !readOnlyQuestion && TimePreferenceResolver.IsOnlyTimeExpression(request.MessageText)
+            && local.Date.Status == ResolutionStatus.Insufficient && local.Time.TryGetValue(out var literalTime)
+            && literalTime.Kind == TimePreferenceKind.Exact
+            && ReservationTimeReference.Current(workspace, context, local.Context.LocalBusinessNow.UtcDateTime) is { } currentTime
+            && literalTime.ExactTime!.Value.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture) == currentTime.Time)
+            return SelectReference(currentTime, false);
         if (reservationCandidate && act == DialogueAct.SemanticAmbiguity && local.Service.Status == ResolutionStatus.Determined)
         { booking = true; act = DialogueAct.StartOperation; }
         if (context.PendingCustomerName != null && local.Name.Code == "SurnameMissing" && context.CurrentStep == "COLLECT_CUSTOMERNAME")
@@ -166,8 +174,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
                 || OrderMentionResolver.IsQuestion(request.MessageText) || OrderMentionResolver.IsHypothetical(request.MessageText) || reference == null)
                 return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.Reservation }, true,
                     "Indica la hora que deseas seleccionar; no hay una referencia inequívoca vigente para esa petición. Conservamos tu borrador.");
-            return new(DialogueAct.RequestedData, new() { Intent = ConversationIntent.Reservation,
-                Location = reference.LocationId, Service = reference.ServiceId, Date = reference.Date, Time = reference.Time }, true);
+            return SelectReference(reference, true);
         }
         // Load only missing authorized candidates once when semantic understanding
         // identifies an entity that a simple-slot read deliberately omitted.
@@ -194,6 +201,11 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(act, new() { Intent = ConversationIntent.General, RequiresClarification = true }, true);
         if (interpretation.Intent == ConversationIntent.Support) return new(DialogueAct.HumanAssistance, interpretation, true);
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) return new(DialogueAct.Cancellation, interpretation, true);
+        // A backed informational act can use ChatFlow's authorized FAQ/profile
+        // reads. An ambiguous General intent alone must still ask for clarification.
+        if (context.CurrentGoal == null && interpretation.Intent == ConversationIntent.General
+            && interpretation.Directive == ConversationDirective.None && backedAct && interpretation.Act == DialogueAct.Information)
+            return new(DialogueAct.Information, interpretation, true);
         if (interpretation.Intent == ConversationIntent.Request && context.CurrentGoal == null
             && backedAct && interpretation.Act == DialogueAct.StartOperation)
             return new(DialogueAct.StartOperation, interpretation, true);
@@ -213,6 +225,10 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         }
         return new(interpretation.RequiresClarification || interpretation.Intent == ConversationIntent.General ? DialogueAct.SemanticAmbiguity : act, interpretation, true);
     }
+
+    private static PreparedDialogueTurn SelectReference(ReservationTimeReference reference, bool usedAi) =>
+        new(DialogueAct.RequestedData, new() { Intent = ConversationIntent.Reservation,
+            Location = reference.LocationId, Service = reference.ServiceId, Date = reference.Date, Time = reference.Time }, usedAi);
 
     private static PreparedDialogueTurn PrepareBooking(TurnUnderstanding value, DialogueAct act, bool usedAi, Guid workspace, string source, bool readOnly = false)
     {

@@ -3,6 +3,7 @@ using Grpc.Core;
 using Moq;
 using NexFlow.Application.Common;
 using NexFlow.Application.Features.Business;
+using NexFlow.Application.Features.Business.Offerings;
 using NexFlow.Application.Features.Catalog.DTOs;
 using NexFlow.Application.Features.Services.DTOs;
 using NexFlow.Application.Features.Shared.DTOs;
@@ -16,6 +17,54 @@ namespace NexFlow.Tests;
 
 public sealed class CatalogGenerationTests
 {
+    [Theory]
+    [InlineData("not-reservable", 5)]
+    [InlineData("legacy-duration", 5)]
+    [InlineData("other-location", 5)]
+    [InlineData("inactive", 4)]
+    public async Task Mvp_public_catalog_and_reservable_services_use_distinct_real_filters(string exclusion, int published)
+    {
+        var f = new CatalogFixture();
+        var services = new[] { "Asesoría preventiva", "Evaluación odontológica", "Fluorización", "Limpieza dental", "Restauración con resina simple" }
+            .Select((name, index) => new ServiceDto { Id = $"service-{index}", Name = name, CategoryId = "dental",
+                RequiresReservation = true, DurationInMinutes = 30, LocationScope = "ALL" }).ToArray();
+        var fifth = services[4];
+        if (exclusion == "not-reservable") fifth.RequiresReservation = false;
+        if (exclusion == "legacy-duration") fifth.DurationInMinutes = null;
+        if (exclusion == "other-location") { fifth.LocationScope = "SPECIFIC"; fifth.LocationIds = ["branch-b"]; }
+        if (exclusion == "inactive") fifth.IsActive = false;
+        f.Catalog.Setup(r => r.GetActiveCategoriesAsync(f.WorkspaceId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new BusinessCategoryDto { Id = "dental", Scope = "SERVICE", Name = "Odontología" }]);
+        f.Catalog.Setup(r => r.GetItemsByTypeAsync(f.WorkspaceId, "SERVICE", It.IsAny<CancellationToken>())).ReturnsAsync(services);
+        var offerings = new OfferingService(f.Catalog.Object);
+        foreach (var service in services.Take(4))
+        {
+            var resolved = await offerings.ResolveReservationServiceAsync(f.WorkspaceId, "branch-a", service.Name, default);
+            Assert.Equal(service.Id, resolved.Service?.Id);
+        }
+        Assert.Null((await offerings.ResolveReservationServiceAsync(f.WorkspaceId, "branch-a", fifth.Name, default)).Service);
+        if (exclusion == "other-location")
+            Assert.Equal(fifth.Id, (await offerings.ResolveReservationServiceAsync(f.WorkspaceId, "branch-b", fifth.Name, default)).Service?.Id);
+        var generation = await f.Generate("SERVICE");
+        using var payload = JsonDocument.Parse(Assert.Single(f.Messages).PayloadJson);
+        var data = payload.RootElement.GetProperty("Data");
+        var items = data.GetProperty("CatalogData").GetProperty("Items").EnumerateArray().ToArray();
+        Assert.Equal(published, items.Length);
+        Assert.Equal("Evaluación odontológica", items[1].GetProperty("Name").GetString());
+        if (published == 5) Assert.Equal(fifth.Name, items[4].GetProperty("Name").GetString());
+        Assert.Equal("SERVICE", data.GetProperty("Scope").GetString());
+        Assert.Equal(generation.SourceHash, await f.Service.GetCurrentSourceHashAsync(f.WorkspaceId, "SERVICE", default));
+        await f.FinishGeneration("SERVICE");
+        var current = await f.Upload("SERVICE");
+        Assert.Equal(CatalogArtifactOrigin.Uploaded, current.Origin);
+        Assert.Equal(CatalogArtifactStatus.Current, (await f.Service.GetArtifactAsync(f.WorkspaceId, "SERVICE", default))!.Status);
+        services[0].DurationInMinutes = 45;
+        Assert.NotEqual(current.SourceHash, await f.Service.GetCurrentSourceHashAsync(f.WorkspaceId, "SERVICE", default));
+        Assert.Equal(CatalogArtifactStatus.Stale, (await f.Service.GetArtifactAsync(f.WorkspaceId, "SERVICE", default))!.Status);
+        Assert.All(f.Catalog.Invocations, call => Assert.Equal(f.WorkspaceId, call.Arguments[0]));
+        f.Catalog.Verify(r => r.GetItemsByTypeAsync(f.WorkspaceId, "PRODUCT", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task Concurrent_requests_accept_one_generation_and_spend_one_token()
     {

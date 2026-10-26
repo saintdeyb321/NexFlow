@@ -32,7 +32,7 @@ public sealed class DialoguePolicy
         if (normalized is "no quiero reservar" or "no deseo reservar" or "no necesito reservar") return DialogueAct.DeclineOperation;
         if ((booking || state.CurrentGoal == "ORDER") && IsResume(normalized)) return DialogueAct.Resume;
         if (booking && state.CurrentQuestion?.Expected is not (ExpectedReply.Information or ExpectedReply.StartReservation)
-            && normalized is "si" or "de acuerdo" or "esta bien" or "vale" or "ok") return DialogueAct.Resume;
+            && IsAcknowledgement(normalized)) return DialogueAct.Resume;
         if (booking && words.Any(w => w is "pedir" or "pedido" or "comprar" or "solicitud" or "reclamo")) return DialogueAct.SemanticAmbiguity;
         // A negated clause requires semantic scope; extracted nouns must not start an operation.
         if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
@@ -58,6 +58,9 @@ public sealed class DialoguePolicy
             && words.Any(w => w is "preguntando" or "consultando" or "informacion")
             && !words.Any(w => w is "confirma" or "confirmo" or "envia" or "envialo");
     }
+
+    // An acknowledgement can resume dialogue; it is never transaction consent.
+    public static bool IsAcknowledgement(string normalized) => normalized is "si" or "de acuerdo" or "esta bien" or "vale" or "ok";
 
     public static bool IsResume(string normalized)
     {

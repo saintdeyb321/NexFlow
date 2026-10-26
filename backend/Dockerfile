@@ -23,12 +23,12 @@ USER $APP_UID
 
 # Optional one-shot image target; it never starts the API or its workers.
 FROM runtime AS migrator
-COPY --from=build /out/migrator ./
+COPY --from=build --chown=$APP_UID:$APP_UID /out/migrator ./
 ENTRYPOINT ["dotnet", "NexFlow.Migrator.dll"]
 
 FROM runtime AS final
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
-COPY --from=build /out/api ./
+COPY --from=build --chown=$APP_UID:$APP_UID /out/api ./
 ENTRYPOINT ["dotnet", "NexFlow.API.dll"]
