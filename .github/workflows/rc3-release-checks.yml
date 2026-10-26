@@ -25,11 +25,13 @@ jobs:
         with:
           node-version: 24.18.1
       - name: Restore and compile backend
+        id: backend-build
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           dotnet restore backend/backend.slnx
           dotnet restore backend/NexFlow.Tests/NexFlow.Tests.csproj
           dotnet build backend/backend.slnx --no-restore
+          dotnet build backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore
           dotnet publish backend/NexFlow.API/NexFlow.API.csproj --no-restore --configuration Release --output backend/NexFlow.API/bin/rc3-publish
       - name: Compile and exercise codec smoke against API publish (Windows only)
         run: |
@@ -38,15 +40,14 @@ jobs:
           dotnet build backend/tools/CodecSmoke/NexFlow.CodecSmoke.csproj --configuration Release "-p:ApiPublishDir=$apiPublish"
           Copy-Item -LiteralPath backend/tools/CodecSmoke/bin/Release/net10.0/NexFlow.CodecSmoke.dll -Destination "$apiPublish/NexFlow.CodecSmoke.dll"
           dotnet exec --runtimeconfig "$apiPublish/NexFlow.API.runtimeconfig.json" --depsfile "$apiPublish/NexFlow.API.deps.json" "$apiPublish/NexFlow.CodecSmoke.dll"
-      - name: Execute explicit backend suite (external contracts run separately)
-        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --filter 'Category!=Integration&Category!=RedisIntegration&Category!=ProviderIntegration' --logger 'trx;LogFileName=rc3-unit.trx' --results-directory backend/NexFlow.Tests/TestResults
-      - name: Require complete local regression evidence
-        run: |
-          [xml]$result = Get-Content backend/NexFlow.Tests/TestResults/rc3-unit.trx
-          $counts = $result.SelectSingleNode("//*[local-name()='Counters']")
-          if (!$counts -or [int]$counts.passed -lt 708 -or $counts.total -ne $counts.executed -or $counts.total -ne $counts.passed) {
-            throw 'Expected at least 708 successful local tests, without omissions.'
-          }
+      - name: Verify strict G8 evidence validator
+        run: python -B -m unittest discover -s .github/workflows -p test_g8_certification.py
+      - name: Current backend contract (at least 1491, zero failures or omissions)
+        run: python -B .github/workflows/g8_certification.py run current --trx backend/NexFlow.Tests/TestResults/rc3-unit.trx
+      - name: Preserve and verify the exact frozen historical incompatibilities
+        # Preserve history even when the current contract is red; never swallow its failure.
+        if: ${{ !cancelled() && steps.backend-build.outcome == 'success' }}
+        run: python -B .github/workflows/g8_certification.py run historical --trx backend/NexFlow.Tests/TestResults/rc3-historical.trx
       - name: Frontend locked dependencies, build and lint
         working-directory: frontend
         run: |
@@ -73,11 +74,14 @@ jobs:
           name: rc3-release-unit-results
           path: |
             backend/NexFlow.Tests/TestResults/rc3-unit.trx
+            backend/NexFlow.Tests/TestResults/rc3-unit.g8.json
+            backend/NexFlow.Tests/TestResults/rc3-historical.trx
+            backend/NexFlow.Tests/TestResults/rc3-historical.g8.json
             frontend/node_modules/.tmp/rc3-typescript.xml
             frontend/node_modules/.tmp/rc3-browser.xml
           retention-days: 7
           if-no-files-found: warn
-          # Only the three explicit synthetic XML paths above, never env/cache trees.
+          # Only explicit synthetic test evidence/identity paths, never env/cache trees.
           include-hidden-files: true
 # Does not certify PostgreSQL/Firestore. Use the separate approved integration
 # workflow with independent authorization; neither workflow deploys anything.

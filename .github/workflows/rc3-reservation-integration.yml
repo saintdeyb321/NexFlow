@@ -52,20 +52,19 @@ jobs:
           npm install --global firebase-tools@14.12.0
           firebase setup:emulators:firestore
       - name: Restore and build
+        id: backend-build
         run: |
           dotnet restore backend/backend.slnx
           dotnet restore backend/NexFlow.Tests/NexFlow.Tests.csproj
           dotnet build backend/backend.slnx --no-restore
           dotnet build backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore
-      - name: Preserve baseline and local safety regressions
-        run: dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter 'Category!=Integration&Category!=RedisIntegration&Category!=ProviderIntegration' --logger 'trx;LogFileName=unit.trx' --results-directory artifacts/rc3
-      - name: Reject missing or skipped local regression evidence
-        shell: python
-        run: |
-          import xml.etree.ElementTree as ET
-          counters = ET.parse('artifacts/rc3/unit.trx').getroot().find('.//{*}Counters')
-          assert counters is not None and int(counters.attrib['passed']) >= 708
-          assert counters.attrib['total'] == counters.attrib['executed'] == counters.attrib['passed'], 'No skipped/failed local regression is certifiable'
+      - name: Verify strict G8 evidence validator
+        run: python -B -m unittest discover -s .github/workflows -p test_g8_certification.py
+      - name: Current baseline and local safety contract (at least 1491, zero omissions)
+        run: python -B .github/workflows/g8_certification.py run current --trx artifacts/rc3/unit.trx
+      - name: Preserve and verify the exact frozen historical incompatibilities
+        if: ${{ !cancelled() && steps.backend-build.outcome == 'success' }}
+        run: python -B .github/workflows/g8_certification.py run historical --trx artifacts/rc3/historical.trx
       - name: Real PostgreSQL plus Firestore Emulator matrix
         env:
           NEXFLOW_RC3_INTEGRATION: '1'
