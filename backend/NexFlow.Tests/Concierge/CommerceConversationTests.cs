@@ -42,7 +42,8 @@ public sealed class CommerceConversationTests(ITestOutputHelper output)
         var f = new AssistantConversationTests.Fixture(serviceCount: 7, conciergeCatalog: true, intelligentCommerce: true);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ServiceQuery, QueryKind = OfferingQueryKind.Broad });
         await f.HandleTurn("Compárteme todas las prestaciones que ofrecen", "semantic-catalog");
-        Assert.Contains("de 7", f.Sent["semantic-catalog"].Content); Assert.Contains("Ver más", f.Sent["semantic-catalog"].Content);
+        // Verify the same total in the typed plan; B4 removed technical counters from WhatsApp text.
+        Assert.Equal(7, f.Understood.Last().Interpretation.OfferingQuery!.TotalCount); Assert.Contains("Ver más", f.Sent["semantic-catalog"].Content);
         Assert.Equal(5, OfferingReference.Read(f.Workspace, await f.Context())!.Ids.Length);
     }
     [Fact]
@@ -270,7 +271,7 @@ public sealed class CommerceConversationTests(ITestOutputHelper output)
     {
         var f=Create();f.Products[1].Currency="USD";
         await f.HandleTurn("Quiero dos panes integrales y un queque","mixed");
-        Assert.Contains("PEN 5.00",f.Sent["mixed"].Content);Assert.Contains("USD 10.00",f.Sent["mixed"].Content);
+        Assert.Contains("S/ 5.00",f.Sent["mixed"].Content);Assert.Contains("USD 10.00",f.Sent["mixed"].Content);
         await f.HandleTurn("finalizar","consent-review");await f.HandleTurn("Confirmar","send");var order=Assert.Single(f.Orders.Values);Assert.Null(order.Currency);Assert.Null(order.TotalAmountMinorUnits);
     }
 

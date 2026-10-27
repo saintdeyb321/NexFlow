@@ -12,8 +12,7 @@ public static class OfferingResponseFormatter
 
     private static string Line(VerifiedOffering p, bool broad)
     {
-        var line = p.Type == "SERVICE" ? $"• *{p.Name}*\n  {Money(p.Currency, p.PriceMinorUnits)}"
-            : $"• {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m:0.00}";
+        var line = $"• *{p.Name}*\n  {Money(p.Currency, p.PriceMinorUnits)}";
         if (p.DurationMinutes.HasValue) line += $" · {p.DurationMinutes.Value} min";
         if (!string.IsNullOrWhiteSpace(p.Description) && !broad) line += ". " + p.Description;
         return line;

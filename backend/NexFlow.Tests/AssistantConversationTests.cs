@@ -342,7 +342,7 @@ public sealed class AssistantConversationTests
             Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()), profiles.Object, knowledge.Object);
             var slots = new WorkspaceSlotResolver(entitlements.Object, profiles.Object, locations.Object, offerings.Object, clock.Object,
                 new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);
-            var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery, offerings.Object, intelligentCommerce ? new CommerceTurnResolver(slots, new OrderMentionResolver()) : null,
+            var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery, offerings.Object, intelligentCommerce ? new CommerceTurnResolver(slots, new OrderMentionResolver(), clock.Object) : null,
                 locationRepository: locations.Object);
             _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, new RecordingComposer(new ResponseComposer(Wording.Object, entitlements.Object, Recovery, Options.Create(CompositionOptions)), Plans, Composed, () => DuringComposition), Recovery, clock.Object, managementFactory?.Invoke(this));
             var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);

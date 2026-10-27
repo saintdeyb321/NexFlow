@@ -139,8 +139,7 @@ public sealed class KnowledgeService : IKnowledgeService
         foreach (var item in selected)
         {
             if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine(service ? $"• *{item.Name}*\n  {NexFlow.Application.Features.Automation.Dialogue.Composition.OfferingResponseFormatter.Money(item.Currency, item.PriceMinorUnits)}"
-                : $"- Producto: {item.Name} | Precio: {item.Currency} {item.PriceMinorUnits / 100m:0.00}");
+            sb.AppendLine($"• *{item.Name}*\n  {NexFlow.Application.Features.Automation.Dialogue.Composition.OfferingResponseFormatter.Money(item.Currency, item.PriceMinorUnits)}");
             if (item is NexFlow.Application.Features.Services.DTOs.ServiceDto { DurationInMinutes: { } duration }) sb.AppendLine($"  Duración: {duration} min");
             if (!string.IsNullOrWhiteSpace(query.SearchTerm) && !string.IsNullOrWhiteSpace(item.Description)) sb.AppendLine($"  Detalle: {item.Description}");
         }

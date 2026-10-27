@@ -13,6 +13,7 @@ using NexFlow.Application.Features.Reservations;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Application.Features.Business;
@@ -48,9 +49,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         : c.ReservationManagement != null ? c.ReservationManagement.NextQuestion
         : string.IsNullOrEmpty(c.CurrentGoal) ? "¿Qué necesitas consultar?"
         : (c.CurrentGoal is "BOOKING" or "RESERVATION" ? "" : "Tu borrador sigue guardado. ") + (c.CurrentStep switch {
-            "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre?", "COLLECT_LOCATION" => "¿En qué sede deseas reservar?",
-            "COLLECT_SERVICE" => "¿Qué servicio deseas reservar?", "COLLECT_DATE" => "¿Para qué fecha?",
-            "COLLECT_TIME" => "¿Qué hora prefieres?", "CONFIRM" => "¿Confirmas la reserva? Responde sí o no.",
+            "COLLECT_CUSTOMERNAME" => SecretaryPresentation.AskName, "COLLECT_LOCATION" => "¿En qué sede te gustaría atenderte? Puedes indicar su nombre o decir «la primera».",
+            "COLLECT_SERVICE" => SecretaryPresentation.ChooseService, "COLLECT_DATE" => SecretaryPresentation.AskDate,
+            "COLLECT_TIME" => SecretaryPresentation.AskTime(c.PreferredTime != null), "CONFIRM" => SecretaryPresentation.ConfirmReservation,
             _ => c.LastQuestion ?? "Puedes continuar o escribir cancelar para descartar el borrador." });
 
     public Task<bool> AcquireAiAsync(Guid workspace, string phone, string source, CancellationToken ct)
@@ -513,7 +514,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 + (context.RecoveryHasMore ? "\nHay más opciones disponibles: escribe ver más. Para solicitar ayuda humana escribe asesor." : "")
                 + (context.RecoveryOptionsOffset > 0 ? "\nPara volver al inicio escribe menú." : "");
         return replacePicker ? ComposePickerResponse(response, available, menu)
-            : response + "\n" + menu + "\n¿Cuál prefieres? Puedes escribir el nombre o el número.";
+            : response + "\n\n" + menu + "\n\n" + SecretaryPresentation.ChooseOption;
     }
 
     private static string ComposePickerResponse(string response, List<ConversationMenuOption> available, string menu)
@@ -523,7 +524,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         var pickerLines = available.Select(o => "• " + o.Label).ToHashSet(StringComparer.Ordinal);
         var lines = response.Replace("\r\n", "\n").Split('\n');
         var finalLine = Array.FindLastIndex(lines, line => !string.IsNullOrWhiteSpace(line));
-        var hasQuestion = finalLine >= 0 && lines[finalLine].TrimEnd().EndsWith('?');
+        var hasQuestion = response.Contains('¿') && response.Contains('?');
         var insertion = Array.FindIndex(lines, line => pickerLines.Contains(line.Trim()));
         if (insertion < 0) insertion = hasQuestion ? finalLine : lines.Length;
         var parts = new List<string>();
@@ -532,7 +533,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             if (i == insertion) parts.Add(menu);
             if (i < lines.Length && !pickerLines.Contains(lines[i].Trim())) parts.Add(lines[i]);
         }
-        if (!hasQuestion) parts.Add("¿Cuál prefieres? Puedes escribir el nombre o el número.");
+        if (!hasQuestion) parts.Add(SecretaryPresentation.ChooseOption);
         return string.Join("\n", parts);
     }
 

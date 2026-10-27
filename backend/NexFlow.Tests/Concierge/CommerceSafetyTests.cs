@@ -225,7 +225,7 @@ public sealed class CommerceSafetyTests
         f.Notifications.VerifyNoOtherCalls();
         var reviewed = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
         Assert.StartsWith("ORDER_CONFIRM:", reviewed.CurrentStep); Assert.Contains("¿Confirmas", reviewed.LastQuestion);
-        Assert.Equal(2, Assert.Single(reviewed.OrderDraftItems).Quantity); Assert.Contains("PEN 5.00", answer);
+        Assert.Equal(2, Assert.Single(reviewed.OrderDraftItems).Quantity); Assert.Contains("S/ 5.00", answer);
         await f.Turn("Confirmar", "fresh-consent");
         await f.Turn("Confirmar", "fresh-consent");
         Assert.Equal(500, Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)).TotalAmountMinorUnits);

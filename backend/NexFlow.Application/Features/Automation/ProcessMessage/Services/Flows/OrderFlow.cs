@@ -130,7 +130,7 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
                 if (resuming && context.CurrentStep == "ORDER_COMMIT:" + quote.Fingerprint)
                     return await Submit(quote);
                 if (reviewed && !consent)
-                    return await Remember("Tu solicitud sigue lista para enviar. Para autorizar el envío del resumen vigente, responde *Confirmar*. También puedes escribir *Editar* o *Descartar*.",
+                    return await Remember("Tu solicitud sigue lista para enviar. Puedes responder «*Confirmar*» o «Sí» para autorizar este resumen, o indicar qué deseas cambiar. También puedes escribir «*Editar*» o «*Descartar*».",
                         OperationStatus.AwaitingConfirmation, quote, preserveQuestion: true);
                 if (!consent)
                 {
@@ -138,7 +138,7 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
                     context.CurrentStep="ORDER_CONFIRM:" + quote.Fingerprint;
                     context.LastQuestion="¿Confirmas que la enviemos al negocio con estos importes?";
                     return await Remember("Revisa el resumen vigente de tu solicitud.\n\n" + quote.Text + "\n\n" + context.LastQuestion
-                        + "\n✅ *Confirmar* — enviar solicitud\n✏️ *Editar* — cambiar el borrador\n❌ *Descartar* — abandonar el borrador",OperationStatus.AwaitingConfirmation,quote);
+                        + "\nPuedes responder «*Confirmar*» o «Sí» para enviar la solicitud, indicar un cambio o escribir «*Descartar*» para abandonar el borrador.",OperationStatus.AwaitingConfirmation,quote);
                 }
                 return await Submit(quote);
             }

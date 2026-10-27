@@ -484,13 +484,13 @@ public class BookingFlow : IBookingFlow
         var step = DialoguePolicy.NextBookingStep(context);
         var question = step switch
         {
-            "COLLECT_CUSTOMERNAME" => "Para registrar tu reserva, ¿cuál es tu nombre y apellido?",
+            "COLLECT_CUSTOMERNAME" => SecretaryPresentation.AskName,
             "COLLECT_LOCATION" => await LocationOptionsAsync(workspaceId, "¿En cuál sede deseas atenderte?", ct, evidence),
             "COLLECT_SERVICE" when !string.IsNullOrWhiteSpace(context.SelectedLocationId)
                 => await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct, evidence, context.ReservationServiceOffset),
-            "COLLECT_DATE" => "¿Para qué fecha deseas reservar? Puedes indicar el día o escribir 'mañana'.",
+            "COLLECT_DATE" => SecretaryPresentation.AskDate,
             "COLLECT_TIME" => await AvailabilityOptionsAsync(workspaceId, context, preserveDraft, ct, evidence, showOptions: false),
-            "CONFIRM" => $"Tu reserva para el {context.TargetDate} a las {context.TargetTime} está pendiente de confirmación. ¿Confirmas? Responde sí o no.",
+            "CONFIRM" => $"Tu reserva para el {context.TargetDate} a las {context.TargetTime} sigue por confirmar.\n\n" + SecretaryPresentation.ConfirmReservation,
             _ => "¿Qué servicio deseas reservar?"
         };
         if (step != "COLLECT_TIME" && evidence != null) evidence.Question = question;
@@ -504,7 +504,7 @@ public class BookingFlow : IBookingFlow
         evidence?.Set(locations.Select(l => new VerifiedFact("Location", l.Name, VerifiedFactSource.BusinessRepository, l.Id)), question,
             locations.Select(l => new ConversationMenuOption(l.Id!, l.Name, "Location")).ToArray());
         if (locations.Count == 0) return "No hay sedes registradas disponibles para reservar.";
-        return "Sedes disponibles:\n" + string.Join("\n", locations.Select(l => $"• {l.Name}")) + "\n\n" + question;
+        return SecretaryPresentation.Locations(locations.Select(l => l.Name), question);
     }
 
     private async Task<bool> IsCustomerNameValidAsync(Guid workspace, string? name, IReadOnlyList<LocationDto> locations,
@@ -693,10 +693,9 @@ public class BookingFlow : IBookingFlow
         if (!showOptions)
         {
             if (!preserveDraft) { context.RecoveryOptions.Clear(); context.RecoveryOptionsContext = null; }
-            var question = context.PreferredTime == null ? "¿Qué horario prefieres? Puedes indicar una hora en formato 12 o 24 horas; verificaré su disponibilidad."
-                : "¿Qué hora prefieres dentro de esa franja? Verificaré su disponibilidad.";
+            var question = SecretaryPresentation.AskTime(context.PreferredTime != null);
             if (evidence != null) evidence.Question = question;
-            return $"Para el {date:dd/MM/yyyy}, {question}";
+            return $"Revisemos un horario para el {date:dd/MM/yyyy}.\n\n{question}";
         }
         var slots = (await _reservationEngine.GetAvailabilityAsync(workspaceId, context.SelectedLocationId, context.SelectedServiceId, date, ct))
             .Where(s => s.IsAvailable).OrderBy(s => s.StartTime).ToList();

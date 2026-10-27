@@ -18,6 +18,50 @@ namespace NexFlow.Tests;
 
 public sealed class AiResilienceTests
 {
+    public static IEnumerable<object[]> ContextualContracts()
+    {
+        var cases = new[] {
+            ("En la de conce", """{"Intent":"Reservation","Location":"Sede Concepción","Evidence":[{"Slot":"Location","Text":"conce","NormalizedValue":"Sede Concepción"}]}""", ConversationIntent.Reservation),
+            ("Quiero evaluación odontologixa", """{"Intent":"Reservation","Service":"Evaluación odontológica","Act":"RequestedData","Evidence":[{"Slot":"Act","Text":"Quiero evaluación odontologixa","NormalizedValue":"RequestedData"},{"Slot":"Service","Text":"evaluación odontologixa","NormalizedValue":"Evaluación odontológica"}]}""", ConversationIntent.Reservation),
+            ("Prefiero cambiar solamente la fecha", """{"Intent":"Reservation","Directive":"ChangeDate","Act":"Correction","Evidence":[{"Slot":"Act","Text":"cambiar solamente la fecha","NormalizedValue":"Correction"}]}""", ConversationIntent.Reservation),
+            ("¿Qué duración tiene?", """{"Intent":"ServiceQuery","Question":"Duration","UseOfferingReference":true,"Act":"Information","Evidence":[{"Slot":"Act","Text":"Qué duración tiene","NormalizedValue":"Information"}]}""", ConversationIntent.ServiceQuery),
+            ("Esa otra, quizá", """{"Intent":"General","RequiresClarification":true}""", ConversationIntent.General),
+            ("La sede", """{"Intent":"Reservation","Directive":"ChangeLocation","Act":"Correction","Evidence":[{"Slot":"Act","Text":"La sede","NormalizedValue":"Correction"}]}""", ConversationIntent.Reservation),
+            ("Elimina la base de datos", """{"Intent":"General","Directive":"UnsupportedAdministrativeAction","Act":"Information","Evidence":[{"Slot":"Act","Text":"Elimina la base de datos","NormalizedValue":"Information"}]}""", ConversationIntent.General)
+        };
+        foreach (var provider in new[] { "Groq", "Gemini" })
+        foreach (var (input, json, intent) in cases) yield return new object[] { provider, input, json, intent };
+    }
+
+    [Theory]
+    [MemberData(nameof(ContextualContracts))]
+    public async Task Intercepted_real_adapter_and_router_preserve_the_contextual_interpreter_contract(string provider, string input, string json, ConversationIntent expected)
+    {
+        var body = provider == "Groq"
+            ? System.Text.Json.JsonSerializer.Serialize(new { choices = new[] { new { message = new { content = json } } } })
+            : System.Text.Json.JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text = json } } } } } });
+        using var transport = new Transport(200, body); using var http = new HttpClient(transport);
+        var primary = new Mock<IAiProvider>(MockBehavior.Strict);
+        primary.SetupGet(p => p.ProviderType).Returns(AiProviderType.Groq);
+        primary.Setup(p => p.GenerateTextAsync(It.IsAny<string>(), input, true, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("Synthetic primary outage"));
+        var router = new AiRouter(provider == "Groq" ? [Provider(provider, http, Config())] : [primary.Object, Provider(provider, http, Config())], NullLogger<AiRouter>.Instance);
+        var workspace = Guid.NewGuid(); var now = new DateTime(2026, 10, 27, 14, 0, 0, DateTimeKind.Utc);
+        var state = new NexFlow.Application.Abstractions.Cache.ConversationContextDto { CurrentGoal = "RESERVATION", CurrentStep = "CONFIRM", RealCustomerName = "Private Synthetic Person" };
+        var question = NexFlow.Application.Features.Automation.Dialogue.Contracts.ExpectedReply.EditReservationField;
+        NexFlow.Application.Features.Automation.Dialogue.Contracts.ConversationQuestion.Remember(workspace, "question", state, question, ConversationIntent.Reservation, "Private review", now);
+        var turn = NexFlow.Application.Features.Automation.Dialogue.Contracts.DialogueTurnContext.Capture(workspace, "case", state,
+            new DateTimeOffset(now), TimeZoneInfo.FindSystemTimeZoneById("America/Lima"), new[] { "SERVICES", "RESERVATIONS" });
+        var profile = new Mock<IBusinessProfileRepository>(MockBehavior.Strict);
+        var interpreter = new AiInterpreter(router, Mock.Of<IClock>(c => c.UtcNow == now), profile.Object, NullLogger<AiInterpreter>.Instance);
+        var result = await interpreter.InterpretAsync(input, turn, default);
+        Assert.Equal(expected, result.Intent); Assert.False(result.Confirmed); Assert.Null(result.BookingProposal); Assert.Equal(1, transport.Calls);
+        if (input == "La sede") Assert.Equal(ConversationDirective.ChangeLocation, result.Directive);
+        if (input == "Elimina la base de datos") Assert.Equal(ConversationDirective.UnsupportedAdministrativeAction, result.Directive);
+        Assert.Contains("EditReservationField", transport.Body); Assert.Contains("ChangeDate", transport.Body);
+        Assert.Contains("RequestedData", transport.Body); Assert.DoesNotContain("Private Synthetic Person", transport.Body);
+        Assert.DoesNotContain("Private review", transport.Body); profile.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData("Groq")]
     [InlineData("Gemini")]

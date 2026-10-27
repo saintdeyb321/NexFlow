@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Domain.Exceptions;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Policy;
@@ -55,16 +56,16 @@ public static class OrderDraftMerger
             if (location != null && !product.AtLocation(location)) { complete=false; lines.Add($"• {product.Name}: no se ofrece en esta sede."); continue; }
             var subtotal = checked(item.Quantity * product.PriceMinorUnits);
             totals[product.Currency] = checked(totals.GetValueOrDefault(product.Currency) + subtotal);
-            lines.Add($"• {item.Quantity} × {product.Name}: {product.Currency} {subtotal / 100m:0.00}");
+            lines.Add($"• {item.Quantity} × {product.Name}\n  {OfferingResponseFormatter.Money(product.Currency, subtotal)}");
             facts.Add(new("Product", product.Name, VerifiedFactSource.BusinessRepository, product.Id));
             facts.Add(new("Quantity", item.Quantity.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.ValidatedConversation, product.Id));
             facts.Add(new("UnitPriceMinorUnits", product.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.BusinessRepository, product.Id));
             facts.Add(new("SubtotalMinorUnits", subtotal.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.AuthorizedWorkflow, product.Id));
             identity.Add(new { product.Id, product.Name, product.PriceMinorUnits, product.Currency, item.Quantity, product.LocationScope, product.LocationIds });
         }
-        var text = items.Count == 0 ? "Tu pedido está vacío." : "🛍️ *Tu solicitud para revisión*\n\nAsí va tu pedido:\n" + string.Join("\n",lines);
+        var text = items.Count == 0 ? "Tu pedido está vacío." : "🛍️ *Tu solicitud para revisión*\n\nAsí va tu pedido:\n\n" + string.Join("\n\n",lines);
         if (locationName != null) text += "\n\nSede: " + locationName;
-        if (totals.Count > 0) text += "\n\nSubtotal parcial: " + string.Join("; ",totals.Select(t => $"{t.Key} {t.Value / 100m:0.00}")) + ".";
+        if (totals.Count > 0) text += "\n\nSubtotal parcial: " + string.Join("; ",totals.Select(t => OfferingResponseFormatter.Money(t.Key, t.Value))) + ".";
         text += "\n\nImportes del catálogo; el negocio revisará la solicitud. No se confirma stock, pago ni aceptación del negocio. No incluyen cargos adicionales no registrados.";
         if (totals.Count > 1) text += " No hay un total único porque los productos tienen monedas distintas.";
         // Preserve existing no-site checkpoints; a displayed site name becomes

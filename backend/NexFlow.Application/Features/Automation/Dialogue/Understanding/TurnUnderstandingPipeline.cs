@@ -177,6 +177,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = NexFlow.Application.Engines.AI.AiFailureKind.Timeout }; }
         if (interpretation.Intent is ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             return new(DialogueAct.ProviderFailure, interpretation, true);
+        if (interpretation.RequiresClarification)
+            return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.General, RequiresClarification = true }, true,
+                "Quiero asegurarme de entenderte. No he cambiado tu selección.\n\n¿Qué dato deseas consultar o cambiar? Conservamos lo que ya indicaste.");
         if (commerce != null && interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
             && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct, interpretation) is { } understoodOrder)
             return understoodOrder with { UsedAi = true };

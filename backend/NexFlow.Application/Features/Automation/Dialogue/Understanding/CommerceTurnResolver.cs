@@ -14,7 +14,7 @@ public interface ICommerceTurnResolver
         HashSet<string> modules, CancellationToken ct, AiInterpretation? semantic = null);
 }
 
-public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMentionResolver orders) : ICommerceTurnResolver
+public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMentionResolver orders, IClock? clock = null) : ICommerceTurnResolver
 {
     public async Task<PreparedDialogueTurn?> ResolveAsync(Guid workspace, string source, string text, ConversationContextDto context,
         HashSet<string> modules, CancellationToken ct, AiInterpretation? semantic = null)
@@ -32,8 +32,6 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
                     with { PageRestarted = next.PageFingerprint != page.PageFingerprint };
             return new(DialogueAct.Information, new() { Intent = intent, QueryKind = OfferingQueryKind.Broad, OfferingQuery = next });
         }
-        if (context.CurrentGoal == "ORDER" && semantic is { Intent: ConversationIntent.Order })
-            return await ResolveOrderActionAsync(workspace, source, text, context, modules, semantic, ct);
         if (semantic is { QueryKind: OfferingQueryKind.Broad, RequiresClarification: false }
             && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
             && !(modules.Contains("CATALOG") && modules.Contains("SERVICES") && InformationalRequest.UnscopedCatalog(text)))
@@ -66,7 +64,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             && semanticEvidence.Length == 1 && semanticEvidence[0].NormalizedValue == nameof(DialogueAct.StartOperation)
             && !string.IsNullOrWhiteSpace(semanticEvidence[0].Text) && semanticEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(text, semanticEvidence[0].Text)
-            && !OrderMentionResolver.IsQuestion(text) && !OrderMentionResolver.IsHypothetical(text);
+            && (!OrderMentionResolver.IsQuestion(text) || semantic.OrderAction == OrderTurnKind.Edit && semantic.Items.Count > 0)
+            && !OrderMentionResolver.IsHypothetical(text);
         if (semantic is { Intent: ConversationIntent.Order, Act: DialogueAct.OperationInformation, RequiresClarification: false,
                 Directive: ConversationDirective.None }
             && semanticEvidence.Length == 1 && semanticEvidence[0].NormalizedValue == nameof(DialogueAct.OperationInformation)
@@ -79,8 +78,13 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             return new(DialogueAct.OperationInformation, new() { Intent = ConversationIntent.Order }, Response:
                 available.Products.Count == 0
                     ? "No hay productos activos para preparar una solicitud en este momento. Puedes solicitar asistencia humana."
-                    : "Puedes preparar una solicitud de pedido con los productos del catálogo y sus cantidades. El negocio la revisará para coordinar contigo; no confirma stock ni procesa pagos. Para comenzar, indica que deseas hacer un pedido.");
+                    : "Puedes preparar una solicitud de pedido con los productos del catálogo y sus cantidades. El negocio la revisará para coordinar contigo; no confirma stock ni procesa pagos. La entrega o el recojo se coordinan con el negocio.\n\n"
+                        + (context.CurrentGoal == "ORDER" ? "Tu selección sigue guardada. ¿Deseas revisarla o cambiar algún dato?" : "¿Qué productos y cantidades te gustaría solicitar?"));
         }
+        if (context.CurrentGoal == "ORDER" && semantic is { Intent: ConversationIntent.Order })
+            return await ResolveOrderActionAsync(workspace, source, text, context, modules, semantic, ct);
+        if (semanticStart && context.CurrentGoal == null && semantic!.OrderAction == OrderTurnKind.Edit && semantic.Items.Count > 0)
+            return await ResolveOrderActionAsync(workspace, source, text, context, modules, semantic, ct, starting: true);
         if (!semanticStart && !OrderMentionResolver.IsCandidate(text, context)) return null;
         var words = OrderMentionResolver.Words(text); var normalized = SpanishTextNormalizer.Normalize(text);
         var activeOrder = context.CurrentGoal == "ORDER";
@@ -100,6 +104,14 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (changing && OrderMentionResolver.IsQuestion(text) && !hypothetical && !polite)
             return new(DialogueAct.Information, new() { Intent=ConversationIntent.Order }, Response: "¿Deseas modificar el pedido o solo consultar esa posibilidad?");
         var readOnly = !submit && !summary && !polite && (catalogRequest || hypothetical || OrderMentionResolver.IsQuestion(text)) && !changing;
+        var broadOfferings = words.Any(w => w is "productos" or "servicios")
+            && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo");
+        // Punctuation alone cannot distinguish a factual question from a polite
+        // request to prepare products. Keep recognized factual zero-token paths;
+        // let the interpreter resolve the remaining semantic uncertainty.
+        if (semantic == null && readOnly && !catalogRequest && !broadOfferings && !hypothetical
+            && comparisonQuestion() == OfferingQuestion.Facts
+            && !OrderMentionResolver.IsQuestion(text.Replace("?", "").Replace("¿", ""))) return null;
         var explicitOrder=semanticStart || politePurchase || words.Any(w=>w is "comprar" or "pedido" or "producto" or "productos" or "agrega" or "agregar" or "anade" or "dame" or "llevo" or "apuntas" or "vendes");
         var weakPurchase=buying && !activeOrder && !explicitOrder;
         if (weakPurchase && !modules.Contains("CATALOG")) return null;
@@ -143,7 +155,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (order || hypothetical)
         {
             if (context.CurrentGoal is "BOOKING" or "RESERVATION") return null;
-            var result = orders.Resolve(text, products, context, reference, hypothetical);
+            var result = orders.Resolve(text, products, context, CurrentPurchaseReference(workspace, context), hypothetical);
             // An unresolved instruction, or a bare mention of an existing line,
             // needs semantic understanding rather than an implicit Add(1).
             var bareExisting = result.Edits.Any(e => e.Kind == OrderEditKind.Add && e.Quantity == 1
@@ -181,8 +193,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             wantsServices = referenced ? reference!.Type == "SERVICE" : bookingContext;
             wantsProducts = !wantsServices;
         }
-        var broad = (catalogRequest || words.Any(w => w is "productos" or "servicios" or "catalogo")
-            && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo"))
+        var broad = (catalogRequest || broadOfferings || words.Contains("catalogo"))
             && !words.Contains("diferencia") && productMatches.Count == 0 && serviceMatches.Count == 0;
         if (broad) return wantsServices ? Query("SERVICE", services, true) : Query("PRODUCT", products, true);
         var matches = productMatches.Concat(serviceMatches).ToArray();
@@ -240,7 +251,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
     }
 
     private async Task<PreparedDialogueTurn> ResolveOrderActionAsync(Guid workspace, string source, string text,
-        ConversationContextDto context, HashSet<string> modules, AiInterpretation semantic, CancellationToken ct)
+        ConversationContextDto context, HashSet<string> modules, AiInterpretation semantic, CancellationToken ct, bool starting = false)
     {
         PreparedDialogueTurn Plan(OrderTurnKind kind, IReadOnlyList<OrderEdit>? edits = null, string? clarification = null,
             string? location = null) => new(semantic.Act ?? DialogueAct.RequestedData,
@@ -253,7 +264,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var backed = !semantic.RequiresClarification && evidence.Length == 1
             && evidence[0].NormalizedValue == semantic.Act?.ToString()
             && !string.IsNullOrWhiteSpace(evidence[0].Text) && AiEvidenceValidator.HasFragment(text, evidence[0].Text);
-        if (!backed || context.CurrentGoal != "ORDER")
+        if (!backed || (starting ? context.CurrentGoal != null : context.CurrentGoal != "ORDER"))
             return Plan(OrderTurnKind.Clarify, clarification: "Conservamos tu borrador. ¿Qué deseas consultar o cambiar?");
         if (semantic.OrderAction == OrderTurnKind.Submit)
         {
@@ -274,9 +285,11 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             return Plan(OrderTurnKind.Clarify, clarification: "¿En cuál sede deseas continuar? Conservamos el pedido.");
         }
         if (semantic.OrderAction != OrderTurnKind.Edit || semantic.Items.Count == 0 || semantic.Items.Count > 10
-            || semantic.Act is not (DialogueAct.Correction or DialogueAct.RequestedData or DialogueAct.MultipleData))
+            || !(semantic.Act is DialogueAct.Correction or DialogueAct.RequestedData or DialogueAct.MultipleData
+                || starting && semantic.Act == DialogueAct.StartOperation))
             return Plan(OrderTurnKind.Clarify, clarification: "Conservamos los productos y cantidades. ¿Qué deseas cambiar?");
         var catalog = await slots.ReadCommerceAsync(workspace, context, true, false, true, context.SelectedLocationId, ct);
+        var reference = semantic.UseOfferingReference ? CurrentPurchaseReference(workspace, context) : null;
         var edits = new List<OrderEdit>();
         foreach (var item in semantic.Items)
         {
@@ -286,10 +299,19 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             // the turn cannot be borrowed for a different product.
             var entityText = item.QuantityText != null && AiEvidenceValidator.HasFragment(item.Text, item.QuantityText)
                 ? item.Text.Replace(item.QuantityText, " ", StringComparison.OrdinalIgnoreCase) : item.Text;
-            var resolved = new OfferingMentionResolver().ResolveEvidence(entityText, catalog.Products.Select(p => p.Option).ToArray());
-            if (!resolved.TryGetValue(out var product) || !catalog.Products.Any(p => p.Id == product.Id
+            var resolver = new OfferingMentionResolver();
+            var options = catalog.Products.Select(p => p.Option).ToArray();
+            var candidates = resolver.ResolveEvidence(entityText, options).Candidates
+                .Concat(resolver.ResolveCommercial(entityText, options).Candidates).Select(c => c.Value).DistinctBy(c => c.Id).ToArray();
+            if (candidates.Length == 0 && reference != null && SpanishTextNormalizer.Normalize(entityText).Length == 0)
+                candidates = catalog.Products.Where(p => p.Id == reference.Ids[0] && p.AtLocation(reference.LocationId))
+                    .Select(p => new ResolvedBusinessEntity(p.Id, p.Name, reference.LocationId)).ToArray();
+            if (candidates.Length != 1 || !catalog.Products.Any(p => p.Id == candidates[0].Id
                 && new[] { p.Name }.Concat(p.Aliases).Any(name => SpanishTextNormalizer.Normalize(name) == SpanishTextNormalizer.Normalize(item.Product))))
                 return Plan(OrderTurnKind.Clarify, clarification: "¿Cuál producto activo deseas cambiar? Conservamos el pedido.");
+            var product = candidates[0];
+            if (starting && item.Kind != OrderEditKind.Add)
+                return Plan(OrderTurnKind.Clarify, clarification: "¿Qué producto y cantidad deseas solicitar? Todavía no hemos preparado una selección.");
             if (item.Kind is not (OrderEditKind.Add or OrderEditKind.Set or OrderEditKind.Remove))
                 return Plan(OrderTurnKind.Clarify, clarification: "Indica qué producto deseas quitar y cuál deseas agregar.");
             var quantity = item.Quantity;
@@ -309,6 +331,16 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (edits.Select(e => e.ProductId).Distinct().Count() != edits.Count)
             return Plan(OrderTurnKind.Clarify, clarification: "Indica una cantidad final para cada producto. Conservamos el pedido.");
         return Plan(OrderTurnKind.Edit, edits);
+    }
+
+    private OfferingReference? CurrentPurchaseReference(Guid workspace, ConversationContextDto context)
+    {
+        if (clock == null || ConversationQuestion.Current(workspace, context, clock.UtcNow) is not { } question
+            || OfferingReference.Read(workspace, context) is not { Type: "PRODUCT", Broad: false, Ids.Length: 1 } reference) return null;
+        var factual = question is { Expected: ExpectedReply.Information, Intent: ConversationIntent.ProductQuery };
+        var draft = context.CurrentGoal == "ORDER" && question.Intent == ConversationIntent.Order
+            && context.OrderDraftItems.Any(i => i.ProductId == reference.Ids[0]);
+        return factual || draft ? reference : null;
     }
 }
 

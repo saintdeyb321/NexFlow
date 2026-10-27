@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 
 namespace NexFlow.Application.Features.Business.Offerings;
 
@@ -167,10 +168,7 @@ public static class OfferingServiceReservationExtensions
         if (services.Count == 0)
             return "En esta sede no hay servicios reservables disponibles. ¿Deseas cambiar de sede?";
         if (services.Count == 1)
-            return $"En esta sede, actualmente el único servicio reservable disponible es {services[0].Name}.\nPuedes elegirlo o cambiar de sede. ¿Qué opción prefieres?";
-        return "Servicios reservables disponibles en esta sede:\n" +
-            string.Join("\n", services.Skip(offset).Take(5).Select(s => $"• {s.Name}")) +
-            (offset + 5 < services.Count ? "\n\nEstas son algunas opciones; puedes pedir «Ver más» o el catálogo." : "") +
-            "\n\n¿Cuál servicio deseas reservar?";
+            return $"En esta sede, actualmente el único servicio reservable disponible es {services[0].Name}.\n\nPuedes elegirlo o consultar otra sede. ¿Qué opción prefieres? Puedes decir «Sí» para elegirlo o indicar otra sede.";
+        return SecretaryPresentation.Services(services.Skip(offset).Take(5).Select(s => s.Name).ToArray(), offset + 5 < services.Count);
     }
 }

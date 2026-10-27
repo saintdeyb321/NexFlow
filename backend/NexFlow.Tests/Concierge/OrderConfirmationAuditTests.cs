@@ -37,7 +37,7 @@ public sealed class OrderConfirmationAuditTests
         Assert.Equal(ExpectedReply.ConfirmOrder, (await f.Context()).CurrentQuestion?.Expected);
         Assert.Contains("2 × Pan integral", f.Sent["review"].Content);
         Assert.Contains("1 × Queque", f.Sent["review"].Content);
-        Assert.Contains("PEN 15.00", f.Sent["review"].Content);
+        Assert.Contains("S/ 15.00", f.Sent["review"].Content);
         return f;
     }
 
