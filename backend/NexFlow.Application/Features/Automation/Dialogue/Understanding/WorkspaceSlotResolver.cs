@@ -100,7 +100,8 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
         ct.ThrowIfCancellationRequested();
         var turn = DialogueTurnContext.Capture(workspaceId, sourceMessageId, state, localNow, zone, modules) with {
             LocationHints = authorizedLocations.Where(l => l.Id != null).Select(l => l.Name).Take(12).ToArray(),
-            ServiceHints = serviceOptions.Select(s => s.Name).Take(12).ToArray()
+            ServiceHints = serviceOptions.Select(s => s.Name).Take(12).ToArray(),
+            ProductHints = productOptions.Select(s => s.Name).Take(12).ToArray()
         };
         var date = reservation
             ? dates.ResolveReservation(text, localNow, state.CurrentStep == "COLLECT_DATE",

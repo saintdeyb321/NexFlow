@@ -24,6 +24,23 @@ namespace NexFlow.Tests.Concierge;
 
 public sealed class CommerceSafetyTests
 {
+    [Theory]
+    [InlineData("Espera, no limpieza dental: extracción dental", """{"Intent":"Reservation","Act":"Correction","Directive":"ChangeService","Service":"Extracción dental","Evidence":[{"Slot":"Act","Text":"Espera, no limpieza dental: extracción dental","NormalizedValue":"Correction"},{"Slot":"Service","Text":"extracción dental","NormalizedValue":"Extracción dental"}]}""", true)]
+    [InlineData("Terminé de elegir", """{"Intent":"Order","Act":"Resume","OrderAction":"Submit","Evidence":[{"Slot":"Act","Text":"Terminé de elegir","NormalizedValue":"Resume"}]}""", true)]
+    [InlineData("Suma dos panes", """{"Intent":"Order","Act":"RequestedData","OrderAction":"Edit","Items":[{"Product":"Pan integral","Text":"dos panes","Kind":"Add","Quantity":2,"QuantityText":"dos"}],"Evidence":[{"Slot":"Act","Text":"Suma dos panes","NormalizedValue":"RequestedData"}]}""", true)]
+    [InlineData("Pon dos panes", """{"Intent":"Order","Act":"RequestedData","OrderAction":"Edit","Items":[{"Product":"Pan","Text":"panes","Kind":"Add","Quantity":99,"QuantityText":"noventa y nueve"}],"Evidence":[{"Slot":"Act","Text":"Pon dos panes","NormalizedValue":"RequestedData"}]}""", false)]
+    [InlineData("Terminé de elegir", """{"Intent":"Order","Act":"Resume","OrderAction":"Submit","Confirmed":true,"Evidence":[{"Slot":"Act","Text":"Terminé de elegir","NormalizedValue":"Resume"}]}""", false)]
+    public async Task Conversation_fix_real_interpreter_checks_structured_semantics_without_lexical_triggers(string text, string json, bool valid)
+    {
+        var router = new Mock<IAiRouter>(); router.Setup(r => r.ExecuteTaskAsync(AiTaskType.IntentExtraction,
+            It.IsAny<string>(), text, true, It.IsAny<CancellationToken>())).ReturnsAsync(json);
+        var clock = Mock.Of<IClock>(c => c.UtcNow == new DateTime(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc));
+        var interpreter = new AiInterpreter(router.Object, clock, Mock.Of<IBusinessProfileRepository>(), NullLogger<AiInterpreter>.Instance);
+        var result = await interpreter.InterpretAsync(Guid.NewGuid(), text, "ORDER", "ORDER_REVIEW:server-hash",
+            ["ORDERS", "CATALOG", "SERVICES", "RESERVATIONS"], default);
+        Assert.Equal(valid, result.Intent != ConversationIntent.ProviderUnavailable);
+        Assert.False(result.Confirmed); Assert.Null(result.OrderProposal); Assert.Null(result.BookingProposal);
+    }
     private sealed class Durable
     {
         public Guid Workspace { get; } = Guid.NewGuid();

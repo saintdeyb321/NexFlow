@@ -6,11 +6,103 @@ using NexFlow.Application.Features.Reservations;
 using NexFlow.Application.Features.Services.DTOs;
 using NexFlow.Domain.Enums;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexFlow.Tests.Concierge;
 
-public sealed class RuntimeNaturalBookingTests
+public sealed class RuntimeNaturalBookingTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Conversation_fix_semantic_extraction_cannot_drop_an_ambiguous_relative_date_operator()
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        var state = await f.Context(); state.TargetDate = "2026-10-22"; state.TargetTime = "16:00";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        const string text = "tras pasado mañana";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Act = DialogueAct.Correction, Date = "2026-10-22",
+            Evidence = [new("Act", text, nameof(DialogueAct.Correction)), new("Date", "pasado mañana", "2026-10-22")] });
+        await f.HandleTurn(text, "ambiguous-anchor"); await f.HandleTurn("Confirmar", "unsafe-confirm");
+        Assert.Contains("Date", (await f.Context()).PendingDialogueSlots); Assert.Empty(f.Bookings);
+    }
+    [Fact]
+    public async Task Conversation_fix_unavailable_replacement_cannot_enter_the_booking_draft()
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        f.Services[1].Name = "Extracción dental"; f.Services[1].LocationScope = "SPECIFIC"; f.Services[1].LocationIds = ["sede-b"];
+        const string text = "No limpieza dental: extracción dental";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Act = DialogueAct.Correction,
+            Directive = ConversationDirective.ChangeService, Service = "Extracción dental",
+            Evidence = [new("Act", text, nameof(DialogueAct.Correction)), new("Service", "extracción dental", "Extracción dental")] });
+        await f.HandleTurn(text, "unavailable-replacement");
+        Assert.NotEqual("service-b", (await f.Context()).SelectedServiceId); Assert.Empty(f.Bookings);
+    }
+
+    [Fact]
+    public async Task Conversation_fix_location_abbreviation_requires_live_authorized_evidence()
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        var state = await f.Context(); state.SelectedLocationId = null; state.CurrentStep = "COLLECT_LOCATION";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        const string text = "En conce";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Location = "Sede Concepcion",
+            Evidence = [new("Location", "conce", "Sede Concepcion")] });
+        await f.HandleTurn(text, "abbreviation");
+        Assert.Equal("sede-a", (await f.Context()).SelectedLocationId); Assert.Empty(f.Bookings);
+    }
+
+    [Fact]
+    public async Task Conversation_fix_reservation_summary_buttons_do_not_change_registered_reservations()
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        var state = await f.Context(); state.TargetDate = "2026-10-22"; state.TargetTime = "16:00";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        await f.HandleTurn("continuemos", "summary");
+        Assert.Contains("*Reserva por confirmar*", f.Sent["summary"].Content); Assert.Contains("\n\n", f.Sent["summary"].Content);
+        await f.HandleTurn("Editar", "edit-button"); Assert.Empty(f.Bookings);
+        await f.HandleTurn("Descartar", "discard-button"); await f.HandleTurn("Sí", "discard-consent");
+        Assert.Null((await f.Context()).CurrentGoal); Assert.Empty(f.Bookings);
+    }
+    [Theory]
+    [InlineData("Location", "No en Concepción: prefiero San Jerónimo", "San Jerónimo", "sede-b")]
+    [InlineData("Date", "No el 2026-10-22: prefiero el 2026-10-23", "2026-10-23", "2026-10-23")]
+    [InlineData("Time", "No a las 10:00: prefiero las 16:00", "16:00", "16:00")]
+    public async Task Conversation_fix_correction_evidence_selects_new_value_and_requires_new_review(string slot, string text, string raw, string expected)
+    {
+        var f = Create(); await f.SeedDraft("RESERVATION");
+        var state = await f.Context(); state.TargetDate = "2026-10-22"; state.TargetTime = "10:00"; state.CurrentStep = "CONFIRM";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        var ai = new AiInterpretation { Intent = ConversationIntent.Reservation, Act = DialogueAct.Correction,
+            Evidence = [new("Act", text, nameof(DialogueAct.Correction)), new(slot, raw, slot == "Location" ? "Sede San Jeronimo" : raw)] };
+        if (slot == "Location") { ai.Location = "Sede San Jeronimo"; ai.Directive = ConversationDirective.ChangeLocation; }
+        if (slot == "Date") ai.Date = raw;
+        if (slot == "Time") ai.Time = raw;
+        f.Interpretations.Enqueue(ai);
+        await f.HandleTurn(text, "replace-" + slot);
+        var after = await f.Context();
+        Assert.Equal(expected, slot == "Location" ? after.SelectedLocationId : slot == "Date" ? after.TargetDate : after.TargetTime);
+        Assert.Empty(f.Bookings);
+    }
+    [Theory]
+    [InlineData("Espera, me confundí; no quiero limpieza dental, quiero extracción dental")]
+    [InlineData("Que no quiero limpieza dental, quiero extracción dental")]
+    [InlineData("Había elegido mal: sustituye limpieza dental por extracción dental")]
+    public async Task Conversation_fix_semantic_service_correction_replaces_only_unconfirmed_draft(string text)
+    {
+        var f = new AssistantConversationTests.Fixture(conciergeCatalog: true, intelligentCommerce: true);
+        f.Services[1].Name = "Extracción dental";
+        var state = await f.Context(); state.CurrentGoal = "RESERVATION"; state.CurrentStep = "COLLECT_DATE";
+        state.SelectedLocationId = "sede-a"; state.SelectedServiceId = "service-a"; state.TargetTime = "10:00";
+        await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Act = DialogueAct.Correction,
+            Directive = ConversationDirective.ChangeService, Service = "Extracción dental",
+            Evidence = [new("Act", text, nameof(DialogueAct.Correction)), new("Service", "extracción dental", "Extracción dental")] });
+        await f.HandleTurn(text, "repair-service");
+        var after = await f.Context(); Assert.Equal("service-b", after.SelectedServiceId);
+        Assert.Equal("sede-a", after.SelectedLocationId); Assert.Null(after.TargetTime); Assert.Empty(f.Bookings);
+        Assert.DoesNotContain("Limpieza dental:", f.Sent["repair-service"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Extracción dental", f.Sent["repair-service"].Content);
+        output.WriteLine("CORRECCIÓN RESERVA\n" + f.Sent["repair-service"].Content);
+    }
     private static AssistantConversationTests.Fixture Create() => new(conciergeCatalog: true) { Now = new(2026, 10, 20, 21, 0, 0, DateTimeKind.Utc) };
 
     [Fact]

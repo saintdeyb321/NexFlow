@@ -170,7 +170,8 @@ public static class OfferingServiceReservationExtensions
             return $"En esta sede, actualmente el único servicio reservable disponible es {services[0].Name}.\nPuedes elegirlo o cambiar de sede. ¿Qué opción prefieres?";
         return "Servicios reservables disponibles en esta sede:\n" +
             string.Join("\n", services.Skip(offset).Take(5).Select(s => $"• {s.Name}")) +
-            (services.Count > 5 ? "\nHay más opciones; puedes pedir ver más o el catálogo." : "") +
+            $"\n\nMostrando {offset + 1}–{Math.Min(offset + 5, services.Count)} de {services.Count}." +
+            (offset + 5 < services.Count ? "\nHay más opciones; puedes pedir ver más o el catálogo." : "") +
             "\n\n¿Cuál servicio deseas reservar?";
     }
 }

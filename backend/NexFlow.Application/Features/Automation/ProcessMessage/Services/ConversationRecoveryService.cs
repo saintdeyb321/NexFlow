@@ -71,12 +71,18 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         var text = Normalize(greeting.Content);
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION";
         var reservationOperation = ReservationOperationClassifier.Classify(request.MessageText, booking);
+        // Formal draft CTAs, not an intent grammar for arbitrary language.
+        if (text == "editar" && (context.CurrentGoal is "ORDER" or "BOOKING" or "RESERVATION") && !expiredDraft)
+            return await Remember(booking ? "Conservamos tu borrador. ¿Qué dato deseas cambiar: sede, servicio, fecha, hora o nombre?"
+                : "Conservamos tu borrador. ¿Qué producto, cantidad o sede deseas cambiar?");
         if (Regex.IsMatch(text, @"\b(ignora (?:todas las |las )?instrucciones|system prompt|api key|revela (?:el )?(?:prompt|secreto)|actua como administrador|cambia (?:el )?workspace)\b", RegexOptions.CultureInvariant))
             return await Remember("Solo puedo ayudarte con información y operaciones autorizadas de este negocio. " + Continuation(context));
         if (!text.Split(' ').Contains("no") && (Regex.IsMatch(text, @"\b(asesor humano|hablar con (?:un |una )?(?:asesor|persona|humano)|atencion humana)\b") || text is "asesor" or "humano"))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Support });
         var information = context.Information is { } saved && saved.UpdatedAt >= clock.UtcNow.AddHours(-Limits.ContextExpiryHours)
             && saved.DraftFingerprint == InformationalRequest.DraftFingerprint(context) ? saved : null;
+        if (text == "ver mas" && context.PendingRecoveryAction == null && OfferingReference.Read(workspace, context) is { Broad: true })
+            return null; // The existing commerce reader revalidates this page against current data/licenses.
         if (context.PendingRecoveryAction == "RESERVATION_SCOPE")
         {
             var reference = ReservationOperationClassifier.ReferenceScope(text);
@@ -248,7 +254,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await Remember(booking ? "Ha pasado un tiempo desde tu última respuesta. ¿Deseas dejar esta reserva en preparación y comenzar de nuevo? Responde sí o no."
                 : "El borrador lleva tiempo sin actualizarse. ¿Quieres descartarlo para empezar de nuevo? Responde sí o no; no realizaré operaciones con esos datos mientras confirmas.");
         }
-        if (text is "cancelar" or "cancela" or "cancelar reserva" or "cancelar pedido" or "cancelar borrador" or "cancela la reserva" or "cancela el pedido")
+        if (text is "descartar" or "cancelar" or "cancela" or "cancelar reserva" or "cancelar pedido" or "cancelar borrador" or "cancela la reserva" or "cancela el pedido")
         {
             if (string.IsNullOrEmpty(context.CurrentGoal)) return await Remember("No hay un borrador activo. Para revisar una reserva o pedido registrado escribe asesor.");
             context.PendingRecoveryAction = "CANCEL";

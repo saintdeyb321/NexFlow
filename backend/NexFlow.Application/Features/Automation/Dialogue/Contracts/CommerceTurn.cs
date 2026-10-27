@@ -13,7 +13,8 @@ public sealed record OrderEdit(OrderEditKind Kind, string ProductId, int Quantit
 
 // Server-built proposals contain identities and quantities, never model-supplied prices.
 public sealed record OrderDraftProposal(Guid WorkspaceId, string SourceMessageId, string? ExpectedStateVersion,
-    OrderTurnKind Kind, ReadOnlyCollection<OrderEdit> Edits, string? LocationId = null, string? Clarification = null);
+    OrderTurnKind Kind, ReadOnlyCollection<OrderEdit> Edits, string? LocationId = null, string? Clarification = null,
+    bool RequireConfirmation = false);
 public sealed record VerifiedOffering(string Id, string Name, string? Description, long PriceMinorUnits, string Currency,
     string Type, string LocationScope, ReadOnlyCollection<string> LocationIds, ReadOnlyCollection<string> Aliases,
     int? DurationMinutes = null, bool RequiresReservation = false)
@@ -39,12 +40,14 @@ public sealed record VerifiedOffering(string Id, string Name, string? Descriptio
 }
 public sealed record OfferingQueryPlan(Guid WorkspaceId, string SourceMessageId, string? StateVersion,
     string Type, OfferingQuestion Question, ReadOnlyCollection<VerifiedOffering> Offerings, bool Broad,
-    string? LocationId = null, string? Clarification = null);
+    string? LocationId = null, string? Clarification = null, int PageOffset = 0, int TotalCount = 0, string? PageFingerprint = null,
+    bool PageRestarted = false);
 public sealed record CommerceCatalog(Guid WorkspaceId, string? StateVersion, ReadOnlyCollection<VerifiedOffering> Products,
     ReadOnlyCollection<VerifiedOffering> Services, ReadOnlyCollection<BusinessEntityOption> Locations);
 
 // Uses the existing LastIntent envelope; no extra document, schema or conversation history.
-public sealed record OfferingReference(Guid WorkspaceId, string Type, string[] Ids, string? LocationId)
+public sealed record OfferingReference(Guid WorkspaceId, string Type, string[] Ids, string? LocationId,
+    bool Broad = false, int PageOffset = 0, int TotalCount = 0, string? PageFingerprint = null)
 {
     private const string Prefix = "OFFERING:v1:";
     public static OfferingReference? Read(Guid workspace, ConversationContextDto context)

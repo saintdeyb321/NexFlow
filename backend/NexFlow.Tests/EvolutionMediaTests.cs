@@ -18,6 +18,22 @@ namespace NexFlow.Tests;
 
 public sealed class EvolutionMediaTests
 {
+    [Fact]
+    public async Task Conversation_fix_whatsapp_paragraphs_survive_durable_outbound_and_real_gateway_json()
+    {
+        using var f = new Fixture("success");
+        var store = new InMemoryFirestore();
+        var repository = new FirestoreConversationRepository(store.Db);
+        SeedConversation(store, f.Workspace);
+        var outbound = new OutboundMessageService(repository, f.Gateway, Mock.Of<INotificationService>(), NullLogger<OutboundMessageService>.Instance);
+        const string text = "🛍️ *Tu solicitud para revisión*\n\n• 2 × Pan integral: PEN 5.00\n\n¿Confirmas?\n✅ *Confirmar*";
+        var sent = await outbound.SendMessageAsync(f.Workspace, "chat", "51999999999", text, SenderType.AI, "format-source", default);
+        Assert.Equal(MessageStatus.Sent, sent.Status);
+        Assert.Equal(text, (await repository.GetOutboundAsync(f.Workspace, sent.Id, default))!.Value.Message.Content);
+        using var body = JsonDocument.Parse(Assert.Single(f.Transport.Bodies));
+        Assert.Equal(text, body.RootElement.GetProperty("text").GetString());
+        Assert.Contains("\n\n", body.RootElement.GetProperty("text").GetString());
+    }
     [Theory]
     [InlineData("document", "success")]
     [InlineData("image", "success")]

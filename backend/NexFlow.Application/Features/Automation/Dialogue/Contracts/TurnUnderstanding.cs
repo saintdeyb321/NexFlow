@@ -52,6 +52,8 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
 {
     public IReadOnlyList<string> LocationHints { get; init; } = [];
     public IReadOnlyList<string> ServiceHints { get; init; } = [];
+    public IReadOnlyList<string> ProductHints { get; init; } = [];
+    public IReadOnlyList<string> DraftItems { get; init; } = [];
     public string? DraftDate { get; init; }
     public DialogueQuestionContext? Question { get; init; }
     public ReservationTimeReference? AvailabilityReference { get; init; }
@@ -60,6 +62,8 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
             state.CurrentGoal, state.CurrentStep, state.StateVersion, state.SelectedLocationId, state.LastQuestion,
             localNow, zone.Id, modules.ToFrozenSet(StringComparer.OrdinalIgnoreCase)) {
                 DraftDate = state.TargetDate,
+                DraftItems = state.CurrentGoal == "ORDER" && modules.Contains("ORDERS") && modules.Contains("CATALOG")
+                    ? state.OrderDraftItems.Take(10).Select(i => $"{i.Quantity} × {i.ProductName}").ToArray() : [],
                 AvailabilityReference = ReservationTimeReference.Current(workspace, state, localNow.UtcDateTime),
                 Question = ConversationQuestion.Current(workspace, state, localNow.UtcDateTime) is { } question
                     ? new(question.Expected, question.Intent, question.LinguisticQuestion(state), question.Expected != ExpectedReply.Information ? null : question.Intent switch {

@@ -88,7 +88,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         var readOnlyQuestion = context.CurrentGoal is "BOOKING" or "RESERVATION"
             && (OrderMentionResolver.IsQuestion(request.MessageText) || OrderMentionResolver.IsHypothetical(request.MessageText));
         var temporalProbe = readOnlyQuestion && new TimePreferenceResolver().Resolve(request.MessageText).Status != ResolutionStatus.Insufficient;
-        if (!temporalProbe && commerce != null && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct) is { } commercial)
+        var activeBooking = context.CurrentGoal is "BOOKING" or "RESERVATION";
+        if (!temporalProbe && (!activeBooking || readOnlyQuestion || InformationalRequest.Catalog(request.MessageText))
+            && commerce != null && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct) is { } commercial)
             return commercial;
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION" || act == DialogueAct.StartOperation;
         var reservationCandidate = !booking && context.CurrentGoal == null && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES")
@@ -132,6 +134,12 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             || local.Name.Candidates.Count > 0;
         var semanticGap = new[] { local.Date.Code, local.Time.Code, local.Name.Code, local.Location.Code, local.Service.Code }
             .Any(code => code is "SemanticComposition" or "UnknownEntity") || !understood && local.Time.Code == "TimeNotUnderstood";
+        semanticGap |= booking && (local.Service.Status == ResolutionStatus.Ambiguous
+                && local.Service.Candidates.Any(c => c.Value.Id == context.SelectedServiceId)
+            || local.Location.Status == ResolutionStatus.Ambiguous
+                && local.Location.Candidates.Any(c => c.Value.Id == context.SelectedLocationId)
+            || local.Date.Status == ResolutionStatus.Ambiguous && context.TargetDate != null
+            || local.Time.Status == ResolutionStatus.Ambiguous && context.TargetTime != null);
         // A partially understood compound answer can contain an unrecognized date
         // even when a name and another slot were parsed. Give the existing semantic
         // interpreter one pass rather than silently discarding the remainder.
@@ -159,7 +167,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = NexFlow.Application.Engines.AI.AiFailureKind.Timeout }; }
         if (interpretation.Intent is ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             return new(DialogueAct.ProviderFailure, interpretation, true);
-        if (commerce != null && interpretation.Intent == ConversationIntent.Order
+        if (commerce != null && interpretation.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
             && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct, interpretation) is { } understoodOrder)
             return understoodOrder with { UsedAi = true };
         var actEvidence = (interpretation.Evidence ?? []).Where(e => e != null && e.Slot == "Act").ToArray();
@@ -183,6 +191,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
         if (booking && backedAct && interpretation.Act == DialogueAct.InformationalInterruption && interpretation.Intent == ConversationIntent.Reservation)
             return PrepareBooking(AiEvidenceValidator.Validate(local, interpretation, request.MessageText), DialogueAct.InformationalInterruption, true, workspace, request.MessageId, readOnly: true);
+        if (booking && backedAct && interpretation.Act == DialogueAct.Correction
+            && interpretation.Intent == ConversationIntent.Reservation)
+            return PrepareBooking(AiEvidenceValidator.Validate(local, interpretation, request.MessageText), DialogueAct.Correction, true, workspace, request.MessageId);
         if (interpretation.Intent == ConversationIntent.Reservation && backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
             && !contradictory && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
         {

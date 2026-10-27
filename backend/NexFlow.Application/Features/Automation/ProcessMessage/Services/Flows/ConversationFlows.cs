@@ -123,6 +123,7 @@ public class BookingFlow : IBookingFlow
         var replay = await TryResumeAsync(workspaceId, phone, sourceMessageId, context, ct);
         if (replay != null) { evidence.Operation = OperationStatus.Succeeded; return Plan(replay); }
         if (context.RecoveryLastMessageId == sourceMessageId && context.RecoveryLastResponse != null) return Plan(context.RecoveryLastResponse);
+        var previousService = context.SelectedServiceId;
         var proposal = interpretation.BookingProposal;
         if (proposal != null)
         {
@@ -183,6 +184,13 @@ public class BookingFlow : IBookingFlow
         if (proposal?.Clarification != null && unresolved != null
             && context.CurrentStep == "COLLECT_" + (unresolved == "Name" ? "CUSTOMERNAME" : unresolved.ToUpperInvariant()))
             response = proposal.Clarification;
+        if (act == DialogueAct.Correction && evidence.Operation == OperationStatus.Collecting && previousService != null
+            && proposal?.Understanding.Service.TryGetValue(out var replacement) == true
+            && context.SelectedServiceId == replacement.Id && previousService != replacement.Id)
+        {
+            evidence.Facts.Add(new("Service", replacement.Name, VerifiedFactSource.BusinessRepository, replacement.Id));
+            response = "✏️ *Borrador actualizado*\n\nServicio: " + replacement.Name + "\n\n" + response;
+        }
         if (proposal != null)
         {
             context.RecoveryLastMessageId = sourceMessageId; context.RecoveryLastResponse = response; context.RecoveryLastInterpretation = null;
@@ -392,8 +400,9 @@ public class BookingFlow : IBookingFlow
                 [new("Service", service.Name, VerifiedFactSource.BusinessRepository, service.Id),
                  new("Location", location.Name, VerifiedFactSource.BusinessRepository, location.Id),
                  new("PriceMinorUnits", service.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.BusinessRepository, service.Id)],
-                "¿Confirmas? Responde sí o no.", []);
-            return $"Reserva por confirmar: {service.Name} en {location.Name}, {selectedTime:dd/MM/yyyy} a las {selectedTime:HH:mm}, a nombre de {context.RealCustomerName}. ¿Confirmas? Responde sí o no.";
+                "¿Confirmas el resumen vigente?", []);
+            return $"📋 *Reserva por confirmar*\n\nSede: {location.Name}\nServicio: {service.Name}\nFecha: {selectedTime:dd/MM/yyyy}\nHora: {selectedTime:HH:mm}\nPaciente: {context.RealCustomerName}\nPrecio: {service.Currency} {service.PriceMinorUnits / 100m:0.00}"
+                + "\n\n¿Confirmas el resumen vigente?\n✅ *Confirmar* — registrar en la agenda\n✏️ *Editar* — cambiar un dato\n❌ *Descartar* — abandonar este borrador";
         }
         context.ReservationCommitSourceMessageId = sourceMessageId;
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
@@ -791,7 +800,7 @@ public class ChatFlow : IChatFlow
             var facts = query.Offerings.SelectMany(p => new[] { new VerifiedFact("Offering",p.Name,VerifiedFactSource.BusinessRepository,p.Id),
                 new VerifiedFact("PriceMinorUnits",p.PriceMinorUnits.ToString(CultureInfo.InvariantCulture),VerifiedFactSource.BusinessRepository,p.Id),
                 new VerifiedFact("Currency",p.Currency,VerifiedFactSource.BusinessRepository,p.Id) }).ToArray();
-            if (query.Broad)
+            if (query.Broad && query.PageOffset == 0)
             {
                 var artifact = await _catalogGeneration.GetArtifactAsync(workspaceId,query.Type,ct);
                 if (artifact != null && (artifact.WorkspaceId != workspaceId || artifact.Scope != query.Type)) throw new InvalidOperationException("Catalog artifact workspace/scope mismatch.");

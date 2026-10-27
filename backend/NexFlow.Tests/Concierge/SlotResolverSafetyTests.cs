@@ -13,6 +13,29 @@ namespace NexFlow.Tests.Concierge;
 
 public sealed class SlotResolverSafetyTests
 {
+    [Theory]
+    [InlineData("En conce", "a")]
+    [InlineData("sanj eronimo", "b")]
+    [InlineData("enjuague bocal", "c")]
+    [InlineData("evaluación odontologixa", "d")]
+    public void Conversation_fix_dynamic_entity_spelling_is_bounded_and_workspace_scoped(string text, string expected)
+    {
+        BusinessEntityOption[] allowed = [new("a", "Concepción"), new("b", "San Jerónimo"),
+            new("c", "Enjuague bucal"), new("d", "Evaluación odontológica")];
+        var result = new OfferingMentionResolver().ResolveEvidence(text, allowed);
+        Assert.True(result.TryGetValue(out var entity)); Assert.Equal(expected, entity.Id);
+        Assert.False(new OfferingMentionResolver().ResolveEvidence(text, []).TryGetValue(out _));
+        Assert.False(new OfferingMentionResolver().ResolveEvidence(text, allowed.Concat([new BusinessEntityOption("collision", allowed.Single(o => o.Id == expected).Name)]).ToArray()).TryGetValue(out _));
+    }
+
+    [Fact]
+    public void Conversation_fix_composed_relative_date_requires_absolute_clarification()
+    {
+        var result = new BusinessDateResolver().ResolveReservation("tras pasado mañana a las 6 de la tarde",
+            new DateTimeOffset(2026, 10, 26, 14, 0, 0, TimeSpan.FromHours(-5)), true);
+        Assert.False(result.TryGetValue(out _));
+        Assert.NotEqual(ResolutionStatus.Determined, result.Status);
+    }
     [Fact]
     public void Failure_contracts_separate_provider_semantics_business_and_uncertain_transport_without_retrying()
     {

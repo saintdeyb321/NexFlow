@@ -46,6 +46,17 @@ public sealed class OrderMentionResolver
             || words.Any(w => w is "producto" or "productos" or "servicios" or "catalogo" or "pedido" or "comprar" or "agrega" or "quita" or "quiero" or "quisiera" or "necesito" or "llevo" or "dame" or "apuntas" or "apuntar" or "vendes" or "anade");
     }
     public static string[] Words(string text) => SpanishTextNormalizer.Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    internal static bool TryQuantity(string text, out int quantity)
+    {
+        quantity = 0;
+        var words = Words(text);
+        if (words.Length == 1) return (Numbers.TryGetValue(words[0], out quantity)
+            || int.TryParse(words[0], NumberStyles.None, CultureInfo.InvariantCulture, out quantity)) && quantity > 0;
+        if (words.Length == 3 && words[1] == "y" && Numbers.TryGetValue(words[0], out var tens)
+            && tens >= 20 && Numbers.TryGetValue(words[2], out var units) && units is > 0 and < 10)
+        { quantity = tens + units; return true; }
+        return false;
+    }
     internal static bool PolitePurchase(string text) => PoliteRequest(text, information: false);
     private static bool PoliteRequest(string text, bool information)
     {

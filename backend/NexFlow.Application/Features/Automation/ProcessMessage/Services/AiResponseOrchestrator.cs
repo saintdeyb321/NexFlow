@@ -158,6 +158,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true));
             var introduction = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes usar estas opciones sin IA:"
                 : interpretation.Intent == ConversationIntent.ProviderUnavailable ? "No pude interpretar tu consulta en este momento. Podemos continuar con opciones verificadas:"
+                : context.CurrentGoal == "ORDER" ? "No he cambiado tu pedido. Conservamos los productos y cantidades. ¿Qué dato deseas consultar o cambiar?"
                 : "¿Qué información necesitas consultar o qué operación deseas realizar?";
             var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context, activeModules, introduction, cancellationToken, contextual: true);
             if (clarification.Response != null) return await SendText(clarification.Response);
@@ -178,6 +179,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (context.CurrentGoal is "BOOKING" or "RESERVATION")
                 finalResponse = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, activeModules)
                     ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
+            else if (context.CurrentGoal == "ORDER")
+                finalResponse = AiIntentAccess.GetDeniedResponse(ConversationIntent.Order, activeModules)
+                    ?? "No pude interpretar ese cambio. Conservamos los productos y cantidades. ¿Qué deseas consultar o cambiar?";
         }
         else
         {
@@ -267,7 +271,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (interpretation.OfferingQuery is not { } query) return;
             if (query.WorkspaceId != workspaceId || query.SourceMessageId != request.MessageId || query.StateVersion != context.StateVersion)
                 throw new ConcurrencyException("Offering query no longer matches this turn.");
-            if (query.Offerings.Count > 0) new OfferingReference(workspaceId,query.Type,query.Offerings.Select(o => o.Id).ToArray(),query.LocationId).Remember(context);
+            if (query.Offerings.Count > 0) new OfferingReference(workspaceId,query.Type,query.Offerings.Select(o => o.Id).ToArray(),query.LocationId,
+                query.Broad,query.PageOffset,query.TotalCount,query.PageFingerprint).Remember(context);
             else context.LastIntent = interpretation.Intent.ToString();
             InformationalRequest.Remember(context, query.Type == "PRODUCT" ? NexFlow.Application.Features.Knowledge.KnowledgeTopic.Products : NexFlow.Application.Features.Knowledge.KnowledgeTopic.Services,
                 new() { LocationId = query.LocationId }, _clock?.UtcNow ?? DateTime.UtcNow);

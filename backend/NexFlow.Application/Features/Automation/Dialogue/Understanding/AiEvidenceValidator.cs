@@ -8,6 +8,10 @@ internal static class AiEvidenceValidator
     internal static TurnUnderstanding Validate(TurnUnderstanding value, AiInterpretation ai, string original)
     {
         var normalized = SpanishTextNormalizer.Normalize(original);
+        var correcting = ai.Act == DialogueAct.Correction && !ai.RequiresClarification
+            && ai.Evidence.Count(e => e.Slot == "Act") == 1
+            && ai.Evidence.Any(e => e.Slot == "Act" && e.NormalizedValue == nameof(DialogueAct.Correction)
+                && !string.IsNullOrWhiteSpace(e.Text) && HasFragment(original, e.Text));
         bool Supplied(string text) => SpanishTextNormalizer.ContainsPhrase(normalized, SpanishTextNormalizer.Normalize(text));
         AiSlotEvidence? Evidence(string slot, string? extracted)
         {
@@ -20,9 +24,15 @@ internal static class AiEvidenceValidator
         }
         SlotResolution<ResolvedBusinessEntity> Entity(string slot, SlotResolution<ResolvedBusinessEntity> local, string? extracted, IReadOnlyList<BusinessEntityOption> allowed)
         {
-            if (local.Status is ResolutionStatus.Determined or ResolutionStatus.Ambiguous || extracted == null || local.Code == "ModuleDenied") return local;
+            var correction = correcting
+                && (slot == "Service" && ai.Directive == ConversationDirective.ChangeService
+                    || slot == "Location" && ai.Directive == ConversationDirective.ChangeLocation);
+            if (!correction && (local.Status is ResolutionStatus.Determined or ResolutionStatus.Ambiguous)
+                || extracted == null || local.Code == "ModuleDenied") return local;
             var evidence = Evidence(slot, extracted);
-            var candidate = new OfferingMentionResolver().Resolve(evidence?.Text ?? (Supplied(extracted) ? extracted : ""), allowed, true);
+            if (correction && evidence == null) return local;
+            var candidate = evidence != null ? new OfferingMentionResolver().ResolveEvidence(evidence.Text, allowed)
+                : new OfferingMentionResolver().Resolve(Supplied(extracted) ? extracted : "", allowed, true);
             if (evidence != null && candidate.Status is ResolutionStatus.Invalid or ResolutionStatus.Insufficient)
             {
                 var matches = allowed.Where(o => new[] { o.Name }.Concat(o.Aliases ?? [])
@@ -50,7 +60,8 @@ internal static class AiEvidenceValidator
                 string.Concat(SpanishTextNormalizer.Terms(label)) == string.Concat(SpanishTextNormalizer.Terms(person)))))
             name = SlotResolution<string>.Invalid("BusinessEntityNotPerson");
         var date = value.Date;
-        if (date.Status == ResolutionStatus.Insufficient && ai.Date != null)
+        if (date.Code != "RelativeOffsetNeedsClarification"
+            && (date.Status == ResolutionStatus.Insufficient || correcting && Evidence("Date", ai.Date) != null) && ai.Date != null)
         {
             var evidence = Evidence("Date", ai.Date);
             var span = evidence?.Text ?? (Supplied(ai.Date) ? ai.Date : "");
@@ -59,11 +70,11 @@ internal static class AiEvidenceValidator
             var resolved = resolver.ResolveEvidence(canonical is { Length: > 0 and <= 100 } && SurfaceEquivalent(span, canonical) ? canonical : span, value.Context.LocalBusinessNow);
             var remainder = span.Length > 0 ? resolver.Resolve(original.Replace(span, " ", StringComparison.OrdinalIgnoreCase), value.Context.LocalBusinessNow) : date;
             date = resolved.TryGetValue(out var candidate) && candidate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) == ai.Date
-                && remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition"
+                && (correcting || remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition")
                 ? resolved : resolved.Status == ResolutionStatus.Ambiguous ? resolved : SlotResolution<DateOnly>.Invalid("UnsubstantiatedDate");
         }
         var time = value.Time;
-        if (time.Status == ResolutionStatus.Insufficient && ai.Time != null)
+        if ((time.Status == ResolutionStatus.Insufficient || correcting && Evidence("Time", ai.Time) != null) && ai.Time != null)
         {
             var evidence = Evidence("Time", ai.Time);
             var span = evidence?.Text ?? (Supplied(ai.Time) ? ai.Time : "");
@@ -72,7 +83,7 @@ internal static class AiEvidenceValidator
             var remainder = span.Length > 0 ? resolver.Resolve(original.Replace(span, " ", StringComparison.OrdinalIgnoreCase)) : time;
             time = resolved.TryGetValue(out var candidate) && candidate.Kind == TimePreferenceKind.Exact
                 && candidate.ExactTime!.Value.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture) == ai.Time
-                && remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition"
+                && (correcting || remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition")
                 ? resolved : resolved.Status == ResolutionStatus.Ambiguous ? resolved : SlotResolution<TimePreference>.Invalid("UnsubstantiatedTime");
         }
         var validated = value with { Name = name, Location = Entity("Location", value.Location, ai.Location, value.AuthorizedLocations),

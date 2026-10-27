@@ -46,9 +46,14 @@ public sealed partial class BusinessDateResolver
         }
         foreach (Match match in RelativeDate().Matches(normalized))
         {
+            // A relative anchor modified by an unquantified temporal operator is
+            // not an exact calendar date. Neither local parsing nor LLM evidence
+            // may silently discard that operator and promise the anchor itself.
+            if (match.Groups["offset"].Success) return SlotResolution<DateOnly>.Ambiguous([], "RelativeOffsetNeedsClarification");
             var prefix = normalized[..match.Index];
-            if (match.Value == "manana" && new[] { "por la ", "en la ", "de la ", "esta " }.Any(p => prefix.EndsWith(p, StringComparison.Ordinal))) continue;
-            dates.Add(today.AddDays(match.Value == "hoy" ? 0 : match.Value == "manana" ? 1 : 2));
+            var relative = match.Groups["relative"].Value;
+            if (relative == "manana" && new[] { "por la ", "en la ", "de la ", "esta " }.Any(p => prefix.EndsWith(p, StringComparison.Ordinal))) continue;
+            dates.Add(today.AddDays(relative == "hoy" ? 0 : relative == "manana" ? 1 : 2));
         }
         var hasDateAnchor = dates.Count > 0;
         var weekdays = Weekday().Matches(normalized);
@@ -170,7 +175,7 @@ public sealed partial class BusinessDateResolver
     private static partial Regex NumericDate();
     [GeneratedRegex(@"\b(?<day>\d{1,2}) (?:de )?(?<month>enero|ene|febrero|feb|marzo|mar|abril|abr|mayo|may|junio|jun|julio|jul|agosto|ago|septiembre|setiembre|sep|set|octubre|oct|noviembre|nov|diciembre|dic)(?: (?:de )?(?<year>\d{4}))?\b", RegexOptions.CultureInvariant, 100)]
     private static partial Regex WrittenDate();
-    [GeneratedRegex(@"\b(?:pasado manana|manana|hoy)\b", RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"\b(?:(?<offset>antes de|despues de|tras) )?(?<relative>pasado manana|manana|hoy)\b", RegexOptions.CultureInvariant, 100)]
     private static partial Regex RelativeDate();
     [GeneratedRegex(@"\b(?:(?<qualifier>el proximo|el siguiente|proximo|proxima|este|esta) )?(?<day>lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b(?: (?<following>que viene))?", RegexOptions.CultureInvariant, 100)]
     private static partial Regex Weekday();

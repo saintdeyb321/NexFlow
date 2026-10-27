@@ -113,12 +113,13 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
                     || resuming && context.CurrentStep == "ORDER_COMMIT:" + quote.Fingerprint);
                 var consent = OrderMentionResolver.IsSubmit(messageText)
                     || context.CurrentStep == "ORDER_CONFIRM:" + quote.Fingerprint && ConversationConfirmation.IsAffirmative(messageText);
-                if (!reviewed || !consent)
+                if (!reviewed || !consent || proposal?.RequireConfirmation == true)
                 {
                     context.CurrentGoal="ORDER";
                     context.CurrentStep="ORDER_CONFIRM:" + quote.Fingerprint;
                     context.LastQuestion="¿Confirmas que la enviemos al negocio con estos importes?";
-                    return await Remember("Revisa el resumen vigente de tu solicitud.\n" + quote.Text + "\n" + context.LastQuestion,OperationStatus.AwaitingConfirmation,quote);
+                    return await Remember("Revisa el resumen vigente de tu solicitud.\n\n" + quote.Text + "\n\n" + context.LastQuestion
+                        + "\n✅ *Confirmar* — enviar solicitud\n✏️ *Editar* — cambiar el borrador\n❌ *Descartar* — abandonar el borrador",OperationStatus.AwaitingConfirmation,quote);
                 }
                 return await Submit(quote);
             }
@@ -130,7 +131,7 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
             }
             var question = needsLocation ? "¿En cuál sede deseas solicitar estos productos?" : "¿Deseas agregar o cambiar algo, o enviar la solicitud para revisión?";
             context.LastQuestion=question;
-            return await Remember(quote.Text + "\n" + question,quote:quote);
+            return await Remember(quote.Text + "\n\n" + question,quote:quote);
         }
         catch (OverflowException) { return await Remember("La cantidad o el importe supera el máximo permitido. ¿Qué cantidad menor deseas?",OperationStatus.NotAvailable); }
         catch (ArgumentException ex) { return await Remember(ex.Message + " ¿Qué producto deseas corregir?",OperationStatus.NotAvailable); }

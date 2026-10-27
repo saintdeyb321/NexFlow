@@ -19,6 +19,48 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
     public async Task<PreparedDialogueTurn?> ResolveAsync(Guid workspace, string source, string text, ConversationContextDto context,
         HashSet<string> modules, CancellationToken ct, AiInterpretation? semantic = null)
     {
+        if (SpanishTextNormalizer.Normalize(text) == "ver mas" && OfferingReference.Read(workspace, context) is { Broad: true } page)
+        {
+            var intent = page.Type == "PRODUCT" ? ConversationIntent.ProductQuery : ConversationIntent.ServiceQuery;
+            if (AiIntentAccess.GetDeniedResponse(intent, modules) is { } pageDenied)
+                return new(DialogueAct.Information, new() { Intent = intent }, Response: pageDenied);
+            var current = await slots.ReadCommerceAsync(workspace, context, page.Type == "PRODUCT", page.Type == "SERVICE", false, page.LocationId, ct);
+            var values = page.Type == "PRODUCT" ? current.Products : current.Services;
+            var next = Page(workspace, source, context, page.Type, values, page.LocationId, page.PageOffset + page.Ids.Length);
+            if (next.PageFingerprint != page.PageFingerprint || next.PageOffset >= next.TotalCount)
+                next = Page(workspace, source, context, page.Type, values, page.LocationId, 0)
+                    with { PageRestarted = next.PageFingerprint != page.PageFingerprint };
+            return new(DialogueAct.Information, new() { Intent = intent, QueryKind = OfferingQueryKind.Broad, OfferingQuery = next });
+        }
+        if (context.CurrentGoal == "ORDER" && semantic is { Intent: ConversationIntent.Order })
+            return await ResolveOrderActionAsync(workspace, source, text, context, modules, semantic, ct);
+        if (semantic is { QueryKind: OfferingQueryKind.Broad, RequiresClarification: false }
+            && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
+            && !(modules.Contains("CATALOG") && modules.Contains("SERVICES") && InformationalRequest.UnscopedCatalog(text)))
+        {
+            var type = semantic.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE";
+            if (AiIntentAccess.GetDeniedResponse(semantic.Intent, modules) is { } broadDenied)
+                return new(DialogueAct.Information, semantic, Response: broadDenied);
+            var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, context.SelectedLocationId, ct);
+            return new(DialogueAct.Information, new() { Intent = semantic.Intent, QueryKind = OfferingQueryKind.Broad,
+                OfferingQuery = Page(workspace, source, context, type, type == "PRODUCT" ? data.Products : data.Services, context.SelectedLocationId, 0) });
+        }
+        if (semantic is { UseOfferingReference: true, Question: not null, RequiresClarification: false }
+            && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)
+        {
+            var type = semantic.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE";
+            if (AiIntentAccess.GetDeniedResponse(semantic.Intent, modules) is { } referenceDenied)
+                return new(DialogueAct.Information, semantic, Response: referenceDenied);
+            var previousOffering = OfferingReference.Read(workspace, context);
+            var acts = semantic.Evidence.Where(e => e.Slot == "Act").ToArray();
+            if (previousOffering?.Type != type || previousOffering.Ids.Length != 1 || acts.Length != 1
+                || acts[0].NormalizedValue != semantic.Act?.ToString() || !AiEvidenceValidator.HasFragment(text, acts[0].Text)) return null;
+            var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, previousOffering.LocationId, ct);
+            var found = data.Products.Concat(data.Services).Where(o => o.Type == type && o.Id == previousOffering.Ids[0]).ToArray();
+            return new(DialogueAct.InformationalInterruption, new() { Intent = semantic.Intent,
+                OfferingQuery = new(workspace, source, context.StateVersion, type, semantic.Question.Value,
+                    Array.AsReadOnly(found), false, previousOffering.LocationId) });
+        }
         var semanticEvidence = semantic?.Evidence?.Where(e => e != null && e.Slot == "Act").ToArray() ?? [];
         var semanticStart = semantic is { Intent: ConversationIntent.Order, Act: DialogueAct.StartOperation, RequiresClarification: false }
             && semanticEvidence.Length == 1 && semanticEvidence[0].NormalizedValue == nameof(DialogueAct.StartOperation)
@@ -64,7 +106,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var order = activeOrder && !readOnly || buying || submit;
         if (!weakPurchase && (order || hypothetical || summary) && AiIntentAccess.GetDeniedResponse(ConversationIntent.Order, modules) is { } denied)
             return new(DialogueAct.Information, new() { Intent = ConversationIntent.Order }, Response: denied);
-        if (words.Contains("no") && order) return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.General, RequiresClarification = true });
+        if (words.Contains("no") && order && semantic == null) return null;
 
         // No catalog lookup is necessary for explicit submit/summary. OrderFlow revalidates it.
         if (submit || summary) return Order(submit ? OrderTurnKind.Submit : OrderTurnKind.Summary, []);
@@ -102,6 +144,12 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         {
             if (context.CurrentGoal is "BOOKING" or "RESERVATION") return null;
             var result = orders.Resolve(text, products, context, reference, hypothetical);
+            // An unresolved instruction, or a bare mention of an existing line,
+            // needs semantic understanding rather than an implicit Add(1).
+            var bareExisting = result.Edits.Any(e => e.Kind == OrderEditKind.Add && e.Quantity == 1
+                    && context.OrderDraftItems.Any(i => i.ProductId == e.ProductId))
+                && !buying && !changing && !words.Any(w => OrderMentionResolver.TryQuantity(w, out _));
+            if (semantic == null && activeOrder && (bareExisting || result.Error != null)) return null;
             if (weakPurchase && new OfferingMentionResolver().Resolve(text,catalog.Services.Select(s=>s.Option).ToArray()).Candidates.Count > 0
                 && (result.Edits.Count > 0 || new OfferingMentionResolver().Resolve(text,catalog.Products.Select(p=>p.Option).ToArray()).Candidates.Count > 0))
                 return new(DialogueAct.SemanticAmbiguity,new(){Intent=ConversationIntent.General},Response:"¿Deseas consultar un servicio o preparar un pedido de productos?");
@@ -136,7 +184,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var broad = (catalogRequest || words.Any(w => w is "productos" or "servicios" or "catalogo")
             && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo"))
             && !words.Contains("diferencia") && productMatches.Count == 0 && serviceMatches.Count == 0;
-        if (broad) return wantsServices ? Query("SERVICE", services.Take(5).ToArray(), true) : Query("PRODUCT", products.Take(5).ToArray(), true);
+        if (broad) return wantsServices ? Query("SERVICE", services, true) : Query("PRODUCT", products, true);
         var matches = productMatches.Concat(serviceMatches).ToArray();
         if (matches.Length == 0 && reference != null && OrderMentionResolver.Ordinal(words) is { } ordinal && ordinal < reference.Ids.Length)
             matches = products.Concat(services).Where(p => p.Type == reference.Type && p.Id == reference.Ids[ordinal]).ToArray();
@@ -169,7 +217,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             new(context.CurrentGoal != null ? DialogueAct.InformationalInterruption : DialogueAct.Information,
                 new() { Intent = type == "PRODUCT" ? ConversationIntent.ProductQuery : ConversationIntent.ServiceQuery,
                     QueryKind = isBroad ? OfferingQueryKind.Broad : OfferingQueryKind.Specific,
-                    OfferingQuery = new(workspace, source, context.StateVersion, type, comparisonQuestion(), Array.AsReadOnly(values.ToArray()), isBroad, scope, clarification) });
+                    OfferingQuery = isBroad && clarification == null ? Page(workspace, source, context, type, values, scope, 0)
+                        : new(workspace, source, context.StateVersion, type, comparisonQuestion(), Array.AsReadOnly(values.ToArray()), isBroad, scope, clarification) });
         OfferingQuestion comparisonQuestion() => words.Contains("stock") ? OfferingQuestion.Stock
             : words.Contains("diferencia") || words.Contains("compara") ? OfferingQuestion.Comparison
             : words.Contains("recomiendas") ? OfferingQuestion.Recommendation
@@ -177,6 +226,89 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             : words.Contains("disponible") || words.Contains("atienden") ? OfferingQuestion.Availability
             : words.Any(w => w is "cuesta" or "cuanto" or "precio") ? OfferingQuestion.Price : OfferingQuestion.Facts;
         static bool changingProduct(string text) => OrderMentionResolver.Words(text).Any(w => w is "por" or "producto" or "productos") && !text.EndsWith("por favor", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static OfferingQueryPlan Page(Guid workspace, string source, ConversationContextDto context, string type,
+        IReadOnlyList<VerifiedOffering> values, string? scope, int offset)
+    {
+        var ordered = values.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ThenBy(o => o.Id, StringComparer.Ordinal).ToArray();
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(ordered.Select(o => o.Id)))));
+        return new(workspace, source, context.StateVersion, type, OfferingQuestion.Facts,
+            Array.AsReadOnly(ordered.Skip(offset).Take(5).ToArray()), true, scope,
+            PageOffset: offset, TotalCount: ordered.Length, PageFingerprint: fingerprint);
+    }
+
+    private async Task<PreparedDialogueTurn> ResolveOrderActionAsync(Guid workspace, string source, string text,
+        ConversationContextDto context, HashSet<string> modules, AiInterpretation semantic, CancellationToken ct)
+    {
+        PreparedDialogueTurn Plan(OrderTurnKind kind, IReadOnlyList<OrderEdit>? edits = null, string? clarification = null,
+            string? location = null) => new(semantic.Act ?? DialogueAct.RequestedData,
+                new() { Intent = ConversationIntent.Order, OrderProposal = new(workspace, source, context.StateVersion,
+                    kind, Array.AsReadOnly((edits ?? []).ToArray()), LocationId: location, Clarification: clarification,
+                    RequireConfirmation: kind == OrderTurnKind.Submit) });
+        if (AiIntentAccess.GetDeniedResponse(ConversationIntent.Order, modules) is { } denied)
+            return new(DialogueAct.Information, new() { Intent = ConversationIntent.Order }, Response: denied);
+        var evidence = semantic.Evidence.Where(e => e.Slot == "Act").ToArray();
+        var backed = !semantic.RequiresClarification && evidence.Length == 1
+            && evidence[0].NormalizedValue == semantic.Act?.ToString()
+            && !string.IsNullOrWhiteSpace(evidence[0].Text) && AiEvidenceValidator.HasFragment(text, evidence[0].Text);
+        if (!backed || context.CurrentGoal != "ORDER")
+            return Plan(OrderTurnKind.Clarify, clarification: "Conservamos tu borrador. ¿Qué deseas consultar o cambiar?");
+        if (semantic.OrderAction == OrderTurnKind.Submit)
+        {
+            // Natural finish requests prepare a current review. The model cannot
+            // provide transaction consent, even when it labels a turn affirmative.
+            return Plan(OrderTurnKind.Submit);
+        }
+        if (semantic.OrderAction == OrderTurnKind.Summary) return Plan(OrderTurnKind.Summary);
+        if (semantic.OrderAction == OrderTurnKind.Location && semantic.Act == DialogueAct.Correction)
+        {
+            var locationEvidence = semantic.Evidence.Where(e => e.Slot == "Location").ToArray();
+            var locations = await slots.ReadCommerceLocationsAsync(workspace, true, ct);
+            var matched = locationEvidence.Length == 1 && locationEvidence[0].NormalizedValue == semantic.Location
+                && AiEvidenceValidator.HasFragment(text, locationEvidence[0].Text)
+                ? new LocationMentionResolver().ResolveEvidence(locationEvidence[0].Text, locations) : SlotResolution<ResolvedBusinessEntity>.Missing();
+            if (matched.TryGetValue(out var location) && string.Concat(SpanishTextNormalizer.Terms(semantic.Location ?? ""))
+                == string.Concat(SpanishTextNormalizer.Terms(location.Name))) return Plan(OrderTurnKind.Location, location: location.Id);
+            return Plan(OrderTurnKind.Clarify, clarification: "¿En cuál sede deseas continuar? Conservamos el pedido.");
+        }
+        if (semantic.OrderAction != OrderTurnKind.Edit || semantic.Items.Count == 0 || semantic.Items.Count > 10
+            || semantic.Act is not (DialogueAct.Correction or DialogueAct.RequestedData or DialogueAct.MultipleData))
+            return Plan(OrderTurnKind.Clarify, clarification: "Conservamos los productos y cantidades. ¿Qué deseas cambiar?");
+        var catalog = await slots.ReadCommerceAsync(workspace, context, true, false, true, context.SelectedLocationId, ct);
+        var edits = new List<OrderEdit>();
+        foreach (var item in semantic.Items)
+        {
+            if (string.IsNullOrWhiteSpace(item.Text) || !AiEvidenceValidator.HasFragment(text, item.Text))
+                return Plan(OrderTurnKind.Clarify, clarification: "Necesito precisar el producto y su cantidad. El pedido sigue intacto.");
+            // Each item span must carry its own quantity; a number elsewhere in
+            // the turn cannot be borrowed for a different product.
+            var entityText = item.QuantityText != null && AiEvidenceValidator.HasFragment(item.Text, item.QuantityText)
+                ? item.Text.Replace(item.QuantityText, " ", StringComparison.OrdinalIgnoreCase) : item.Text;
+            var resolved = new OfferingMentionResolver().ResolveEvidence(entityText, catalog.Products.Select(p => p.Option).ToArray());
+            if (!resolved.TryGetValue(out var product) || !catalog.Products.Any(p => p.Id == product.Id
+                && new[] { p.Name }.Concat(p.Aliases).Any(name => SpanishTextNormalizer.Normalize(name) == SpanishTextNormalizer.Normalize(item.Product))))
+                return Plan(OrderTurnKind.Clarify, clarification: "¿Cuál producto activo deseas cambiar? Conservamos el pedido.");
+            if (item.Kind is not (OrderEditKind.Add or OrderEditKind.Set or OrderEditKind.Remove))
+                return Plan(OrderTurnKind.Clarify, clarification: "Indica qué producto deseas quitar y cuál deseas agregar.");
+            var quantity = item.Quantity;
+            if (item.Kind != OrderEditKind.Remove && (!quantity.HasValue || item.QuantityText == null
+                || !AiEvidenceValidator.HasFragment(item.Text, item.QuantityText)
+                || !OrderMentionResolver.TryQuantity(item.QuantityText, out var literal) || literal != quantity))
+                return Plan(OrderTurnKind.Clarify, clarification: "¿Cuántas unidades deseas? Conservamos las cantidades actuales.");
+            if (item.Kind == OrderEditKind.Remove && context.OrderDraftItems.All(i => i.ProductId != product.Id))
+                return Plan(OrderTurnKind.Clarify, clarification: "Ese producto no está en tu pedido. ¿Cuál deseas cambiar?");
+            if (item.Kind == OrderEditKind.Remove && quantity.HasValue
+                && (item.QuantityText == null || !AiEvidenceValidator.HasFragment(item.Text, item.QuantityText)
+                    || !OrderMentionResolver.TryQuantity(item.QuantityText, out var removed) || removed != quantity
+                    || context.OrderDraftItems.Single(i => i.ProductId == product.Id).Quantity != quantity))
+                return Plan(OrderTurnKind.Clarify, clarification: "¿Deseas quitar el producto completo o ajustar su cantidad?");
+            edits.Add(new(item.Kind, product.Id, quantity ?? 1));
+        }
+        if (edits.Select(e => e.ProductId).Distinct().Count() != edits.Count)
+            return Plan(OrderTurnKind.Clarify, clarification: "Indica una cantidad final para cada producto. Conservamos el pedido.");
+        return Plan(OrderTurnKind.Edit, edits);
     }
 }
 

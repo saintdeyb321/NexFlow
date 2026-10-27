@@ -15,6 +15,53 @@ namespace NexFlow.Tests.Concierge;
 
 public sealed class CommerceConversationTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Conversation_fix_catalog_pages_keep_real_ids_and_workspace_scope()
+    {
+        var f = new AssistantConversationTests.Fixture(serviceCount: 7, conciergeCatalog: true, intelligentCommerce: true);
+        await f.HandleTurn("¿Qué servicios tienen?", "page-one");
+        var first = OfferingReference.Read(f.Workspace, await f.Context()); Assert.NotNull(first); Assert.Equal(5, first.Ids.Length);
+        Assert.Contains("Ver más", f.Sent["page-one"].Content);
+        await f.HandleTurn("Ver más", "page-two");
+        var next = OfferingReference.Read(f.Workspace, await f.Context()); Assert.NotNull(next);
+        Assert.Empty(first.Ids.Intersect(next.Ids));
+        Assert.Null(OfferingReference.Read(Guid.NewGuid(), await f.Context()));
+        Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+        output.WriteLine("LISTADO POR SEDE\n" + f.Sent["page-one"].Content + "\n\n" + f.Sent["page-two"].Content);
+        f.Services[0].IsActive = false;
+        await f.HandleTurn("Ver más", "changed-catalog");
+        Assert.Contains("catálogo cambió", f.Sent["changed-catalog"].Content);
+        Assert.DoesNotContain("service-a", OfferingReference.Read(f.Workspace, await f.Context())!.Ids);
+        f.Modules.Remove("SERVICES"); await f.HandleTurn("Ver más", "revoked-catalog");
+        Assert.DoesNotContain("Servicio 2", f.Sent["revoked-catalog"].Content);
+    }
+
+    [Fact]
+    public async Task Conversation_fix_semantic_broad_request_uses_the_same_real_paging_contract()
+    {
+        var f = new AssistantConversationTests.Fixture(serviceCount: 7, conciergeCatalog: true, intelligentCommerce: true);
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ServiceQuery, QueryKind = OfferingQueryKind.Broad });
+        await f.HandleTurn("Compárteme todas las prestaciones que ofrecen", "semantic-catalog");
+        Assert.Contains("de 7", f.Sent["semantic-catalog"].Content); Assert.Contains("Ver más", f.Sent["semantic-catalog"].Content);
+        Assert.Equal(5, OfferingReference.Read(f.Workspace, await f.Context())!.Ids.Length);
+    }
+    [Fact]
+    public async Task Conversation_fix_specific_stock_repair_preserves_single_reference_and_draft()
+    {
+        var f = Create(); await f.HandleTurn("Quiero dos panes integrales y un queque", "cart");
+        var before = (await f.Context()).OrderDraftItems.Select(i => (i.ProductId, i.Quantity)).ToArray();
+        await f.HandleTurn("¿Está disponible el pan integral?", "stock");
+        Assert.Contains("Pan integral", f.Sent["stock"].Content); Assert.DoesNotContain("Queque:", f.Sent["stock"].Content);
+        const string repair = "Dije si está disponible o no";
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.ProductQuery, Act = DialogueAct.InformationalInterruption,
+            Question = OfferingQuestion.Stock, UseOfferingReference = true,
+            Evidence = [new("Act", repair, nameof(DialogueAct.InformationalInterruption))] });
+        await f.HandleTurn(repair, "repair");
+        Assert.Contains("stock", f.Sent["repair"].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Pan integral", f.Sent["repair"].Content); Assert.DoesNotContain("Queque:", f.Sent["repair"].Content);
+        Assert.Equal(before, (await f.Context()).OrderDraftItems.Select(i => (i.ProductId, i.Quantity)).ToArray());
+        output.WriteLine("DISPONIBILIDAD\n" + f.Sent["repair"].Content);
+    }
     private static AssistantConversationTests.Fixture Create() => new(conciergeCatalog:true,intelligentCommerce:true)
         { Now=new DateTime(2026,10,20,21,0,0,DateTimeKind.Utc) };
 

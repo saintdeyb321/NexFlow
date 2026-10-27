@@ -2,10 +2,10 @@ using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Understanding;
 
-// Exact tokens/aliases only; no edit-distance guess that could silently choose another entity.
+// Runtime names/aliases only. Bounded spelling evidence never breaks a collision.
 internal static class EntityMentionMatcher
 {
-    internal static SlotResolution<ResolvedBusinessEntity> Resolve(string text, IReadOnlyList<BusinessEntityOption> options, bool directAnswer)
+    internal static SlotResolution<ResolvedBusinessEntity> Resolve(string text, IReadOnlyList<BusinessEntityOption> options, bool directAnswer, bool spellingEvidence = false)
     {
         if (string.IsNullOrWhiteSpace(text)) return SlotResolution<ResolvedBusinessEntity>.Missing();
         if (text.Length > 2000) return SlotResolution<ResolvedBusinessEntity>.Invalid("InputTooLong");
@@ -30,6 +30,14 @@ internal static class EntityMentionMatcher
         var tokens = SpanishTextNormalizer.Terms(text).Where(t => t.Length >= 3).ToHashSet(StringComparer.Ordinal);
         var partial = tokens.Count == 0 ? [] : entities.Where(o => Keys(o).Any(k => tokens.IsSubsetOf(k.Split(' ')))).ToArray();
         if (partial.Length > 0) return Result(partial);
+        if (spellingEvidence && fragments.Length is > 0 and <= 8)
+        {
+            var scored = entities.Select(o => (Option: o, Score: Keys(o).Select(k => Score(term, k)).DefaultIfEmpty(int.MaxValue).Min()))
+                .Where(x => x.Score <= 1).ToArray();
+            // Require a full confidence margin: a second plausible entity remains
+            // ambiguous even if its spelling score is slightly worse.
+            if (scored.Length > 0) return Result(scored.Select(x => x.Option));
+        }
         return directAnswer && term.Length > 0 ? SlotResolution<ResolvedBusinessEntity>.Invalid("UnknownEntity") : SlotResolution<ResolvedBusinessEntity>.Missing();
 
         SlotResolution<ResolvedBusinessEntity> Result(IEnumerable<BusinessEntityOption> matches)
@@ -41,16 +49,43 @@ internal static class EntityMentionMatcher
                     new(o.Id, o.Name, o.LocationId), text, EvidenceSource.LocalResolver, o.Id)), "MultipleEntities");
         }
     }
+
+    private static int Score(string source, string target)
+    {
+        var a = source.Split(' '); var b = target.Split(' ');
+        if (a.Length == 1 && a[0].Length >= 5 && b.Any(word => word.StartsWith(a[0], StringComparison.Ordinal))) return 1;
+        if (a.Length != b.Length) return int.MaxValue;
+        var score = 0;
+        for (var i = 0; i < a.Length; i++)
+        {
+            if (a[i] == b[i]) continue;
+            if (Math.Min(a[i].Length, b[i].Length) < 5 || Math.Abs(a[i].Length - b[i].Length) > 1 || ++score > 1) return int.MaxValue;
+            var x = 0; var y = 0; var edits = 0;
+            while (x < a[i].Length && y < b[i].Length)
+            {
+                if (a[i][x] == b[i][y]) { x++; y++; continue; }
+                if (++edits > 1) return int.MaxValue;
+                if (a[i].Length >= b[i].Length) x++;
+                if (b[i].Length >= a[i].Length) y++;
+            }
+            if (edits + a[i].Length - x + b[i].Length - y > 1) return int.MaxValue;
+        }
+        return score;
+    }
 }
 
 public sealed class LocationMentionResolver
 {
     public SlotResolution<ResolvedBusinessEntity> Resolve(string text, IReadOnlyList<BusinessEntityOption> authorizedLocations, bool directAnswer = false)
         => EntityMentionMatcher.Resolve(text, authorizedLocations, directAnswer);
+    public SlotResolution<ResolvedBusinessEntity> ResolveEvidence(string text, IReadOnlyList<BusinessEntityOption> authorizedLocations)
+        => EntityMentionMatcher.Resolve(text, authorizedLocations, true, true);
 }
 
 public sealed class OfferingMentionResolver
 {
+    public SlotResolution<ResolvedBusinessEntity> ResolveEvidence(string text, IReadOnlyList<BusinessEntityOption> authorizedOfferings)
+        => EntityMentionMatcher.Resolve(text, authorizedOfferings, true, true);
     internal static IReadOnlyList<BusinessEntityOption> NamedLiterals(string text, IReadOnlyList<BusinessEntityOption> options)
     {
         var value = " " + SpanishTextNormalizer.Normalize(text) + " ";

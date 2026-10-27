@@ -22,10 +22,15 @@ public static class OfferingResponseFormatter
     {
         if (query.Clarification != null) return query.Clarification;
         if (query.Offerings.Count == 0) return "No tengo una opción activa registrada que coincida con tu consulta.";
+        if (Realization(query) is { } verifiedLayout) return verifiedLayout.CanonicalText;
         var facts = query.Offerings.Take(5).Select(p => Line(p, query.Broad));
-        var text = string.Join("\n", facts);
+        var text = "*" + (query.Type == "PRODUCT" ? "Productos del catálogo" : "Servicios del negocio") + "*\n\n" + string.Join("\n", facts);
+        if (query.PageRestarted) text = "El catálogo cambió. Esta es la primera página actualizada.\n\n" + text;
+        if (query.Broad && query.TotalCount > 0)
+            text += $"\n\nMostrando {query.PageOffset + 1}–{query.PageOffset + query.Offerings.Count} de {query.TotalCount}."
+                + (query.PageOffset + query.Offerings.Count < query.TotalCount ? "\nPara continuar, responde *Ver más*." : "");
         if (query.Question is OfferingQuestion.Stock || query.Question == OfferingQuestion.Availability && query.Type == "PRODUCT")
-            text += "\nEsto confirma su presencia en el catálogo, no existencias de stock ni una entrega garantizada; el negocio debe confirmarlas.";
+            text += "\n\nEsto confirma su presencia en el catálogo, no existencias de stock ni una entrega garantizada; el negocio debe confirmarlas.";
         if (query.Question == OfferingQuestion.Availability && query.Type == "SERVICE")
             text += query.LocationId == null ? "\nPuedo verificar en qué sede se ofrece; un horario de reserva requiere consultar la agenda."
                 : "\nEl servicio figura para la sede indicada. Esto no confirma una cita ni un horario disponible.";
