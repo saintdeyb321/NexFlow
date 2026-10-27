@@ -1,0 +1,131 @@
+name: nexflow-staging
+
+services:
+  postgres:
+    image: postgres:15.10
+    environment:
+      POSTGRES_DB: nexflow_staging
+      POSTGRES_USER: nexflow_staging
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+    ports:
+      - "127.0.0.1:${STAGING_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - staging-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexflow_staging -d nexflow_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [staging-internal]
+
+  redis:
+    image: redis:7.4.2
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${STAGING_REDIS_PORT:-56379}:6379"
+    volumes:
+      - staging-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks: [staging-internal]
+
+  firestore:
+    build:
+      context: .
+      dockerfile: backend/staging/firestore-emulator.Dockerfile
+    environment:
+      GCLOUD_PROJECT: ${STAGING_FIREBASE_PROJECT_ID:-nexflow-staging-local}
+      JAVA_TOOL_OPTIONS: -Xmx1024m
+    command:
+      - sh
+      - -ec
+      - >-
+        firebase emulators:start --only firestore
+        --project "$${GCLOUD_PROJECT}"
+        --config /emulator/firebase.json
+        --import /emulator/data --export-on-exit /emulator/data
+    ports:
+      - "127.0.0.1:${STAGING_FIRESTORE_PORT:-58080}:8080"
+    volumes:
+      - ./backend/staging/firebase.staging.json:/emulator/firebase.json:ro
+      - ./backend/NexFlow.Tests/Integration/emulator/firestore.rules:/emulator/firestore.rules:ro
+      - staging-firestore-data:/emulator/data
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080').then(() => process.exit(0)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 25s
+    networks: [staging-internal]
+
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrator
+    environment:
+      ConnectionStrings__DefaultConnection: >-
+        Host=postgres;Port=5432;Database=nexflow_staging;Username=nexflow_staging;Password=${STAGING_POSTGRES_PASSWORD:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [staging-internal]
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: final
+    environment:
+      ASPNETCORE_ENVIRONMENT: Staging
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: >-
+        Host=postgres;Port=5432;Database=nexflow_staging;Username=nexflow_staging;Password=${STAGING_POSTGRES_PASSWORD:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+      ConnectionStrings__Redis: redis:6379
+      Firebase__ProjectId: ${STAGING_FIREBASE_PROJECT_ID:-nexflow-staging-local}
+      GCLOUD_PROJECT: ${STAGING_FIREBASE_PROJECT_ID:-nexflow-staging-local}
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+      Gemini__ApiKey: "${STAGING_GEMINI_API_KEY:-}"
+      Gemini__Model: ${STAGING_GEMINI_MODEL:-gemini-3.5-flash}
+      Gemini__FallbackModel: ${STAGING_GEMINI_FALLBACK_MODEL:-gemini-3.1-flash-lite}
+      Groq__ApiKey: "${STAGING_GROQ_API_KEY:-}"
+      Groq__Model: ${STAGING_GROQ_MODEL:-openai/gpt-oss-20b}
+      Evolution__BaseUrl: http://evolution:8080
+      Evolution__ApiKey: ${STAGING_EVOLUTION_API_KEY:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+      Evolution__WebhookUrl: http://api:8080/api/webhooks/evolution/messages-upsert
+      Evolution__WebhookKey: ${STAGING_EVOLUTION_WEBHOOK_KEY:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+      Evolution__TimeoutSeconds: "10"
+      Evolution__AllowLegacyWebhookKey: "false"
+      N8n__BaseUrl: http://n8n-unavailable:5678
+      N8n__WebhookSecret: ${STAGING_N8N_WEBHOOK_SECRET:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+      N8n__EventsWebhookId: nexflow-events
+      N8n__TimeoutSeconds: "30"
+      Cors__AllowedOrigins__0: http://localhost:5173
+      Logging__LogLevel__NexFlow.API.Middleware.UserIdentityMiddleware: Warning
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      firestore:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${STAGING_API_PORT:-58081}:8080"
+    networks: [staging-internal]
+
+networks:
+  staging-internal:
+    name: nexflow-staging-internal
+
+volumes:
+  staging-postgres-data:
+  staging-redis-data:
+  staging-firestore-data:

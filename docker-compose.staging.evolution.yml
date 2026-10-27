@@ -1,0 +1,58 @@
+# Optional overlay for a pinned, test-only Evolution installation. The NexFlow
+# repository intentionally does not prescribe an Evolution image, database
+# schema, or persistent-data path: those are provider-version contracts.
+#
+# Start only after the operator has supplied an image/version, its exact runtime
+# env file, and its documented persistent data path in the ignored .env.staging.
+services:
+  evolution-postgres:
+    profiles: ["whatsapp"]
+    image: postgres:15.10
+    environment:
+      POSTGRES_DB: evolution_staging
+      POSTGRES_USER: evolution_staging
+      POSTGRES_PASSWORD: ${STAGING_EVOLUTION_POSTGRES_PASSWORD:?Run scripts/staging/Start-LocalStaging.ps1 first.}
+    volumes:
+      - staging-evolution-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution_staging -d evolution_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [staging-internal]
+
+  evolution-redis:
+    profiles: ["whatsapp"]
+    image: redis:7.4.2
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - staging-evolution-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [staging-internal]
+
+  evolution:
+    profiles: ["whatsapp"]
+    image: ${STAGING_EVOLUTION_IMAGE:?Set the audited Evolution image and version in .env.staging.}
+    env_file:
+      - ${STAGING_EVOLUTION_RUNTIME_ENV_FILE:?Set the ignored vendor runtime env file in .env.staging.}
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${STAGING_EVOLUTION_PORT:-58082}:8080"
+    volumes:
+      - type: volume
+        source: staging-evolution-instance-data
+        target: ${STAGING_EVOLUTION_DATA_PATH:?Set the documented persistent data path for the pinned provider image.}
+    networks: [staging-internal]
+
+volumes:
+  staging-evolution-postgres-data:
+  staging-evolution-redis-data:
+  staging-evolution-instance-data:

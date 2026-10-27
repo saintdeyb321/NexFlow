@@ -40,6 +40,10 @@ Dockerfile
 docker-compose*.yml
 docker-compose*.yaml
 .env
+# The local staging composition and its public template are source-controlled.
+!docker-compose.staging.yml
+!docker-compose.staging.evolution.yml
+!.env.staging.example
 
 # =========================
 # OS Files
