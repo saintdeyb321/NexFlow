@@ -86,7 +86,7 @@ public sealed record ReservationTimeReference(Guid WorkspaceId, string LocationI
             && !string.IsNullOrWhiteSpace(reference.LocationId) && !string.IsNullOrWhiteSpace(reference.ServiceId)
             && DateOnly.TryParseExact(reference.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)
             && TimeOnly.TryParseExact(reference.Time, "HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)
-            && ConversationQuestion.Current(workspace, state, now) is { Expected: ExpectedReply.Information, Intent: ConversationIntent.Reservation }
+            && ConversationQuestion.Current(workspace, state, now) is { Expected: ExpectedReply.Information or ExpectedReply.SelectReservationTime, Intent: ConversationIntent.Reservation }
             ? reference : null;
 }
 
@@ -96,6 +96,8 @@ public sealed record TurnUnderstanding(DialogueTurnContext Context, SlotResoluti
 {
     // Phase 1 deliberately does not infer actions, confirm operations or merge state.
     public ConversationIntent? Intent { get; init; }
+    public ConversationIntent? SupplementalInformation { get; init; }
+    public DateOnly? SupplementalDate { get; init; }
     public IReadOnlyList<BusinessEntityOption> AuthorizedLocations { get; init; } = [];
     public IReadOnlyList<BusinessEntityOption> AuthorizedServices { get; init; } = [];
     public IReadOnlyList<BusinessEntityOption> AuthorizedProducts { get; init; } = [];

@@ -134,6 +134,17 @@ public sealed class ResponseComposerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Composer.ComposeAsync(h.Plan(), "private-phone", cancellation.Token));
     }
 
+    [Theory]
+    [InlineData(DialogueAct.RequestedData)] [InlineData(DialogueAct.MultipleData)]
+    [InlineData(DialogueAct.Correction)] [InlineData(DialogueAct.InformationalInterruption)]
+    public async Task Continuing_turns_do_not_repeat_a_generic_opening_or_spend_ai_budget(DialogueAct act)
+    {
+        var h = new Harness(); h.Settings.Style = ResponseStyle.Clinic; var plan = h.Plan(act: act);
+        var response = await h.Composer.ComposeAsync(plan, "private-phone", default);
+        Assert.Equal(plan.FallbackText, response.Text); Assert.Equal("Deterministic", response.Outcome);
+        Assert.Empty(h.Router.Invocations); Assert.Empty(h.Budget.Invocations);
+    }
+
     private static ResponsePlan AvailabilityPlan(Harness h) => new(h.Workspace, "availability-source", "v1",
         ConversationIntent.Reservation, DialogueAct.InformationalInterruption, OperationStatus.Informational,
         [new("RequestedLocalTime", "22/10/2026 16:00", VerifiedFactSource.ValidatedConversation), new("Availability", "Available", VerifiedFactSource.TransactionEngine)],

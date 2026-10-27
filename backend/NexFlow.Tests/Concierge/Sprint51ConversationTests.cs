@@ -55,7 +55,8 @@ public sealed class Sprint51ConversationTests
         var f = await Draft("CONFIRM");
         await f.HandleTurn("¿Y a las 4?", "ask");
         await f.HandleTurn("sí", "yes-to-question");
-        Assert.Empty(f.Bookings); Assert.Equal("10:00", (await f.Context()).TargetTime);
+        Assert.Empty(f.Bookings); Assert.Equal("16:00", (await f.Context()).TargetTime);
+        Assert.Equal(NexFlow.Application.Features.Automation.Dialogue.Contracts.ExpectedReply.ConfirmReservation, (await f.Context()).CurrentQuestion!.Expected);
         await f.HandleTurn("a las cuatro de la tarde", "select");
         Assert.Equal("16:00", (await f.Context()).TargetTime); Assert.Empty(f.Bookings);
         Assert.Contains("Confirmas", f.Sent["select"].Content);

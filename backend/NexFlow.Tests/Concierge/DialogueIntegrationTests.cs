@@ -248,24 +248,24 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Changing_location_invalidates_service_time_and_preference_but_preserves_name_and_date()
+    public async Task Changing_location_revalidates_and_preserves_compatible_service_time_name_and_date()
     {
         var f = Create(); await Ready(f);
         await f.HandleTurn("mejor sede San Jerónimo", "move");
         var state = await f.Context(); Assert.Equal("sede-b", state.SelectedLocationId);
-        Assert.Null(state.SelectedServiceId); Assert.Null(state.TargetTime); Assert.Null(state.PreferredTime);
+        Assert.Equal("service-a", state.SelectedServiceId); Assert.Equal("16:00", state.TargetTime); Assert.Null(state.PreferredTime);
         Assert.Equal("2026-10-22", state.TargetDate); Assert.Equal("Ana Pérez", state.RealCustomerName);
         Assert.Contains("servicio", f.Sent["move"].Content, StringComparison.OrdinalIgnoreCase); Assert.Empty(f.Bookings);
         Cost(f, "location correction");
     }
 
     [Fact]
-    public async Task Correcting_date_invalidates_the_old_selected_time_and_does_not_commit()
+    public async Task Correcting_date_revalidates_the_selected_time_and_does_not_commit()
     {
         var f = Create(); await Ready(f);
         await f.HandleTurn("mejor el 23 de octubre", "date-correction");
-        var state = await f.Context(); Assert.Equal("2026-10-23", state.TargetDate); Assert.Null(state.TargetTime);
-        Assert.Equal("service-a", state.SelectedServiceId); Assert.Equal("COLLECT_TIME", state.CurrentStep);
+        var state = await f.Context(); Assert.Equal("2026-10-23", state.TargetDate); Assert.Equal("16:00", state.TargetTime);
+        Assert.Equal("service-a", state.SelectedServiceId); Assert.Equal("CONFIRM", state.CurrentStep);
         Assert.Contains("23/10/2026", f.Sent["date-correction"].Content); Assert.Empty(f.Bookings);
         Cost(f, "date correction");
     }
@@ -445,17 +445,19 @@ public sealed class DialogueIntegrationTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Existing_change_location_directive_and_numeric_menu_clear_pending_dependencies()
+    public async Task Existing_change_location_directive_and_numeric_menu_preserve_compatible_dependencies()
     {
         var f = Create(); await Ready(f);
         var state = await f.Context(); state.PreferredTime = new(TimePreferenceKind.Period, From: new(12, 0), Until: new(18, 0));
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, state, default);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Reservation, Directive = ConversationDirective.ChangeLocation });
         await f.HandleTurn("quiero cambiar de sede", "change-location");
-        state = await f.Context(); Assert.Null(state.SelectedLocationId); Assert.Null(state.SelectedServiceId);
-        Assert.Null(state.TargetTime); Assert.Null(state.PreferredTime); Assert.Contains("sede", f.Sent["change-location"].Content);
+        state = await f.Context(); Assert.Equal("sede-a", state.SelectedLocationId); Assert.Equal("service-a", state.SelectedServiceId);
+        Assert.Equal("16:00", state.TargetTime); Assert.NotNull(state.PreferredTime); Assert.Contains("Location", state.PendingDialogueSlots);
+        Assert.Contains("sede", f.Sent["change-location"].Content);
         await f.HandleTurn("2", "location-choice");
-        state = await f.Context(); Assert.Equal("sede-b", state.SelectedLocationId); Assert.Null(state.SelectedServiceId);
+        state = await f.Context(); Assert.Equal("sede-b", state.SelectedLocationId); Assert.Equal("service-a", state.SelectedServiceId);
+        Assert.Equal("16:00", state.TargetTime); Assert.DoesNotContain("Location", state.PendingDialogueSlots);
         Assert.Equal("2026-10-22", state.TargetDate); Assert.Equal("Ana Pérez", state.RealCustomerName); Assert.Empty(f.Bookings);
     }
 

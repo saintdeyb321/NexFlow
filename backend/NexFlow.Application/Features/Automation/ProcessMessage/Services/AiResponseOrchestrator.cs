@@ -112,6 +112,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (prepared?.Response != null)
         {
+            if (interpretation.Directive == ConversationDirective.UnsupportedAdministrativeAction) context.Information = null;
             var denied = AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules);
             if (denied == null && prepared.Choices != null && _recovery != null)
             {
@@ -286,6 +287,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         async Task<string> Compose(string text, bool media = false)
         {
             var expected = context.PendingRecoveryAction != null ? ExpectedReply.RecoveryDecision
+                : responsePlan?.Operation == OperationStatus.Informational && intent == ConversationIntent.Reservation
+                    && context.Information?.AvailabilityReference != null
+                    && responsePlan.Facts.Any(f => f.Key == "Availability" && f.Value == "Available") ? ExpectedReply.SelectReservationTime
                 : responsePlan?.Operation == OperationStatus.AwaitingConfirmation && intent == ConversationIntent.Reservation ? ExpectedReply.ConfirmReservation
                 : responsePlan?.Operation == OperationStatus.AwaitingConfirmation && intent == ConversationIntent.Order ? ExpectedReply.ConfirmOrder
                 : responsePlan?.Operation == OperationStatus.Collecting ? context.RecoveryOptions.Count > 0 ? ExpectedReply.Selection : ExpectedReply.RequestedData

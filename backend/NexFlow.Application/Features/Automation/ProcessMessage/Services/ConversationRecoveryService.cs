@@ -74,7 +74,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         // Formal draft CTAs, not an intent grammar for arbitrary language.
         if (text == "editar" && (context.CurrentGoal is "ORDER" or "BOOKING" or "RESERVATION") && !expiredDraft)
             return await Remember(booking ? "Conservamos tu borrador. ¿Qué dato deseas cambiar: sede, servicio, fecha, hora o nombre?"
-                : "Conservamos tu borrador. ¿Qué producto, cantidad o sede deseas cambiar?");
+                : "Conservamos tu borrador. ¿Qué producto, cantidad o sede deseas cambiar?",
+                expected: booking ? ExpectedReply.EditReservationField : ExpectedReply.Information,
+                referenceIntent: booking ? ConversationIntent.Reservation : null);
         if (Regex.IsMatch(text, @"\b(ignora (?:todas las |las )?instrucciones|system prompt|api key|revela (?:el )?(?:prompt|secreto)|actua como administrador|cambia (?:el )?workspace)\b", RegexOptions.CultureInvariant))
             return await Remember("Solo puedo ayudarte con información y operaciones autorizadas de este negocio. " + Continuation(context));
         if (!text.Split(' ').Contains("no") && (Regex.IsMatch(text, @"\b(asesor humano|hablar con (?:un |una )?(?:asesor|persona|humano)|atencion humana)\b") || text is "asesor" or "humano"))
@@ -157,11 +159,16 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             && (ConversationConfirmation.IsAffirmative(request.MessageText) || DialoguePolicy.IsAcknowledgement(text) || repair))
         {
             var reference = ReservationTimeReference.Current(workspace, context, clock.UtcNow);
+            if (reference != null && question?.Expected == ExpectedReply.SelectReservationTime
+                && ConversationConfirmation.IsAffirmative(request.MessageText))
+                return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation,
+                    Location = reference.LocationId, Service = reference.ServiceId, Date = reference.Date, Time = reference.Time });
             var continuation = reference == null
                 ? "Indica la fecha y hora que deseas seleccionar, o escribe continuemos para retomar el borrador."
                 : $"Consultamos el {DateOnly.ParseExact(reference.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture):dd/MM/yyyy} a las {reference.Time}. "
-                    + $"¿Qué hora deseas seleccionar? Puedes escribir «{reference.Time}» para elegir esa combinación; volveré a verificarla.";
-            return await Remember("No he cambiado ni confirmado tu reserva. " + continuation, referenceIntent: ConversationIntent.Reservation);
+                    + $"¿Deseas elegir esa hora? Puedes responder «Sí» o indicar otra; volveré a verificarla.";
+            return await Remember("No he cambiado ni confirmado tu reserva. " + continuation,
+                expected: reference == null ? ExpectedReply.Information : question!.Expected, referenceIntent: ConversationIntent.Reservation);
         }
         if (repair)
         {
@@ -536,7 +543,10 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         {
             if (context.CurrentStep == "COLLECT_LOCATION") result.AddRange((await locations.GetLocationsAsync(workspace, ct)).Where(l => l.Id != null).OrderBy(l => l.Name).ThenBy(l => l.Id).Select(l => new ConversationMenuOption(l.Id!, l.Name, "Location")));
             else if (context.CurrentStep == "COLLECT_SERVICE" && context.SelectedLocationId != null)
-                result.AddRange((await offerings.GetServicesAsync(workspace, context.SelectedLocationId, null, ct)).Where(s => s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new ConversationMenuOption(s.Id, s.Name, "Service")));
+                result.AddRange((await offerings.GetServicesAsync(workspace, context.SelectedLocationId, null, ct)).Where(s => s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5
+                    && (string.Equals(s.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(s.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && s.LocationIds.Contains(context.SelectedLocationId)))
+                    .OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new ConversationMenuOption(s.Id, s.Name, "Service")));
             else if (context.CurrentStep == "COLLECT_TIME" && context.SelectedLocationId != null && context.SelectedServiceId != null && DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
             {
                 var profile = await profiles.GetProfileAsync(workspace, ct);

@@ -98,7 +98,7 @@ public sealed class RuntimeNaturalBookingTests(ITestOutputHelper output)
             Evidence = [new("Act", text, nameof(DialogueAct.Correction)), new("Service", "extracción dental", "Extracción dental")] });
         await f.HandleTurn(text, "repair-service");
         var after = await f.Context(); Assert.Equal("service-b", after.SelectedServiceId);
-        Assert.Equal("sede-a", after.SelectedLocationId); Assert.Null(after.TargetTime); Assert.Empty(f.Bookings);
+        Assert.Equal("sede-a", after.SelectedLocationId); Assert.Equal("10:00", after.TargetTime); Assert.Empty(f.Bookings);
         Assert.DoesNotContain("Limpieza dental:", f.Sent["repair-service"].Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Extracción dental", f.Sent["repair-service"].Content);
         output.WriteLine("CORRECCIÓN RESERVA\n" + f.Sent["repair-service"].Content);

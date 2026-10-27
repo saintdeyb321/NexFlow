@@ -73,7 +73,7 @@ public sealed class ResponseComposer : IResponseComposer
             catch { return new(text, false, "CompositionFallback", watch.ElapsedMilliseconds); }
         }
         if (settings.EnableAi && plan.AllowCreativeParaphrase && plan.Operation is OperationStatus.Collecting or OperationStatus.Informational
-            && plan.Act is not (DialogueAct.ProviderFailure or DialogueAct.BusinessUnavailable or DialogueAct.Cancellation or DialogueAct.HumanAssistance))
+            && plan.Act == DialogueAct.StartOperation)
         {
             var style=settings.WorkspaceStyles.GetValueOrDefault(plan.WorkspaceId,settings.Style);
             var lead=style switch {

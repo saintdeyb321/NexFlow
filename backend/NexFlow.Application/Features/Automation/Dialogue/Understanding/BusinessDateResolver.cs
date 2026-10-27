@@ -122,7 +122,7 @@ public sealed partial class BusinessDateResolver
     private static int Number(Match match, string group) => int.Parse(match.Groups[group].Value, CultureInfo.InvariantCulture);
 
     // The model isolates a phrase; software still evaluates its calendar meaning.
-    public SlotResolution<DateOnly> ResolveEvidence(string fragment, DateTimeOffset localBusinessNow)
+    public SlotResolution<DateOnly> ResolveEvidence(string fragment, DateTimeOffset localBusinessNow, bool reservation = false, DateOnly? contextDate = null)
     {
         var words = SpanishTextNormalizer.Normalize(fragment).Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var today = DateOnly.FromDateTime(localBusinessNow.DateTime);
@@ -146,7 +146,7 @@ public sealed partial class BusinessDateResolver
                 catch (ArgumentOutOfRangeException) { return SlotResolution<DateOnly>.Invalid("InvalidCalendarDate"); }
             }
         }
-        return Resolve(fragment, localBusinessNow, true);
+        return reservation ? ResolveReservation(fragment, localBusinessNow, true, contextDate) : Resolve(fragment, localBusinessNow, true);
         SlotResolution<DateOnly> Result(DateOnly value) => value < today ? SlotResolution<DateOnly>.Invalid("PastDate")
             : SlotResolution<DateOnly>.Match(value, fragment, source: EvidenceSource.ValidatedLlm);
     }

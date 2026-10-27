@@ -20,18 +20,13 @@ internal static class BookingDraftMerger
         state.CurrentGoal = "RESERVATION";
         if (value.Location.TryGetValue(out var location) && state.SelectedLocationId != location.Id)
         {
-            if (state.SelectedLocationId != null)
-            {
-                state.PendingServiceIds.Clear(); state.TargetTime = null; state.PreferredTime = null;
-                state.PendingDialogueSlots.Remove("Time");
-            }
-            state.SelectedLocationId = location.Id; state.SelectedServiceId = null;
-            state.ReservationServiceOffset = 0; state.PendingDialogueSlots.Remove("Service");
+            // Retain candidate data. BookingFlow revalidates the service and the
+            // exact instant at the new site before issuing a new review.
+            state.SelectedLocationId = location.Id;
+            state.ReservationServiceOffset = 0;
         }
         if (value.Date.TryGetValue(out var date) && state.TargetDate != date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
         {
-            if (state.TargetDate != null)
-            { state.TargetTime = null; state.PreferredTime = null; state.PendingDialogueSlots.Remove("Time"); }
             state.TargetDate = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
         if (value.Name.TryGetValue(out var name)) { state.RealCustomerName = name; state.PendingCustomerName = null; }
@@ -61,8 +56,6 @@ internal static class BookingDraftMerger
         if (candidate is { IsActive: true, RequiresReservation: true, DurationInMinutes: >= 5 }
             && await offerings.IsServiceAvailableAtLocationAsync(workspace, candidate.Id, state.SelectedLocationId, ct))
         {
-            if (state.SelectedServiceId != null && state.SelectedServiceId != candidate.Id)
-            { state.TargetTime = null; state.PreferredTime = null; state.PendingDialogueSlots.Remove("Time"); }
             state.SelectedServiceId = candidate.Id; state.PendingServiceIds.Clear(); state.PendingDialogueSlots.Remove("Service");
         }
         else

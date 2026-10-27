@@ -196,6 +196,26 @@ public class BookingFlow : IBookingFlow
             context.RecoveryLastMessageId = sourceMessageId; context.RecoveryLastResponse = response; context.RecoveryLastInterpretation = null;
             context.LastQuestion = response;
         }
+        if (proposal?.Understanding.SupplementalInformation == ConversationIntent.BusinessHours)
+        {
+            var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var answer = AiIntentAccess.GetDeniedResponse(ConversationIntent.BusinessHours, modules);
+            if (answer == null && context.SelectedLocationId is { } selectedSite)
+            {
+                var hours = (await _hoursRepo.GetBusinessHoursAsync(workspaceId, selectedSite, ct)).ToArray();
+                var siteName = proposal.Understanding.AuthorizedLocations.SingleOrDefault(l => l.Id == selectedSite)?.Name ?? "la sede seleccionada";
+                if (proposal.Understanding.SupplementalDate is { } informationDate)
+                {
+                    var day = hours.SingleOrDefault(h => h.DayOfWeek == (int)informationDate.DayOfWeek);
+                    answer = day is { IsClosed: true } ? $"El {informationDate:dd/MM/yyyy}, {siteName} está cerrada."
+                        : BusinessHoursFormatter.IsOpen(day) ? $"El {informationDate:dd/MM/yyyy}, {siteName} atiende de {day!.OpenTime} a {day.CloseTime}. El horario de atención no garantiza una cita disponible."
+                        : $"No tengo un horario de atención registrado para el {informationDate:dd/MM/yyyy} en {siteName}.";
+                }
+                else answer = $"Horarios de atención registrados para {siteName}:\n" + BusinessHoursFormatter.Format(hours);
+            }
+            response = (answer ?? "Para consultar la atención de hoy necesito saber la sede.") + "\n\n" + response;
+            context.RecoveryLastResponse = response;
+        }
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
         return Plan(response, evidence.Operation == OperationStatus.Collecting);
     }
@@ -209,30 +229,35 @@ public class BookingFlow : IBookingFlow
         // Neither a question's location nor its date/time can overwrite the draft.
         if (context.CurrentGoal is "BOOKING" or "RESERVATION")
         {
+            if (interpretation.Directive == ConversationDirective.ExplainServiceScope)
+            {
+                context.Information = null;
+                evidence.Operation = OperationStatus.Informational;
+                return await ExplainServiceScopeAsync(workspaceId, context, ct);
+            }
             if (interpretation.Directive == ConversationDirective.CancelCurrentFlow)
             {
                 evidence.Operation = OperationStatus.Cancelled;
                 ClearDraft(context);
                 return "He cancelado el borrador de tu reserva. ¿En qué más puedo ayudarte?";
             }
-            if (interpretation.Directive == ConversationDirective.ChangeLocation)
+            var editSlot = interpretation.Directive switch {
+                ConversationDirective.ChangeLocation when string.IsNullOrWhiteSpace(interpretation.Location) => "Location",
+                ConversationDirective.ChangeService when string.IsNullOrWhiteSpace(interpretation.Service) => "Service",
+                ConversationDirective.ChangeDate when string.IsNullOrWhiteSpace(interpretation.Date) => "Date",
+                ConversationDirective.ChangeTime when string.IsNullOrWhiteSpace(interpretation.Time) => "Time",
+                ConversationDirective.ChangeCustomerName when string.IsNullOrWhiteSpace(interpretation.CustomerName) => "Name",
+                _ => null
+            };
+            if (editSlot != null)
             {
-                context.SelectedLocationId = null; context.SelectedServiceId = null; context.TargetTime = null;
-                context.PreferredTime = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service"); context.PendingDialogueSlots.Remove("Time");
+                if (!context.PendingDialogueSlots.Contains(editSlot)) context.PendingDialogueSlots.Add(editSlot);
                 context.ReservationServiceOffset = 0;
                 UpdateStep(context);
-                context.CurrentStep = "COLLECT_LOCATION";
-                return await LocationOptionsAsync(workspaceId, "¿A cuál sede deseas cambiar?", ct);
+                return "Conservo los demás datos de tu reserva; comprobaré que sigan siendo válidos con el cambio.\n\n"
+                    + await PromptAsync(workspaceId, context, false, ct, evidence);
             }
-            if (interpretation.Directive == ConversationDirective.ChangeService)
-            {
-                context.SelectedServiceId = null; context.TargetTime = null;
-                context.PreferredTime = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service"); context.PendingDialogueSlots.Remove("Time");
-                UpdateStep(context);
-                if (string.IsNullOrWhiteSpace(interpretation.Service))
-                    return await GetContinuationAsync(workspaceId, context, ct);
-            }
-            else if (interpretation.Directive == ConversationDirective.ShowOptions
+            if (interpretation.Directive == ConversationDirective.ShowOptions
                 || (interpretation.Intent == ConversationIntent.ServiceQuery && interpretation.QueryKind == OfferingQueryKind.Broad))
             {
                 if (context.CurrentStep == "COLLECT_TIME") return await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence);
@@ -291,17 +316,13 @@ public class BookingFlow : IBookingFlow
             }
             if (context.SelectedLocationId != locationId)
             {
-                if (context.SelectedLocationId != null)
-                { context.PendingServiceIds.Clear(); context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
-                context.SelectedLocationId = locationId; context.SelectedServiceId = null;
-                context.PendingDialogueSlots.Remove("Service");
+                context.SelectedLocationId = locationId;
                 context.ReservationServiceOffset = 0;
             }
             context.PendingDialogueSlots.Remove("Location");
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date) && context.TargetDate != interpretation.Date)
         {
-            if (context.TargetDate != null) { context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
             context.TargetDate = interpretation.Date;
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date)) context.PendingDialogueSlots.Remove("Date");
@@ -328,15 +349,12 @@ public class BookingFlow : IBookingFlow
                     UpdateStep(context);
                     return resolution.Clarification!;
                 }
-                if (context.SelectedServiceId != null && context.SelectedServiceId != resolution.Service.Id && string.IsNullOrWhiteSpace(interpretation.Time))
-                { context.TargetTime = null; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time"); }
                 context.SelectedServiceId = resolution.Service.Id;
                 context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Remove("Service");
             }
             else if (!string.IsNullOrWhiteSpace(context.SelectedServiceId) && !await IsSelectedServiceValidAsync(workspaceId, context, ct))
             {
-                context.SelectedServiceId = null; context.TargetTime = null;
-                context.PreferredTime = null;
+                context.SelectedServiceId = null;
                 UpdateStep(context);
                 return "El servicio seleccionado ya no está disponible para reservar en esta sede.\n\n" +
                     await ServiceOptionsAsync(workspaceId, context.SelectedLocationId, ct);
@@ -361,8 +379,9 @@ public class BookingFlow : IBookingFlow
             if (!available.Any(s => s.IsAvailable && TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
                 == $"{context.TargetDate} {context.TargetTime}"))
             {
+                var requestedTime = context.TargetTime;
                 context.TargetTime = null; UpdateStep(context);
-                return "Ese horario no está disponible.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence);
+                return "Ese horario no está disponible.\n\n" + await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence, anchor: TimeOnly.ParseExact(requestedTime, "HH:mm", CultureInfo.InvariantCulture));
             }
         }
         if (context.CurrentStep != "CONFIRM") return await PromptAsync(workspaceId, context, false, ct, evidence);
@@ -401,8 +420,8 @@ public class BookingFlow : IBookingFlow
                  new("Location", location.Name, VerifiedFactSource.BusinessRepository, location.Id),
                  new("PriceMinorUnits", service.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.BusinessRepository, service.Id)],
                 "¿Confirmas el resumen vigente?", []);
-            return $"📋 *Reserva por confirmar*\n\nSede: {location.Name}\nServicio: {service.Name}\nFecha: {selectedTime:dd/MM/yyyy}\nHora: {selectedTime:HH:mm}\nPaciente: {context.RealCustomerName}\nPrecio: {service.Currency} {service.PriceMinorUnits / 100m:0.00}"
-                + "\n\n¿Confirmas el resumen vigente?\n✅ *Confirmar* — registrar en la agenda\n✏️ *Editar* — cambiar un dato\n❌ *Descartar* — abandonar este borrador";
+            return $"📋 *Reserva por confirmar*\n\nSede: {location.Name}\nServicio: {service.Name}\nFecha: {selectedTime:dd/MM/yyyy}\nHora: {selectedTime:HH:mm}\nPaciente: {context.RealCustomerName}\nPrecio: {OfferingResponseFormatter.Money(service.Currency, service.PriceMinorUnits)}"
+                + "\n\n¿Confirmas estos datos? Puedes responder «Confirmar» o «Sí» para registrar la cita.\nPara cambiar un dato, dime cuál o escribe «Editar». Para abandonar el borrador, escribe «Descartar».";
         }
         context.ReservationCommitSourceMessageId = sourceMessageId;
         await _contextStore.SaveContextAsync(workspaceId, phone, context, ct);
@@ -413,8 +432,9 @@ public class BookingFlow : IBookingFlow
             evidence.Operation = OperationStatus.Succeeded;
             evidence.Facts.Add(new("ReservationStatus", "Confirmed", VerifiedFactSource.TransactionEngine));
             var name = context.RealCustomerName;
+            var location = authorizedLocations.Single(l => l.Id == context.SelectedLocationId);
             ClearDraft(context);
-            return $"✅ ¡Todo listo, {name}! Tu reserva está confirmada:\n• Servicio: {service.Name}\n• Fecha: {selectedTime:dd/MM/yyyy}\n• Hora: {selectedTime:HH:mm}\n\n¡Te esperamos!";
+            return $"✅ ¡Todo listo, {name}! Tu reserva está confirmada:\n• Sede: {location.Name}\n• Servicio: {service.Name}\n• Fecha: {selectedTime:dd/MM/yyyy}\n• Hora: {selectedTime:HH:mm}\n• Referencia: {result.Value.Id}\n\n¡Te esperamos!";
         }
         context.TargetTime = null;
         if (result.Error.Code is "Reservation.Closed" or "Reservation.OutOfHours")
@@ -554,7 +574,8 @@ public class BookingFlow : IBookingFlow
                 if (point.Length > 0)
                 {
                     evidence.Facts.Add(new("Availability", "Available", VerifiedFactSource.TransactionEngine));
-                    return $"Sí, el {label} está disponible para {service.Name}. No he cambiado ni confirmado tu reserva. Puedes escribir esa hora para seleccionarla.";
+                    evidence.Question = "¿Deseas elegir esa hora para tu reserva?";
+                    return $"Sí, el {label} está disponible para {service.Name}.\n\n¿Deseas elegir esa hora para tu reserva? Puedes responder «Sí» o indicar otra. Todavía no he confirmado la cita.";
                 }
                 introduction = clocks[0] < open || clocks[0].ToTimeSpan() + TimeSpan.FromMinutes(service.DurationInMinutes.Value) > close.ToTimeSpan()
                     ? $"El {label} queda fuera de la jornada de atención."
@@ -574,11 +595,12 @@ public class BookingFlow : IBookingFlow
                     _ => null
                 };
             var alternatives = slots.DistinctBy(s => s.StartTime)
+                .Where(s => clocks.Length != 1 || Math.Abs((TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).TimeOfDay - clocks[0].ToTimeSpan()).Ticks) <= TimeSpan.FromHours(2).Ticks)
                 .OrderBy(s => anchor.HasValue ? Math.Abs((TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).TimeOfDay - anchor.Value).Ticks) : 0)
                 .ThenBy(s => s.StartTime).Take(3)
                 .Select(s => TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture)).ToArray();
             return introduction + (alternatives.Length == 0 ? " No encontré horarios disponibles que coincidan. ¿Qué otra fecha u hora deseas comprobar?"
-                : " Horarios disponibles: " + string.Join(", ", alternatives) + ". Escribe la hora que deseas seleccionar; no he modificado el borrador.");
+                : " Horarios disponibles: " + string.Join(", ", alternatives) + ". Son algunas sugerencias cercanas; puedes indicar una de ellas u otra hora para comprobarla. No he modificado el borrador.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return "No pude comprobar la disponibilidad en este momento. Conservamos tu borrador; puedes consultar de nuevo o solicitar un asesor."; }
@@ -603,15 +625,38 @@ public class BookingFlow : IBookingFlow
     private async Task<List<ServiceDto>> ReservableServicesAsync(Guid workspaceId, string locationId, CancellationToken ct)
     {
         return (await _offeringService.GetServicesAsync(workspaceId, locationId, null, ct))
-            .Where(s => s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5)
+            .Where(s => s.IsActive && s.RequiresReservation && s.DurationInMinutes >= 5
+                && (string.Equals(s.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(s.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && s.LocationIds.Contains(locationId)))
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal).ToList();
     }
 
     private async Task<bool> IsSelectedServiceValidAsync(Guid workspaceId, ConversationContextDto context, CancellationToken ct)
     {
         var service = await _offeringService.GetServiceByIdAsync(workspaceId, context.SelectedServiceId!, ct);
-        return service is { RequiresReservation: true, DurationInMinutes: >= 5 } &&
+        return service is { IsActive: true, RequiresReservation: true, DurationInMinutes: >= 5 } &&
             await _offeringService.IsServiceAvailableAtLocationAsync(workspaceId, service.Id, context.SelectedLocationId!, ct);
+    }
+
+    private async Task<string> ExplainServiceScopeAsync(Guid workspace, ConversationContextDto context, CancellationToken ct)
+    {
+        var sites = (await _locationRepo.GetLocationsAsync(workspace, ct)).Where(l => l.Id != null).ToArray();
+        var site = sites.SingleOrDefault(l => l.Id == context.SelectedLocationId);
+        if (site == null) return "El catálogo general y los servicios reservables por sede pueden ser distintos. ¿En qué sede deseas comprobarlos?";
+        var all = (await _offeringService.GetServicesAsync(workspace, null, null, ct)).Where(s => s.IsActive).ToArray();
+        bool Reservable(ServiceDto s) => s.RequiresReservation && s.DurationInMinutes >= 5;
+        bool At(ServiceDto s, string id) => string.Equals(s.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(s.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && s.LocationIds.Contains(id);
+        var here = all.Where(s => Reservable(s) && At(s, site.Id!)).ToArray();
+        var explanation = $"El catálogo general actual tiene {all.Length} servicios; {here.Length} se pueden reservar en {site.Name}.";
+        foreach (var other in all.Except(here).Take(5))
+        {
+            var otherSites = Reservable(other) ? sites.Where(l => At(other, l.Id!)).Select(l => l.Name).Take(5).ToArray() : [];
+            explanation += "\n\n• " + other.Name + (otherSites.Length > 0
+                ? ": se ofrece para reservas en " + string.Join(", ", otherSites) + "."
+                : ": no figura como reservable en esta sede; puedes consultarlo con el negocio.");
+        }
+        return explanation + "\n\n" + await GetContinuationAsync(workspace, context, ct, concise: true);
     }
 
     private async Task<string> WeeklyHoursAsync(Guid workspaceId, string locationId, CancellationToken ct)
@@ -623,7 +668,7 @@ public class BookingFlow : IBookingFlow
         return $"Horario de atención de {location.Name}:\n" + BusinessHoursFormatter.Format(hours);
     }
 
-    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct, TurnEvidence? evidence = null, bool showOptions = true)
+    private async Task<string> AvailabilityOptionsAsync(Guid workspaceId, ConversationContextDto context, bool preserveDraft, CancellationToken ct, TurnEvidence? evidence = null, bool showOptions = true, TimeOnly? anchor = null)
     {
         if (!DateTime.TryParseExact(context.TargetDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
         {
@@ -671,12 +716,20 @@ public class BookingFlow : IBookingFlow
             slots = new TimePreferenceResolver().FilterAvailableSlots(slots, DateOnly.FromDateTime(date), zone, context.PreferredTime).ToList();
             if (slots.Count == 0) return "Hay horarios disponibles, pero ninguno coincide con tu preferencia. ¿Qué otra franja u hora prefieres?";
         }
+        // Suggestions are a bounded view of real engine results, not the full
+        // set of permitted starts. Keep the customer's requested time relevant.
+        if (anchor.HasValue)
+            slots = slots.Where(s => Math.Abs((TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).TimeOfDay - anchor.Value.ToTimeSpan()).Ticks) <= TimeSpan.FromHours(2).Ticks)
+                .OrderBy(s => Math.Abs((TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).TimeOfDay - anchor.Value.ToTimeSpan()).Ticks))
+                .ThenBy(s => s.StartTime).Take(3).ToList();
+        else slots = slots.Take(5).ToList();
+        if (slots.Count == 0) return "No encontré una alternativa cercana a esa hora. ¿Prefieres consultar otra hora o fecha?";
         if (evidence != null) { evidence.Zone = zone.Id; evidence.Set(
             slots.Select(s => new VerifiedFact("AvailableStartUtc", s.StartTime.ToString("O", CultureInfo.InvariantCulture), VerifiedFactSource.TransactionEngine)).ToArray(),
             "¿Qué horario prefieres?", slots.Select(s => {
                 var label = TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture);
                 return new ConversationMenuOption(label, label, "Time"); }).ToArray()); }
-        if (evidence != null) return $"Horarios disponibles para el {date:dd/MM/yyyy}:\n\n¿Cuál horario prefieres?";
+        if (evidence != null) return $"Algunas sugerencias disponibles para el {date:dd/MM/yyyy}; también puedes consultar otra hora:\n\n¿Cuál horario prefieres?";
         return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
             string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
             (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +

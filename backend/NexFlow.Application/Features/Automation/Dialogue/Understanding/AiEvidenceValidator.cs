@@ -67,7 +67,10 @@ internal static class AiEvidenceValidator
             var span = evidence?.Text ?? (Supplied(ai.Date) ? ai.Date : "");
             var resolver = new BusinessDateResolver();
             var canonical = evidence?.CanonicalText;
-            var resolved = resolver.ResolveEvidence(canonical is { Length: > 0 and <= 100 } && SurfaceEquivalent(span, canonical) ? canonical : span, value.Context.LocalBusinessNow);
+            var resolved = resolver.ResolveEvidence(canonical is { Length: > 0 and <= 100 } && SurfaceEquivalent(span, canonical) ? canonical : span,
+                value.Context.LocalBusinessNow, ai.Intent == NexFlow.Domain.Enums.ConversationIntent.Reservation,
+                DateOnly.TryParseExact(value.Context.DraftDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var draftDate) ? draftDate : null);
             var remainder = span.Length > 0 ? resolver.Resolve(original.Replace(span, " ", StringComparison.OrdinalIgnoreCase), value.Context.LocalBusinessNow) : date;
             date = resolved.TryGetValue(out var candidate) && candidate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) == ai.Date
                 && (correcting || remainder.Status == ResolutionStatus.Insufficient && remainder.Code != "SemanticComposition")
@@ -88,6 +91,13 @@ internal static class AiEvidenceValidator
         }
         var validated = value with { Name = name, Location = Entity("Location", value.Location, ai.Location, value.AuthorizedLocations),
             Service = Entity("Service", value.Service, ai.Service, value.AuthorizedServices), Date = date, Time = time };
+        validated = validated with { SupplementalInformation = ai.InformationalIntent == NexFlow.Domain.Enums.ConversationIntent.BusinessHours
+            && Evidence("Information", nameof(NexFlow.Domain.Enums.ConversationIntent.BusinessHours)) != null
+                ? NexFlow.Domain.Enums.ConversationIntent.BusinessHours : null };
+        if (validated.SupplementalInformation != null && new BusinessDateResolver().Resolve(
+            Evidence("Information", nameof(NexFlow.Domain.Enums.ConversationIntent.BusinessHours))!.Text,
+            value.Context.LocalBusinessNow).TryGetValue(out var informationDate))
+            validated = validated with { SupplementalDate = informationDate };
         if (new[] { validated.Name.Code, validated.Location.Code, validated.Service.Code, validated.Date.Code, validated.Time.Code }
             .Any(code => code.StartsWith("Unsubstantiated", StringComparison.Ordinal)))
             NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationDiagnostics.Count("SemanticEvidence", "Rejected");

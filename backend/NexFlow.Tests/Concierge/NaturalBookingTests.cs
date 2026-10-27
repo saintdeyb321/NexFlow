@@ -123,7 +123,7 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
         f.OfferingReads.Invocations.Clear();
         var before = Draft(await f.Context());
         await Turn(f, "¿Cuánto cuesta?");
-        Assert.Equal(before, Draft(await f.Context())); Assert.Contains($"{f.Services[0].Currency} 25.00", f.Sent.Values.Last().Content);
+        Assert.Equal(before, Draft(await f.Context())); Assert.Contains("S/ 25.00", f.Sent.Values.Last().Content);
         // Sprint 4 reuses the current point read instead of querying the full type
         // through KnowledgeService (whose legacy fixture returned a fixed S/25).
         f.KnowledgeReads.Verify(k => k.QueryAsync(f.Workspace, It.Is<BusinessKnowledgeSnapshot>(s => s.WorkspaceId == f.Workspace),
@@ -138,13 +138,13 @@ public sealed class NaturalBookingTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task E_location_change_invalidates_service_and_time_until_revalidated()
+    public async Task E_location_change_preserves_service_and_time_after_revalidation()
     {
         var f = Create(); await Turn(f, "Soy Ana Pérez, quiero limpieza dental en Concepción pasado mañana"); await Turn(f, "16:00");
         await Turn(f, "Mejor San Jerónimo"); var state = await f.Context();
-        Assert.Equal("sede-b", state.SelectedLocationId); Assert.Null(state.SelectedServiceId); Assert.Null(state.TargetTime);
+        Assert.Equal("sede-b", state.SelectedLocationId); Assert.Equal("service-a", state.SelectedServiceId); Assert.Equal("16:00", state.TargetTime);
         Assert.Equal("Ana Pérez", state.RealCustomerName); Assert.Equal("2026-10-22", state.TargetDate);
-        await Turn(f, "Limpieza dental"); await Turn(f, "por la tarde"); await Turn(f, "16:00"); await Turn(f, "sí");
+        Assert.Empty(f.Bookings); await Turn(f, "sí");
         Assert.Equal("sede-b", Assert.Single(f.Bookings.Values).LocationId);
     }
 

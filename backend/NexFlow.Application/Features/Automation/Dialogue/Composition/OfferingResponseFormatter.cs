@@ -12,8 +12,9 @@ public static class OfferingResponseFormatter
 
     private static string Line(VerifiedOffering p, bool broad)
     {
-        var line = $"• {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m:0.00}";
-        if (p.DurationMinutes.HasValue) line += $"; duración: {p.DurationMinutes.Value} min";
+        var line = p.Type == "SERVICE" ? $"• *{p.Name}*\n  {Money(p.Currency, p.PriceMinorUnits)}"
+            : $"• {p.Name}: {p.Currency} {p.PriceMinorUnits / 100m:0.00}";
+        if (p.DurationMinutes.HasValue) line += $" · {p.DurationMinutes.Value} min";
         if (!string.IsNullOrWhiteSpace(p.Description) && !broad) line += ". " + p.Description;
         return line;
     }
@@ -24,11 +25,13 @@ public static class OfferingResponseFormatter
         if (query.Offerings.Count == 0) return "No tengo una opción activa registrada que coincida con tu consulta.";
         if (Realization(query) is { } verifiedLayout) return verifiedLayout.CanonicalText;
         var facts = query.Offerings.Take(5).Select(p => Line(p, query.Broad));
-        var text = "*" + (query.Type == "PRODUCT" ? "Productos del catálogo" : "Servicios del negocio") + "*\n\n" + string.Join("\n", facts);
+        var text = "*" + (query.Type == "PRODUCT" ? "Productos del catálogo" : "Servicios del negocio") + "*\n\n" + string.Join("\n\n", facts);
         if (query.PageRestarted) text = "El catálogo cambió. Esta es la primera página actualizada.\n\n" + text;
-        if (query.Broad && query.TotalCount > 0)
-            text += $"\n\nMostrando {query.PageOffset + 1}–{query.PageOffset + query.Offerings.Count} de {query.TotalCount}."
-                + (query.PageOffset + query.Offerings.Count < query.TotalCount ? "\nPara continuar, responde *Ver más*." : "");
+        if (query.Broad && query.PageOffset + query.Offerings.Count < query.TotalCount)
+            text += "\n\nEstas son algunas opciones. Puedes pedir «Ver más» para continuar.";
+        if (query.Type == "SERVICE" && query.Broad)
+            text += query.LocationId == null ? "\n\nEl catálogo general puede incluir servicios de distintas sedes. Para reservar, comprobaré el servicio y la hora en la sede que elijas."
+                : "\n\nEstos servicios corresponden a la sede consultada. Una reserva requiere comprobar disponibilidad para la fecha y hora elegidas.";
         if (query.Question is OfferingQuestion.Stock || query.Question == OfferingQuestion.Availability && query.Type == "PRODUCT")
             text += "\n\nEsto confirma su presencia en el catálogo, no existencias de stock ni una entrega garantizada; el negocio debe confirmarlas.";
         if (query.Question == OfferingQuestion.Availability && query.Type == "SERVICE")
@@ -40,6 +43,7 @@ public static class OfferingResponseFormatter
             text = "Estas son sus características registradas:\n" + text + "\nNo hay otras diferencias verificadas que pueda afirmar.";
         return text;
     }
+    public static string Money(string currency, long minorUnits) => $"{(currency == "PEN" ? "S/" : currency)} {(minorUnits / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
     public static string Capabilities(IReadOnlySet<string> modules)
     {
         var options = new List<string>();

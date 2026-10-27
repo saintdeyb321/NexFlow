@@ -93,6 +93,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
                     ?? (context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction));
         var readOnlyQuestion = context.CurrentGoal is "BOOKING" or "RESERVATION"
             && (OrderMentionResolver.IsQuestion(request.MessageText) || OrderMentionResolver.IsHypothetical(request.MessageText));
+        var mixedQuestion = readOnlyQuestion && act == DialogueAct.Correction;
         var temporalProbe = readOnlyQuestion && new TimePreferenceResolver().Resolve(request.MessageText).Status != ResolutionStatus.Insufficient;
         var activeBooking = context.CurrentGoal is "BOOKING" or "RESERVATION";
         if (!temporalProbe && (!activeBooking || readOnlyQuestion || InformationalRequest.Catalog(request.MessageText))
@@ -109,7 +110,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             var matching = local.Time.Candidates.Where(c => c.Value.ExactTime is { } time && TimePreferenceResolver.Matches(time, preference)).ToArray();
             if (matching.Length == 1) local = local with { Time = SlotResolution<TimePreference>.Match(matching[0].Value, matching[0].RawText) };
         }
-        if (readOnlyQuestion && (local.Time.Status != ResolutionStatus.Insufficient || local.Date.Status != ResolutionStatus.Insufficient)
+        if (readOnlyQuestion && !mixedQuestion && (local.Time.Status != ResolutionStatus.Insufficient || local.Date.Status != ResolutionStatus.Insufficient)
             && !new[] { local.Date.Code, local.Time.Code, local.Location.Code, local.Service.Code }.Any(code => code is "SemanticComposition" or "UnknownEntity"))
             return PrepareBooking(local, DialogueAct.InformationalInterruption, false, workspace, request.MessageId, readOnly: true);
         // An explicit literal choice of the just-verified time selects that whole
@@ -124,7 +125,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         { booking = true; act = DialogueAct.StartOperation; }
         if (context.PendingCustomerName != null && local.Name.Code == "SurnameMissing" && context.CurrentStep == "COLLECT_CUSTOMERNAME")
             local = local with { Name = new NameSlotResolver().Resolve(context.PendingCustomerName + " " + local.Name.Candidates[0].Value, true) };
-        var dataTurn = booking && act is DialogueAct.StartOperation or DialogueAct.RequestedData or DialogueAct.Correction;
+        var dataTurn = booking && !mixedQuestion && act is DialogueAct.StartOperation or DialogueAct.RequestedData or DialogueAct.Correction;
         if (booking && act == DialogueAct.Correction && ConversationConfirmation.IsCorrection(request.MessageText))
         {
             var words = normalized.Split(' ');
@@ -140,6 +141,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             || local.Name.Candidates.Count > 0;
         var semanticGap = new[] { local.Date.Code, local.Time.Code, local.Name.Code, local.Location.Code, local.Service.Code }
             .Any(code => code is "SemanticComposition" or "UnknownEntity") || !understood && local.Time.Code == "TimeNotUnderstood";
+        // Locally extracting a date from a negated correction does not establish
+        // whether it is the rejected or the requested value.
+        semanticGap |= dataTurn && normalized.Split(' ').Contains("no");
         semanticGap |= booking && (local.Service.Status == ResolutionStatus.Ambiguous
                 && local.Service.Candidates.Any(c => c.Value.Id == context.SelectedServiceId)
             || local.Location.Status == ResolutionStatus.Ambiguous
@@ -173,7 +177,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         { interpretation = new() { Intent = ConversationIntent.ProviderUnavailable, Failure = NexFlow.Application.Engines.AI.AiFailureKind.Timeout }; }
         if (interpretation.Intent is ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)
             return new(DialogueAct.ProviderFailure, interpretation, true);
-        if (commerce != null && interpretation.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
+        if (commerce != null && interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
             && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct, interpretation) is { } understoodOrder)
             return understoodOrder with { UsedAi = true };
         var actEvidence = (interpretation.Evidence ?? []).Where(e => e != null && e.Slot == "Act").ToArray();
@@ -181,6 +185,21 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && !string.IsNullOrWhiteSpace(actEvidence[0].Text) && actEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(request.MessageText, actEvidence[0].Text)
             && actEvidence[0].NormalizedValue == interpretation.Act?.ToString();
+        var informationSpans = (interpretation.Evidence ?? []).Where(e => e.Slot == "Information").ToArray();
+        var informationSpan = interpretation.InformationalIntent == ConversationIntent.BusinessHours && informationSpans.Length == 1
+            ? informationSpans[0] : null;
+        var operationText = request.MessageText;
+        var operationResolved = false;
+        if (backedAct && interpretation.Intent == ConversationIntent.Reservation
+            && interpretation.Act is DialogueAct.StartOperation or DialogueAct.Correction
+            && informationSpan is { NormalizedValue: nameof(ConversationIntent.BusinessHours), Text.Length: > 0 and <= 300 }
+            && AiEvidenceValidator.HasFragment(request.MessageText, informationSpan.Text))
+        {
+            operationText = request.MessageText.Replace(informationSpan.Text, " ", StringComparison.OrdinalIgnoreCase);
+            local = await slots.ResolveAsync(workspace, request.MessageId, operationText, context,
+                SlotResolutionPurpose.Reservation, new(true, true, false), ct);
+            operationResolved = true;
+        }
         if (interpretation.Directive == ConversationDirective.SelectReferencedTime)
         {
             var reference = ReservationTimeReference.Current(workspace, context, local.Context.LocalBusinessNow.UtcDateTime);
@@ -194,20 +213,39 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         // identifies an entity that a simple-slot read deliberately omitted.
         if (booking && interpretation.Intent == ConversationIntent.Reservation
             && (interpretation.Service != null && local.AuthorizedServices.Count == 0 || interpretation.Location != null && local.AuthorizedLocations.Count == 0))
-            local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
+        {
+            local = await slots.ResolveAsync(workspace, request.MessageId, operationText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
+            operationResolved = true;
+        }
+        if (booking && backedAct && interpretation.Act == DialogueAct.Correction && interpretation.Intent == ConversationIntent.Reservation)
+            local = AiEvidenceValidator.Validate(local, interpretation, request.MessageText);
+        if (interpretation.Directive == ConversationDirective.UnsupportedAdministrativeAction)
+            return new(DialogueAct.Information, new() { Intent = ConversationIntent.General, Directive = ConversationDirective.UnsupportedAdministrativeAction }, true,
+                "No puedo borrar datos ni realizar tareas administrativas por WhatsApp. "
+                    + (booking ? "Tu reserva en preparación sigue guardada. " : "")
+                    + "Puedo ayudarte con consultas del negocio o solicitar atención humana.");
+        if (booking && (interpretation.Directive == ConversationDirective.ChangeLocation && local.Location.Status != ResolutionStatus.Determined
+            || interpretation.Directive == ConversationDirective.ChangeService && local.Service.Status != ResolutionStatus.Determined
+            || interpretation.Directive == ConversationDirective.ChangeDate && local.Date.Status != ResolutionStatus.Determined
+            || interpretation.Directive == ConversationDirective.ChangeTime && local.Time.Status != ResolutionStatus.Determined
+            || interpretation.Directive == ConversationDirective.ChangeCustomerName && local.Name.Status != ResolutionStatus.Determined
+            || interpretation.Directive == ConversationDirective.ShowOptions
+            || interpretation.Directive == ConversationDirective.ExplainServiceScope))
+            return new(DialogueAct.Correction, new() { Intent = ConversationIntent.Reservation, Directive = interpretation.Directive }, true);
         if (booking && backedAct && interpretation.Act == DialogueAct.InformationalInterruption && interpretation.Intent == ConversationIntent.Reservation)
             return PrepareBooking(AiEvidenceValidator.Validate(local, interpretation, request.MessageText), DialogueAct.InformationalInterruption, true, workspace, request.MessageId, readOnly: true);
         if (booking && backedAct && interpretation.Act == DialogueAct.Correction
             && interpretation.Intent == ConversationIntent.Reservation)
-            return PrepareBooking(AiEvidenceValidator.Validate(local, interpretation, request.MessageText), DialogueAct.Correction, true, workspace, request.MessageId);
+            return PrepareBooking(local, DialogueAct.Correction, true, workspace, request.MessageId);
         if (interpretation.Intent == ConversationIntent.Reservation && backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
             && !contradictory && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
         {
             // Semantic intent can start a draft; only licensed, reservable entities
             // from this workspace can enter it. Confirmation remains server-owned.
-            local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
+            if (!operationResolved)
+                local = await slots.ResolveAsync(workspace, request.MessageId, operationText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
             local = AiEvidenceValidator.Validate(local, interpretation, request.MessageText);
-            if (local.Service.Status == ResolutionStatus.Determined)
+            if (new[] { local.Location.Status, local.Service.Status, local.Date.Status, local.Time.Status }.Any(s => s == ResolutionStatus.Determined))
                 return PrepareBooking(local, DialogueAct.StartOperation, true, workspace, request.MessageId);
         }
         // Informational interruptions never turn extracted entities into mutations of a business draft.
@@ -226,17 +264,13 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         if (interpretation.Intent == ConversationIntent.Request && context.CurrentGoal == null
             && backedAct && interpretation.Act == DialogueAct.StartOperation)
             return new(DialogueAct.StartOperation, interpretation, true);
-        if (booking && (interpretation.Directive == ConversationDirective.ChangeLocation && local.Location.Status != ResolutionStatus.Determined
-            || interpretation.Directive == ConversationDirective.ChangeService && local.Service.Status != ResolutionStatus.Determined
-            || interpretation.Directive == ConversationDirective.ShowOptions))
-            return new(DialogueAct.Correction, new() { Intent = ConversationIntent.Reservation, Directive = interpretation.Directive }, true);
         if (interpretation.Intent == ConversationIntent.Reservation || booking && interpretation.Intent != ConversationIntent.Order && interpretation.Intent != ConversationIntent.Request)
         {
             if (!booking && act != DialogueAct.StartOperation)
                 return new(DialogueAct.OperationInformation, new() { Intent = ConversationIntent.Reservation }, true, DialoguePolicy.Instruction);
             // A semantic result can require entities not loaded for a simple-slot attempt.
             if (!booking && (interpretation.Service != null && local.AuthorizedServices.Count == 0 || interpretation.Location != null && local.AuthorizedLocations.Count == 0))
-                local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
+                local = await slots.ResolveAsync(workspace, request.MessageId, operationText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
             local = AiEvidenceValidator.Validate(local, interpretation, request.MessageText);
             return PrepareBooking(local, act, true, workspace, request.MessageId);
         }
