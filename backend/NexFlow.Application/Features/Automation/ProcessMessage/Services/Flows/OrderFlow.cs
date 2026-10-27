@@ -23,7 +23,7 @@ public interface IOrderFlow
 }
 
 public sealed class OrderFlow(IOrderRepository orders, INotificationService notifications, IContextRecoveryService contexts,
-    IOfferingService offerings, IEntitlementService entitlements) : IOrderFlow
+    IOfferingService offerings, IEntitlementService entitlements, IClock? clock = null, ILocationRepository? locations = null) : IOrderFlow
 {
     public async Task<string?> TryResumeAsync(Guid workspaceId, string phone, string conversationId, string sourceMessageId, ConversationContextDto context, CancellationToken ct)
     {
@@ -71,6 +71,8 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
             return Plan(denied,OperationStatus.Denied);
         }
         if (context.OrderLastSourceMessageId == sourceMessageId && context.OrderLastResponse != null) return Plan(context.OrderLastResponse);
+        if (context.PendingRecoveryAction != null)
+            return Plan("Resuelve primero la decisión pendiente sobre el borrador. No he enviado la solicitud.");
         if (context.CurrentGoal is not (null or "ORDER")) return Plan("Completa la operación actual o solicita cancelar su preparación antes de iniciar un pedido.");
         var resuming = context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true && context.OrderLastSourceMessageId == sourceMessageId;
         if (context.CurrentStep?.StartsWith("ORDER_COMMIT",StringComparison.Ordinal) == true && !resuming) throw new ConcurrencyException("An earlier order commit must recover before processing another turn.");
@@ -92,15 +94,26 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         if (proposal == null)
         {
             var result = new OrderMentionResolver().Resolve(messageText,products,context,OfferingReference.Read(workspaceId,context));
-            var kind = OrderMentionResolver.IsSubmit(messageText) ? OrderTurnKind.Submit
+            var kind = OrderMentionResolver.IsSubmit(messageText) || ConversationConfirmation.IsAffirmative(messageText) ? OrderTurnKind.Submit
                 : OrderMentionResolver.IsQuestion(messageText) ? OrderTurnKind.Summary : result.Error == null ? OrderTurnKind.Edit : OrderTurnKind.Summary;
             proposal = new(workspaceId,sourceMessageId,context.StateVersion,kind,Array.AsReadOnly(result.Edits.ToArray()));
         }
+        string? locationName = null;
         try
         {
             var staged = OrderDraftMerger.Apply(workspaceId,sourceMessageId,context,proposal,products);
             var location = proposal.LocationId ?? context.SelectedLocationId;
-            var quote = OrderDraftMerger.Price(workspaceId,staged,products,location);
+            if (location != null)
+            {
+                var authorized = locations == null ? [] : (await locations.GetLocationsAsync(workspaceId, ct)).Where(l => l.Id == location).ToArray();
+                if (authorized.Length != 1 || string.IsNullOrWhiteSpace(authorized[0].Name))
+                {
+                    context.CurrentQuestion = null;
+                    return await Remember("La sede seleccionada ya no está disponible. Indica otra sede para revisar tu solicitud.", OperationStatus.NotAvailable);
+                }
+                locationName = authorized[0].Name;
+            }
+            var quote = OrderDraftMerger.Price(workspaceId,staged,products,location,locationName);
             var needsLocation=quote.NeedsLocation || location==null && context.CurrentStep=="ORDER_LOCATION";
             if (proposal.Kind == OrderTurnKind.Hypothetical)
                 return await Remember("Si eligieras esas cantidades, quedaría así:\n" + quote.Text + "\nNo he cambiado tu pedido. Para aplicarlo, indica la nueva cantidad. ¿Qué deseas ajustar?",OperationStatus.Informational,quote);
@@ -108,12 +121,18 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
             {
                 if (!quote.Complete) return await Remember(quote.Text + "\n¿Qué producto deseas corregir o quitar?",OperationStatus.NotAvailable,quote);
                 if (needsLocation) { context.CurrentStep="ORDER_LOCATION"; return await Remember(quote.Text + "\n¿En cuál sede deseas solicitar estos productos?",quote:quote); }
-                var reviewed = context.CurrentGoal == "ORDER" && (context.CurrentStep == "ORDER_REVIEW:" + quote.Fingerprint
-                    || context.CurrentStep == "ORDER_CONFIRM:" + quote.Fingerprint
-                    || resuming && context.CurrentStep == "ORDER_COMMIT:" + quote.Fingerprint);
-                var consent = OrderMentionResolver.IsSubmit(messageText)
-                    || context.CurrentStep == "ORDER_CONFIRM:" + quote.Fingerprint && ConversationConfirmation.IsAffirmative(messageText);
-                if (!reviewed || !consent || proposal?.RequireConfirmation == true)
+                var now = clock?.UtcNow ?? DateTime.UtcNow;
+                var reviewed = ConversationQuestion.HasCurrentOrderReview(workspaceId, conversationId, context, quote.Fingerprint, now);
+                var consent = reviewed && context.CurrentQuestion!.SourceMessageId != sourceMessageId
+                    && ConversationConfirmation.IsAffirmative(messageText) && !proposal.RequireConfirmation;
+                // A checkpoint for this same inbound may recover an already
+                // authorized effect. It must not acquire a different quote.
+                if (resuming && context.CurrentStep == "ORDER_COMMIT:" + quote.Fingerprint)
+                    return await Submit(quote);
+                if (reviewed && !consent)
+                    return await Remember("Tu solicitud sigue lista para enviar. Para autorizar el envío del resumen vigente, responde *Confirmar*. También puedes escribir *Editar* o *Descartar*.",
+                        OperationStatus.AwaitingConfirmation, quote, preserveQuestion: true);
+                if (!consent)
                 {
                     context.CurrentGoal="ORDER";
                     context.CurrentStep="ORDER_CONFIRM:" + quote.Fingerprint;
@@ -136,9 +155,12 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         catch (OverflowException) { return await Remember("La cantidad o el importe supera el máximo permitido. ¿Qué cantidad menor deseas?",OperationStatus.NotAvailable); }
         catch (ArgumentException ex) { return await Remember(ex.Message + " ¿Qué producto deseas corregir?",OperationStatus.NotAvailable); }
 
-        async Task<ResponsePlan> Remember(string text, OperationStatus status = OperationStatus.Collecting, OrderDraftMerger.Quote? quote = null)
+        async Task<ResponsePlan> Remember(string text, OperationStatus status = OperationStatus.Collecting, OrderDraftMerger.Quote? quote = null, bool preserveQuestion = false)
         {
             context.OrderLastSourceMessageId=sourceMessageId; context.OrderLastResponse=text;
+            if (status == OperationStatus.AwaitingConfirmation && !preserveQuestion)
+                ConversationQuestion.Remember(workspaceId, sourceMessageId, context, ExpectedReply.ConfirmOrder,
+                    ConversationIntent.Order, text, clock?.UtcNow ?? DateTime.UtcNow, conversationId);
             await contexts.SaveContextAsync(workspaceId,phone,context,ct);
             return Plan(text,status,quote);
         }
@@ -183,7 +205,8 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
             { context.CurrentStep=null;return await Remember(deniedNow,OperationStatus.Denied); }
             if (conflict.Change == OrderCatalogChange.LocationDeleted) context.SelectedLocationId=null;
             var current=(await offerings.GetProductsAsync(workspaceId,context.SelectedLocationId,null,ct)).Where(p=>p.IsActive).Select(VerifiedOffering.Capture).ToArray();
-            var fresh=OrderDraftMerger.Price(workspaceId,context.OrderDraftItems,current,context.SelectedLocationId);
+            var fresh=OrderDraftMerger.Price(workspaceId,context.OrderDraftItems,current,context.SelectedLocationId,
+                context.SelectedLocationId == null ? null : locationName);
             var description=conflict.Change switch {
                 OrderCatalogChange.Location => "El catálogo cambió: un producto ya no se ofrece en la sede seleccionada.",
                 OrderCatalogChange.LocationDeleted => "El catálogo cambió: la sede seleccionada ya no está disponible.",

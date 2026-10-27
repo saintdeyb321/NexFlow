@@ -214,7 +214,8 @@ public sealed class LinguisticRegression62Tests
         var f = Create(); await f.HandleTurn("Me das dos queques, gracias", "draft");
         await f.HandleTurn("Me das dos queques, gracias", "draft");
         Assert.Equal(2, Assert.Single((await f.Context()).OrderDraftItems).Quantity); Assert.Empty(f.Orders);
-        await f.HandleTurn("enviar pedido", "commit"); await f.HandleTurn("enviar pedido", "commit");
+        await f.HandleTurn("finalizar", "consent-review");
+        await f.HandleTurn("Confirmar", "commit"); await f.HandleTurn("Confirmar", "commit");
         Assert.Single(f.Orders); Assert.Single(f.OrderWrites.Invocations, i => i.Method.Name == "CreateOrderAsync");
     }
 

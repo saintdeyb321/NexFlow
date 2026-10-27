@@ -224,7 +224,8 @@ public sealed class RuntimeOrderRequestTests(ITestOutputHelper output)
         Assert.Equal(2, (await f.Context()).OrderDraftItems.Count); Assert.Empty(f.Orders);
         await f.HandleTurn("Mejor cuatro panes", "correct");
         Assert.Equal(4, (await f.Context()).OrderDraftItems.Single(i => i.ProductId == "product-a").Quantity);
-        await f.HandleTurn("envía el pedido", "submit"); await f.HandleTurn("envía el pedido", "submit");
+        await f.HandleTurn("finalizar", "review-submit");
+        await f.HandleTurn("Confirmar", "submit"); await f.HandleTurn("Confirmar", "submit");
         Assert.Equal(OrderStatus.PendingReview, Assert.Single(f.Orders.Values).Status);
         Assert.Single(f.OrderWrites.Invocations, i => i.Method.Name == "CreateOrderAsync");
         Assert.Contains("revisará", f.Sent["submit"].Content); Assert.Equal(0, f.AiCalls);

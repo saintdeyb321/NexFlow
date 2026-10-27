@@ -2,7 +2,35 @@
 
 Fecha: 2026-10-26. Referencia local, `origin/main` y `main` remoto comprobado mediante `git ls-remote`: `4840b3b0258da47834dd990a73e2fc3ab9e33dc5`. Árbol inicialmente limpio. Sin cambios de producción, ramas, commits, migraciones, proveedores reales u Oracle.
 
-## Dictamen
+## Actualización: cierre funcional del MVP sobre fba564d
+
+Esta sección sustituye el dictamen funcional anterior. Se conservan debajo las evidencias de la auditoría original; sus limitaciones del flujo MVP ya no describen el parche actual.
+
+- Reproducción previa: 27 pruebas de consentimiento, 9 fallidas y 18 aprobadas. Se confirmó que `finalizar` desde `ORDER_REVIEW` creaba un pedido, que faltaba renovar referencias inválidas y que se repetía el resumen sin mostrar la sede.
+- `ORDER_REVIEW` ya no permite un nuevo efecto. El backend exige `ORDER_CONFIRM` con fingerprint comercial actual, pregunta `ConfirmOrder/Order` vigente y de la misma conversación/workspace, fuente posterior, ausencia de recuperación pendiente y consentimiento textual explícito. El claim CAS y la revalidación del catálogo/licencia siguen precediendo a la creación `PendingReview` y `NotifyOnce`.
+- El `Submit` semántico no autoriza. Con revisión válida devuelve un recordatorio corto con `Confirmar / Editar / Descartar`, conservando pregunta y vencimiento. Una respuesta explícita válida completa el pedido sin consultar IA; se probó también tras indisponibilidad y rate limit del proveedor.
+- Referencias vencidas, ausentes, futuras, ajenas o con intención/fingerprint incorrectos generan una nueva revisión y requieren otro mensaje. Los recordatorios no renuevan la ventana original de diez minutos.
+- La sede se obtiene del repositorio autorizado del workspace, se muestra por nombre y se vincula al fingerprint. Sedes inexistentes/ajenas y productos fuera de su alcance no pueden confirmarse. `LocationDto` no tiene un campo de desactivación: no se inventó ese contrato. Sin sede seleccionada no se fabrica ninguna.
+- Los checkpoints sin sede conservan su formato de hash; la recuperación de un efecto ya persistido o de `ORDER_COMMIT` del mismo inbound conserva su identidad. Contextos antiguos sin vinculación de conversación deben presentar una nueva revisión antes de un efecto nuevo.
+- Evolution convierte determinadas respuestas interactivas en texto (`EvolutionWebhookController.cs:195`); no se atribuye autenticidad criptográfica a IDs o etiquetas de botones. No se implementó la alternativa interactiva propuesta en la auditoría inicial.
+- Pruebas no congeladas que antes enviaban directamente desde revisión ahora presentan la confirmación y usan un mensaje explícito posterior. Se mantienen sus aserciones de CAS, efectos únicos, recuperación de catálogo, persistencia y notificaciones. No se cambiaron corpus congelados ni workflows.
+
+Validación real del parche final:
+
+| Validación | Ejecutadas | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Consentimiento, dentro de las focalizadas | 32 | 32 | 0 | 0 |
+| Suites focalizadas de pedidos, reservas y recuperación | 258 | 258 | 0 | 0 |
+| Gate oficial `g8_certification.py run current` | 1609 | 1609 | 0 | 0 |
+| Históricos congelados | 130 | 102 | 28 | 0 |
+
+`dotnet build backend/backend.slnx --no-restore`: 0 errores; tres advertencias preexistentes en `refactor`/designer y `FirestoreCatalogRepository.cs:228`. `git diff --check`: sin errores. TRX, logs y reportes del gate: `backend/NexFlow.Tests/TestResults/order-final/`.
+
+**Bloqueo de certificación CI:** los 12 fallos históricos anteriores conservan identidad y motivo. Se añaden `*-03`, `*-04`, `*-19` de los cinco sectores de `CommercialCertificationCorpus.json` y `H26` de `QualityHoldout61.json`: 16 casos `OrderEffects` que esperaban crear un pedido sin la nueva confirmación separada. Los hashes de corpus/evaluadores permanecen intactos. El verificador histórico exige exactamente 118/12 y devuelve **NO-GO** con 102/28. No se amplió su allowlist ni se falseó un PASS. Hace falta una decisión independiente y explícita sobre la compatibilidad de ese contrato congelado con la nueva política de seguridad; no corresponde relajar el flujo productivo para satisfacerlo.
+
+**Estado:** cierre funcional local del MVP explícito aprobado; consentimiento libre arbitrario sigue sin certificarse. Build, focalizadas y gate vigente cumplen la condición de publicación del encargo, pero los cuatro workflows no pueden darse por listos/aprobados debido al gate histórico. No se ejecutaron CI remoto, integraciones reales, proveedores, migraciones ni operaciones de Oracle. El despliegue sigue sin estar autorizado. Las secciones siguientes son el informe histórico de la auditoría anterior.
+
+## Dictamen de la auditoría inicial (anterior al parche)
 
 **P1 confirmado: la autorización libre del resumen vigente continúa PENDIENTE.** Esta intervención añade pruebas y documenta la limitación permitida por el encargo; no habilita consentimiento inferido por IA. Pruebas verdes de caracterización y seguridad **no significan que se haya corregido el bucle**.
 

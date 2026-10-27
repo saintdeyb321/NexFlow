@@ -261,6 +261,11 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Esto no cancela ninguna reserva registrada."
                 : "¿Quieres descartar el borrador actual? Responde sí o no. Esto no cancela una reserva o pedido ya registrado.", DialogueAct.Cancellation, OperationStatus.AwaitingConfirmation);
         }
+        if (context.CurrentGoal == "ORDER" && context.PendingRecoveryAction == null
+            && (context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true
+                || context.CurrentStep?.StartsWith("ORDER_REVIEW:", StringComparison.Ordinal) == true)
+            && question?.Expected != ExpectedReply.Information && ConversationConfirmation.IsAffirmative(request.MessageText))
+            return null; // OrderFlow validates the actual quote/question and renews expired or legacy reviews.
         if (context.PendingRecoveryAction == null && ConversationConfirmation.IsAffirmative(request.MessageText) && context.CurrentQuestion != null)
         {
             if (question == null)

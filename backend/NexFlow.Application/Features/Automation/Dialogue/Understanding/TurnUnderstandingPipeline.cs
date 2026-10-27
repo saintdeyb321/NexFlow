@@ -46,6 +46,12 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             request = request with { MessageText = greeting.Content };
         var act = policy.Classify(request.MessageText, context);
         if (act == DialogueAct.HumanAssistance) return new(act, new() { Intent = ConversationIntent.Support });
+        if (context.CurrentGoal == "ORDER" && (context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true
+            || context.CurrentStep?.StartsWith("ORDER_REVIEW:", StringComparison.Ordinal) == true)
+            && ConversationConfirmation.IsAffirmative(request.MessageText))
+            return new(DialogueAct.Confirmation, new() { Intent = ConversationIntent.Order,
+                OrderProposal = new(workspace, request.MessageId, context.StateVersion, OrderTurnKind.Submit,
+                    Array.AsReadOnly(Array.Empty<OrderEdit>())) });
         if (act == DialogueAct.Cancellation || act == DialogueAct.DeclineOperation && context.CurrentGoal != null)
             return new(DialogueAct.Cancellation, new() { Intent = ConversationIntent.General, Directive = ConversationDirective.CancelCurrentFlow });
         if (act == DialogueAct.DeclineOperation)

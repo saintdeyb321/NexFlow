@@ -12,7 +12,7 @@ public enum ExpectedReply { Information, Selection, RequestedData, StartReservat
 // Backend-owned reference in the existing CAS envelope, not consent or a business command.
 public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, string SourceMessageId,
     ExpectedReply Expected, ConversationIntent Intent, string DraftFingerprint, string? OptionsFingerprint,
-    DateTime IssuedAt, DateTime ExpiresAt)
+    DateTime IssuedAt, DateTime ExpiresAt, string? ConversationId = null)
 {
     public static string Fingerprint(ConversationContextDto state) => Hash(new {
         state.CurrentGoal, state.CurrentStep, state.SelectedLocationId, state.SelectedServiceId,
@@ -31,14 +31,21 @@ public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, s
             ? question : null;
 
     public static void Remember(Guid workspace, string source, ConversationContextDto state, ExpectedReply expected,
-        ConversationIntent intent, string response, DateTime now)
+        ConversationIntent intent, string response, DateTime now, string? conversationId = null)
     {
         // OrderFlow owns its existing continuation question; do not replace it with a quote or factual interruption.
         if (state.CurrentGoal != "ORDER") state.LastQuestion = response;
         state.CurrentQuestion = new(Guid.NewGuid().ToString("N"), workspace, source, expected, intent,
             Fingerprint(state), expected == ExpectedReply.Selection ? Hash(state.RecoveryOptions) : null,
-            now, now.AddMinutes(10));
+            now, now.AddMinutes(10), conversationId);
     }
+
+    public static bool HasCurrentOrderReview(Guid workspace, string conversation, ConversationContextDto state,
+        string quoteFingerprint, DateTime now)
+        => state.CurrentGoal == "ORDER" && state.CurrentStep == "ORDER_CONFIRM:" + quoteFingerprint
+            && state.PendingRecoveryAction == null
+            && Current(workspace, state, now) is { Expected: ExpectedReply.ConfirmOrder, Intent: ConversationIntent.Order } question
+            && question.ConversationId == conversation;
 
     public static bool CanConfirmReservation(Guid workspace, ConversationContextDto state, string text, DateTime now)
         => state.CurrentGoal is "BOOKING" or "RESERVATION" && state.CurrentStep == "CONFIRM"

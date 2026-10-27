@@ -22,28 +22,28 @@ public sealed class CommerceHardeningTests
     public async Task Catalog_mutation_after_transaction_reads_aborts_then_recovers_without_a_stale_order()
     {
         var db=new InMemoryFirestore();var f=new CommerceCertificationFixture(db.Db,db.Resources,Guid.NewGuid());await f.Seed();
-        await f.Turn("Quiero dos panes integrales","draft");
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         db.BeforeCommit=request=>{
             if(!request.Writes.Any(w=>w.Update?.Name.Contains("/orders/",StringComparison.Ordinal)==true)) return null;
             db.BeforeCommit=null;var path=$"workspaces/{f.Workspace}/catalogItems/bread";
             var fields=db.Read(path)!.Fields.ToDictionary(p=>p.Key,p=>p.Value);
             fields["PriceMinorUnits"]=new Value{IntegerValue=350};db.Seed(path,fields);return null;
         };
-        var reply=await f.Turn("envía el pedido","confirm");
+        var reply=await f.Turn("Confirmar","confirm");
         Assert.True(db.AbortedCommits>0);Assert.Contains("7.00",reply);
         Assert.StartsWith("ORDER_CONFIRM:",(await f.State()).CurrentStep);Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
-        await f.Turn("envía el pedido","fresh");Assert.Equal(700,Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default)).TotalAmountMinorUnits);
+        await f.Turn("Confirmar","fresh");Assert.Equal(700,Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default)).TotalAmountMinorUnits);
     }
 
     [Fact]
     public async Task Human_takeover_during_catalog_recovery_cannot_be_overwritten_by_the_old_turn()
     {
-        var db=new InMemoryFirestore();var f=new CommerceCertificationFixture(db.Db,db.Resources,Guid.NewGuid());await f.Seed();await f.Turn("Quiero dos panes integrales","draft");
+        var db=new InMemoryFirestore();var f=new CommerceCertificationFixture(db.Db,db.Resources,Guid.NewGuid());await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.AfterReadProduct=async _=>{
             f.AfterReadProduct=null;var human=await f.State();human.Mode="Human";await f.Context.SaveContextAsync(f.Workspace,"synthetic-client",human,default);
             await db.Db.Collection("workspaces").Document(f.Workspace.ToString()).Collection("catalogItems").Document("bread").UpdateAsync("PriceMinorUnits",500L);
         };
-        await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("envía el pedido","confirm"));
+        await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("Confirmar","confirm"));
         Assert.Equal("Human",(await f.State()).Mode);Assert.Equal(2,Assert.Single((await f.State()).OrderDraftItems).Quantity);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
     }
@@ -64,10 +64,10 @@ public sealed class CommerceHardeningTests
     public async Task Generic_concurrency_and_unknown_transport_failures_are_not_catalog_recoveries(bool transport)
     {
         var db=new InMemoryFirestore();var f=new CommerceCertificationFixture(db.Db,db.Resources,Guid.NewGuid());
-        await f.Seed();await f.Turn("Quiero dos panes integrales","draft");
+        await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.BeforeCreate=()=>Task.FromException(transport ? new IOException("Unknown commit result") : new ConcurrencyException("CAS conflict"));
-        if(transport) await Assert.ThrowsAsync<IOException>(()=>f.Turn("envía el pedido","commit"));
-        else await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("envía el pedido","commit"));
+        if(transport) await Assert.ThrowsAsync<IOException>(()=>f.Turn("Confirmar","commit"));
+        else await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("Confirmar","commit"));
         Assert.StartsWith("ORDER_COMMIT:",(await f.State()).CurrentStep);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
     }
@@ -76,13 +76,13 @@ public sealed class CommerceHardeningTests
     public async Task An_already_committed_identity_is_resumed_instead_of_quoted_or_created_again()
     {
         var db=new InMemoryFirestore();var f=new CommerceCertificationFixture(db.Db,db.Resources,Guid.NewGuid());
-        await f.Seed();await f.Turn("Quiero dos panes integrales","draft");
+        await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.Writes.Setup(r=>r.CreateOrderAsync(f.Workspace,It.IsAny<NexFlow.Application.Features.Orders.DTOs.OrderRecord>(),It.IsAny<CancellationToken>()))
             .Returns(async(Guid w,NexFlow.Application.Features.Orders.DTOs.OrderRecord order,CancellationToken ct)=>{
                 await f.Orders.CreateOrderAsync(w,order,ct);
                 throw new OrderCatalogChangedException(OrderCatalogChange.PriceOrCurrency,"Synthetic boundary failure");
             });
-        Assert.Contains("enviada",await f.Turn("envía el pedido","commit"));
+        Assert.Contains("enviada",await f.Turn("Confirmar","commit"));
         Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         Assert.Single(f.Writes.Invocations,i=>i.Method.Name=="CreateOrderAsync");
     }
@@ -94,7 +94,7 @@ public sealed class CommerceHardeningTests
         var root=db.Db.Collection("workspaces").Document(f.Workspace.ToString());
         await root.Collection("locations").Document("site").SetAsync(new {Name="Synthetic"});
         var state=await f.State();state.SelectedLocationId="site";await f.Context.SaveContextAsync(f.Workspace,"synthetic-client",state,default);
-        await f.Turn("Quiero dos panes integrales","draft");await f.Turn("envía el pedido","commit");
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();await f.Turn("Confirmar","commit");
         var order=Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));Assert.Equal("site",order.RequestedLocationId);
         var doc=root.Collection("orders").Document(order.Id);Assert.Equal("site",(await doc.GetSnapshotAsync()).GetValue<string>("RequestedLocationId"));
         order.RequestedLocationId="foreign-site";
@@ -111,14 +111,14 @@ public sealed class CommerceHardeningTests
         var db=new InMemoryFirestore();var f=new CommerceCertificationFixture(db.Db,db.Resources,Guid.NewGuid());
         await f.Seed();await db.Db.Collection("workspaces").Document(f.Workspace.ToString()).Collection("locations").Document("site").SetAsync(new {Name="Synthetic"});
         var context=await f.State();context.SelectedLocationId="site";await f.Context.SaveContextAsync(f.Workspace,"synthetic-client",context,default);
-        await f.Turn("Quiero dos panes integrales","draft");
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.AfterReadProduct=async _=>{
             f.AfterReadProduct=null;
             var patch=new Dictionary<string,object>{[change=="price" ? "PriceMinorUnits" : change=="currency" ? "Currency" : "LocationScope"]=change=="price" ? 300L : change=="currency" ? "USD" : "SPECIFIC"};
             if(change=="location") patch["LocationIds"]=new[]{"other"};
             await db.Db.Collection("workspaces").Document(f.Workspace.ToString()).Collection("catalogItems").Document("bread").UpdateAsync(patch);
         };
-        var response=await f.Turn("envía el pedido","commit");
+        var response=await f.Turn("Confirmar","commit");
         Assert.Contains("cambi",response,StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         var state=await f.State();Assert.Equal(2,Assert.Single(state.OrderDraftItems).Quantity);
@@ -127,8 +127,8 @@ public sealed class CommerceHardeningTests
             Assert.StartsWith("ORDER_CONFIRM:",state.CurrentStep);
             Assert.Contains(change=="price" ? "6.00" : "USD",response);
             Assert.Contains(change=="price" ? "precio de PEN 2.50 a PEN 3.00" : "moneda de PEN a USD",response);
-            Assert.Equal(response,await f.Turn("envía el pedido","commit"));
-            await f.Turn("envía el pedido","fresh-confirm");
+            Assert.Equal(response,await f.Turn("Confirmar","commit"));
+            await f.Turn("Confirmar","fresh-confirm");
             Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         }
     }

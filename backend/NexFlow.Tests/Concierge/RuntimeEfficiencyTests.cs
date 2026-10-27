@@ -72,7 +72,8 @@ public sealed class RuntimeEfficiencyTests(ITestOutputHelper output)
             Assert.Equal(draft, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
             await FailureDoesNotChangeDraft();
             await f.HandleTurn("ver pedido", "review-order");
-            await f.HandleTurn("envía el pedido", "submit-order"); await f.HandleTurn("envía el pedido", "submit-order");
+            await f.HandleTurn("finalizar", "confirm-order-review");
+            await f.HandleTurn("Confirmar", "submit-order"); await f.HandleTurn("Confirmar", "submit-order");
             Assert.Equal(OrderStatus.PendingReview, Assert.Single(f.Orders.Values).Status);
         }
         Assert.All(f.FactualQueries, q => Assert.Equal(f.Workspace, q.Workspace));

@@ -151,8 +151,9 @@ public sealed class AssistantConversationTests
         Assert.Empty(f.Orders); Assert.StartsWith("ORDER_CONFIRM:", (await f.Context()).CurrentStep);
         f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, SearchTerm = "FINALIZAR_PEDIDO" }); await f.Turn("todavía estoy pensando");
         Assert.Empty(f.Orders); Assert.Single((await f.Context()).OrderDraftItems);
-        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, SearchTerm = "FINALIZAR_PEDIDO" }); await f.Turn("enviar pedido", source: "finish");
-        await f.Turn("enviar pedido", source: "finish"); Assert.Single(f.Orders);
+        await f.Turn("Confirmar", source: "renewed-review"); Assert.Empty(f.Orders);
+        f.Interpretations.Enqueue(new() { Intent = ConversationIntent.Order, SearchTerm = "FINALIZAR_PEDIDO" }); await f.Turn("Confirmar", source: "finish");
+        await f.Turn("Confirmar", source: "finish"); Assert.Single(f.Orders);
         Assert.Equal(2, Assert.Single(Assert.Single(f.Orders.Values).Items).Quantity);
     }
 
@@ -323,7 +324,7 @@ public sealed class AssistantConversationTests
             orderRepo.Setup(o => o.CreateOrderAsync(Workspace, It.IsAny<OrderRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, OrderRecord r, CancellationToken _) => { foreach (var item in r.Items) { var product=Products.Single(p => p.Id == item.ProductId && p.IsActive); item.UnitPriceMinorUnits=product.PriceMinorUnits;item.Currency=product.Currency; }
                 r.Currency=r.Items.Select(i => i.Currency).Distinct().Count() == 1 ? r.Items[0].Currency : null;
                 r.TotalAmountMinorUnits=r.Currency == null ? null : r.Items.Sum(i => i.SubtotalMinorUnits); Orders.TryAdd(r.Id, r); return Orders[r.Id]; });
-            var order = new OrderFlow(orderRepo.Object, notifications, Contexts, offerings.Object, entitlements.Object);
+            var order = new OrderFlow(orderRepo.Object, notifications, Contexts, offerings.Object, entitlements.Object, clock.Object, locations.Object);
             var interpreter = new Mock<IAiInterpreter>(MockBehavior.Strict);
             interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).Returns(async () => { AiCalls++; if (DuringInterpretation != null) await DuringInterpretation(); if(InterpretationOverride!=null) return await InterpretationOverride(); return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
             var outbound = new Mock<IOutboundMessageService>(MockBehavior.Strict);

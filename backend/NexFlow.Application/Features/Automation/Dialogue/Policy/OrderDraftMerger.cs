@@ -41,7 +41,7 @@ public static class OrderDraftMerger
     public sealed record Quote(string Text, string Fingerprint, bool Complete, bool NeedsLocation,
         IReadOnlyList<VerifiedFact> Facts, string? Currency);
 
-    public static Quote Price(Guid workspace, IReadOnlyList<OrderDraftItem> items, IReadOnlyList<VerifiedOffering> products, string? location)
+    public static Quote Price(Guid workspace, IReadOnlyList<OrderDraftItem> items, IReadOnlyList<VerifiedOffering> products, string? location, string? locationName = null)
     {
         var lines = new List<string>(); var facts = new List<VerifiedFact>(); var totals = new SortedDictionary<string,long>(StringComparer.OrdinalIgnoreCase);
         var complete = items.Count > 0; var needsLocation = false;
@@ -63,10 +63,15 @@ public static class OrderDraftMerger
             identity.Add(new { product.Id, product.Name, product.PriceMinorUnits, product.Currency, item.Quantity, product.LocationScope, product.LocationIds });
         }
         var text = items.Count == 0 ? "Tu pedido está vacío." : "🛍️ *Tu solicitud para revisión*\n\nAsí va tu pedido:\n" + string.Join("\n",lines);
+        if (locationName != null) text += "\n\nSede: " + locationName;
         if (totals.Count > 0) text += "\n\nSubtotal parcial: " + string.Join("; ",totals.Select(t => $"{t.Key} {t.Value / 100m:0.00}")) + ".";
-        text += "\n\nImportes del catálogo; el negocio revisará la solicitud. No se confirma stock ni pago. No incluyen cargos adicionales no registrados.";
+        text += "\n\nImportes del catálogo; el negocio revisará la solicitud. No se confirma stock, pago ni aceptación del negocio. No incluyen cargos adicionales no registrados.";
         if (totals.Count > 1) text += " No hay un total único porque los productos tienen monedas distintas.";
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { workspace,location,identity }))));
+        // Preserve existing no-site checkpoints; a displayed site name becomes
+        // part of the reviewed commercial identity when one is selected.
+        object quoteIdentity = locationName == null ? new { workspace,location,identity }
+            : new { workspace,location,locationName,identity };
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(quoteIdentity))));
         return new(text,hash,complete,needsLocation,Array.AsReadOnly(facts.ToArray()),totals.Count == 1 ? totals.Keys.Single() : null);
     }
 }

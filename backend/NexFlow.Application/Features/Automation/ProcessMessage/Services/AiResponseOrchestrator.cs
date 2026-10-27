@@ -290,7 +290,13 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 : responsePlan?.Operation == OperationStatus.AwaitingConfirmation && intent == ConversationIntent.Order ? ExpectedReply.ConfirmOrder
                 : responsePlan?.Operation == OperationStatus.Collecting ? context.RecoveryOptions.Count > 0 ? ExpectedReply.Selection : ExpectedReply.RequestedData
                 : expectedReply;
-            ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, _clock?.UtcNow ?? DateTime.UtcNow);
+            var now = _clock?.UtcNow ?? DateTime.UtcNow;
+            var keepOrderReview = context.CurrentGoal == "ORDER"
+                && (responsePlan?.Operation == OperationStatus.AwaitingConfirmation || act == DialogueAct.ProviderFailure)
+                && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.ConfirmOrder, Intent: ConversationIntent.Order } orderQuestion
+                && orderQuestion.ConversationId == conversation.Id;
+            if (!keepOrderReview)
+                ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, now, conversation.Id);
             await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             var plan = Bind(text, media);
             ConversationDiagnostics.Count("BusinessResult", plan.Operation.ToString());

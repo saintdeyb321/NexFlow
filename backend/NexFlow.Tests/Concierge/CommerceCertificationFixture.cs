@@ -31,10 +31,11 @@ internal sealed class CommerceCertificationFixture
     public Func<Task>? BeforeCreate { get; set; }
     public Func<ProductDto, Task>? AfterReadProduct { get; set; }
     public bool Licensed { get; set; } = true;
-    public OrderFlow Flow => new(Writes.Object, Notifications.Object, Context, Offerings, Access.Object);
+    public ILocationRepository Locations { get; }
+    public OrderFlow Flow => new(Writes.Object, Notifications.Object, Context, Offerings, Access.Object, locations: Locations);
     public CommerceCertificationFixture(FirestoreDb db, IReservationResourceCoordinator resources, Guid workspace)
     {
-        Db=db;Workspace=workspace;Catalog=new(db,resources);
+        Db=db;Workspace=workspace;Catalog=new(db,resources);Locations=new FirestoreLocationRepository(db,resources);
         var actual=new OfferingService(Catalog);
         var offerings=new Mock<IOfferingService>(MockBehavior.Strict);
         offerings.Setup(o=>o.GetProductsAsync(Workspace,It.IsAny<string?>(),It.IsAny<string?>(),It.IsAny<CancellationToken>()))
@@ -59,4 +60,5 @@ internal sealed class CommerceCertificationFixture
     public Task Seed(long price=250,string currency="PEN")=>Catalog.SaveItemAsync(Workspace,new ProductDto{Id="bread",Name="Pan integral",PriceMinorUnits=price,Currency=currency},true,default);
     public Task<string> Turn(string text,string source)=>Flow.ProcessAsync(Workspace,"synthetic-client","synthetic-chat","Synthetic",text,new(){Intent=ConversationIntent.Order},source,default);
     public Task<ConversationContextDto> State()=>Context.GetOrRecoverContextAsync(Workspace,"synthetic-client",default);
+    public Task<string> Review()=>Turn("finalizar","consent-review");
 }

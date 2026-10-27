@@ -175,7 +175,7 @@ public sealed class Rc3Sprint4CommercialTests
         Assert.Contains("PEN 5.00", quote); Assert.StartsWith("ORDER_CONFIRM:", durable.CurrentStep);
         Assert.Equal("review", durable.OrderLastSourceMessageId);
         Assert.Empty(await f.Repository.GetOrdersAsync(f.Workspace, null, default)); Assert.Equal(0, attempts);
-        Task<string> Send() => flow.ProcessAsync(f.Workspace, "phone", "conversation", "Customer", "enviar pedido", new AiInterpretation(), "source", default);
+        Task<string> Send() => flow.ProcessAsync(f.Workspace, "phone", "conversation", "Customer", "Confirmar", new AiInterpretation(), "source", default);
         await Assert.ThrowsAsync<IOException>(Send);
         var created = Assert.Single(await f.Repository.GetOrdersAsync(f.Workspace, null, default));
         Assert.Equal(NexFlow.Domain.Enums.OrderStatus.PendingReview, created.Status);

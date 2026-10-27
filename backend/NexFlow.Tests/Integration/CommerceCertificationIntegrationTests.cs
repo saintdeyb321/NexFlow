@@ -40,7 +40,7 @@ public sealed class CommerceCertificationIntegrationTests
         await using var stores=await IsolatedStores.Create();var f=await Create(stores);
         await stores.Root(f.Workspace).Collection("locations").Document("site").SetAsync(new {Name="Synthetic"},cancellationToken:stores.Ct);
         var state=await f.State();state.SelectedLocationId="site";await f.Context.SaveContextAsync(f.Workspace,"synthetic-client",state,stores.Ct);
-        await f.Turn("Quiero dos panes integrales","draft");await f.Turn("envía el pedido","confirm");
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();await f.Turn("Confirmar","confirm");
         var restarted=new FirestoreOrderRepository(stores.Firestore,f.Offerings);
         var saved=Assert.Single(await restarted.GetOrdersAsync(f.Workspace,null,stores.Ct));Assert.Equal("site",saved.RequestedLocationId);
         Assert.Null(await restarted.GetOrderByIdAsync(await stores.Workspace(false),saved.Id,stores.Ct));
@@ -57,16 +57,16 @@ public sealed class CommerceCertificationIntegrationTests
         await using var stores=await IsolatedStores.Create();var f=await Create(stores);
         await stores.Root(f.Workspace).Collection("locations").Document("site").SetAsync(new {Name="Synthetic"},cancellationToken:stores.Ct);
         var state=await f.State();state.SelectedLocationId="site";await f.Context.SaveContextAsync(f.Workspace,"synthetic-client",state,stores.Ct);
-        await f.Turn("Quiero dos panes integrales","draft");
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.AfterReadProduct=async _=>{
             f.AfterReadProduct=null;
             await stores.Root(f.Workspace).Collection("catalogItems").Document("bread").UpdateAsync(new Dictionary<string,object>{{field,value}},cancellationToken:stores.Ct);
         };
-        var answer=await f.Turn("envía el pedido","confirm");Assert.Contains("cambió",answer,StringComparison.OrdinalIgnoreCase);
+        var answer=await f.Turn("Confirmar","confirm");Assert.Contains("cambió",answer,StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));Assert.Equal(2,Assert.Single((await f.State()).OrderDraftItems).Quantity);
         if(field!="LocationScope") {
             Assert.StartsWith("ORDER_CONFIRM:",(await f.State()).CurrentStep);
-            await f.Turn("envía el pedido","fresh");Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));
+            await f.Turn("Confirmar","fresh");Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));
         }
     }
 
@@ -87,19 +87,19 @@ public sealed class CommerceCertificationIntegrationTests
         await using var stores=await IsolatedStores.Create();var f=await Create(stores);
         var site=stores.Root(f.Workspace).Collection("locations").Document("deleted");await site.SetAsync(new {Name="Synthetic"},cancellationToken:stores.Ct);
         var state=await f.State();state.SelectedLocationId="deleted";await f.Context.SaveContextAsync(f.Workspace,"synthetic-client",state,stores.Ct);
-        await f.Turn("Quiero dos panes integrales","draft");f.BeforeCreate=()=>site.DeleteAsync(cancellationToken:stores.Ct);
-        var response=await f.Turn("envía el pedido","confirm");
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();f.BeforeCreate=()=>site.DeleteAsync(cancellationToken:stores.Ct);
+        var response=await f.Turn("Confirmar","confirm");
         Assert.Contains("sede",response);Assert.Null((await f.State()).SelectedLocationId);Assert.Equal("ORDER_LOCATION",(await f.State()).CurrentStep);
-        await f.Turn("envía el pedido","second");Assert.Equal("ORDER_LOCATION",(await f.State()).CurrentStep);
+        await f.Turn("Confirmar","second");Assert.Equal("ORDER_LOCATION",(await f.State()).CurrentStep);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));
     }
 
     [IsolatedIntegrationFact]
     public async Task Deactivation_during_commit_preserves_the_unsubmitted_draft()
     {
-        await using var stores=await IsolatedStores.Create();var f=await Create(stores);await f.Turn("Quiero dos panes integrales","draft");
+        await using var stores=await IsolatedStores.Create();var f=await Create(stores);await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.BeforeCreate=()=>stores.Root(f.Workspace).Collection("catalogItems").Document("bread").UpdateAsync("IsActive",false,cancellationToken:stores.Ct);
-        Assert.Contains("disponibilidad",await f.Turn("envía el pedido","confirm"));
+        Assert.Contains("disponibilidad",await f.Turn("Confirmar","confirm"));
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));Assert.Equal(2,Assert.Single((await f.State()).OrderDraftItems).Quantity);
     }
 
@@ -112,7 +112,7 @@ public sealed class CommerceCertificationIntegrationTests
             .Returns(async(Guid w,string m,NotificationType type,string id,string title,string body,string? url,CancellationToken ct)=>{
                 await notifications.NotifyOnceAsync(w,m,type,id,title,body,url,ct);if(++attempts==1) throw new IOException("Lost acknowledgement");
             });
-        await f.Turn("Quiero dos panes integrales","draft");await Assert.ThrowsAsync<IOException>(()=>f.Turn("envía el pedido","confirm"));
+        await f.Turn("Quiero dos panes integrales","draft");await f.Review();await Assert.ThrowsAsync<IOException>(()=>f.Turn("Confirmar","confirm"));
         // Rebuild state/order services, retaining only the durable stores and stable source.
         var restarted=new OrderFlow(new FirestoreOrderRepository(stores.Firestore,f.Offerings),notifications,
             new ContextRecoveryService(Mock.Of<NexFlow.Application.Abstractions.Cache.IConversationCache>(),new FirestoreConversationStateRepository(stores.Firestore)),f.Offerings,f.Access.Object);
@@ -124,12 +124,12 @@ public sealed class CommerceCertificationIntegrationTests
     [IsolatedIntegrationFact]
     public async Task Same_source_and_concurrent_sources_cannot_duplicate_an_order()
     {
-        await using var stores=await IsolatedStores.Create();var f=await Create(stores);await f.Turn("Quiero dos panes integrales","draft");
+        await using var stores=await IsolatedStores.Create();var f=await Create(stores);await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         using var gate=new AsyncGate();f.BeforeCreate=()=>gate.Stop(stores.Ct);
-        var first=f.Turn("envía el pedido","first");await gate.Reached;
-        await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("envía el pedido","second"));
+        var first=f.Turn("Confirmar","first");await gate.Reached;
+        await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("Confirmar","second"));
         gate.Open();var response=await first;f.BeforeCreate=null;
-        Assert.Equal(response,await f.Turn("envía el pedido","first"));Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));
+        Assert.Equal(response,await f.Turn("Confirmar","first"));Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,stores.Ct));
     }
 
     [IsolatedIntegrationFact]

@@ -129,8 +129,8 @@ public sealed class CommerceConversationTests(ITestOutputHelper output)
                 await Turn("¿Podríamos organizar aquello?");Assert.Null((await f.Context()).CurrentGoal);
                 await Turn("Quiero tres panes integrales y dos queques");await AssertCart(3,2);Assert.Equal(0,f.Handoffs);break;
             case "O":
-                await Turn("Quiero tres panes integrales y dos queques");await Turn("Está bien, envía el pedido","confirm");
-                await Turn("Está bien, envía el pedido","confirm");var saved=Assert.Single(f.Orders.Values);
+                await Turn("Quiero tres panes integrales y dos queques");await Turn("finalizar","consent-review");await Turn("Confirmar","confirm");
+                await Turn("Confirmar","confirm");var saved=Assert.Single(f.Orders.Values);
                 Assert.Equal(OrderStatus.PendingReview,saved.Status);Assert.Equal(2750,saved.TotalAmountMinorUnits);
                 Assert.Equal(1,f.OrderWrites.Invocations.Count(i=>i.Method.Name=="CreateOrderAsync"));break;
             case "P":
@@ -271,7 +271,7 @@ public sealed class CommerceConversationTests(ITestOutputHelper output)
         var f=Create();f.Products[1].Currency="USD";
         await f.HandleTurn("Quiero dos panes integrales y un queque","mixed");
         Assert.Contains("PEN 5.00",f.Sent["mixed"].Content);Assert.Contains("USD 10.00",f.Sent["mixed"].Content);
-        await f.HandleTurn("envía el pedido","send");var order=Assert.Single(f.Orders.Values);Assert.Null(order.Currency);Assert.Null(order.TotalAmountMinorUnits);
+        await f.HandleTurn("finalizar","consent-review");await f.HandleTurn("Confirmar","send");var order=Assert.Single(f.Orders.Values);Assert.Null(order.Currency);Assert.Null(order.TotalAmountMinorUnits);
     }
 
     [Theory]

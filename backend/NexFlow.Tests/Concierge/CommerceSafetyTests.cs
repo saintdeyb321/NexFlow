@@ -58,23 +58,24 @@ public sealed class CommerceSafetyTests
             Context=new ContextRecoveryService(Mock.Of<IConversationCache>(),new FirestoreConversationStateRepository(Db.Db));
             Access.Setup(a=>a.GetAvailableModuleCodesAsync(Workspace,It.IsAny<CancellationToken>())).ReturnsAsync(()=>Licensed ? new[]{"CATALOG","ORDERS"} : []);
             Notifications.Setup(n=>n.NotifyOnceAsync(Workspace,"ORDERS",NotificationType.NewCommercialRequest,It.IsAny<string>(),It.IsAny<string>(),It.IsAny<string>(),"/orders",It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-            Flow=new(Orders,Notifications.Object,Context,offerings,Access.Object);
+            Flow=new(Orders,Notifications.Object,Context,offerings,Access.Object,locations:new FirestoreLocationRepository(Db.Db,Db.Resources));
         }
         public async Task Seed() => await Catalog.SaveItemAsync(Workspace,new ProductDto { Id="bread",Name="Pan integral",PriceMinorUnits=250 },true,default);
         public Task<string> Turn(string text,string source) => Flow.ProcessAsync(Workspace,"phone","chat","Consumer",text,new(){Intent=ConversationIntent.Order},source,default);
+        public Task<string> Review() => Turn("finalizar", "consent-review");
     }
 
     [Fact]
     public async Task Commit_before_notification_failure_recovers_once_and_blocks_other_writers()
     {
-        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");var attempts=0;
+        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();var attempts=0;
         f.Notifications.Setup(n=>n.NotifyOnceAsync(f.Workspace,"ORDERS",NotificationType.NewCommercialRequest,It.IsAny<string>(),It.IsAny<string>(),It.IsAny<string>(),"/orders",It.IsAny<CancellationToken>()))
             .Returns(()=>++attempts == 1 ? Task.FromException(new IOException("Simulated lost notification")) : Task.CompletedTask);
-        await Assert.ThrowsAsync<IOException>(()=>f.Turn("envía el pedido","commit"));
+        await Assert.ThrowsAsync<IOException>(()=>f.Turn("Confirmar","commit"));
         Assert.StartsWith("ORDER_COMMIT:",(await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).CurrentStep);
         Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         await Assert.ThrowsAsync<ConcurrencyException>(()=>f.Turn("Mejor cuatro panes","another"));
-        var answer=await f.Turn("envía el pedido","commit");Assert.Equal(answer,await f.Turn("envía el pedido","commit"));
+        var answer=await f.Turn("Confirmar","commit");Assert.Equal(answer,await f.Turn("Confirmar","commit"));
         var saved=Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         Assert.Equal(500,saved.TotalAmountMinorUnits);Assert.Equal(OrderStatus.PendingReview,saved.Status);Assert.Equal(2,attempts);
         Assert.Empty((await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).OrderDraftItems);
@@ -83,20 +84,20 @@ public sealed class CommerceSafetyTests
     [Fact]
     public async Task A_committed_order_recovers_after_license_revocation_without_a_second_purchase()
     {
-        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");var attempts=0;
+        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();var attempts=0;
         f.Notifications.Setup(n=>n.NotifyOnceAsync(f.Workspace,"ORDERS",NotificationType.NewCommercialRequest,It.IsAny<string>(),It.IsAny<string>(),It.IsAny<string>(),"/orders",It.IsAny<CancellationToken>()))
             .Returns(()=>++attempts==1 ? Task.FromException(new IOException("Simulated outage")) : Task.CompletedTask);
-        await Assert.ThrowsAsync<IOException>(()=>f.Turn("envía el pedido","commit"));f.Licensed=false;
-        await f.Turn("envía el pedido","commit");Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
+        await Assert.ThrowsAsync<IOException>(()=>f.Turn("Confirmar","commit"));f.Licensed=false;
+        await f.Turn("Confirmar","commit");Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         Assert.Null((await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).CurrentGoal);Assert.Equal(2,attempts);
     }
 
     [Fact]
     public async Task Concurrent_commits_have_one_cas_winner_and_one_business_record()
     {
-        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");
+        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         f.Db.SynchronizeReads($"workspaces/{f.Workspace}/conversationStates/phone");
-        async Task<bool> Attempt(string source) {try {await f.Turn("envía el pedido",source);return true;}catch(ConcurrencyException){return false;}}
+        async Task<bool> Attempt(string source) {try {await f.Turn("Confirmar",source);return true;}catch(ConcurrencyException){return false;}}
         var results=await Task.WhenAll(Attempt("first"),Attempt("second")).WaitAsync(TimeSpan.FromSeconds(15));
         Assert.Single(results,r=>r);Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         Assert.Empty((await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).OrderDraftItems);
@@ -106,7 +107,7 @@ public sealed class CommerceSafetyTests
     [InlineData("workspace")] [InlineData("source")] [InlineData("version")]
     public async Task Forged_or_stale_proposals_never_mutate_the_durable_draft(string mismatch)
     {
-        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");
+        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         var context=await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default);
         var proposal=new OrderDraftProposal(mismatch=="workspace" ? Guid.NewGuid() : f.Workspace,mismatch=="source" ? "foreign" : "edit",
             mismatch=="version" ? "stale" : context.StateVersion,OrderTurnKind.Edit,Array.AsReadOnly(new[]{new OrderEdit(OrderEditKind.Set,"bread",4)}));
@@ -148,12 +149,12 @@ public sealed class CommerceSafetyTests
     [Fact]
     public async Task A_checkpoint_without_business_commit_keeps_price_consent_after_restart()
     {
-        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");
+        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();
         var context=await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default);
-        context.CurrentStep=context.CurrentStep!.Replace("ORDER_REVIEW:","ORDER_COMMIT:",StringComparison.Ordinal);
+        context.CurrentStep=context.CurrentStep!.Replace("ORDER_CONFIRM:","ORDER_COMMIT:",StringComparison.Ordinal);
         context.OrderLastSourceMessageId="commit";context.OrderLastResponse=null;await f.Context.SaveContextAsync(f.Workspace,"phone",context,default);
         await f.Catalog.SaveItemAsync(f.Workspace,new ProductDto{Id="bread",Name="Pan integral",PriceMinorUnits=300},false,default);
-        await f.Turn("envía el pedido","commit");Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
+        await f.Turn("Confirmar","commit");Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         Assert.StartsWith("ORDER_CONFIRM:",(await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).CurrentStep);
     }
 
@@ -170,9 +171,9 @@ public sealed class CommerceSafetyTests
     [Fact]
     public async Task Revocation_after_catalog_read_stops_the_commit()
     {
-        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");var checks=0;
+        var f=new Durable();await f.Seed();await f.Turn("Quiero dos panes integrales","draft");await f.Review();var checks=0;
         f.Access.Setup(a=>a.GetAvailableModuleCodesAsync(f.Workspace,It.IsAny<CancellationToken>())).ReturnsAsync(()=>++checks==1 ? new[]{"CATALOG","ORDERS"} : []);
-        await f.Turn("envía el pedido","commit");Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
+        await f.Turn("Confirmar","commit");Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace,null,default));
         Assert.Equal(2,Assert.Single((await f.Context.GetOrRecoverContextAsync(f.Workspace,"phone",default)).OrderDraftItems).Quantity);
     }
 
@@ -181,13 +182,13 @@ public sealed class CommerceSafetyTests
     {
         var f = new Durable();
         await f.Seed();
-        var originalQuote = await f.Turn("Quiero dos panes integrales", "draft");
+        var originalQuote = await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         Assert.Contains("5.00", originalQuote);
         var checks = 0;
         f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => ++checks == 1 ? new[] { "CATALOG", "ORDERS" } : []);
 
-        await f.Turn("envía el pedido", "revoked-commit");
+        await f.Turn("Confirmar", "revoked-commit");
         Assert.Equal(2, checks);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
         Assert.Equal(2, Assert.Single((await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).OrderDraftItems).Quantity);
@@ -197,7 +198,7 @@ public sealed class CommerceSafetyTests
         await f.Catalog.SaveItemAsync(f.Workspace,
             new ProductDto { Id = "bread", Name = "Pan integral", PriceMinorUnits = 300 }, false, default);
 
-        var response = await f.Turn("envía el pedido", "restored-commit");
+        var response = await f.Turn("Confirmar", "restored-commit");
         var records = (await f.Orders.GetOrdersAsync(f.Workspace, null, default)).ToArray();
         Assert.True(records.Length == 0,
             $"A changed quote requires renewed review before creating an order; actual orders={records.Length}, total minor units={records.FirstOrDefault()?.TotalAmountMinorUnits}.");
@@ -214,19 +215,19 @@ public sealed class CommerceSafetyTests
     [InlineData("ORDER_COMMIT:")] [InlineData("ORDER_COMMIT:obsolete")]
     public async Task Missing_or_stale_quote_requires_review_before_a_new_effect(string? step)
     {
-        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
         state.CurrentStep = step; state.OrderLastSourceMessageId = "retry"; state.OrderLastResponse = null;
         await f.Context.SaveContextAsync(f.Workspace, "phone", state, default);
-        var answer = await f.Turn("envía el pedido", "retry");
-        Assert.Equal(answer, await f.Turn("envía el pedido", "retry"));
+        var answer = await f.Turn("Confirmar", "retry");
+        Assert.Equal(answer, await f.Turn("Confirmar", "retry"));
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
         f.Notifications.VerifyNoOtherCalls();
         var reviewed = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
         Assert.StartsWith("ORDER_CONFIRM:", reviewed.CurrentStep); Assert.Contains("¿Confirmas", reviewed.LastQuestion);
         Assert.Equal(2, Assert.Single(reviewed.OrderDraftItems).Quantity); Assert.Contains("PEN 5.00", answer);
-        await f.Turn("envía el pedido", "fresh-consent");
-        await f.Turn("envía el pedido", "fresh-consent");
+        await f.Turn("Confirmar", "fresh-consent");
+        await f.Turn("Confirmar", "fresh-consent");
         Assert.Equal(500, Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)).TotalAmountMinorUnits);
         Assert.Single(f.Notifications.Invocations);
     }
@@ -235,20 +236,20 @@ public sealed class CommerceSafetyTests
     [InlineData(1)] [InlineData(2)]
     public async Task Revocation_invalidates_review_even_if_the_price_does_not_change(int revokeAt)
     {
-        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         var checks = 0;
         f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => ++checks == revokeAt ? [] : new[] { "CATALOG", "ORDERS" });
-        await f.Turn("envía el pedido", "revoked");
+        await f.Turn("Confirmar", "revoked");
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
         var denied = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
         Assert.Null(denied.CurrentStep); Assert.Equal(2, Assert.Single(denied.OrderDraftItems).Quantity);
         f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { "CATALOG", "ORDERS" });
-        Assert.Contains("5.00", await f.Turn("envía el pedido", "restored"));
+        Assert.Contains("5.00", await f.Turn("Confirmar", "restored"));
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
         Assert.StartsWith("ORDER_CONFIRM:", (await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).CurrentStep);
-        await f.Turn("envía el pedido", "fresh");
+        await f.Turn("Confirmar", "fresh");
         Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Single(f.Notifications.Invocations);
     }
 
@@ -256,11 +257,11 @@ public sealed class CommerceSafetyTests
     [InlineData("quantity")] [InlineData("location")] [InlineData("workspace")]
     public async Task Quote_identity_covers_quantities_location_and_workspace(string change)
     {
-        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
         if (change == "quantity") state.OrderDraftItems[0].Quantity = 3;
         if (change == "location") {
-            f.Db.Seed($"workspaces/{f.Workspace}/locations/site", new Dictionary<string, Value>());
+            f.Db.Seed($"workspaces/{f.Workspace}/locations/site", new Dictionary<string, Value> { ["Name"] = new() { StringValue = "Synthetic site" } });
             state.SelectedLocationId = "site";
         }
         if (change == "workspace") {
@@ -268,11 +269,11 @@ public sealed class CommerceSafetyTests
             state.CurrentStep = (await other.Context.GetOrRecoverContextAsync(other.Workspace, "phone", default)).CurrentStep;
         }
         await f.Context.SaveContextAsync(f.Workspace, "phone", state, default);
-        var answer = await f.Turn("envía el pedido", "changed");
+        var answer = await f.Turn("Confirmar", "changed");
         Assert.Contains(change == "quantity" ? "7.50" : "5.00", answer);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
         Assert.StartsWith("ORDER_CONFIRM:", (await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).CurrentStep);
-        await f.Turn("envía el pedido", "fresh");
+        await f.Turn("Confirmar", "fresh");
         var record = Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
         Assert.Equal(change == "quantity" ? 750 : 500, record.TotalAmountMinorUnits);
         Assert.Equal(change == "location" ? "site" : null, record.RequestedLocationId);
@@ -281,21 +282,21 @@ public sealed class CommerceSafetyTests
     [Fact]
     public async Task A_submit_proposal_cannot_replace_explicit_consent()
     {
-        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
         var proposal = new OrderDraftProposal(f.Workspace, "question", state.StateVersion, OrderTurnKind.Submit, []);
         var plan = await f.Flow.ProcessPlannedAsync(f.Workspace, "phone", "chat", "Consumer", "¿Ya se enviaría?",
             new() { Intent = ConversationIntent.Order, OrderProposal = proposal }, "question", DialogueAct.Confirmation, default);
         Assert.Equal(OperationStatus.AwaitingConfirmation, plan.Operation);
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
-        await f.Turn("envía el pedido", "fresh"); Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
+        await f.Turn("Confirmar", "fresh"); Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
     }
 
     [Fact]
     public async Task Revocation_during_catalog_recovery_requires_a_new_review_after_restoration()
     {
         var db = new InMemoryFirestore(); var f = new CommerceCertificationFixture(db.Db, db.Resources, Guid.NewGuid());
-        await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         var checks = 0;
         f.Access.Setup(a => a.GetAvailableModuleCodesAsync(f.Workspace, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => ++checks == 3 ? [] : new[] { "CATALOG", "ORDERS" });
@@ -303,12 +304,12 @@ public sealed class CommerceSafetyTests
             f.AfterReadProduct = null;
             await f.Db.Collection("workspaces").Document(f.Workspace.ToString()).Collection("catalogItems").Document("bread").UpdateAsync("PriceMinorUnits", 300L);
         };
-        await f.Turn("envía el pedido", "revoked");
+        await f.Turn("Confirmar", "revoked");
         Assert.Equal(3, checks); Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default));
         Assert.Empty(f.Notifications.Invocations); Assert.Null((await f.State()).CurrentStep);
-        Assert.Contains("6.00", await f.Turn("envía el pedido", "restored"));
+        Assert.Contains("6.00", await f.Turn("Confirmar", "restored"));
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
-        await f.Turn("envía el pedido", "fresh");
+        await f.Turn("Confirmar", "fresh");
         Assert.Equal(600, Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)).TotalAmountMinorUnits);
     }
 
@@ -316,7 +317,7 @@ public sealed class CommerceSafetyTests
     public async Task Handler_requires_renewed_quote_after_revocation_during_the_commit()
     {
         var f = new AssistantConversationTests.Fixture(intelligentCommerce: true);
-        await f.HandleTurn("Quiero dos panes integrales", "draft");
+        await f.HandleTurn("Quiero dos panes integrales", "draft"); await f.HandleTurn("finalizar", "consent-review");
         f.Firestore.BeforeCommit = request => {
             if (request.Writes.Any(w => w.Update?.Fields.TryGetValue("contextJson", out var json) == true
                 && json.StringValue.Contains("ORDER_COMMIT:", StringComparison.Ordinal))) {
@@ -324,7 +325,7 @@ public sealed class CommerceSafetyTests
             }
             return null;
         };
-        await f.HandleTurn("envía el pedido", "revoked"); Assert.Empty(f.Orders);
+        await f.HandleTurn("Confirmar", "revoked"); Assert.Empty(f.Orders);
         Assert.Equal(2, Assert.Single((await f.Context()).OrderDraftItems).Quantity);
         f.Modules.Add("ORDERS"); f.Products[0].PriceMinorUnits = 300;
         await f.HandleTurn("envía el pedido", "restored"); Assert.Empty(f.Orders);
@@ -338,14 +339,14 @@ public sealed class CommerceSafetyTests
     [Fact]
     public async Task A_matching_pending_checkpoint_resumes_only_its_original_source_once()
     {
-        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft");
+        var f = new Durable(); await f.Seed(); await f.Turn("Quiero dos panes integrales", "draft"); await f.Review();
         var state = await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default);
-        state.CurrentStep = state.CurrentStep!.Replace("ORDER_REVIEW:", "ORDER_COMMIT:", StringComparison.Ordinal);
+        state.CurrentStep = state.CurrentStep!.Replace("ORDER_CONFIRM:", "ORDER_COMMIT:", StringComparison.Ordinal);
         state.OrderLastSourceMessageId = "commit"; state.OrderLastResponse = null;
         await f.Context.SaveContextAsync(f.Workspace, "phone", state, default);
-        await Assert.ThrowsAsync<ConcurrencyException>(() => f.Turn("envía el pedido", "another"));
+        await Assert.ThrowsAsync<ConcurrencyException>(() => f.Turn("Confirmar", "another"));
         Assert.Empty(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Empty(f.Notifications.Invocations);
-        await f.Turn("envía el pedido", "commit"); await f.Turn("envía el pedido", "commit");
+        await f.Turn("Confirmar", "commit"); await f.Turn("Confirmar", "commit");
         Assert.Single(await f.Orders.GetOrdersAsync(f.Workspace, null, default)); Assert.Single(f.Notifications.Invocations);
         Assert.Empty((await f.Context.GetOrRecoverContextAsync(f.Workspace, "phone", default)).OrderDraftItems);
     }
