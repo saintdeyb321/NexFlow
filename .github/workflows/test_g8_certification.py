@@ -13,7 +13,7 @@ def evidence(historical=True):
     results = ET.SubElement(root, "Results")
     definitions = ET.SubElement(root, "TestDefinitions")
     summary = ET.SubElement(root, "ResultSummary", outcome="Failed" if historical else "Completed")
-    total, passed, failed = (130, 118, 12) if historical else (gate.MIN_CURRENT, gate.MIN_CURRENT, 0)
+    total, passed, failed = (130, 102, 28) if historical else (gate.MIN_CURRENT, gate.MIN_CURRENT, 0)
     counters = dict(total=total, executed=total, passed=passed, failed=failed)
     counters.update({key: 0 for key in ("error", "timeout", "aborted", "inconclusive", "passedButRunAborted",
                                       "notRunnable", "notExecuted", "disconnected", "warning", "inProgress", "pending")})
@@ -49,7 +49,28 @@ class GateTests(unittest.TestCase):
     def test_exact_frozen_historical_contract_preserves_red_tests(self):
         result = self.verify(evidence())
         self.assertEqual("EXPECTED_HISTORICAL_INCOMPATIBILITIES", result["decision"])
-        self.assertEqual(12, len(result["known_failures"]))
+        self.assertEqual(28, len(result["known_failures"]))
+
+    def test_new_order_consent_historical_failures_are_exactly_pinned(self):
+        cases = gate.historical_contract(gate.ROOT)
+        expected = {
+            f'{gate.PUBLIC}.Independent_commercial_conversation(caseId: "{sector}-{number}")': f"{sector}-{number}: OrderEffects"
+            for sector in ("clinic", "hotel", "restaurant", "bakery", "limited")
+            for number in ("03", "04", "19")
+        }
+        expected[f'{gate.HOLDOUT}.Frozen_independent_conversation(id: "H26")'] = (
+            "H26/2/A: OrderEffects; H26/3/A: OrderEffects")
+        observed = {name: reason for name, (_, _, reason) in cases.items() if reason and "OrderEffects" in reason}
+        self.assertEqual(expected, observed)
+        self.assertEqual(12, sum("VerifiedFact" in reason for _, _, reason in cases.values() if reason))
+        self.assertEqual(130, len(cases))
+        for name in expected:
+            with self.subTest(case=name):
+                root = evidence()
+                result = next(r for r in root.find("Results") if r.attrib["testName"] == name)
+                result.find("Output/ErrorInfo/Message").text += "; unexpected change"
+                with self.assertRaises(ValueError):
+                    self.verify(root)
 
     def test_missing_duplicate_or_foreign_historical_case_is_rejected(self):
         for kind in ("missing", "duplicate", "foreign", "execution", "testId"):

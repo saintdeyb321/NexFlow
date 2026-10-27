@@ -57,10 +57,17 @@ def historical_contract(root):
         for case_id in ids:
             name = f'{cls}.{method}({parameter}: "{case_id}")'
             reason = None
-            if cls == PUBLIC and case_id in {f"{sector}-{n}" for sector in ("clinic", "hotel", "restaurant", "bakery", "limited") for n in ("09", "10")}:
-                reason = f"{case_id}: VerifiedFact"
-            if cls == HOLDOUT and case_id in ("H10", "H21"):
-                reason = f"{case_id}/3/A: VerifiedFact"
+            if cls == PUBLIC:
+                if case_id in {f"{sector}-{n}" for sector in ("clinic", "hotel", "restaurant", "bakery", "limited") for n in ("09", "10")}:
+                    reason = f"{case_id}: VerifiedFact"
+                elif case_id in {f"{sector}-{n}" for sector in ("clinic", "hotel", "restaurant", "bakery", "limited") for n in ("03", "04", "19")}:
+                    # Legacy script expected an order before separate, explicit final consent.
+                    reason = f"{case_id}: OrderEffects"
+            elif cls == HOLDOUT:
+                if case_id in ("H10", "H21"):
+                    reason = f"{case_id}/3/A: VerifiedFact"
+                elif case_id == "H26":
+                    reason = "H26/2/A: OrderEffects; H26/3/A: OrderEffects"
             expected[name] = (cls, method, reason)
     return expected
 
@@ -111,8 +118,8 @@ def validate(suite, path, test_exit_code, repo=ROOT):
     else:
         require(test_exit_code == 1, f"Historical dotnet test must return exactly 1, got {test_exit_code}")
         require(outcome == "Failed", "Historical run summary must preserve the real failure")
-        require((counts["total"], counts["passed"], counts["failed"]) == (130, 118, 12),
-                "Historical counts must be exactly 130/118/12")
+        require((counts["total"], counts["passed"], counts["failed"]) == (130, 102, 28),
+                "Historical counts must be exactly 130/102/28")
         expected = historical_contract(repo)
         names = [result.attrib["testName"] for result in results]
         require(len(names) == len(set(names)) == 130 and set(names) == set(expected),
