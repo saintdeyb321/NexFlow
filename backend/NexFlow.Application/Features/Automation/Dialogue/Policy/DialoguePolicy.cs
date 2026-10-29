@@ -38,10 +38,8 @@ public sealed class DialoguePolicy
         if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
         if (HasContradictoryGoals(normalized)) return DialogueAct.SemanticAmbiguity;
         var reservationMention = words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita");
-        var instruction = normalized.Contains("como ", StringComparison.Ordinal) || normalized.Contains("no se", StringComparison.Ordinal)
-            || words.Contains("informacion")
-            || normalized.Contains("orientacion para ",StringComparison.Ordinal) || normalized.Contains("orientacion sobre ",StringComparison.Ordinal);
-        if (reservationMention && instruction) return DialogueAct.OperationInformation;
+        var instruction = IsProcedureQuestion(normalized);
+        if (reservationMention && (instruction || OrderMentionResolver.IsQuestion(text))) return DialogueAct.OperationInformation;
         var correction = words.Any(w => w.StartsWith("cambi", StringComparison.Ordinal) || w is "mejor" or "otra" or "otro" or "corregir");
         if (booking && correction) return DialogueAct.Correction;
         var question = words.Any(w => w is "cuanto" or "precio" or "cuesta" or "donde" or "horario" or "horarios" or "duracion" or "como" or "que" or "cual");
@@ -58,6 +56,10 @@ public sealed class DialoguePolicy
             && words.Any(w => w is "preguntando" or "consultando" or "informacion")
             && !words.Any(w => w is "confirma" or "confirmo" or "envia" or "envialo");
     }
+
+    internal static bool IsProcedureQuestion(string normalized) => normalized.Contains("como ", StringComparison.Ordinal)
+        || normalized.Contains("no se", StringComparison.Ordinal) || normalized.Split(' ').Contains("informacion")
+        || normalized.Contains("orientacion para ", StringComparison.Ordinal) || normalized.Contains("orientacion sobre ", StringComparison.Ordinal);
 
     // An acknowledgement can resume dialogue; it is never transaction consent.
     public static bool IsAcknowledgement(string normalized) => normalized is "si" or "de acuerdo" or "esta bien" or "vale" or "ok";

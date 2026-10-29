@@ -94,7 +94,14 @@ public sealed class ComposedConversationTests(ITestOutputHelper output)
                 await Turn("¿Cuánto cuesta ese servicio?"); Assert.Equal(before, AssistantConversationTests.Fixture.BusinessDraft(await f.Context()));
                 Assert.Empty(f.FactualQueries); // Current point read now supplies the verified plan directly.
                 Assert.Contains(f.Plans.Last().Facts, fact => fact.Key == "Offering" && fact.EntityId == f.Services[0].Id);
-                Assert.Contains($"{f.Services[0].Currency} {f.Services[0].PriceMinorUnits / 100m:0.00}", f.Sent.Values.Last().Content); break;
+                var selected = f.Services[0];
+                Assert.Contains(f.Plans.Last().Facts, fact => fact.Key == "PriceMinorUnits" && fact.EntityId == selected.Id
+                    && fact.Source == VerifiedFactSource.BusinessRepository && fact.Value == selected.PriceMinorUnits.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Assert.Contains(f.Plans.Last().Facts, fact => fact.Key == "Currency" && fact.EntityId == selected.Id
+                    && fact.Source == VerifiedFactSource.BusinessRepository && fact.Value == selected.Currency);
+                // PEN is the canonical fact; S/ is its existing WhatsApp presentation.
+                var currencyLabel = selected.Currency == "PEN" ? "S/" : selected.Currency;
+                Assert.Contains($"{currencyLabel} {(selected.PriceMinorUnits / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}", f.Sent.Values.Last().Content); break;
             case 10:
                 await Turn("quiero limpieza dental en Concepción");
                 var draft = AssistantConversationTests.Fixture.BusinessDraft(await f.Context());

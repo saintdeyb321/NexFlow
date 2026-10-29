@@ -28,6 +28,9 @@ internal static class BookingDraftMerger
         if (value.Date.TryGetValue(out var date) && state.TargetDate != date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
         {
             state.TargetDate = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            // A slot selected under a general period belongs to the old date.
+            // Keep that preference, but ask for a time on the new day.
+            if (state.PreferredTime != null) state.TargetTime = null;
         }
         if (value.Name.TryGetValue(out var name)) { state.RealCustomerName = name; state.PendingCustomerName = null; }
         else if (value.Name.Code == "SurnameMissing") state.PendingCustomerName = value.Name.Candidates[0].Value;
@@ -36,8 +39,8 @@ internal static class BookingDraftMerger
         await ResolvePendingServiceAsync(workspace, state, offerings, ct);
         if (value.Time.TryGetValue(out var time))
         {
-            state.PreferredTime = time.Kind == TimePreferenceKind.Exact ? null : time;
-            state.TargetTime = time.Kind == TimePreferenceKind.Exact ? time.ExactTime!.Value.ToString("HH:mm", CultureInfo.InvariantCulture) : null;
+            if (time.Kind == TimePreferenceKind.Exact) SelectTime(state, time.ExactTime!.Value.ToString("HH:mm", CultureInfo.InvariantCulture));
+            else { state.PreferredTime = time; state.TargetTime = null; }
         }
         Resolved("Name", value.Name.Status); Resolved("Location", value.Location.Status);
         if (state.SelectedServiceId != null) Resolved("Service", value.Service.Status);
@@ -47,6 +50,14 @@ internal static class BookingDraftMerger
         state.RecoveryOptions.Clear(); state.RecoveryOptionsContext = null;
         void Resolved(string slot, ResolutionStatus status)
         { if (status == ResolutionStatus.Determined) state.PendingDialogueSlots.Remove(slot); }
+    }
+
+    internal static void SelectTime(ConversationContextDto state, string time)
+    {
+        if (!TimeOnly.TryParseExact(time, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var selected)
+            || state.PreferredTime == null || !Understanding.TimePreferenceResolver.Matches(selected, state.PreferredTime))
+            state.PreferredTime = null;
+        state.TargetTime = time;
     }
 
     internal static async Task ResolvePendingServiceAsync(Guid workspace, ConversationContextDto state, IOfferingService offerings, CancellationToken ct)

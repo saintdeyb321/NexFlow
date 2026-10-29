@@ -87,10 +87,11 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
                     Array.AsReadOnly(new[] { verified }), false, context.SelectedLocationId)
             });
         }
-        if (act == DialogueAct.OperationInformation)
+        if (act == DialogueAct.OperationInformation && AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules) is { } operationDenied)
+            return new(act, new() { Intent = ConversationIntent.Reservation }, Response: operationDenied);
+        if (act == DialogueAct.OperationInformation && DialoguePolicy.IsProcedureQuestion(normalized))
             return new(act, new() { Intent = ConversationIntent.Reservation }, Response:
-                AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules)
-                    ?? (context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction));
+                context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction);
         var readOnlyQuestion = context.CurrentGoal is "BOOKING" or "RESERVATION"
             && (OrderMentionResolver.IsQuestion(request.MessageText) || OrderMentionResolver.IsHypothetical(request.MessageText));
         var mixedQuestion = readOnlyQuestion && act == DialogueAct.Correction;
@@ -106,6 +107,12 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && normalized.Split(' ').Any(w => w is "quiero" or "quisiera" or "necesito" or "deseo");
         var purpose = booking || reservationCandidate ? SlotResolutionPurpose.Reservation : context.CurrentGoal == "ORDER" ? SlotResolutionPurpose.Order : SlotResolutionPurpose.Information;
         var local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, purpose, policy.Reads(request.MessageText, context, act), ct);
+        // A generic capability/procedure question is not a start command. A
+        // question naming real entities or time still needs semantic routing.
+        if (act == DialogueAct.OperationInformation
+            && new[] { local.Location.Status, local.Service.Status, local.Date.Status, local.Time.Status }.All(s => s == ResolutionStatus.Insufficient))
+            return new(act, new() { Intent = ConversationIntent.Reservation }, Response:
+                context.CurrentGoal is "BOOKING" or "RESERVATION" ? DialoguePolicy.ReservationProcess : DialoguePolicy.Instruction);
         if (local.Time.Status == ResolutionStatus.Ambiguous && context.PreferredTime is { } preference)
         {
             var matching = local.Time.Candidates.Where(c => c.Value.ExactTime is { } time && TimePreferenceResolver.Matches(time, preference)).ToArray();

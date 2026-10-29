@@ -70,7 +70,7 @@ public static class OfferingResponseFormatter
             text = "Estas son sus características registradas:\n" + text + "\nNo hay otras diferencias verificadas que pueda afirmar.";
         return text;
     }
-    public static string Money(string currency, long minorUnits) => $"{(currency == "PEN" ? "S/" : currency)} {(minorUnits / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
+    public static string Money(string currency, long minorUnits, bool useSymbol = true) => $"{(useSymbol && currency == "PEN" ? "S/" : currency)} {(minorUnits / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
     public static string Capabilities(IReadOnlySet<string> modules)
     {
         var options = new List<string>();

@@ -124,12 +124,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         var readOnly = !submit && !summary && !polite && (catalogRequest || hypothetical || OrderMentionResolver.IsQuestion(text)) && !changing;
         var broadOfferings = words.Any(w => w is "productos" or "servicios")
             && words.Any(w => w is "que" or "muestrame" or "lista" or "catalogo");
-        // Punctuation alone cannot distinguish a factual question from a polite
-        // request to prepare products. Keep recognized factual zero-token paths;
-        // let the interpreter resolve the remaining semantic uncertainty.
-        if (semantic == null && readOnly && !catalogRequest && !broadOfferings && !hypothetical
-            && comparisonQuestion() == OfferingQuestion.Facts
-            && !OrderMentionResolver.IsQuestion(text.Replace("?", "").Replace("¿", ""))) return null;
+        // Resolve authorized offerings before deciding that a read-only question
+        // lacks a factual subject. Unresolved references still reach semantics below.
         var explicitOrder=semanticStart || politePurchase || words.Any(w=>w is "comprar" or "pedido" or "producto" or "productos" or "agrega" or "agregar" or "anade" or "dame" or "llevo" or "apuntas" or "vendes");
         var weakPurchase=buying && !activeOrder && !explicitOrder;
         if (weakPurchase && !modules.Contains("CATALOG")) return null;
@@ -199,6 +195,11 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (wantsServices && !modules.Contains("SERVICES")) return Query("SERVICE", [], false, AiIntentAccess.ServicesUnavailable);
         if (wantsProducts && !modules.Contains("CATALOG")) return Query("PRODUCT", [], false, AiIntentAccess.ProductsUnavailable);
         var productMatches = OrderMentionResolver.Match(text, text, products); var serviceMatches = OrderMentionResolver.Match(text, text, services);
+        // Punctuation alone does not establish a factual subject. Ask semantics
+        // only after looking for a real offering, so named price questions survive.
+        if (semantic == null && readOnly && !catalogRequest && !broadOfferings && !hypothetical
+            && productMatches.Count == 0 && serviceMatches.Count == 0 && comparisonQuestion() == OfferingQuestion.Facts
+            && !OrderMentionResolver.IsQuestion(text.Replace("?", "").Replace("¿", ""))) return null;
         if (dualCatalog && productMatches.Count == 0 && serviceMatches.Count == 0)
         {
             var referenced = reference != null && reference.Ids.All(id => products.Concat(services).Any(o => o.Type == reference.Type && o.Id == id));

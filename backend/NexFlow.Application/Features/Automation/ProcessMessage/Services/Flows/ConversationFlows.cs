@@ -333,11 +333,12 @@ public class BookingFlow : IBookingFlow
         if (!string.IsNullOrWhiteSpace(interpretation.Date) && context.TargetDate != interpretation.Date)
         {
             context.TargetDate = interpretation.Date;
+            if (context.PreferredTime != null) context.TargetTime = null;
         }
         if (!string.IsNullOrWhiteSpace(interpretation.Date)) context.PendingDialogueSlots.Remove("Date");
         if (!string.IsNullOrWhiteSpace(interpretation.Time))
         {
-            context.TargetTime = interpretation.Time; context.PreferredTime = null; context.PendingDialogueSlots.Remove("Time");
+            BookingDraftMerger.SelectTime(context, interpretation.Time); context.PendingDialogueSlots.Remove("Time");
             if (context.Information?.Topic == "Availability") context.Information = null;
         }
 

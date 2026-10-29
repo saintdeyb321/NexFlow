@@ -282,6 +282,14 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 || context.CurrentStep?.StartsWith("ORDER_REVIEW:", StringComparison.Ordinal) == true)
             && question?.Expected != ExpectedReply.Information && ConversationConfirmation.IsAffirmative(request.MessageText))
             return null; // OrderFlow validates the actual quote/question and renews expired or legacy reviews.
+        if (context.PendingRecoveryAction == null && context.CurrentGoal == null && !expiredDraft
+            && question is { Expected: ExpectedReply.StartReservation, Intent: ConversationIntent.Reservation }
+            && DialoguePolicy.IsAcknowledgement(text))
+        {
+            var denied = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, modules);
+            return denied != null ? await Remember(denied)
+                : await RememberInterpretation(new() { Intent = ConversationIntent.Reservation });
+        }
         if (context.PendingRecoveryAction == null && ConversationConfirmation.IsAffirmative(request.MessageText) && context.CurrentQuestion != null)
         {
             if (question == null)

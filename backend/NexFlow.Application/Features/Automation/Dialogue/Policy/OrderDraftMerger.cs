@@ -56,7 +56,7 @@ public static class OrderDraftMerger
             if (location != null && !product.AtLocation(location)) { complete=false; lines.Add($"• {product.Name}: no se ofrece en esta sede."); continue; }
             var subtotal = checked(item.Quantity * product.PriceMinorUnits);
             totals[product.Currency] = checked(totals.GetValueOrDefault(product.Currency) + subtotal);
-            lines.Add($"• {item.Quantity} × {product.Name}\n  {OfferingResponseFormatter.Money(product.Currency, subtotal)}");
+            lines.Add($"• {item.Quantity} × {product.Name}\n  {OfferingResponseFormatter.Money(product.Currency, subtotal, useSymbol: false)}");
             facts.Add(new("Product", product.Name, VerifiedFactSource.BusinessRepository, product.Id));
             facts.Add(new("Quantity", item.Quantity.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.ValidatedConversation, product.Id));
             facts.Add(new("UnitPriceMinorUnits", product.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), VerifiedFactSource.BusinessRepository, product.Id));

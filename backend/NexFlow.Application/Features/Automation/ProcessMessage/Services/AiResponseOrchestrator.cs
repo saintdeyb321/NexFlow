@@ -114,20 +114,37 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         {
             if (interpretation.Directive == ConversationDirective.UnsupportedAdministrativeAction) context.Information = null;
             var denied = AiIntentAccess.GetDeniedResponse(interpretation.Intent, activeModules);
-            if (denied == null && prepared.Choices != null && _recovery != null)
+            if (denied == null && prepared.Act == DialogueAct.SemanticAmbiguity && _recovery != null)
             {
                 var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context,
                     activeModules, prepared.Response, cancellationToken, contextual: true, choices: prepared.Choices);
-                expectedReply = clarification.Expected;
-                return await SendText(clarification.Response!);
+                if (clarification.Response != null)
+                {
+                    expectedReply = clarification.Expected;
+                    return await SendText(clarification.Response);
+                }
+                interpretation = clarification.Interpretation!;
+                intent = interpretation.Intent;
+                act = DialogueAct.HumanAssistance;
+                prepared = prepared with { Interpretation = interpretation, Response = null };
             }
-            var response = denied ?? prepared.Response;
-            if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal == null
-                && interpretation.Intent == ConversationIntent.Reservation)
-                expectedReply = ExpectedReply.StartReservation;
-            if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal is "BOOKING" or "RESERVATION")
-                response += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
-            return await SendText(response);
+            else
+            {
+                if (denied == null && prepared.Choices != null && _recovery != null)
+                {
+                    var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context,
+                        activeModules, prepared.Response, cancellationToken, contextual: true, choices: prepared.Choices);
+                    expectedReply = clarification.Expected;
+                    return await SendText(clarification.Response!);
+                }
+                var response = denied ?? prepared.Response;
+                if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal == null
+                    && interpretation.Intent == ConversationIntent.Reservation)
+                    expectedReply = ExpectedReply.StartReservation;
+                if (denied == null && prepared.Act == DialogueAct.OperationInformation && context.CurrentGoal is "BOOKING" or "RESERVATION")
+                    response += "\n\n" + await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
+                return await SendText(response);
+            }
         }
         interpretation.Confirmed = ConversationQuestion.CanConfirmReservation(workspaceId, context, request.MessageText, _clock?.UtcNow ?? DateTime.UtcNow);
         if (interpretation.Confirmed) act = DialogueAct.Confirmation;
