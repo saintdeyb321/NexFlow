@@ -257,8 +257,17 @@ public class BookingFlow : IBookingFlow
                 return "Conservo los demás datos de tu reserva; comprobaré que sigan siendo válidos con el cambio.\n\n"
                     + await PromptAsync(workspaceId, context, false, ct, evidence);
             }
-            if (interpretation.Directive == ConversationDirective.ShowOptions
-                || (interpretation.Intent == ConversationIntent.ServiceQuery && interpretation.QueryKind == OfferingQueryKind.Broad))
+            if (interpretation.Intent == ConversationIntent.ServiceQuery && interpretation.QueryKind == OfferingQueryKind.Broad)
+            {
+                var all = (await _offeringService.GetServicesAsync(workspaceId, null, null, ct)).Where(s => s.IsActive).ToArray();
+                var query = CommerceTurnResolver.Page(workspaceId, sourceMessageId, context, "SERVICE", all.Select(VerifiedOffering.Capture).ToArray(), null, 0);
+                if (query.Offerings.Count > 0)
+                    new OfferingReference(workspaceId, "SERVICE", query.Offerings.Select(s => s.Id).ToArray(), null,
+                        true, query.PageOffset, query.TotalCount, query.PageFingerprint).Remember(context);
+                evidence.Operation = OperationStatus.Informational;
+                return OfferingResponseFormatter.Format(query) + "\n\n" + await ExplainServiceScopeAsync(workspaceId, context, ct);
+            }
+            if (interpretation.Directive == ConversationDirective.ShowOptions)
             {
                 if (context.CurrentStep == "COLLECT_TIME") return await AvailabilityOptionsAsync(workspaceId, context, false, ct, evidence);
                 if (string.IsNullOrWhiteSpace(context.SelectedLocationId))
@@ -475,6 +484,8 @@ public class BookingFlow : IBookingFlow
             return Task.FromResult("¿Qué servicio deseas reservar en la sede seleccionada?");
         if (concise && DialoguePolicy.NextBookingStep(context) == "COLLECT_LOCATION")
             return Task.FromResult("¿En cuál sede deseas continuar con tu reserva?");
+        if (concise && DialoguePolicy.NextBookingStep(context) == "CONFIRM")
+            return Task.FromResult("Tu reserva sigue guardada, sin confirmar. Puedes retomar la revisión del resumen o indicar el dato que deseas cambiar.");
         return PromptAsync(workspaceId, context, true, ct);
     }
 
@@ -640,22 +651,10 @@ public class BookingFlow : IBookingFlow
 
     private async Task<string> ExplainServiceScopeAsync(Guid workspace, ConversationContextDto context, CancellationToken ct)
     {
-        var sites = (await _locationRepo.GetLocationsAsync(workspace, ct)).Where(l => l.Id != null).ToArray();
-        var site = sites.SingleOrDefault(l => l.Id == context.SelectedLocationId);
-        if (site == null) return "El catálogo general y los servicios reservables por sede pueden ser distintos. ¿En qué sede deseas comprobarlos?";
-        var all = (await _offeringService.GetServicesAsync(workspace, null, null, ct)).Where(s => s.IsActive).ToArray();
-        bool Reservable(ServiceDto s) => s.RequiresReservation && s.DurationInMinutes >= 5;
-        bool At(ServiceDto s, string id) => string.Equals(s.LocationScope, "ALL", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(s.LocationScope, "SPECIFIC", StringComparison.OrdinalIgnoreCase) && s.LocationIds.Contains(id);
-        var here = all.Where(s => Reservable(s) && At(s, site.Id!)).ToArray();
-        var explanation = $"El catálogo general actual tiene {all.Length} servicios; {here.Length} se pueden reservar en {site.Name}.";
-        foreach (var other in all.Except(here).Take(5))
-        {
-            var otherSites = Reservable(other) ? sites.Where(l => At(other, l.Id!)).Select(l => l.Name).Take(5).ToArray() : [];
-            explanation += "\n\n• " + other.Name + (otherSites.Length > 0
-                ? ": se ofrece para reservas en " + string.Join(", ", otherSites) + "."
-                : ": no figura como reservable en esta sede; puedes consultarlo con el negocio.");
-        }
+        var sites = await _locationRepo.GetLocationsAsync(workspace, ct);
+        var all = await _offeringService.GetServicesAsync(workspace, null, null, ct);
+        var explanation = OfferingResponseFormatter.ServiceScope(all, sites, context.SelectedLocationId)
+            ?? "El catálogo general incluye los servicios del negocio. Para reservar, comprobaré cuáles se ofrecen en la sede que elijas.";
         return explanation + "\n\n" + await GetContinuationAsync(workspace, context, ct, concise: true);
     }
 
@@ -728,10 +727,11 @@ public class BookingFlow : IBookingFlow
             "¿Qué horario prefieres?", slots.Select(s => {
                 var label = TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone).ToString("HH:mm", CultureInfo.InvariantCulture);
                 return new ConversationMenuOption(label, label, "Time"); }).ToArray()); }
-        if (evidence != null) return $"Algunas sugerencias disponibles para el {date:dd/MM/yyyy}; también puedes consultar otra hora:\n\n¿Cuál horario prefieres?";
-        return $"Para el {date:dd/MM/yyyy} tengo disponibles:\n" +
+        var introduction = anchor.HasValue ? "Estas son algunas alternativas cercanas que pude verificar" : "Estos son algunos horarios que pude verificar";
+        if (evidence != null) return $"{introduction} para el {date:dd/MM/yyyy}. También puedes proponer otra hora.\n\n¿Cuál horario prefieres?";
+        return $"{introduction} para el {date:dd/MM/yyyy}:\n" +
             string.Join("\n", slots.Take(8).Select(s => $"• {TimeZoneInfo.ConvertTimeFromUtc(s.StartTime, zone):HH:mm}")) +
-            (slots.Count > 8 ? "\nHay más opciones; puedes escribir otra hora dentro del horario comercial y verificaré su disponibilidad." : "") +
+            "\nTambién puedes proponer otra hora; comprobaré su disponibilidad." +
             "\n\n¿Cuál horario prefieres?";
     }
 
@@ -819,10 +819,13 @@ public class ChatFlow : IChatFlow
     private readonly IEntitlementService _entitlementService;
     private readonly ICatalogGenerationService _catalogGeneration;
     private readonly INotificationService _notifications;
+    private readonly IOfferingService? _offerings;
+    private readonly ILocationRepository? _locations;
 
     public ChatFlow(IKnowledgeService knowledgeService, IEntitlementService entitlementService,
         ILocationResolverService locationResolver, ILogger<ChatFlow> logger,
-        ICatalogGenerationService catalogGeneration, INotificationService notifications, IBusinessReadTools? readTools = null)
+        ICatalogGenerationService catalogGeneration, INotificationService notifications, IBusinessReadTools? readTools = null,
+        IOfferingService? offerings = null, ILocationRepository? locations = null)
     {
         _readTools = readTools ?? new BusinessReadTools(knowledgeService, entitlementService);
         _locationResolver = locationResolver;
@@ -830,6 +833,8 @@ public class ChatFlow : IChatFlow
         _entitlementService = entitlementService;
         _catalogGeneration = catalogGeneration;
         _notifications = notifications;
+        _offerings = offerings;
+        _locations = locations;
     }
 
     public async Task<ChatResponse> ProcessAsync(Guid workspaceId, string text, AiInterpretation interpretation, string? factualLocationId, CancellationToken ct)
@@ -849,6 +854,14 @@ public class ChatFlow : IChatFlow
             if (query.WorkspaceId != workspaceId || query.Type != (interpretation.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE"))
                 throw new InvalidOperationException("Offering query workspace/type mismatch.");
             var body = OfferingResponseFormatter.Format(query);
+            if (query.Type == "SERVICE" && query.Broad && factualLocationId != null && modules.Contains("RESERVATIONS")
+                && _offerings != null && _locations != null)
+            {
+                var all = await _offerings.GetServicesAsync(workspaceId, null, null, ct);
+                var sites = await _locations.GetLocationsAsync(workspaceId, ct);
+                if (OfferingResponseFormatter.ServiceScope(all, sites, query.LocationId ?? factualLocationId) is { } explanation)
+                    body += "\n\n" + explanation;
+            }
             var facts = query.Offerings.SelectMany(p => new[] { new VerifiedFact("Offering",p.Name,VerifiedFactSource.BusinessRepository,p.Id),
                 new VerifiedFact("PriceMinorUnits",p.PriceMinorUnits.ToString(CultureInfo.InvariantCulture),VerifiedFactSource.BusinessRepository,p.Id),
                 new VerifiedFact("Currency",p.Currency,VerifiedFactSource.BusinessRepository,p.Id) }).ToArray();
@@ -857,7 +870,11 @@ public class ChatFlow : IChatFlow
                 var artifact = await _catalogGeneration.GetArtifactAsync(workspaceId,query.Type,ct);
                 if (artifact != null && (artifact.WorkspaceId != workspaceId || artifact.Scope != query.Type)) throw new InvalidOperationException("Catalog artifact workspace/scope mismatch.");
                 if (artifact?.Status == CatalogArtifactStatus.Current && Uri.TryCreate(artifact.PdfUrl,UriKind.Absolute,out var uri) && uri.Scheme is "https" or "http")
+                {
+                    if (query.LocationId != null || query.Question == OfferingQuestion.Availability)
+                        body += "\n\nEl PDF adjunto corresponde al catálogo general del negocio.";
                     return new(body,artifact.PdfUrl,query.Type == "PRODUCT" ? "catalogo-productos.pdf" : "catalogo-servicios.pdf",query.Type) { Facts=Array.AsReadOnly(facts), Operation=OperationStatus.MediaPending };
+                }
                 if (artifact?.Status != CatalogArtifactStatus.Generating) await _notifications.NotifyCatalogUnavailableAsync(workspaceId,query.Type,ct);
             }
             return new(body) { Facts=Array.AsReadOnly(facts), Realization=OfferingResponseFormatter.Realization(query),
@@ -881,7 +898,9 @@ public class ChatFlow : IChatFlow
         };
         if (!topic.HasValue) return new ChatResponse("No puedo resolver esa consulta con la información disponible.");
 
-        string? locationId = factualLocationId;
+        // An unscoped broad query is the business catalog, even during booking.
+        string? locationId = interpretation.QueryKind == OfferingQueryKind.Broad
+            && interpretation.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery ? null : factualLocationId;
         if (topic != KnowledgeTopic.Faqs && !string.IsNullOrWhiteSpace(interpretation.Location))
         {
             try

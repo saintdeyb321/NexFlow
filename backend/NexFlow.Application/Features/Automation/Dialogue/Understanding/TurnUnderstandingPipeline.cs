@@ -96,7 +96,8 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         var mixedQuestion = readOnlyQuestion && act == DialogueAct.Correction;
         var temporalProbe = readOnlyQuestion && new TimePreferenceResolver().Resolve(request.MessageText).Status != ResolutionStatus.Insufficient;
         var activeBooking = context.CurrentGoal is "BOOKING" or "RESERVATION";
-        if (!temporalProbe && (!activeBooking || readOnlyQuestion || InformationalRequest.Catalog(request.MessageText))
+        if (!temporalProbe && (!activeBooking || readOnlyQuestion || InformationalRequest.Catalog(request.MessageText)
+                || normalized == "ver mas" && OfferingReference.Read(workspace, context) is { Broad: true })
             && commerce != null && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct) is { } commercial)
             return commercial;
         var booking = context.CurrentGoal is "BOOKING" or "RESERVATION" || act == DialogueAct.StartOperation;
@@ -125,7 +126,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         { booking = true; act = DialogueAct.StartOperation; }
         if (context.PendingCustomerName != null && local.Name.Code == "SurnameMissing" && context.CurrentStep == "COLLECT_CUSTOMERNAME")
             local = local with { Name = new NameSlotResolver().Resolve(context.PendingCustomerName + " " + local.Name.Candidates[0].Value, true) };
-        var dataTurn = booking && !mixedQuestion && act is DialogueAct.StartOperation or DialogueAct.RequestedData or DialogueAct.Correction;
+        var dataTurn = booking && !mixedQuestion && !readOnlyQuestion && act is DialogueAct.StartOperation or DialogueAct.RequestedData or DialogueAct.Correction;
         if (booking && act == DialogueAct.Correction && ConversationConfirmation.IsCorrection(request.MessageText))
         {
             var words = normalized.Split(' ');

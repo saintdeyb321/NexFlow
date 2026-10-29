@@ -338,7 +338,8 @@ public sealed class AssistantConversationTests
             outbound.Setup(o => o.SendHandoffAcknowledgementAsync(Workspace, "chat", Phone, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid w, string chatId, string phone, string content, string source, CancellationToken ct) => outbound.Object.SendMessageAsync(w, chatId, phone, content, SenderType.AI, source, ct));
             support.Setup(s => s.ProcessAsync(Workspace, "chat", It.IsAny<CancellationToken>())).Returns(async () => { Handoffs++; var c = await Context(); c.Mode = "Human"; await Contexts.SaveContextAsync(Workspace, Phone, c, default); return "Un asesor continuará la conversación."; });
-            var chat = new ChatFlow(knowledge.Object, entitlements.Object, new LocationResolverService(locations.Object), NullLogger<ChatFlow>.Instance, CatalogReads.Object, notifications);
+            var chat = new ChatFlow(knowledge.Object, entitlements.Object, new LocationResolverService(locations.Object), NullLogger<ChatFlow>.Instance, CatalogReads.Object, notifications,
+                offerings: offerings.Object, locations: locations.Object);
             Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()), profiles.Object, knowledge.Object);
             var slots = new WorkspaceSlotResolver(entitlements.Object, profiles.Object, locations.Object, offerings.Object, clock.Object,
                 new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);

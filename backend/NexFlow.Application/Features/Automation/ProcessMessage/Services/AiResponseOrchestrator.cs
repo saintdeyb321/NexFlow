@@ -273,7 +273,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             if (query.WorkspaceId != workspaceId || query.SourceMessageId != request.MessageId || query.StateVersion != context.StateVersion)
                 throw new ConcurrencyException("Offering query no longer matches this turn.");
             if (query.Offerings.Count > 0) new OfferingReference(workspaceId,query.Type,query.Offerings.Select(o => o.Id).ToArray(),query.LocationId,
-                query.Broad,query.PageOffset,query.TotalCount,query.PageFingerprint).Remember(context);
+                query.Broad,query.PageOffset,query.TotalCount,query.PageFingerprint,query.Question).Remember(context);
             else context.LastIntent = interpretation.Intent.ToString();
             InformationalRequest.Remember(context, query.Type == "PRODUCT" ? NexFlow.Application.Features.Knowledge.KnowledgeTopic.Products : NexFlow.Application.Features.Knowledge.KnowledgeTopic.Services,
                 new() { LocationId = query.LocationId }, _clock?.UtcNow ?? DateTime.UtcNow);
@@ -295,11 +295,15 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 : responsePlan?.Operation == OperationStatus.Collecting ? context.RecoveryOptions.Count > 0 ? ExpectedReply.Selection : ExpectedReply.RequestedData
                 : expectedReply;
             var now = _clock?.UtcNow ?? DateTime.UtcNow;
+            var keepBookingSelection = context.CurrentGoal is "BOOKING" or "RESERVATION"
+                && responsePlan?.Operation is OperationStatus.Informational or OperationStatus.MediaPending
+                && intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.Faq or ConversationIntent.Profile
+                && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.Selection, Intent: ConversationIntent.Reservation };
             var keepOrderReview = context.CurrentGoal == "ORDER"
                 && (responsePlan?.Operation == OperationStatus.AwaitingConfirmation || act == DialogueAct.ProviderFailure)
                 && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.ConfirmOrder, Intent: ConversationIntent.Order } orderQuestion
                 && orderQuestion.ConversationId == conversation.Id;
-            if (!keepOrderReview)
+            if (!keepOrderReview && !keepBookingSelection)
                 ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, now, conversation.Id);
             await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             var plan = Bind(text, media);

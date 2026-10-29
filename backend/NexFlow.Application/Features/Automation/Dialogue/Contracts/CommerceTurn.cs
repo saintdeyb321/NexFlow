@@ -47,7 +47,8 @@ public sealed record CommerceCatalog(Guid WorkspaceId, string? StateVersion, Rea
 
 // Uses the existing LastIntent envelope; no extra document, schema or conversation history.
 public sealed record OfferingReference(Guid WorkspaceId, string Type, string[] Ids, string? LocationId,
-    bool Broad = false, int PageOffset = 0, int TotalCount = 0, string? PageFingerprint = null)
+    bool Broad = false, int PageOffset = 0, int TotalCount = 0, string? PageFingerprint = null,
+    OfferingQuestion Question = OfferingQuestion.Facts)
 {
     private const string Prefix = "OFFERING:v1:";
     public static OfferingReference? Read(Guid workspace, ConversationContextDto context)

@@ -26,9 +26,11 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
                 return new(DialogueAct.Information, new() { Intent = intent }, Response: pageDenied);
             var current = await slots.ReadCommerceAsync(workspace, context, page.Type == "PRODUCT", page.Type == "SERVICE", false, page.LocationId, ct);
             var values = page.Type == "PRODUCT" ? current.Products : current.Services;
-            var next = Page(workspace, source, context, page.Type, values, page.LocationId, page.PageOffset + page.Ids.Length);
+            if (page.Type == "SERVICE" && page.Question == OfferingQuestion.Availability)
+                values = Array.AsReadOnly(values.Where(s => s.RequiresReservation && s.DurationMinutes >= 5).ToArray());
+            var next = Page(workspace, source, context, page.Type, values, page.LocationId, page.PageOffset + page.Ids.Length, page.Question);
             if (next.PageFingerprint != page.PageFingerprint || next.PageOffset >= next.TotalCount)
-                next = Page(workspace, source, context, page.Type, values, page.LocationId, 0)
+                next = Page(workspace, source, context, page.Type, values, page.LocationId, 0, page.Question)
                     with { PageRestarted = next.PageFingerprint != page.PageFingerprint };
             return new(DialogueAct.Information, new() { Intent = intent, QueryKind = OfferingQueryKind.Broad, OfferingQuery = next });
         }
@@ -39,9 +41,25 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             var type = semantic.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE";
             if (AiIntentAccess.GetDeniedResponse(semantic.Intent, modules) is { } broadDenied)
                 return new(DialogueAct.Information, semantic, Response: broadDenied);
-            var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, context.SelectedLocationId, ct);
+            // A broad catalog is global unless this turn explicitly scopes it.
+            // The reservation's location is not an implicit catalog filter.
+            string? locationId = null;
+            if (!string.IsNullOrWhiteSpace(semantic.Location))
+            {
+                var location = await slots.ResolveAsync(workspace, source, text, context,
+                    modules.Contains("RESERVATIONS") && modules.Contains("SERVICES") ? SlotResolutionPurpose.Reservation : SlotResolutionPurpose.Information,
+                    new(true, false, false), ct);
+                if (!location.Location.TryGetValue(out var site))
+                    return new(DialogueAct.Information, semantic, Response: "¿De qué sede deseas consultar los servicios?");
+                locationId = site.Id;
+            }
+            var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, locationId, ct);
+            var values = type == "PRODUCT" ? data.Products : data.Services;
+            if (type == "SERVICE" && semantic.Question == OfferingQuestion.Availability)
+                values = Array.AsReadOnly(values.Where(s => s.RequiresReservation && s.DurationMinutes >= 5).ToArray());
             return new(DialogueAct.Information, new() { Intent = semantic.Intent, QueryKind = OfferingQueryKind.Broad,
-                OfferingQuery = Page(workspace, source, context, type, type == "PRODUCT" ? data.Products : data.Services, context.SelectedLocationId, 0) });
+                OfferingQuery = Page(workspace, source, context, type, values, locationId, 0,
+                    semantic.Question ?? OfferingQuestion.Facts) });
         }
         if (semantic is { UseOfferingReference: true, Question: not null, RequiresClarification: false }
             && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)
@@ -123,7 +141,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         // No catalog lookup is necessary for explicit submit/summary. OrderFlow revalidates it.
         if (submit || summary) return Order(submit ? OrderTurnKind.Submit : OrderTurnKind.Summary, []);
         var reference = OfferingReference.Read(workspace, context);
-        string? scope = context.SelectedLocationId ?? reference?.LocationId;
+        // Read-only catalog questions do not inherit a transactional filter.
+        string? scope = readOnly ? null : context.SelectedLocationId ?? reference?.LocationId;
         string? selectedLocation = null;
         if (internalLocation || words.Contains("en"))
         {
@@ -239,13 +258,13 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         static bool changingProduct(string text) => OrderMentionResolver.Words(text).Any(w => w is "por" or "producto" or "productos") && !text.EndsWith("por favor", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static OfferingQueryPlan Page(Guid workspace, string source, ConversationContextDto context, string type,
-        IReadOnlyList<VerifiedOffering> values, string? scope, int offset)
+    internal static OfferingQueryPlan Page(Guid workspace, string source, ConversationContextDto context, string type,
+        IReadOnlyList<VerifiedOffering> values, string? scope, int offset, OfferingQuestion question = OfferingQuestion.Facts)
     {
         var ordered = values.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ThenBy(o => o.Id, StringComparer.Ordinal).ToArray();
         var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(ordered.Select(o => o.Id)))));
-        return new(workspace, source, context.StateVersion, type, OfferingQuestion.Facts,
+        return new(workspace, source, context.StateVersion, type, question,
             Array.AsReadOnly(ordered.Skip(offset).Take(5).ToArray()), true, scope,
             PageOffset: offset, TotalCount: ordered.Length, PageFingerprint: fingerprint);
     }

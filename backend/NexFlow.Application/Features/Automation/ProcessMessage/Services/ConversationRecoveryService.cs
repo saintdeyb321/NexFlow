@@ -148,6 +148,9 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                 expected: denied == null ? question.Expected : ExpectedReply.Information, referenceIntent: question.Intent);
         }
         var repair = InformationalRequest.IsRepair(text);
+        // Let the catalog resolver re-read its own scoped page; do not replace
+        // it with a reservation picker just because a draft is active.
+        if (text == "ver mas" && OfferingReference.Read(workspace, context) is { Broad: true }) return null;
         if (booking && context.CurrentStep == "COLLECT_TIME" && context.PendingRecoveryAction == null && !expiredDraft && InformationalRequest.Menu(text))
             return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Directive = ConversationDirective.ShowOptions });
         var topic = repair ? InformationalRequest.RepairTopic(request.MessageText) : InformationalRequest.PublicTopic(text);
