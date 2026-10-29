@@ -303,6 +303,25 @@ public sealed class AiResilienceTests
     }
 
     [Fact]
+    public async Task Cross_provider_and_model_fallback_count_three_physical_attempts_without_logging_content()
+    {
+        var logs = new List<string>();
+        using var groqTransport = new Transport(503, "private provider failure");
+        using var geminiTransport = new Transport(200, "") { ResponseAt = call => call == 1 ? (429, "private rate limit")
+            : (200, """{"candidates":[{"content":{"parts":[{"text":"safe"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""") };
+        using var groqHttp = new HttpClient(groqTransport); using var geminiHttp = new HttpClient(geminiTransport);
+        var config = Config(); config["Gemini:FallbackModel"] = "explicit-alternate";
+        var router = new AiRouter([Provider("Groq", groqHttp, config, logs), Provider("Gemini", geminiHttp, config, logs)], new CaptureLogger<AiRouter>(logs));
+        using (AiTelemetry.Begin(Guid.NewGuid(), AiTaskType.IntentExtraction))
+            Assert.Equal("safe", await router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "sensitive prompt", "private person", true, default));
+        Assert.Equal(1, groqTransport.Calls); Assert.Equal(2, geminiTransport.Calls);
+        Assert.Equal(3, logs.Count(l => l.StartsWith("AiHttpAttempt", StringComparison.Ordinal)));
+        Assert.Contains(logs, l => l.StartsWith("AiUsage", StringComparison.Ordinal) && l.Contains("TotalTokens=15"));
+        foreach (var text in new[] { "private provider failure", "private rate limit", "sensitive prompt", "private person" })
+            Assert.DoesNotContain(text, string.Join("\n", logs));
+    }
+
+    [Fact]
     public async Task Concurrent_diagnostic_scopes_never_mix_workspace_usage_and_throwing_observers_do_not_fail_a_response()
     {
         async Task<(Guid Workspace, List<string> Logs)> Run()

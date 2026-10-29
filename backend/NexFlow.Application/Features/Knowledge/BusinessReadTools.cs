@@ -2,6 +2,7 @@ using System.Diagnostics;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Reservations;
+using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Knowledge;
 
@@ -11,6 +12,39 @@ public sealed record KnowledgeRead(KnowledgeTopic Topic, string? LocationId = nu
     int Offset = 0, int Limit = 5) : BusinessReadRequest;
 public sealed record AvailabilityRead(string LocationId, string ServiceId, DateTime LocalDate,
     TimeOnly? LocalTime = null) : BusinessReadRequest;
+
+public sealed record BusinessReadCapability(ConversationIntent Intent, KnowledgeTopic Topic, string? RequiredModule);
+
+// One map for the interpreter's read manifest, the typed adapter and execution.
+// It contains no write tools or human-role permissions.
+public static class BusinessReadCapabilities
+{
+    private static readonly BusinessReadCapability[] Reads = [
+        new(ConversationIntent.Profile, KnowledgeTopic.Profile, null),
+        new(ConversationIntent.ProductQuery, KnowledgeTopic.Products, "CATALOG"),
+        new(ConversationIntent.ServiceQuery, KnowledgeTopic.Services, "SERVICES"),
+        new(ConversationIntent.Location, KnowledgeTopic.Locations, "LOCATIONS"),
+        new(ConversationIntent.BusinessHours, KnowledgeTopic.BusinessHours, "BUSINESS_HOURS"),
+        new(ConversationIntent.Faq, KnowledgeTopic.Faqs, "FAQ")
+    ];
+
+    public static IReadOnlyList<BusinessReadCapability> ForModules(IReadOnlySet<string> modules)
+        => Array.AsReadOnly(Reads.Where(r => r.RequiredModule == null || Has(modules, r.RequiredModule)).ToArray());
+
+    public static KnowledgeRead? FromIntent(ConversationIntent intent, string? location = null, string? search = null)
+        => Reads.SingleOrDefault(r => r.Intent == intent) is { } read ? new(read.Topic, location, search) : null;
+
+    public static bool CanReadAvailability(IReadOnlySet<string> modules) => Has(modules, "SERVICES") && Has(modules, "RESERVATIONS");
+
+    public static bool Allows(BusinessReadRequest request, IReadOnlySet<string> modules) => request switch {
+        AvailabilityRead => CanReadAvailability(modules),
+        KnowledgeRead { Topic: KnowledgeTopic.Offerings } => Has(modules, "CATALOG"),
+        KnowledgeRead read => Reads.Any(r => r.Topic == read.Topic && (r.RequiredModule == null || Has(modules, r.RequiredModule))),
+        _ => false
+    };
+
+    private static bool Has(IReadOnlySet<string> modules, string code) => modules.Contains(code, StringComparer.OrdinalIgnoreCase);
+}
 
 // Created by the authenticated backend, never deserialized from provider arguments.
 public sealed class BusinessReadTurn
@@ -57,15 +91,7 @@ public sealed class BusinessReadTools(IKnowledgeService knowledge, IEntitlementS
         {
             async Task<bool> Allowed() {
                 var modules = (await entitlements.GetAvailableModuleCodesAsync(turn.WorkspaceId, deadline.Token)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                return request switch {
-                    KnowledgeRead { Topic: KnowledgeTopic.Profile } => true,
-                    KnowledgeRead { Topic: KnowledgeTopic.Products or KnowledgeTopic.Offerings } => modules.Contains("CATALOG"),
-                    KnowledgeRead { Topic: KnowledgeTopic.Services } => modules.Contains("SERVICES"),
-                    KnowledgeRead { Topic: KnowledgeTopic.Locations } => modules.Contains("LOCATIONS"),
-                    KnowledgeRead { Topic: KnowledgeTopic.BusinessHours } => modules.Contains("BUSINESS_HOURS"),
-                    KnowledgeRead { Topic: KnowledgeTopic.Faqs } => modules.Contains("FAQ"),
-                    AvailabilityRead => modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"), _ => false
-                };
+                return BusinessReadCapabilities.Allows(request, modules);
             }
             if (!await Allowed().WaitAsync(deadline.Token)) return Empty(BusinessReadStatus.Denied);
             BusinessReadResult result;

@@ -19,6 +19,19 @@ public static class AiTelemetry
     private static readonly Histogram<double> Duration = Meter.CreateHistogram<double>("nexflow.ai.http.duration", "ms");
     private static readonly Counter<long> Tokens = Meter.CreateCounter<long>("nexflow.ai.tokens");
     private static readonly Counter<long> UsageReports = Meter.CreateCounter<long>("nexflow.ai.usage.reports");
+    private static readonly Histogram<long> InputCharacters = Meter.CreateHistogram<long>("nexflow.ai.input.characters", "characters");
+
+    public static void InterpretationInput(int contract, int context, int message, ILogger logger)
+    {
+        try
+        {
+            foreach (var part in new[] { (Kind: "Contract", Count: contract), (Kind: "Context", Count: context), (Kind: "Message", Count: message) })
+                InputCharacters.Record(part.Count, new TagList { { "task", AiTaskType.IntentExtraction.ToString() }, { "kind", part.Kind }, { "version", "2" } });
+            logger.LogInformation("AiInterpretationInput Version={Version} ContractCharacters={ContractCharacters} ContextCharacters={ContextCharacters} MessageCharacters={MessageCharacters} WorkspaceKey={WorkspaceKey}",
+                2, contract, context, message, WorkspaceKey());
+        }
+        catch { /* Size diagnostics contain no content and cannot affect an operation. */ }
+    }
 
     public static IDisposable Begin(Guid workspace, AiTaskType task) => new Scope(new(workspace, task));
     internal static IDisposable TaskScope(AiTaskType task) => new Scope(new(Current.Value?.Workspace, task));

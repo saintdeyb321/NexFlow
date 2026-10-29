@@ -881,21 +881,15 @@ public class ChatFlow : IChatFlow
                 Operation=query.Offerings.Count == 0 ? OperationStatus.NotAvailable : OperationStatus.Informational };
         }
 
-        KnowledgeTopic? topic = interpretation.Intent switch
+        KnowledgeTopic? topic = BusinessReadCapabilities.FromIntent(interpretation.Intent)?.Topic ?? (interpretation.Intent switch
         {
-            ConversationIntent.ProductQuery => KnowledgeTopic.Products,
-            ConversationIntent.ServiceQuery => KnowledgeTopic.Services,
-            ConversationIntent.Faq => KnowledgeTopic.Faqs,
-            ConversationIntent.Location => KnowledgeTopic.Locations,
-            ConversationIntent.BusinessHours => KnowledgeTopic.BusinessHours,
             // A general informational introduction uses the public profile. An
             // incidental FAQ text match must not replace the business identity.
             // Specific FAQ requests keep their explicit Faq route above.
             ConversationIntent.General when interpretation.Act == DialogueAct.Information => KnowledgeTopic.Profile,
             ConversationIntent.General => modules.Contains("FAQ") ? KnowledgeTopic.Faqs : KnowledgeTopic.Profile,
-            ConversationIntent.Profile => KnowledgeTopic.Profile,
             _ => null
-        };
+        });
         if (!topic.HasValue) return new ChatResponse("No puedo resolver esa consulta con la información disponible.");
 
         // An unscoped broad query is the business catalog, even during booking.

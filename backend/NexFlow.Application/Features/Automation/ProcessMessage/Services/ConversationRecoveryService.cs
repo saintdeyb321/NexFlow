@@ -219,6 +219,10 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                     return await AnswerInformation(KnowledgeTopic.BusinessHours, location.Id, knownLocations: currentLocations);
             }
         }
+        if (context.PendingRecoveryAction == null && question?.Expected is ExpectedReply.ConfirmReservation or ExpectedReply.ConfirmOrder
+            && DialoguePolicy.IsAcknowledgement(text) && !ConversationConfirmation.IsAffirmative(request.MessageText))
+            return await Remember("Conservamos el resumen, sin confirmar. Si deseas autorizarlo tal como está, puedes responder «Confirmar»; también puedes indicar un cambio.",
+                operation: OperationStatus.AwaitingConfirmation, expected: question.Expected, referenceIntent: question.Intent);
         if ((context.CurrentStep == "CONFIRM" || context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true || context.PendingRecoveryAction is "CANCEL" or "EXPIRE")
             && ConversationConfirmation.IsStatusQuestion(request.MessageText))
             return await Remember("La propuesta todavía espera tu decisión; esta pregunta no la confirma. " + Continuation(context));
@@ -239,7 +243,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (context.PendingRecoveryAction == "REQUEST_DETAILS")
         {
             if (text is "cancelar" or "no") { context.PendingRecoveryAction = null; return await Remember("No he registrado ninguna solicitud."); }
-            if (text.Length < 10 || ConversationConfirmation.IsAffirmative(request.MessageText)) return await Remember("Describe brevemente qué necesitas solicitar al negocio, o escribe cancelar.");
+            if (text.Length < 10 || DialoguePolicy.IsAcknowledgement(text) || ConversationConfirmation.IsAffirmative(request.MessageText))
+                return await Remember("Describe brevemente qué necesitas solicitar al negocio, o escribe cancelar.");
             context.PendingRecoveryAction = null;
             return await RememberInterpretation(new() { Intent = ConversationIntent.Request });
         }

@@ -6,7 +6,7 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Policy;
 public static class ConversationConfirmation
 {
     public static bool IsAffirmative(string text) => !text.Contains('?') && !text.Contains('¿')
-        && SpanishTextNormalizer.Normalize(text) is "si" or "si confirmo" or "confirmo" or "confirmar" or "de acuerdo";
+        && SpanishTextNormalizer.Normalize(text) is "si" or "si confirmo" or "confirmo" or "confirmar";
 
     public static bool NeedsClarification(string text)
     {

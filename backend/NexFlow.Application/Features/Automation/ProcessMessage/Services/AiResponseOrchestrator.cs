@@ -300,10 +300,16 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 && intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.Faq or ConversationIntent.Profile
                 && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.Selection, Intent: ConversationIntent.Reservation };
             var keepOrderReview = context.CurrentGoal == "ORDER"
-                && (responsePlan?.Operation == OperationStatus.AwaitingConfirmation || act == DialogueAct.ProviderFailure)
+                && (responsePlan?.Operation == OperationStatus.AwaitingConfirmation
+                    || operation == OperationStatus.AwaitingConfirmation && expectedReply == ExpectedReply.ConfirmOrder
+                    || act == DialogueAct.ProviderFailure)
                 && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.ConfirmOrder, Intent: ConversationIntent.Order } orderQuestion
                 && orderQuestion.ConversationId == conversation.Id;
-            if (!keepOrderReview && !keepBookingSelection)
+            var keepBookingReview = context.CurrentGoal is "BOOKING" or "RESERVATION"
+                && operation == OperationStatus.AwaitingConfirmation && expectedReply == ExpectedReply.ConfirmReservation
+                && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.ConfirmReservation, Intent: ConversationIntent.Reservation } bookingQuestion
+                && bookingQuestion.ConversationId == conversation.Id;
+            if (!keepOrderReview && !keepBookingSelection && !keepBookingReview)
                 ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, now, conversation.Id);
             await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             var plan = Bind(text, media);
