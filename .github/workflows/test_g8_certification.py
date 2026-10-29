@@ -13,7 +13,7 @@ def evidence(historical=True):
     results = ET.SubElement(root, "Results")
     definitions = ET.SubElement(root, "TestDefinitions")
     summary = ET.SubElement(root, "ResultSummary", outcome="Failed" if historical else "Completed")
-    total, passed, failed = (130, 102, 28) if historical else (gate.MIN_CURRENT, gate.MIN_CURRENT, 0)
+    total, passed, failed = (130, 101, 29) if historical else (gate.MIN_CURRENT, gate.MIN_CURRENT, 0)
     counters = dict(total=total, executed=total, passed=passed, failed=failed)
     counters.update({key: 0 for key in ("error", "timeout", "aborted", "inconclusive", "passedButRunAborted",
                                       "notRunnable", "notExecuted", "disconnected", "warning", "inProgress", "pending")})
@@ -49,7 +49,19 @@ class GateTests(unittest.TestCase):
     def test_exact_frozen_historical_contract_preserves_red_tests(self):
         result = self.verify(evidence())
         self.assertEqual("EXPECTED_HISTORICAL_INCOMPATIBILITIES", result["decision"])
-        self.assertEqual(28, len(result["known_failures"]))
+        self.assertEqual(29, len(result["known_failures"]))
+
+    def test_h06_ambiguous_acknowledgement_is_exactly_pinned_as_security_incompatibility(self):
+        cases = gate.historical_contract(gate.ROOT)
+        name = f'{gate.HOLDOUT}.Frozen_independent_conversation(id: "H06")'
+        self.assertEqual("H06/4/A: ReservationEffects", cases[name][2])
+        self.assertEqual(29, sum(reason is not None for _, _, reason in cases.values()))
+        root = evidence()
+        target = next(r for r in root.find("Results") if r.attrib["testName"] == name)
+        self.assertEqual("Failed", target.attrib["outcome"])
+        target.find("Output/ErrorInfo/Message").text += "; wrong reason"
+        with self.assertRaises(ValueError):
+            self.verify(root)
 
     def test_new_order_consent_historical_failures_are_exactly_pinned(self):
         cases = gate.historical_contract(gate.ROOT)

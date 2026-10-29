@@ -66,6 +66,9 @@ def historical_contract(root):
             elif cls == HOLDOUT:
                 if case_id in ("H10", "H21"):
                     reason = f"{case_id}/3/A: VerifiedFact"
+                elif case_id == "H06":
+                    # Intentional security change: acknowledgement is not final booking consent.
+                    reason = "H06/4/A: ReservationEffects"
                 elif case_id == "H26":
                     reason = "H26/2/A: OrderEffects; H26/3/A: OrderEffects"
             expected[name] = (cls, method, reason)
@@ -118,8 +121,8 @@ def validate(suite, path, test_exit_code, repo=ROOT):
     else:
         require(test_exit_code == 1, f"Historical dotnet test must return exactly 1, got {test_exit_code}")
         require(outcome == "Failed", "Historical run summary must preserve the real failure")
-        require((counts["total"], counts["passed"], counts["failed"]) == (130, 102, 28),
-                "Historical counts must be exactly 130/102/28")
+        require((counts["total"], counts["passed"], counts["failed"]) == (130, 101, 29),
+                "Historical counts must be exactly 130/101/29")
         expected = historical_contract(repo)
         names = [result.attrib["testName"] for result in results]
         require(len(names) == len(set(names)) == 130 and set(names) == set(expected),
