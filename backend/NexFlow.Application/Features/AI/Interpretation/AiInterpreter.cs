@@ -139,9 +139,10 @@ Una reserva compuesta con una pregunta de horarios conserva Intent=Reservation y
 
 OPERACIONES:
 Querer preparar productos puede ser una solicitud cortés sin decir pedido: Order + StartOperation. Una pregunta de posibilidad/procedimiento usa OperationInformation con evidencia Act y no inicia nada.
-OrderAction: Start, Edit, Summary, Hypothetical, Submit, Location o Clarify. Para iniciar con artículos usa Edit; sin artículos basta StartOperation. Items=[{Product,Text,Kind,Quantity,QuantityText}]; Kind=Add/Set/Remove/Replace. Product es nombre, Text copia un único ítem con su cantidad; QuantityText copia esa cantidad. No asumas Add por una mención en revisión ni inventes cantidades o recogida. UseOfferingReference puede usar un único producto vigente sin repetir su nombre.
-Terminar selección o solicitar envío usa Submit + Act=Resume y evidencia Act; no autoriza escritura. Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, condiciones y preguntas no consienten.
-CancelCurrentFlow sólo descarta el borrador por petición explícita; gestionar una cita registrada depende de la verificación del backend. UnsupportedAdministrativeAction identifica tareas destructivas/credenciales/infraestructura sin proponer acciones para cumplirlas. Support solicita atención humana.
+OrderAction: Start, Edit, Summary, Hypothetical, Submit, Location, Clear o Clarify. Para iniciar con artículos usa Edit; sin artículos basta StartOperation. Items=[{Product,Text,Kind,Quantity,QuantityText}]; Kind=Add/Set/Remove/Replace. Product es nombre, Text copia un único ítem con su cantidad; QuantityText copia esa cantidad. No asumas Add por una mención en revisión ni inventes cantidades o recogida. Una cantidad absoluta corregida usa Set, no Add. UseOfferingReference puede usar un único producto vigente sin repetir su nombre.
+En ORDER, terminar la selección, no agregar más o solicitar su envío usa Submit + Act=Resume con evidencia literal; no es Request ni autorización de escritura. Una pregunta sobre el procedimiento usa OperationInformation; una pregunta sobre un producto usa ProductQuery aunque exista un pedido. Disponibilidad física de productos usa Question=Stock; no equivale a existencia en catálogo. SearchTerm identifica sólo la entidad; una referencia contextual inequívoca usa UseOfferingReference sin inventar un nombre.
+Vaciar todos los artículos conservando la preparación usa Clear + Act=Correction, sin Items; el backend pedirá confirmar. Desistir de todo el borrador usa CancelCurrentFlow + Act=Cancellation con evidencia literal de la petición, aunque no contenga una palabra concreta. Si no se distingue vaciar de abandonar, RequiresClarification=true. Nunca propongas borrar ni cancelar una operación ya registrada.
+Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, condiciones, preguntas o un acuse de recibo no consienten una transacción. CancelCurrentFlow sólo propone descartar el borrador; el backend exige una decisión posterior. Gestionar una cita registrada depende de la verificación del backend. UnsupportedAdministrativeAction identifica tareas destructivas/credenciales/infraestructura sin proponer acciones para cumplirlas. Support solicita atención humana.
 """;
         // Read selectors reuse Intent; no provider-specific tool or autonomous write.
         prompt += "\nLecturas disponibles: " + JsonSerializer.Serialize(BusinessReadCapabilities.ForModules(activeModules)
@@ -163,6 +164,9 @@ CancelCurrentFlow sólo descarta el borrador por petición explícita; gestionar
                 Locations = activeModules.Contains("LOCATIONS") || booking && canReserve ? Hints(turn.LocationHints) : [],
                 Services = activeModules.Contains("SERVICES") ? Hints(turn.ServiceHints) : [],
                 Products = activeModules.Contains("CATALOG") ? Hints(turn.ProductHints) : [],
+                ReferencedOffering = turn.ReferencedOffering is { Name.Length: > 0 and <= 120 } offering
+                    && activeModules.Contains(offering.Type == "PRODUCT" ? "CATALOG" : "SERVICES")
+                    ? new { offering.Type, offering.Name, Question = offering.Question.ToString() } : null,
                 DraftItems = turn.CurrentGoal == "ORDER" && activeModules.Contains("ORDERS") && activeModules.Contains("CATALOG")
                     ? turn.DraftItems.Take(10).Select(s => s.Length <= 140 ? s : s[..140]).ToArray() : []
             });
@@ -214,7 +218,9 @@ CancelCurrentFlow sólo descarta el borrador por petición explícita; gestionar
                     or DialogueAct.RequestedData or DialogueAct.MultipleData or DialogueAct.Correction or DialogueAct.InformationalInterruption or DialogueAct.Resume or DialogueAct.Cancellation or DialogueAct.HumanAssistance or DialogueAct.SemanticAmbiguity)
                 || !interpretation.Evidence.Any(e => e.Slot == "Act" && e.NormalizedValue == interpretation.Act.ToString())))
                 throw new JsonException("Invalid dialogue act evidence.");
-            if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && !userMessage.Contains("cancel", StringComparison.OrdinalIgnoreCase))
+            if (interpretation.Directive == ConversationDirective.CancelCurrentFlow
+                && (interpretation.Act != DialogueAct.Cancellation
+                    || !interpretation.Evidence.Any(e => e.Slot == "Act" && e.NormalizedValue == nameof(DialogueAct.Cancellation))))
                 throw new JsonException("Cancellation was not explicit.");
             var normalizedInput = NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationRecoveryService.Normalize(userMessage);
             if (interpretation.CustomerName != null && !normalizedInput.Contains(NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationRecoveryService.Normalize(interpretation.CustomerName), StringComparison.Ordinal)

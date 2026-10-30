@@ -2,6 +2,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using NexFlow.Application.Features.Automation.ProcessMessage;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
@@ -167,7 +168,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return PrepareBooking(local, act, false, workspace, request.MessageId);
         if (!await recovery.AcquireAiAsync(workspace, phone, request.MessageId, ct))
         {
-            if (booking) return new(DialogueAct.ProviderFailure, new() { Intent = ConversationIntent.RateLimited });
+            if (booking || context.CurrentGoal == "ORDER") return new(DialogueAct.ProviderFailure, new() { Intent = ConversationIntent.RateLimited });
             return new(DialogueAct.ProviderFailure, new() { Intent = ConversationIntent.RateLimited }, Response:
                 "Hemos alcanzado el límite temporal de consultas. Espera un minuto o escribe asesor para recibir ayuda humana.");
         }
@@ -187,7 +188,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             return new(DialogueAct.ProviderFailure, interpretation, true);
         if (interpretation.RequiresClarification)
             return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.General, RequiresClarification = true }, true,
-                "Quiero asegurarme de entenderte. No he cambiado tu selección.\n\n¿Qué dato deseas consultar o cambiar? Conservamos lo que ya indicaste.");
+                context.CurrentGoal == "ORDER" ? SecretaryPresentation.OrderRecovery(context.OrderDraftItems.Count > 0,
+                    context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true)
+                : "Quiero asegurarme de entenderte. No he cambiado tu selección.\n\n¿Qué dato deseas consultar o cambiar? Conservamos lo que ya indicaste.");
         if (commerce != null && interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
             && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct, interpretation) is { } understoodOrder)
             return understoodOrder with { UsedAi = true };
@@ -196,6 +199,11 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && !string.IsNullOrWhiteSpace(actEvidence[0].Text) && actEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(request.MessageText, actEvidence[0].Text)
             && actEvidence[0].NormalizedValue == interpretation.Act?.ToString();
+        // A semantic discard only asks for a separate recovery decision. It must
+        // precede generic negation handling and never supplies transaction consent.
+        if (backedAct && interpretation.Act == DialogueAct.Cancellation
+            && interpretation.Directive == ConversationDirective.CancelCurrentFlow)
+            return new(DialogueAct.Cancellation, interpretation, true);
         var informationSpans = (interpretation.Evidence ?? []).Where(e => e.Slot == "Information").ToArray();
         var informationSpan = interpretation.InformationalIntent == ConversationIntent.BusinessHours && informationSpans.Length == 1
             ? informationSpans[0] : null;

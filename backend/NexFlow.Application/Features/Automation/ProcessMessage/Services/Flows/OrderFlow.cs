@@ -5,6 +5,7 @@ using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Repositories;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Business.Offerings;
@@ -80,6 +81,11 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         if (proposal != null && (proposal.WorkspaceId != workspaceId || proposal.SourceMessageId != sourceMessageId || proposal.ExpectedStateVersion != context.StateVersion))
             throw new ConcurrencyException("Stale or foreign order proposal.");
         if (proposal?.Kind == OrderTurnKind.Clarify) return await Remember(proposal.Clarification ?? "¿Cuál producto deseas agregar o cambiar?");
+        if (proposal?.Kind == OrderTurnKind.Clear)
+        {
+            context.PendingRecoveryAction = "CLEAR_ORDER_ITEMS";
+            return await Remember("Conservaré la preparación del pedido, sin enviar nada al negocio.\n\n¿Quieres quitar todos los productos del borrador? Responde «Sí» o «No».");
+        }
         var products = (await offerings.GetProductsAsync(workspaceId, proposal?.LocationId ?? context.SelectedLocationId,null,ct))
             .Where(p => p.IsActive).Select(VerifiedOffering.Capture).ToArray();
         if (proposal?.Kind == OrderTurnKind.Start)
@@ -88,7 +94,7 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
                 return await Remember("No hay productos activos para preparar una solicitud en este momento. Puedes solicitar asistencia humana.", OperationStatus.NotAvailable);
             context.CurrentGoal = "ORDER";
             context.CurrentStep = "ORDER_COLLECT_ITEMS";
-            context.LastQuestion = "¿Qué productos y cantidades deseas solicitar? Puedes consultar el catálogo antes de elegir.";
+            context.LastQuestion = SecretaryPresentation.StartOrder(products.Select(p => p.Name).First());
             return await Remember(context.LastQuestion);
         }
         if (proposal == null)
@@ -148,7 +154,7 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
                 context.CurrentGoal="ORDER"; context.CurrentStep=needsLocation ? "ORDER_LOCATION" : "ORDER_REVIEW:" + quote.Fingerprint;
                 if (proposal.Edits.Count > 0) new OfferingReference(workspaceId,"PRODUCT",proposal.Edits.Select(e => e.ProductId).Distinct().ToArray(),location).Remember(context);
             }
-            var question = needsLocation ? "¿En cuál sede deseas solicitar estos productos?" : "¿Deseas agregar o cambiar algo, o enviar la solicitud para revisión?";
+            var question = needsLocation ? "¿En cuál sede deseas solicitar estos productos?" : SecretaryPresentation.ReviewOrder;
             context.LastQuestion=question;
             return await Remember(quote.Text + "\n\n" + question,quote:quote);
         }

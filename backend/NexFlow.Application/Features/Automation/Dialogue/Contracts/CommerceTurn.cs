@@ -7,7 +7,7 @@ using NexFlow.Application.Features.Services.DTOs;
 namespace NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 public enum OrderEditKind { Add, Set, Remove, Replace }
-public enum OrderTurnKind { Edit, Summary, Hypothetical, Submit, Location, Clarify, Start }
+public enum OrderTurnKind { Edit, Summary, Hypothetical, Submit, Location, Clarify, Start, Clear }
 public enum OfferingQuestion { Facts, Price, Duration, Availability, Stock, Comparison, Recommendation }
 public sealed record OrderEdit(OrderEditKind Kind, string ProductId, int Quantity, string? ReplacesProductId = null);
 

@@ -176,7 +176,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true));
             var introduction = interpretation.Intent == ConversationIntent.RateLimited ? "El proveedor de IA alcanzó su límite temporal. Puedes usar estas opciones sin IA:"
                 : interpretation.Intent == ConversationIntent.ProviderUnavailable ? "No pude interpretar tu consulta en este momento. Podemos continuar con opciones verificadas:"
-                : context.CurrentGoal == "ORDER" ? "No he cambiado tu pedido. Conservamos los productos y cantidades. ¿Qué dato deseas consultar o cambiar?"
+                : context.CurrentGoal == "ORDER" ? SecretaryPresentation.OrderRecovery(context.OrderDraftItems.Count > 0,
+                    context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true)
                 : "¿Qué información necesitas consultar o qué operación deseas realizar?";
             var clarification = await _recovery.ClarifyAsync(workspaceId, normalizedPhone, request.MessageId, context, activeModules, introduction, cancellationToken, contextual: true);
             if (clarification.Response != null) return await SendText(clarification.Response);
@@ -199,7 +200,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);
             else if (context.CurrentGoal == "ORDER")
                 finalResponse = AiIntentAccess.GetDeniedResponse(ConversationIntent.Order, activeModules)
-                    ?? "No pude interpretar ese cambio. Conservamos los productos y cantidades. ¿Qué deseas consultar o cambiar?";
+                    ?? SecretaryPresentation.OrderRecovery(context.OrderDraftItems.Count > 0,
+                        context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true);
         }
         else
         {

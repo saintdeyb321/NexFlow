@@ -103,6 +103,20 @@ public sealed class WorkspaceSlotResolver(IEntitlementService entitlements, IBus
             ServiceHints = serviceOptions.Select(s => s.Name).Take(12).ToArray(),
             ProductHints = productOptions.Select(s => s.Name).Take(12).ToArray()
         };
+        if (turn.Question != null && OfferingReference.Read(workspaceId, state) is { Broad: false, Ids.Length: 1 } reference
+            && (reference.Type == "PRODUCT" ? modules.Contains("CATALOG") : modules.Contains("SERVICES"))
+            && (turn.Question.Intent == (reference.Type == "PRODUCT" ? NexFlow.Domain.Enums.ConversationIntent.ProductQuery : NexFlow.Domain.Enums.ConversationIntent.ServiceQuery)
+                || turn.Question.Intent == NexFlow.Domain.Enums.ConversationIntent.Order && state.CurrentGoal == "ORDER"
+                    && state.OrderDraftItems.Any(i => i.ProductId == reference.Ids[0])))
+        {
+            // A reference omitted by this turn's minimal read plan still needs a
+            // current authorized label for semantics, not a whole catalog/history.
+            BusinessOfferingDto? entity = reference.Type == "PRODUCT"
+                ? await offerings.GetProductByIdAsync(workspaceId, reference.Ids[0], ct)
+                : await offerings.GetServiceByIdAsync(workspaceId, reference.Ids[0], ct);
+            if (entity is { IsActive: true } && Eligible(entity, reference.Type, reference.LocationId))
+                turn = turn with { ReferencedOffering = new(reference.Type, entity.Name, reference.Question) };
+        }
         var date = reservation
             ? dates.ResolveReservation(text, localNow, state.CurrentStep == "COLLECT_DATE",
                 DateOnly.TryParseExact(state.TargetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,

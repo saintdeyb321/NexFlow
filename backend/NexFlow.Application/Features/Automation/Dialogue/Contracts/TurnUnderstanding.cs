@@ -54,6 +54,7 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
     public IReadOnlyList<string> ServiceHints { get; init; } = [];
     public IReadOnlyList<string> ProductHints { get; init; } = [];
     public IReadOnlyList<string> DraftItems { get; init; } = [];
+    public LinguisticOfferingReference? ReferencedOffering { get; init; }
     public string? DraftDate { get; init; }
     public DialogueQuestionContext? Question { get; init; }
     public ReservationTimeReference? AvailabilityReference { get; init; }
@@ -76,6 +77,8 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
 }
 
 public sealed record DialogueQuestionContext(ExpectedReply Expected, ConversationIntent Intent, string Prompt, string? InformationTopic);
+// Ephemeral, authorized entity label only; never prices, contact details or a write command.
+public sealed record LinguisticOfferingReference(string Type, string Name, OfferingQuestion Question);
 
 public sealed record ReservationTimeReference(Guid WorkspaceId, string LocationId, string ServiceId, string Date, string Time, DateTime ObservedAt)
 {

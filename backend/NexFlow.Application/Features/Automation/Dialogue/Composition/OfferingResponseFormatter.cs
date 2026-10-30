@@ -59,7 +59,10 @@ public static class OfferingResponseFormatter
         if (query.Type == "SERVICE" && query.Broad)
             text += query.LocationId == null ? "\n\nEl catálogo general puede incluir servicios de distintas sedes. Para reservar, comprobaré el servicio y la hora en la sede que elijas."
                 : "\n\nEstos servicios corresponden a la sede consultada. Una reserva requiere comprobar disponibilidad para la fecha y hora elegidas.";
-        if (query.Question is OfferingQuestion.Stock || query.Question == OfferingQuestion.Availability && query.Type == "PRODUCT")
+        // The catalog verifies publication, never physical inventory. A specific
+        // product fact must preserve that limit even on the zero-token path.
+        if (query.Question is OfferingQuestion.Stock || query.Type == "PRODUCT"
+            && (query.Question == OfferingQuestion.Availability || !query.Broad && query.Question == OfferingQuestion.Facts))
             text += "\n\nEsto confirma su presencia en el catálogo, no existencias de stock ni una entrega garantizada; el negocio debe confirmarlas.";
         if (query.Question == OfferingQuestion.Availability && query.Type == "SERVICE" && !query.Broad)
             text += query.LocationId == null ? "\nPuedo verificar en qué sede se ofrece; un horario de reserva requiere consultar la agenda."

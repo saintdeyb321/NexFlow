@@ -250,6 +250,23 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         }
         if (context.PendingRecoveryAction != null)
         {
+            if (context.PendingRecoveryAction == "CLEAR_ORDER_ITEMS")
+            {
+                if (context.CurrentGoal == "ORDER" && question is { Expected: ExpectedReply.RecoveryDecision, Intent: ConversationIntent.Order }
+                    && question.ConversationId == conversation && question.SourceMessageId != request.MessageId
+                    && ConversationConfirmation.IsAffirmative(request.MessageText))
+                {
+                    context.OrderDraftItems.Clear(); context.PendingRecoveryAction = null;
+                    context.CurrentStep = "ORDER_COLLECT_ITEMS"; context.CurrentQuestion = null;
+                    context.LastIntent = null; context.Information = null;
+                    context.LastQuestion = "¿Qué productos y cantidades deseas solicitar ahora?";
+                    return await Remember("He quitado los productos del borrador; no he cambiado ningún pedido registrado.\n\n" + context.LastQuestion,
+                        operation: OperationStatus.Collecting, expected: ExpectedReply.RequestedData, referenceIntent: ConversationIntent.Order);
+                }
+                if (No(text)) { context.PendingRecoveryAction = null; return await Remember(Continuation(context)); }
+                return await Remember("No he quitado ningún producto. ¿Confirmas que vaciemos únicamente los artículos del borrador? Responde «Sí» o «No».",
+                    expected: ExpectedReply.RecoveryDecision, referenceIntent: ConversationIntent.Order);
+            }
             if (ConversationConfirmation.IsAffirmative(request.MessageText))
             {
                 context.CurrentGoal = null; context.CurrentStep = null; context.SelectedServiceId = null; context.SelectedLocationId = null;
@@ -313,8 +330,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (greeting.HasGreeting && text.Length == 0)
             return await Remember(context.CurrentGoal != null ? Continuation(context)
                 : context.RecoveryLastMessageId != null || context.LastQuestion != null || context.LastIntent != null
-                    ? "¿En qué más puedo ayudarte? Si prefieres, escribe menú para ver opciones o asesor para hablar con una persona."
-                    : "¡Hola! Soy el asistente del negocio. ¿Qué necesitas consultar? Si prefieres, escribe menú para ver opciones o asesor para hablar con una persona.");
+                    ? Welcome(false)
+                    : Welcome(true));
         if (greeting.HasGreeting && text is "quisiera informacion" or "quiero informacion" or "necesito informacion")
             return await Remember("Claro, ¿qué información del negocio necesitas? También puedes escribir menú para ver las opciones disponibles o asesor para solicitar ayuda humana.");
         if (text is "necesito ayuda con un pedido" or "quiero ayuda con un pedido")
@@ -466,6 +483,19 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             try { return (await locations.GetLocationsAsync(workspace, ct)).Where(l => l.Id != null).ToArray(); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception) { ct.ThrowIfCancellationRequested(); return null; }
+        }
+
+        string Welcome(bool first)
+        {
+            var examples = new List<string>();
+            if (modules.Contains("SERVICES")) examples.Add("«¿Qué servicios ofrecen?»");
+            if (modules.Contains("CATALOG")) examples.Add("«¿Qué productos tienen?»");
+            if (modules.Contains("RESERVATIONS") && modules.Contains("SERVICES")) examples.Add("«Quiero reservar»");
+            if (examples.Count < 3 && modules.Contains("ORDERS") && modules.Contains("CATALOG")) examples.Add("«Quiero preparar un pedido»");
+            if (examples.Count < 3 && modules.Contains("BUSINESS_HOURS")) examples.Add("«¿Cuál es su horario?»");
+            return (first ? "¡Hola! Soy la secretaria virtual del negocio. " : "¿En qué más puedo ayudarte? ")
+                + (examples.Count > 0 ? "Puedes conversar conmigo; por ejemplo: " + string.Join(", ", examples.Take(3)) + ".\n\n" : "")
+                + "Cuéntame qué necesitas. También puedes escribir «menú» o «asesor» para recibir atención humana.";
         }
     }
 

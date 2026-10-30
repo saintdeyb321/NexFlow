@@ -69,7 +69,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
                 return new(DialogueAct.Information, semantic, Response: referenceDenied);
             var previousOffering = OfferingReference.Read(workspace, context);
             var acts = semantic.Evidence.Where(e => e.Slot == "Act").ToArray();
-            if (previousOffering?.Type != type || previousOffering.Ids.Length != 1 || acts.Length != 1
+            if (previousOffering?.Type != type || previousOffering.Broad || previousOffering.Ids.Length != 1 || acts.Length != 1
+                || clock == null || ConversationQuestion.Current(workspace, context, clock.UtcNow) == null
                 || acts[0].NormalizedValue != semantic.Act?.ToString() || !AiEvidenceValidator.HasFragment(text, acts[0].Text)) return null;
             var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, previousOffering.LocationId, ct);
             var found = data.Products.Concat(data.Services).Where(o => o.Type == type && o.Id == previousOffering.Ids[0]).ToArray();
@@ -293,6 +294,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             return Plan(OrderTurnKind.Submit);
         }
         if (semantic.OrderAction == OrderTurnKind.Summary) return Plan(OrderTurnKind.Summary);
+        if (semantic.OrderAction == OrderTurnKind.Clear && semantic.Act == DialogueAct.Correction && semantic.Items.Count == 0)
+            return Plan(OrderTurnKind.Clear);
         if (semantic.OrderAction == OrderTurnKind.Location && semantic.Act == DialogueAct.Correction)
         {
             var locationEvidence = semantic.Evidence.Where(e => e.Slot == "Location").ToArray();
