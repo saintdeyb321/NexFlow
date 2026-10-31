@@ -178,7 +178,8 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             var bareExisting = result.Edits.Any(e => e.Kind == OrderEditKind.Add && e.Quantity == 1
                     && context.OrderDraftItems.Any(i => i.ProductId == e.ProductId))
                 && !buying && !changing && !words.Any(w => OrderMentionResolver.TryQuantity(w, out _));
-            if (semantic == null && (activeOrder && bareExisting || result.Error != null && (activeOrder || purchaseReference != null))) return null;
+            // A stored reference alone does not turn an empty start into an unresolved item reference.
+            if (semantic == null && (activeOrder && bareExisting || result.Error != null && (activeOrder || purchaseReference != null && anaphora))) return null;
             if (weakPurchase && new OfferingMentionResolver().Resolve(text,catalog.Services.Select(s=>s.Option).ToArray()).Candidates.Count > 0
                 && (result.Edits.Count > 0 || new OfferingMentionResolver().Resolve(text,catalog.Products.Select(p=>p.Option).ToArray()).Candidates.Count > 0))
                 return new(DialogueAct.SemanticAmbiguity,new(){Intent=ConversationIntent.General},Response:"¿Deseas consultar un servicio o preparar un pedido de productos?");

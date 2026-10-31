@@ -6,6 +6,7 @@ using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Integrations;
 using NexFlow.Application.Features.AI.Interpretation;
 using NexFlow.Application.Features.AI.Router;
+using NexFlow.Application.Features.Business;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.ProcessMessage.Services;
@@ -109,6 +110,72 @@ public sealed class WhatsAppConversationalRepairTests(ITestOutputHelper output)
         Assert.Null(state.TargetDate); Assert.Null(state.TargetTime); Assert.Null(state.RealCustomerName);
         Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
         Assert.DoesNotContain(f.Sent.Values, m => m.Content.Contains("reserva está confirmada", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Starting_an_empty_order_after_a_product_query_does_not_spend_the_budget_needed_for_later_location_evidence()
+    {
+        var f = Create(); await Speak(f, "¿Cuánto cuesta el hilo dental?", "price");
+        var state = await f.Context(); Assert.NotNull(OfferingReference.Read(f.Workspace, state));
+        Assert.NotNull(ConversationQuestion.Current(f.Workspace, state, f.Now)); var calls = f.AiCalls;
+        await Speak(f, "Quiero hacer un pedido", "start");
+        Assert.Equal(calls, f.AiCalls); Assert.Equal("ORDER", (await f.Context()).CurrentGoal);
+        Assert.Empty((await f.Context()).OrderDraftItems); Assert.Empty(f.Orders); Assert.Empty(f.Bookings);
+    }
+
+    [Theory]
+    [InlineData("En Concepción", "Concepción")]
+    [InlineData("En conepcion", "conepcion")]
+    [InlineData("En sede conepcion", "sede conepcion")]
+    [InlineData("En conepción", "conepción")]
+    public async Task Location_evidence_with_an_omitted_prefix_or_one_spelling_edit_resolves_only_an_authorized_site(string text, string span)
+    {
+        // Check the matcher and then the real interpreter/pipeline validator.
+        BusinessEntityOption[] allowed = [new("sede-a", "Sede Concepcion"), new("sede-b", "Sede San Jeronimo")];
+        Assert.True(new LocationMentionResolver().ResolveEvidence(span, allowed).TryGetValue(out var matched));
+        Assert.Equal("sede-a", matched.Id);
+        var f = Create(); await Speak(f, "Quiero hacer una reserva", "start");
+        await Speak(f, text, "location", new() { Intent = ConversationIntent.Reservation, Act = DialogueAct.RequestedData,
+            Location = "Sede Concepcion", Evidence = [new("Act", text, nameof(DialogueAct.RequestedData)), new("Location", span, "Sede Concepcion")] });
+        Assert.Equal("sede-a", (await f.Context()).SelectedLocationId);
+        Assert.Null((await f.Context()).SelectedServiceId); Assert.Null((await f.Context()).TargetDate); Assert.Null((await f.Context()).TargetTime);
+        Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
+    }
+
+    [Theory]
+    [InlineData("ambiguous")]
+    [InlineData("invented-id")]
+    [InlineData("invented-name")]
+    [InlineData("outside-workspace")]
+    [InlineData("excessive-edit")]
+    public async Task Unsubstantiated_or_ambiguous_location_evidence_never_selects_a_site_or_creates_an_operation(string kind)
+    {
+        var f = Create(); var foreign = Guid.NewGuid();
+        if (kind == "ambiguous") f.LocationReads.Setup(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new LocationDto("sede-a", "Sede Concepción", "Synthetic", null, null, true),
+                new LocationDto("sede-similar", "Sede Conección", "Synthetic", null, null, false)]);
+        if (kind == "outside-workspace") {
+            f.LocationReads.Setup(l => l.GetLocationsAsync(f.Workspace, It.IsAny<CancellationToken>()))
+                .ReturnsAsync([new LocationDto("sede-own", "Sede Lima", "Synthetic", null, null, true)]);
+            f.LocationReads.Setup(l => l.GetLocationsAsync(foreign, It.IsAny<CancellationToken>()))
+                .ReturnsAsync([new LocationDto("sede-foreign", "Sede Concepcion", "Synthetic", null, null, true)]);
+        }
+        var span = kind == "invented-name" ? "Atlantida" : kind == "excessive-edit" ? "conpxzzion" : "conepcion";
+        var canonical = kind == "invented-id" ? "sede-inventada" : "Sede Concepcion"; var text = "En " + span;
+        await Speak(f, "Quiero hacer una reserva", "start");
+        await Speak(f, text, "location", new() { Intent = ConversationIntent.Reservation, Act = DialogueAct.RequestedData,
+            Location = canonical, Evidence = [new("Act", text, nameof(DialogueAct.RequestedData)), new("Location", span, canonical)] });
+        var state = await f.Context(); Assert.Null(state.SelectedLocationId); Assert.Equal("COLLECT_LOCATION", state.CurrentStep);
+        Assert.Null(state.SelectedServiceId); Assert.Null(state.TargetDate); Assert.Null(state.TargetTime);
+        if (kind == "ambiguous") {
+            BusinessEntityOption[] options = [new("sede-a", "Sede Concepción"), new("sede-similar", "Sede Conección")];
+            var match = new LocationMentionResolver().ResolveEvidence(span, options);
+            Assert.Equal(ResolutionStatus.Ambiguous, match.Status); Assert.False(match.TryGetValue(out _)); Assert.Equal(2, match.Candidates.Count);
+            Assert.Equal(ExpectedReply.Selection, state.CurrentQuestion!.Expected);
+            Assert.Contains("Sede Concepción", f.Sent["location"].Content); Assert.Contains("Sede Conección", f.Sent["location"].Content);
+        }
+        f.LocationReads.Verify(l => l.GetLocationsAsync(foreign, It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(f.Bookings); Assert.Empty(f.Orders);
     }
 
     [Theory]
