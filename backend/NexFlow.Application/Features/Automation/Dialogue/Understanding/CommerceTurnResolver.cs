@@ -171,13 +171,14 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
         if (order || hypothetical)
         {
             if (context.CurrentGoal is "BOOKING" or "RESERVATION") return null;
-            var result = orders.Resolve(text, products, context, CurrentPurchaseReference(workspace, context), hypothetical);
+            var purchaseReference = CurrentPurchaseReference(workspace, context);
+            var result = orders.Resolve(text, products, context, purchaseReference, hypothetical);
             // An unresolved instruction, or a bare mention of an existing line,
             // needs semantic understanding rather than an implicit Add(1).
             var bareExisting = result.Edits.Any(e => e.Kind == OrderEditKind.Add && e.Quantity == 1
                     && context.OrderDraftItems.Any(i => i.ProductId == e.ProductId))
                 && !buying && !changing && !words.Any(w => OrderMentionResolver.TryQuantity(w, out _));
-            if (semantic == null && activeOrder && (bareExisting || result.Error != null)) return null;
+            if (semantic == null && (activeOrder && bareExisting || result.Error != null && (activeOrder || purchaseReference != null))) return null;
             if (weakPurchase && new OfferingMentionResolver().Resolve(text,catalog.Services.Select(s=>s.Option).ToArray()).Candidates.Count > 0
                 && (result.Edits.Count > 0 || new OfferingMentionResolver().Resolve(text,catalog.Products.Select(p=>p.Option).ToArray()).Candidates.Count > 0))
                 return new(DialogueAct.SemanticAmbiguity,new(){Intent=ConversationIntent.General},Response:"¿Deseas consultar un servicio o preparar un pedido de productos?");

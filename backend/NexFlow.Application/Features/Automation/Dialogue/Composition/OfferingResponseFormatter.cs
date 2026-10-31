@@ -47,6 +47,10 @@ public static class OfferingResponseFormatter
     public static string Format(OfferingQueryPlan query)
     {
         if (query.Clarification != null) return query.Clarification;
+        if (query.Broad && query.Type == "PRODUCT" && query.Offerings.Count == 0)
+            return query.LocationId == null
+                ? "En este momento no hay productos activos publicados en el catálogo del negocio."
+                : "En este momento no hay productos activos publicados en el catálogo de la sede consultada.";
         if (query.Offerings.Count == 0) return "No tengo una opción activa registrada que coincida con tu consulta.";
         if (Realization(query) is { } verifiedLayout) return verifiedLayout.CanonicalText;
         var facts = query.Offerings.Take(5).Select(p => Line(p, query.Broad));
