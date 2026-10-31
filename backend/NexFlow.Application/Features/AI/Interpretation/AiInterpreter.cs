@@ -26,6 +26,7 @@ public class AiInterpretation
     [JsonIgnore] public BookingDraftProposal? BookingProposal { get; set; }
     [JsonIgnore] public OrderDraftProposal? OrderProposal { get; set; }
     [JsonIgnore] public OfferingQueryPlan? OfferingQuery { get; set; }
+    [JsonIgnore] public FocusChangeProposal? FocusProposal { get; set; }
     public string? Service { get; set; }
     public string? Location { get; set; }
     public string? Date { get; set; }
@@ -171,6 +172,13 @@ Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, cond
                     ? turn.DraftItems.Take(10).Select(s => s.Length <= 140 ? s : s[..140]).ToArray() : []
             });
             prompt += "\nQuestion es la referencia vigente para comprender respuestas incompletas; no autoriza confirmar ni ejecutar operaciones. Si no existe una referencia inequívoca, pide aclaración sin inventar antecedentes.";
+            if (turn.SupportsFocusSwitch)
+            {
+                var paused = turn.SuspendedOperation is { } kind && AiIntentAccess.GetDeniedResponse(
+                    kind == OperationKind.Order ? ConversationIntent.Order : ConversationIntent.Reservation, activeModules) == null ? kind.ToString() : "Ninguna";
+                prompt += "\nCambio de foco habilitado, sin descartar borradores ni ejecutar operaciones. Borrador suspendido: " + paused
+                    + ". Una petición explícita de otra preparación usa su Intent + StartOperation; retomar un borrador usa su Intent + Resume. Aporta evidencia Act del mensaje actual. Una consulta, un acuse o una intención incierta no cambian el foco. No propongas dos acciones mutables en el mismo turno.";
+            }
         }
 
         AiTelemetry.InterpretationInput(contractCharacters, prompt.Length - contractCharacters, userMessage.Length, _logger);
@@ -187,7 +195,8 @@ Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, cond
             if (json.RootElement.EnumerateObject().Any(p => p.Name.Equals("Confirmed", StringComparison.OrdinalIgnoreCase)
                 || p.Name.Equals("DeniedResponse", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Failure", StringComparison.OrdinalIgnoreCase)
                 || p.Name.Equals("BookingProposal", StringComparison.OrdinalIgnoreCase)
-                || p.Name.Equals("OrderProposal", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("OfferingQuery", StringComparison.OrdinalIgnoreCase)))
+                || p.Name.Equals("OrderProposal", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("OfferingQuery", StringComparison.OrdinalIgnoreCase)
+                || p.Name.Equals("FocusProposal", StringComparison.OrdinalIgnoreCase)))
                 throw new JsonException("Interpretation contains server-owned fields.");
             var interpretation = JsonSerializer.Deserialize<AiInterpretation>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, Converters = { new JsonStringEnumConverter(allowIntegerValues: false) } })
                    ?? throw new JsonException("Interpretation was null.");

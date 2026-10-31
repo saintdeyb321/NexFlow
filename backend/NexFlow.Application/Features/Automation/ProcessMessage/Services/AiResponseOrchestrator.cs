@@ -34,13 +34,14 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IConversationRecoveryService? _recovery;
     private readonly IClock? _clock;
     private readonly IExistingReservationFlow? _existingReservations;
+    private readonly ConversationFocusService? _focus;
 
     public AiResponseOrchestrator(
         ITurnUnderstandingPipeline understanding, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger, IResponseComposer composer, IConversationRecoveryService? recovery = null, IClock? clock = null,
-        IExistingReservationFlow? existingReservations = null)
+        IExistingReservationFlow? existingReservations = null, ConversationFocusService? focus = null)
     {
         _understanding = understanding; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
@@ -50,6 +51,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         _recovery = recovery;
         _clock = clock;
         _existingReservations = existingReservations;
+        _focus = focus;
     }
 
     public Task<MessageRecord> RespondAsync(Guid workspaceId, string normalizedPhone, ProcessIncomingMessageCommand request, ConversationRecord conversation, CancellationToken cancellationToken)
@@ -110,6 +112,44 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (latest.Mode == "Human" || latest.StateVersion != context.StateVersion)
             throw new ConcurrencyException("Conversation changed during interpretation; reload before processing.");
         activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (interpretation.FocusProposal is { } change && _focus != null)
+        {
+            if (await _focus.ApplyAsync(workspaceId, normalizedPhone, conversation.Id, request.MessageId, context, change, activeModules, cancellationToken) is { } refusal)
+            {
+                operation = OperationStatus.NotAvailable;
+                return await SendText(refusal);
+            }
+            context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+            // No pre-switch proposal, question or model consent enters the target engine.
+            if (change.Target == OperationKind.Order)
+            {
+                var kind = context.OrderDraftItems.Count == 0 ? OrderTurnKind.Start : OrderTurnKind.Summary;
+                var target = new AiInterpretation { Intent = ConversationIntent.Order,
+                    OrderProposal = new(workspaceId, request.MessageId, context.StateVersion, kind, Array.AsReadOnly(Array.Empty<OrderEdit>())) };
+                responsePlan = await _orderFlow.ProcessPlannedAsync(workspaceId, normalizedPhone, conversation.Id, request.CustomerName,
+                    request.MessageText, target, request.MessageId, DialogueAct.Resume, cancellationToken);
+                context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
+                if (context.OrderDraftItems.Count == 1 && responsePlan.Facts.Any(f => f.Key == "Product"
+                    && f.Source == VerifiedFactSource.BusinessRepository && f.EntityId == context.OrderDraftItems[0].ProductId))
+                    new OfferingReference(workspaceId, "PRODUCT", [context.OrderDraftItems[0].ProductId], context.SelectedLocationId).Remember(context);
+            }
+            else
+            {
+                responsePlan = await _bookingFlow.ProcessPlannedAsync(workspaceId, normalizedPhone, conversation.Id, context,
+                    new() { Intent = ConversationIntent.Reservation }, request.CustomerName, request.MessageId, DialogueAct.Resume, cancellationToken);
+                if (responsePlan.Operation == OperationStatus.AwaitingConfirmation)
+                    responsePlan = new(workspaceId, request.MessageId, context.StateVersion, ConversationIntent.Reservation,
+                        DialogueAct.Resume, OperationStatus.Collecting, responsePlan.Facts, [], [], responsePlan.TimeZone, responsePlan.Currency,
+                        "¿Deseas revisar los datos de la reserva?", "Tu reserva sigue en preparación, sin confirmar. Puedes indicar qué dato cambiar o decir «Continuemos» para comprobar el horario y ver un resumen nuevo.");
+                else if (_recovery != null && context.CurrentStep is "COLLECT_LOCATION" or "COLLECT_SERVICE")
+                    responsePlan = responsePlan.WithText(await _recovery.DecorateAsync(workspaceId, normalizedPhone, context, activeModules,
+                        responsePlan.FallbackText, cancellationToken), context.StateVersion);
+            }
+            var prefix = context.Focus?.LastTransitionResumed == true ? "Retomamos tu preparación sin confirmar ninguna operación."
+                : "He cambiado el foco sin enviar ni confirmar nada.";
+            if (context.Focus?.Suspended != null) prefix += " La otra preparación queda guardada para retomarla.";
+            return await SendText(prefix + "\n\n" + responsePlan.FallbackText);
+        }
         if (prepared?.Response != null)
         {
             if (interpretation.Directive == ConversationDirective.UnsupportedAdministrativeAction) context.Information = null;
@@ -150,6 +190,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (interpretation.Confirmed) act = DialogueAct.Confirmation;
         else if (interpretation.Intent == ConversationIntent.Support) act = DialogueAct.HumanAssistance;
         else if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) act = DialogueAct.Cancellation;
+        if (context.CurrentGoal == null && context.Focus?.Suspended != null
+            && act == DialogueAct.StartOperation && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Reservation)
+            return await SendText("Hay una preparación guardada. Retómala antes de iniciar otra; no la he descartado ni confirmado.");
         if (context.PendingRecoveryAction != null && interpretation.Intent != ConversationIntent.Support
             && (interpretation.Directive != ConversationDirective.None
                 || interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Profile or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)))
@@ -157,7 +200,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         if (context.CurrentGoal is "BOOKING" or "RESERVATION" && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Request
             || context.CurrentGoal == "ORDER" && interpretation.Intent is ConversationIntent.Reservation or ConversationIntent.Request)
-            return await SendText("Para iniciar otra operación, primero completa la actual o escribe cancelar; te pediré confirmación antes de descartarla.");
+            return await SendText(_focus?.Enabled == true && interpretation.Intent != ConversationIntent.Request
+                ? "Tu borrador sigue guardado. Necesito precisar qué preparación deseas iniciar o retomar antes de cambiar el foco; no he descartado ni confirmado nada."
+                : "Para iniciar otra operación, primero completa la actual o escribe cancelar; te pediré confirmación antes de descartarla.");
 
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && _recovery != null)
         {
@@ -305,6 +350,9 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         async Task<string> Compose(string text, bool media = false)
         {
+            // Once both preparations ended there is no operation identity to
+            // reuse for a later, unrelated start. Durable effect receipts stay intact.
+            if (context.CurrentGoal == null && context.Focus?.Suspended == null) context.Focus = null;
             var expected = context.PendingRecoveryAction != null ? ExpectedReply.RecoveryDecision
                 : responsePlan?.Operation == OperationStatus.Informational && intent == ConversationIntent.Reservation
                     && context.Information?.AvailabilityReference != null

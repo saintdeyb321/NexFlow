@@ -54,6 +54,8 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
     public IReadOnlyList<string> ServiceHints { get; init; } = [];
     public IReadOnlyList<string> ProductHints { get; init; } = [];
     public IReadOnlyList<string> DraftItems { get; init; } = [];
+    public bool SupportsFocusSwitch { get; init; }
+    public OperationKind? SuspendedOperation { get; init; }
     public LinguisticOfferingReference? ReferencedOffering { get; init; }
     public string? DraftDate { get; init; }
     public DialogueQuestionContext? Question { get; init; }
@@ -63,6 +65,8 @@ public sealed record DialogueTurnContext(Guid WorkspaceId, string SourceMessageI
             state.CurrentGoal, state.CurrentStep, state.StateVersion, state.SelectedLocationId, state.LastQuestion,
             localNow, zone.Id, modules.ToFrozenSet(StringComparer.OrdinalIgnoreCase)) {
                 DraftDate = state.TargetDate,
+                SuspendedOperation = state.Focus is { Version: 1, Suspended: { } paused } focus && focus.WorkspaceId == workspace
+                    && paused.Identity.ExpiresAt > localNow.UtcDateTime ? paused.Identity.Kind : null,
                 DraftItems = state.CurrentGoal == "ORDER" && modules.Contains("ORDERS") && modules.Contains("CATALOG")
                     ? state.OrderDraftItems.Take(10).Select(i => $"{i.Quantity} × {i.ProductName}").ToArray() : [],
                 AvailabilityReference = ReservationTimeReference.Current(workspace, state, localNow.UtcDateTime),

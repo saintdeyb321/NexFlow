@@ -3,6 +3,8 @@ namespace NexFlow.Application.Abstractions.Cache;
 public class ConversationContextDto
 {
     public string? StateVersion { get; set; }
+    // Optional CTA envelope in the existing contextJson. Active slots remain the engine projection.
+    public NexFlow.Application.Features.Automation.Dialogue.Contracts.ConversationFocusState? Focus { get; set; }
     // Additive inside contextJson; absent in legacy documents. Never a second state store.
     public NexFlow.Application.Features.Automation.Dialogue.Contracts.ConversationQuestion? CurrentQuestion { get; set; }
     public List<ConversationMenuOption> RecoveryOptions { get; set; } = new();

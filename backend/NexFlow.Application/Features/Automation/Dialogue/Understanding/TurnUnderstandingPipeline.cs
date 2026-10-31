@@ -20,7 +20,8 @@ public interface ITurnUnderstandingPipeline
 
 public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, DialoguePolicy policy,
     IAiInterpreter interpreter, IConversationRecoveryService recovery, IOfferingService offerings, ICommerceTurnResolver? commerce = null,
-    ILogger<TurnUnderstandingPipeline>? logger = null, ILocationRepository? locationRepository = null) : ITurnUnderstandingPipeline
+    ILogger<TurnUnderstandingPipeline>? logger = null, ILocationRepository? locationRepository = null,
+    ConversationFocusService? focus = null) : ITurnUnderstandingPipeline
 {
     public Task<PreparedDialogueTurn> PrepareAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
@@ -42,6 +43,8 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
     private async Task<PreparedDialogueTurn> PrepareCoreAsync(Guid workspace, string phone, ProcessIncomingMessageCommand request,
         ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
     {
+        if (focus?.Replay(workspace, request.MessageId, context) is { } replay)
+            return new(DialogueAct.Resume, new() { Intent = replay.Target == OperationKind.Order ? ConversationIntent.Order : ConversationIntent.Reservation, FocusProposal = replay });
         var greeting = GreetingRecognizer.Parse(request.MessageText);
         if (greeting.HasGreeting && greeting.Content.Length > 0)
             request = request with { MessageText = greeting.Content };
@@ -108,6 +111,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && normalized.Split(' ').Any(w => w is "quiero" or "quisiera" or "necesito" or "deseo");
         var purpose = booking || reservationCandidate ? SlotResolutionPurpose.Reservation : context.CurrentGoal == "ORDER" ? SlotResolutionPurpose.Order : SlotResolutionPurpose.Information;
         var local = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, context, purpose, policy.Reads(request.MessageText, context, act), ct);
+        if (focus?.Enabled == true) local = local with { Context = local.Context with { SupportsFocusSwitch = true } };
         // A generic capability/procedure question is not a start command. A
         // question naming real entities or time still needs semantic routing.
         if (act == DialogueAct.OperationInformation
@@ -164,7 +168,8 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         // interpreter one pass rather than silently discarding the remainder.
         semanticGap |= local.Name.Status == ResolutionStatus.Determined && local.Date.Status == ResolutionStatus.Insufficient
             && (local.Time.Status == ResolutionStatus.Determined || local.Service.Status == ResolutionStatus.Determined);
-        if (dataTurn && !semanticGap && (understood || act == DialogueAct.StartOperation))
+        var crossFocus = focus?.Enabled == true && context.CurrentGoal == "ORDER" && act == DialogueAct.StartOperation;
+        if (dataTurn && !crossFocus && !semanticGap && (understood || act == DialogueAct.StartOperation))
             return PrepareBooking(local, act, false, workspace, request.MessageId);
         if (!await recovery.AcquireAiAsync(workspace, phone, request.MessageId, ct))
         {
@@ -191,6 +196,8 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
                 context.CurrentGoal == "ORDER" ? SecretaryPresentation.OrderRecovery(context.OrderDraftItems.Count > 0,
                     context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true)
                 : "Quiero asegurarme de entenderte. No he cambiado tu selección.\n\n¿Qué dato deseas consultar o cambiar? Conservamos lo que ya indicaste.");
+        if (focus?.Prepare(workspace, request.MessageId, request.MessageText, context, interpretation) is { } change)
+            return new(interpretation.Act!.Value, new() { Intent = interpretation.Intent, FocusProposal = change }, true);
         if (commerce != null && interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
             && await commerce.ResolveAsync(workspace, request.MessageId, request.MessageText, context, modules, ct, interpretation) is { } understoodOrder)
             return understoodOrder with { UsedAi = true };

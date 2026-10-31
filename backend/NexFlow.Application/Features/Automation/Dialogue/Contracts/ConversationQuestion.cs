@@ -12,14 +12,19 @@ public enum ExpectedReply { Information, Selection, RequestedData, StartReservat
 // Backend-owned reference in the existing CAS envelope, not consent or a business command.
 public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, string SourceMessageId,
     ExpectedReply Expected, ConversationIntent Intent, string DraftFingerprint, string? OptionsFingerprint,
-    DateTime IssuedAt, DateTime ExpiresAt, string? ConversationId = null)
+    DateTime IssuedAt, DateTime ExpiresAt, string? ConversationId = null, Guid? OperationId = null, long? ActivationRevision = null)
 {
-    public static string Fingerprint(ConversationContextDto state) => Hash(new {
+    public static string Fingerprint(ConversationContextDto state)
+    {
+        var draft = Hash(new {
         state.CurrentGoal, state.CurrentStep, state.SelectedLocationId, state.SelectedServiceId,
         state.TargetDate, state.TargetTime, state.PreferredTime, state.RealCustomerName,
         state.PendingCustomerName, state.PendingServiceIds, state.PendingDialogueSlots,
         state.OrderDraftItems, state.PendingRecoveryAction
-    });
+        });
+        // Byte-identical legacy fingerprint when CTA is absent.
+        return state.Focus?.Active is { } active ? Hash(new { Draft = draft, active.Id, active.ActivationRevision }) : draft;
+    }
     private static string Hash<T>(T value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));
 
     public static ConversationQuestion? Current(Guid workspace, ConversationContextDto state, DateTime now)
@@ -27,8 +32,18 @@ public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, s
             && !string.IsNullOrWhiteSpace(question.QuestionId) && !string.IsNullOrWhiteSpace(question.SourceMessageId)
             && question.IssuedAt <= now && question.ExpiresAt > now && Enum.IsDefined(question.Expected) && Enum.IsDefined(question.Intent)
             && question.DraftFingerprint == Fingerprint(state)
+            && (state.Focus == null ? question.OperationId == null && question.ActivationRevision == null
+                : state.Focus.WorkspaceId == workspace && state.Focus.Version == 1 && state.Focus.Active is { } active
+                    && active.ExpiresAt > now
+                    && (ConversationFocusKind(state.CurrentGoal) is not { } kind || active.Kind == kind)
+                    && question.ConversationId == state.Focus.ConversationId && question.OperationId == active.Id
+                    && question.ActivationRevision == active.ActivationRevision)
             && (question.Expected != ExpectedReply.Selection || question.OptionsFingerprint == Hash(state.RecoveryOptions))
             ? question : null;
+
+    private static OperationKind? ConversationFocusKind(string? goal) => goal switch {
+        "ORDER" => OperationKind.Order, "BOOKING" or "RESERVATION" => OperationKind.Reservation, _ => null
+    };
 
     public static void Remember(Guid workspace, string source, ConversationContextDto state, ExpectedReply expected,
         ConversationIntent intent, string response, DateTime now, string? conversationId = null)
@@ -37,7 +52,7 @@ public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, s
         if (state.CurrentGoal != "ORDER") state.LastQuestion = response;
         state.CurrentQuestion = new(Guid.NewGuid().ToString("N"), workspace, source, expected, intent,
             Fingerprint(state), expected == ExpectedReply.Selection ? Hash(state.RecoveryOptions) : null,
-            now, now.AddMinutes(10), conversationId);
+            now, now.AddMinutes(10), conversationId, state.Focus?.Active.Id, state.Focus?.Active.ActivationRevision);
     }
 
     public static bool HasCurrentOrderReview(Guid workspace, string conversation, ConversationContextDto state,
