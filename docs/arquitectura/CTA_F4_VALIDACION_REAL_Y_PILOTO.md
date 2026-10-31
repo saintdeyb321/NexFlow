@@ -231,3 +231,26 @@ Backend productivo (7 inserciones / 2 eliminaciones): `OfferingResponseFormatter
 ?? docs/NEXFLOW_CTA_AUDITORIA_S2_S3_2026-10-31.md
 ?? docs/arquitectura/CTA_F4_VALIDACION_REAL_Y_PILOTO.md
 ```
+
+## 8. Cierre externo sobre la publicación ed93e25
+
+Comprobación del **31/10/2026, 19:51 UTC**. Esta sección actualiza identidad y bloqueos; no sustituye ni atribuye al nuevo SHA las ejecuciones históricas anteriores.
+
+- HEAD local y `main` remoto verificados: **`ed93e25a7a17d08de1cf3d006abe83c16c3fab8f`**, «Sprint 4». Árbol e índice inicialmente limpios. El commit publica los ocho archivos F4 esperados; no incorpora modificaciones ajenas al alcance anterior.
+- GitHub Actions, consulta de la colección de runs con `head_sha` exacto: **0 runs; sin Run IDs ni resultados externos que certificar**. No se hizo dispatch.
+- No existen `provider-sample.started` ni `provider-sample.json`. Las cuatro variables `NEXFLOW_TEST_*` de claves/modelos y `NEXFLOW_CONCIERGE_REAL_AI_AUTHORIZED` están ausentes tanto en proceso como en usuario. **BLOCKED_PROVIDER_ENV**; no se ejecutó el harness, ni siquiera para repetir su omisión anterior. No se leyeron appsettings, .env, secretos privados ni Oracle.
+- Groq **0 llamadas**, Gemini **0 llamadas** en esta intervención. JSON, comprensión semántica, referencias, correcciones de cantidades, cambios de foco, consentimiento/cancelación interpretados por proveedores: **NO VERIFICADOS**. Tokens y latencias: **NO MEDIDOS**; coste **NO DETERMINADO**. No hay respuestas del modelo nuevas que analizar ni fallos nuevos reproducidos que justifiquen parches.
+- Se revisó solamente el aislamiento declarado en los archivos versionados de staging y el alcance del flag. `docker-compose.staging.yml` usa PostgreSQL/Redis/Firestore Emulator internos, recursos propios y exposición loopback; el perfil Evolution declara almacenamiento y servicios propios. Su funcionamiento efectivo, overrides, identidad Firebase de prueba y vínculo del número autorizado **no fueron verificados**. No se abrió el archivo privado de entorno. `Start-LocalStaging.ps1` inicia servicios y el Migrator; **no se ejecutó** por las restricciones de este encargo.
+- `EnableContextualFocus` continúa siendo global y false por defecto. No se demuestra un modo productivo exclusivo de borradores ni un allowlist operativo por workspace. La separación lógica por WorkspaceId no acredita que activar el flag en una API compartida afecte únicamente al DEMO.
+
+| Capacidad del piloto real | Decisión | Condiciones concretas pendientes |
+|---|---|---|
+| Interpretación aislada, sin motores/WhatsApp | **NO-GO de ejecución / mecanismo listo** | Cargar las cuatro variables de prueba y opt-in=1 en el proceso ejecutor; confirmar ausencia del marcador y ejecutar solo el filtro F4 de la sección 2, una vez, con máximo 12 intentos. No atribuir a Gemini resultados de Groq si no hubo fallback real. |
+| Consultas y guía DEMO | **NO-GO** | Muestra real válida y revisión humana; CI del SHA exacto; host/recursos/número/workspace de prueba acreditados, capacidades solo de lectura y ausencia de entregas históricas conflictivas. |
+| Borradores no confirmados DEMO | **NO-GO** | Lo anterior más todos los escritores compatibles y un límite verificable que impida efectos de negocio durante el ensayo; licenciar ORDERS/RESERVATIONS no constituye ese límite. |
+| Pedidos reales DEMO | **NO-GO** | Muestra real y CI, revisión/consentimiento/precios/licencias/idempotencia acreditados en el entorno aislado; autorización expresa y P0 de reservas resuelto o formalmente aislado impidiendo reservas. |
+| Reservas reales DEMO | **NO-GO** | P0 cerrado con correlación causal o aislamiento seguro explícitamente aprobado, además de todos los controles anteriores y autorización específica de efectos reales. |
+
+**Intervención necesaria, sin secretos por chat:** configurar el entorno de prueba con el procedimiento ya incluido; el propietario debe ejecutar manualmente Release Checks, PostgreSQL/Firestore, Redis y ARM64 sobre `ed93e25…` mientras el ref seleccionado siga apuntando a ese SHA. ARM64 requiere `release_sha=ed93e25a7a17d08de1cf3d006abe83c16c3fab8f`; conservar retención de imagen desactivada salvo autorización de almacenamiento. Si main cambia, detener la aceptación de resultados y verificar de nuevo su identidad. Aportar después Run IDs/attempts y evidencia sanitizada del aislamiento/P0 descrita en las secciones 5–6. No se requiere volver a construir el harness ni repetir pruebas sintéticas antes de aportar esas condiciones.
+
+Único archivo modificado en este cierre: este informe. Backend/frontend, configuración, pruebas y motores **sin cambios**; build y suites **no repetidos**. Índice vacío; `git diff --check` PASS. No se ejecutaron servicios, migraciones, commits, push ni despliegues. **Validación externa todavía pendiente; no hay autorización de activación global o piloto real.**
