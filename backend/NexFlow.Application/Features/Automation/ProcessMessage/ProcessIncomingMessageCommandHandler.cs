@@ -23,6 +23,7 @@ public class ProcessIncomingMessageCommandHandler
     private readonly IKnowledgeService _knowledgeService;
     private readonly IOutboundMessageService _outboundMessageService;
     private readonly ILogger<ProcessIncomingMessageCommandHandler> _logger;
+    private readonly IClock? _clock;
 
     public ProcessIncomingMessageCommandHandler(
         IIncomingMessageGuard guard,
@@ -33,7 +34,7 @@ public class ProcessIncomingMessageCommandHandler
         ILogger<ProcessIncomingMessageCommandHandler> logger,
         IContextRecoveryService contextRecovery,
         ILocationRepository locationRepo,
-        IEntitlementService entitlementService)
+        IEntitlementService entitlementService, IClock? clock = null)
     {
         _guard = guard;
         _stateService = stateService;
@@ -44,6 +45,7 @@ public class ProcessIncomingMessageCommandHandler
         _contextRecovery = contextRecovery;
         _locationRepo = locationRepo;
         _entitlementService = entitlementService;
+        _clock = clock;
     }
 
     public Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
@@ -101,6 +103,7 @@ public class ProcessIncomingMessageCommandHandler
         if (topic.HasValue)
         {
             var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, phone, ct);
+            if (context.Focus?.PendingDiscard != null) return false;
             if (!string.IsNullOrWhiteSpace(context.CurrentGoal) || context.ReservationManagement != null) return false;
             var modules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var intent = topic == KnowledgeTopic.Locations ? ConversationIntent.Location : ConversationIntent.BusinessHours;
@@ -134,8 +137,9 @@ public class ProcessIncomingMessageCommandHandler
                 result = new KnowledgeResult { Status = KnowledgeStatus.Unavailable, Source = topic.Value };
             }
 
-            InformationalRequest.Remember(context, topic.Value, result, DateTime.UtcNow);
-            ConversationQuestion.Remember(workspaceId, sourceMessageId, context, ExpectedReply.Information, intent, result.ToResponse(), DateTime.UtcNow);
+            var now = _clock?.UtcNow ?? DateTime.UtcNow;
+            InformationalRequest.Remember(context, topic.Value, result, now);
+            ConversationQuestion.Remember(workspaceId, sourceMessageId, context, ExpectedReply.Information, intent, result.ToResponse(), now, conversation.Id);
             await _contextRecovery.SaveContextAsync(workspaceId, phone, context, ct);
             var outbound = await _outboundMessageService.SendMessageAsync(workspaceId, conversation.Id, phone,
                 result.ToResponse(), SenderType.AI, sourceMessageId, ct);

@@ -13,7 +13,7 @@ using NexFlow.Domain.Exceptions;
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
 // State-only policy. Existing flows revalidate facts and own every business effect.
-public sealed class ConversationFocusService(IContextRecoveryService contexts, IClock clock, IOptions<AssistantRecoveryOptions> options)
+public sealed partial class ConversationFocusService(IContextRecoveryService contexts, IClock clock, IOptions<AssistantRecoveryOptions> options)
 {
     public bool Enabled => options.Value.EnableContextualFocus;
     public static OperationKind? Kind(string? goal) => goal switch {
@@ -55,7 +55,7 @@ public sealed class ConversationFocusService(IContextRecoveryService contexts, I
             throw new ConcurrencyException("Unsupported or foreign focus identity.");
         var intent = proposal.Target == OperationKind.Order ? ConversationIntent.Order : ConversationIntent.Reservation;
         if (AiIntentAccess.GetDeniedResponse(intent, modules) is { } denied) return denied;
-        if (state.PendingRecoveryAction != null || state.ReservationManagement != null
+        if (state.PendingRecoveryAction != null || focus?.PendingDiscard != null || state.ReservationManagement != null
             || state.ReservationCommitSourceMessageId != null || state.CurrentStep?.StartsWith("ORDER_COMMIT", StringComparison.Ordinal) == true)
             return "Primero debemos resolver la decisión o recuperación pendiente. No he cambiado ni descartado ningún borrador.";
         if (focus?.LastTransitionSource == source && Kind(state.CurrentGoal) == proposal.Target) return null;

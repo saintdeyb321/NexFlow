@@ -1,8 +1,28 @@
+using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+
 namespace NexFlow.Application.Features.Automation.Dialogue.Composition;
 
 // Presentation of already verified data only: no lookups, transitions or consent.
 public static class SecretaryPresentation
 {
+    private static string OperationName(OperationKind kind) => kind == OperationKind.Order ? "pedido" : "reserva";
+    private static string Article(OperationKind kind) => kind == OperationKind.Order ? "el" : "la";
+    private static string Saved(OperationKind kind, bool sentence = false)
+        => $"{(sentence ? "Tu" : "tu")} {OperationName(kind)} sigue " + (kind == OperationKind.Order ? "guardado" : "guardada");
+    public static string FocusTransition(OperationKind active, OperationKind? saved, bool resumed, bool canResume)
+    {
+        var text = resumed ? $"Retomamos tu {OperationName(active)}."
+            : saved is { } other ? $"{Saved(other, sentence: true)}; continuamos con tu {OperationName(active)}."
+            : $"Continuamos con tu {OperationName(active)}.";
+        if (resumed && saved is { } paused) text += " " + Saved(paused, sentence: true) + ".";
+        if (saved is { } available && canResume)
+            text += $" Puedes pedir «Retomar {Article(available)} {OperationName(available)}» cuando quieras volver.";
+        return text + " Este cambio no envía ni confirma operaciones.";
+    }
+
+    public static string FocusReminder(OperationKind active, OperationKind saved)
+        => $"Tu {OperationName(active)} está en preparación y {Saved(saved)}. Puedes pedir «Retomar {Article(saved)} {OperationName(saved)}»; al volver comprobaremos de nuevo los datos.";
+
     public const string AskDate = "Busquemos un día que te acomode.\n\n¿Para qué fecha deseas reservar? Puedes indicar día y mes, por ejemplo «03/11» o «3 de noviembre», o decir «mañana por la tarde»; comprobaré los horarios de la sede.";
     public const string AskName = "Para completar tu reserva,\n\n¿cuál es tu nombre y apellido?";
     public const string ChooseService = "¿Cuál servicio te gustaría reservar? Puedes decir su nombre o una opción como «la primera».";

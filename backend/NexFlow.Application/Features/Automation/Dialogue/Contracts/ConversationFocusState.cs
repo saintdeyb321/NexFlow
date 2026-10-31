@@ -3,6 +3,9 @@ using NexFlow.Application.Abstractions.Cache;
 namespace NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
 public enum OperationKind { Order, Reservation }
+public enum DraftDiscardScope { Active, Suspended, Both }
+public sealed record DraftDiscardDecision(DraftDiscardScope? Scope, string SourceMessageId, DateTime ExpiresAt,
+    string Fingerprint, string? QuestionId = null);
 
 public sealed record OperationIdentity(Guid Id, OperationKind Kind, long ActivationRevision, DateTime ExpiresAt);
 
@@ -17,6 +20,7 @@ public sealed class ConversationFocusState
     public SuspendedConversationDraft? Suspended { get; set; }
     public string? LastTransitionSource { get; set; }
     public bool LastTransitionResumed { get; set; }
+    public DraftDiscardDecision? PendingDiscard { get; set; }
 }
 
 public sealed record SuspendedConversationDraft(OperationIdentity Identity, DateTime SuspendedAt,

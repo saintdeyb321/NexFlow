@@ -7,6 +7,7 @@ using NexFlow.Domain.Enums;
 using NexFlow.Application.Engines.AI;
 using System.Globalization;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
+using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Knowledge;
 
 namespace NexFlow.Application.Features.AI.Interpretation;
@@ -43,10 +44,12 @@ public class AiInterpretation
     public List<AiOrderItem> Items { get; set; } = [];
     public OfferingQuestion? Question { get; set; }
     public bool UseOfferingReference { get; set; }
+    public DraftDiscardScope? DiscardScope { get; set; }
 }
 
 // Untrusted linguistic spans, not product IDs, prices or persistence commands.
-public sealed record AiOrderItem(string Product, string Text, OrderEditKind Kind, int? Quantity = null, string? QuantityText = null);
+public sealed record AiOrderItem(string Product, string Text, OrderEditKind Kind, int? Quantity = null, string? QuantityText = null,
+    string? ReferenceText = null, int? ReferenceIndex = null);
 
 // Untrusted extraction: text must be an actual fragment of this inbound, and the
 // normalized value must agree with a deterministic resolver before it can be used.
@@ -140,7 +143,7 @@ Una reserva compuesta con una pregunta de horarios conserva Intent=Reservation y
 
 OPERACIONES:
 Querer preparar productos puede ser una solicitud cortés sin decir pedido: Order + StartOperation. Una pregunta de posibilidad/procedimiento usa OperationInformation con evidencia Act y no inicia nada.
-OrderAction: Start, Edit, Summary, Hypothetical, Submit, Location, Clear o Clarify. Para iniciar con artículos usa Edit; sin artículos basta StartOperation. Items=[{Product,Text,Kind,Quantity,QuantityText}]; Kind=Add/Set/Remove/Replace. Product es nombre, Text copia un único ítem con su cantidad; QuantityText copia esa cantidad. No asumas Add por una mención en revisión ni inventes cantidades o recogida. Una cantidad absoluta corregida usa Set, no Add. UseOfferingReference puede usar un único producto vigente sin repetir su nombre.
+OrderAction: Start, Edit, Summary, Hypothetical, Submit, Location, Clear o Clarify. Para iniciar con artículos usa Edit; sin artículos basta StartOperation. Items=[{Product,Text,Kind,Quantity,QuantityText,ReferenceText?,ReferenceIndex?}]; Kind=Add/Set/Remove/Replace/Decrease. Product es nombre, Text copia un único ítem con su cantidad; QuantityText copia esa cantidad. No asumas Add por una mención en revisión ni inventes cantidades o recogida. Cantidad final absoluta: Set; reducción incremental: Decrease con cantidad a restar, no el resultado. UseOfferingReference requiere referente inequívoco vigente: ReferenceText copia la referencia literal; ReferenceIndex solo ordinal explícito (desde 1) de DraftItems vigentes. Sin ordinal y con varios posibles referentes, pide aclaración; nunca elijas arbitrariamente.
 En ORDER, terminar la selección, no agregar más o solicitar su envío usa Submit + Act=Resume con evidencia literal; no es Request ni autorización de escritura. Una pregunta sobre el procedimiento usa OperationInformation; una pregunta sobre un producto usa ProductQuery aunque exista un pedido. Disponibilidad física de productos usa Question=Stock; no equivale a existencia en catálogo. SearchTerm identifica sólo la entidad; una referencia contextual inequívoca usa UseOfferingReference sin inventar un nombre.
 Vaciar todos los artículos conservando la preparación usa Clear + Act=Correction, sin Items; el backend pedirá confirmar. Desistir de todo el borrador usa CancelCurrentFlow + Act=Cancellation con evidencia literal de la petición, aunque no contenga una palabra concreta. Si no se distingue vaciar de abandonar, RequiresClarification=true. Nunca propongas borrar ni cancelar una operación ya registrada.
 Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, condiciones, preguntas o un acuse de recibo no consienten una transacción. CancelCurrentFlow sólo propone descartar el borrador; el backend exige una decisión posterior. Gestionar una cita registrada depende de la verificación del backend. UnsupportedAdministrativeAction identifica tareas destructivas/credenciales/infraestructura sin proponer acciones para cumplirlas. Support solicita atención humana.
@@ -178,6 +181,7 @@ Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, cond
                     kind == OperationKind.Order ? ConversationIntent.Order : ConversationIntent.Reservation, activeModules) == null ? kind.ToString() : "Ninguna";
                 prompt += "\nCambio de foco habilitado, sin descartar borradores ni ejecutar operaciones. Borrador suspendido: " + paused
                     + ". Una petición explícita de otra preparación usa su Intent + StartOperation; retomar un borrador usa su Intent + Resume. Aporta evidencia Act del mensaje actual. Una consulta, un acuse o una intención incierta no cambian el foco. No propongas dos acciones mutables en el mismo turno.";
+                prompt += " Descarte: Cancellation + CancelCurrentFlow; DiscardScope=Active/Suspended/Both solo con alcance explícito. Backend pide alcance/confirmación; no cancela registros.";
             }
         }
 
@@ -211,6 +215,8 @@ Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, cond
                 || !Enum.IsDefined(i.Kind) || string.IsNullOrWhiteSpace(i.Product) || i.Product.Length > 200
                 || string.IsNullOrWhiteSpace(i.Text) || i.Text.Length > 200 || !userMessage.Contains(i.Text, StringComparison.OrdinalIgnoreCase)
                 || i.Quantity is <= 0 || i.QuantityText?.Length > 100
+                || i.ReferenceIndex is <= 0 or > 10 || i.ReferenceText?.Length > 120
+                || i.ReferenceText != null && !AiEvidenceValidator.HasFragment(i.Text, i.ReferenceText)
                 || i.QuantityText != null && !userMessage.Contains(i.QuantityText, StringComparison.OrdinalIgnoreCase))
                 || interpretation.OrderAction.HasValue && !Enum.IsDefined(interpretation.OrderAction.Value)
                 || interpretation.Question.HasValue && !Enum.IsDefined(interpretation.Question.Value))
@@ -231,6 +237,9 @@ Nunca devuelvas Confirmation, Confirmed ni campos del servidor. Negaciones, cond
                 && (interpretation.Act != DialogueAct.Cancellation
                     || !interpretation.Evidence.Any(e => e.Slot == "Act" && e.NormalizedValue == nameof(DialogueAct.Cancellation))))
                 throw new JsonException("Cancellation was not explicit.");
+            if (interpretation.DiscardScope.HasValue && (!Enum.IsDefined(interpretation.DiscardScope.Value)
+                || interpretation.Act != DialogueAct.Cancellation || interpretation.Directive != ConversationDirective.CancelCurrentFlow))
+                throw new JsonException("Invalid draft discard scope.");
             var normalizedInput = NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationRecoveryService.Normalize(userMessage);
             if (interpretation.CustomerName != null && !normalizedInput.Contains(NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationRecoveryService.Normalize(interpretation.CustomerName), StringComparison.Ordinal)
                 || interpretation.Directive is ConversationDirective.ChangeLocation or ConversationDirective.ChangeService

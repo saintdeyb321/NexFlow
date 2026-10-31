@@ -93,7 +93,12 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
             }
             if (managed?.Response != null) { intent = ConversationIntent.Reservation; return await SendText(managed.Response); }
         }
-        var recovery = _recovery == null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
+        if (_focus?.HandleDiscard(workspaceId, conversation.Id, request.MessageId, request.MessageText, context) is { } discarded)
+            return await SendText(discarded);
+        var recovery = _recovery == null || context.Focus?.PendingDiscard != null ? null : await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request, context, activeModules, cancellationToken);
+        if (_focus?.Enabled == true && context.Focus?.Suspended != null && context.PendingRecoveryAction == "CANCEL"
+            && recovery?.Operation == OperationStatus.AwaitingConfirmation)
+            return await SendText(_focus.BeginDiscard(workspaceId, conversation.Id, request.MessageId, context, null));
         if (recovery?.Response != null) { intent = recovery.Interpretation?.Intent ?? ConversationIntent.General; act = recovery.Act; operation = recovery.Operation; expectedReply = recovery.Expected; return await SendText(recovery.Response); }
         AiInterpretation interpretation;
         PreparedDialogueTurn? prepared = null;
@@ -112,6 +117,13 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (latest.Mode == "Human" || latest.StateVersion != context.StateVersion)
             throw new ConcurrencyException("Conversation changed during interpretation; reload before processing.");
         activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (_focus?.Enabled == true && interpretation.Directive == ConversationDirective.CancelCurrentFlow
+            && (context.Focus?.Suspended != null || interpretation.DiscardScope != null))
+            return await SendText(_focus.BeginDiscard(workspaceId, conversation.Id, request.MessageId, context, interpretation.DiscardScope));
+        if (context.Focus?.PendingDiscard != null && interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery
+            or ConversationIntent.Location or ConversationIntent.BusinessHours or ConversationIntent.Faq or ConversationIntent.Profile or ConversationIntent.Support
+            or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited))
+            return await SendText("Antes de cambiar una preparación, resuelve el descarte pendiente: indica el alcance, responde «No» para conservar todo o solicita un asesor.");
         if (interpretation.FocusProposal is { } change && _focus != null)
         {
             if (await _focus.ApplyAsync(workspaceId, normalizedPhone, conversation.Id, request.MessageId, context, change, activeModules, cancellationToken) is { } refusal)
@@ -145,9 +157,10 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     responsePlan = responsePlan.WithText(await _recovery.DecorateAsync(workspaceId, normalizedPhone, context, activeModules,
                         responsePlan.FallbackText, cancellationToken), context.StateVersion);
             }
-            var prefix = context.Focus?.LastTransitionResumed == true ? "Retomamos tu preparación sin confirmar ninguna operación."
-                : "He cambiado el foco sin enviar ni confirmar nada.";
-            if (context.Focus?.Suspended != null) prefix += " La otra preparación queda guardada para retomarla.";
+            var saved = context.Focus?.Suspended?.Identity;
+            var canResume = saved != null && saved.ExpiresAt > (_clock?.UtcNow ?? DateTime.UtcNow)
+                && AiIntentAccess.GetDeniedResponse(saved.Kind == OperationKind.Order ? ConversationIntent.Order : ConversationIntent.Reservation, activeModules) == null;
+            var prefix = SecretaryPresentation.FocusTransition(change.Target, saved?.Kind, context.Focus?.LastTransitionResumed == true, canResume);
             return await SendText(prefix + "\n\n" + responsePlan.FallbackText);
         }
         if (prepared?.Response != null)
@@ -192,7 +205,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         else if (interpretation.Directive == ConversationDirective.CancelCurrentFlow) act = DialogueAct.Cancellation;
         if (context.CurrentGoal == null && context.Focus?.Suspended != null
             && act == DialogueAct.StartOperation && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Reservation)
+        {
+            if (_focus?.Enabled == true && context.Focus.Suspended.Identity.ExpiresAt <= (_clock?.UtcNow ?? DateTime.UtcNow))
+                return await SendText("El borrador guardado ha vencido. " + _focus.BeginDiscard(workspaceId, conversation.Id, request.MessageId, context, DraftDiscardScope.Suspended));
             return await SendText("Hay una preparación guardada. Retómala antes de iniciar otra; no la he descartado ni confirmado.");
+        }
         if (context.PendingRecoveryAction != null && interpretation.Intent != ConversationIntent.Support
             && (interpretation.Directive != ConversationDirective.None
                 || interpretation.Intent is not (ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery or ConversationIntent.BusinessHours or ConversationIntent.Location or ConversationIntent.Faq or ConversationIntent.Profile or ConversationIntent.ProviderUnavailable or ConversationIntent.RateLimited)))
@@ -350,10 +367,20 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         async Task<string> Compose(string text, bool media = false)
         {
+            // Status is presentation only. It adds no lookups, writes, menu or
+            // consent, and never suggests resuming an expired/revoked operation.
+            if (_focus?.Enabled == true && act is DialogueAct.ProviderFailure or DialogueAct.SemanticAmbiguity
+                && context.Focus is { PendingDiscard: null, Suspended: { } paused } scoped
+                && scoped.WorkspaceId == workspaceId && scoped.ConversationId == conversation.Id
+                && scoped.Active.ExpiresAt > (_clock?.UtcNow ?? DateTime.UtcNow) && paused.Identity.ExpiresAt > (_clock?.UtcNow ?? DateTime.UtcNow)
+                && context.Mode != "Human" && context.PendingRecoveryAction == null
+                && AiIntentAccess.GetDeniedResponse(paused.Identity.Kind == OperationKind.Order ? ConversationIntent.Order : ConversationIntent.Reservation, activeModules) == null)
+                text += "\n\n" + SecretaryPresentation.FocusReminder(scoped.Active.Kind, paused.Identity.Kind);
             // Once both preparations ended there is no operation identity to
             // reuse for a later, unrelated start. Durable effect receipts stay intact.
             if (context.CurrentGoal == null && context.Focus?.Suspended == null) context.Focus = null;
-            var expected = context.PendingRecoveryAction != null ? ExpectedReply.RecoveryDecision
+            var expected = context.Focus?.PendingDiscard != null ? ExpectedReply.DiscardDrafts
+                : context.PendingRecoveryAction != null ? ExpectedReply.RecoveryDecision
                 : responsePlan?.Operation == OperationStatus.Informational && intent == ConversationIntent.Reservation
                     && context.Information?.AvailabilityReference != null
                     && responsePlan.Facts.Any(f => f.Key == "Availability" && f.Value == "Available") ? ExpectedReply.SelectReservationTime
@@ -376,8 +403,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                 && operation == OperationStatus.AwaitingConfirmation && expectedReply == ExpectedReply.ConfirmReservation
                 && ConversationQuestion.Current(workspaceId, context, now) is { Expected: ExpectedReply.ConfirmReservation, Intent: ConversationIntent.Reservation } bookingQuestion
                 && bookingQuestion.ConversationId == conversation.Id;
-            if (!keepOrderReview && !keepBookingSelection && !keepBookingReview)
+            var keepDiscard = context.Focus?.PendingDiscard is { QuestionId: not null } decision && context.CurrentQuestion?.QuestionId == decision.QuestionId;
+            if (!keepOrderReview && !keepBookingSelection && !keepBookingReview && !keepDiscard)
                 ConversationQuestion.Remember(workspaceId, request.MessageId, context, expected, intent, text, now, conversation.Id);
+            if (context.Focus?.PendingDiscard is { QuestionId: null } pendingDiscard)
+                context.Focus.PendingDiscard = pendingDiscard with { QuestionId = context.CurrentQuestion!.QuestionId };
             await _contextRecovery.SaveContextAsync(workspaceId, normalizedPhone, context, cancellationToken);
             var plan = Bind(text, media);
             ConversationDiagnostics.Count("BusinessResult", plan.Operation.ToString());

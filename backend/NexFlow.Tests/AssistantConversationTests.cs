@@ -354,7 +354,7 @@ public sealed class AssistantConversationTests
             stateService.Setup(s => s.ProcessStateAsync(Workspace, Phone, It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(async () => { var state = await Context(); return (state.Mode != "Human", new ConversationRecord { Id = "chat", Mode = state.Mode == "Human" ? ConversationMode.Human : ConversationMode.Automatic }, (string?)null); });
             Handler = new(guard.Object, stateService.Object, _orchestrator, knowledge.Object, outbound.Object,
-                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object);
+                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object, clock.Object);
         }
         public Task<ConversationContextDto> Context() => Contexts.GetOrRecoverContextAsync(Workspace, Phone, default);
         public void UseCatalogKnowledge()

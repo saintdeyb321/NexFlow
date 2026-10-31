@@ -7,7 +7,7 @@ using NexFlow.Domain.Enums;
 
 namespace NexFlow.Application.Features.Automation.Dialogue.Contracts;
 
-public enum ExpectedReply { Information, Selection, RequestedData, StartReservation, ConfirmReservation, RecoveryDecision, ConfirmOrder, SelectReservationTime, EditReservationField }
+public enum ExpectedReply { Information, Selection, RequestedData, StartReservation, ConfirmReservation, RecoveryDecision, ConfirmOrder, SelectReservationTime, EditReservationField, DiscardDrafts }
 
 // Backend-owned reference in the existing CAS envelope, not consent or a business command.
 public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, string SourceMessageId,
@@ -76,6 +76,7 @@ public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, s
         ExpectedReply.EditReservationField => "¿Qué dato de tu reserva en preparación deseas editar: sede, servicio, fecha, hora o nombre? La respuesta señala el campo a editar, no una consulta de dirección ni consentimiento.",
         ExpectedReply.Selection => "Elige una opción de la lista vigente.",
         ExpectedReply.RecoveryDecision => "Confirma o rechaza la decisión pendiente sobre el borrador.",
+        ExpectedReply.DiscardDrafts => "Decide el alcance del descarte de borradores; no autoriza ninguna transacción.",
         ExpectedReply.RequestedData => state.CurrentStep switch {
             "COLLECT_LOCATION" => "¿En qué sede deseas reservar?", "COLLECT_SERVICE" => "¿Qué servicio deseas reservar?",
             "COLLECT_DATE" => "¿Para qué fecha?", "COLLECT_TIME" => "¿Qué hora prefieres?",

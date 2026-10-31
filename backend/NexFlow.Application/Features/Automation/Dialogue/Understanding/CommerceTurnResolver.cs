@@ -326,23 +326,41 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             var options = catalog.Products.Select(p => p.Option).ToArray();
             var candidates = resolver.ResolveEvidence(entityText, options).Candidates
                 .Concat(resolver.ResolveCommercial(entityText, options).Candidates).Select(c => c.Value).DistinctBy(c => c.Id).ToArray();
-            if (candidates.Length == 0 && reference != null && SpanishTextNormalizer.Normalize(entityText).Length == 0)
-                candidates = catalog.Products.Where(p => p.Id == reference.Ids[0] && p.AtLocation(reference.LocationId))
-                    .Select(p => new ResolvedBusinessEntity(p.Id, p.Name, reference.LocationId)).ToArray();
+            // A semantic reference supplies only a span/index. The target comes
+            // from the current backend-owned question and its exact draft revision.
+            var indexed = item.ReferenceIndex.HasValue;
+            string? referencedId = null;
+            if (semantic.UseOfferingReference && item.ReferenceText is { Length: > 0 and <= 120 } referenceText
+                && AiEvidenceValidator.HasFragment(item.Text, referenceText))
+            {
+                if (indexed && clock != null && ConversationQuestion.Current(workspace, context, clock.UtcNow) is { Intent: ConversationIntent.Order }
+                    && context.CurrentGoal == "ORDER" && item.ReferenceIndex is > 0 and <= 10
+                    && item.ReferenceIndex <= context.OrderDraftItems.Count
+                    && OrderMentionResolver.Ordinal(OrderMentionResolver.Words(referenceText)) == item.ReferenceIndex - 1)
+                    referencedId = context.OrderDraftItems[item.ReferenceIndex.Value - 1].ProductId;
+                else if (!indexed && reference != null) referencedId = reference.Ids[0];
+            }
+            else if (!indexed && reference != null && SpanishTextNormalizer.Normalize(entityText).Length == 0)
+                referencedId = reference.Ids[0];
+            if (indexed && referencedId == null || referencedId != null && candidates.Any(c => c.Id != referencedId))
+                return Plan(OrderTurnKind.Clarify, clarification: "¿A cuál producto del resumen vigente te refieres? No he cambiado las cantidades.");
+            if (candidates.Length == 0 && referencedId != null)
+                candidates = catalog.Products.Where(p => p.Id == referencedId && p.AtLocation(context.SelectedLocationId))
+                    .Select(p => new ResolvedBusinessEntity(p.Id, p.Name, context.SelectedLocationId)).ToArray();
             if (candidates.Length != 1 || !catalog.Products.Any(p => p.Id == candidates[0].Id
                 && new[] { p.Name }.Concat(p.Aliases).Any(name => SpanishTextNormalizer.Normalize(name) == SpanishTextNormalizer.Normalize(item.Product))))
                 return Plan(OrderTurnKind.Clarify, clarification: "¿Cuál producto activo deseas cambiar? Conservamos el pedido.");
             var product = candidates[0];
             if (starting && item.Kind != OrderEditKind.Add)
                 return Plan(OrderTurnKind.Clarify, clarification: "¿Qué producto y cantidad deseas solicitar? Todavía no hemos preparado una selección.");
-            if (item.Kind is not (OrderEditKind.Add or OrderEditKind.Set or OrderEditKind.Remove))
+            if (item.Kind is not (OrderEditKind.Add or OrderEditKind.Set or OrderEditKind.Remove or OrderEditKind.Decrease))
                 return Plan(OrderTurnKind.Clarify, clarification: "Indica qué producto deseas quitar y cuál deseas agregar.");
             var quantity = item.Quantity;
             if (item.Kind != OrderEditKind.Remove && (!quantity.HasValue || item.QuantityText == null
                 || !AiEvidenceValidator.HasFragment(item.Text, item.QuantityText)
                 || !OrderMentionResolver.TryQuantity(item.QuantityText, out var literal) || literal != quantity))
                 return Plan(OrderTurnKind.Clarify, clarification: "¿Cuántas unidades deseas? Conservamos las cantidades actuales.");
-            if (item.Kind == OrderEditKind.Remove && context.OrderDraftItems.All(i => i.ProductId != product.Id))
+            if (item.Kind is OrderEditKind.Remove or OrderEditKind.Decrease && context.OrderDraftItems.All(i => i.ProductId != product.Id))
                 return Plan(OrderTurnKind.Clarify, clarification: "Ese producto no está en tu pedido. ¿Cuál deseas cambiar?");
             if (item.Kind == OrderEditKind.Remove && quantity.HasValue
                 && (item.QuantityText == null || !AiEvidenceValidator.HasFragment(item.Text, item.QuantityText)

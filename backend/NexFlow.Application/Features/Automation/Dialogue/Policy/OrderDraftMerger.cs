@@ -25,6 +25,14 @@ public static class OrderDraftMerger
             var product = products.SingleOrDefault(p => p.Id == edit.ProductId && p.Type == "PRODUCT")
                 ?? throw new ArgumentException("Ese producto ya no está activo en el catálogo de esta sede.");
             if (edit.Quantity <= 0) throw new ArgumentException("La cantidad debe ser un entero mayor que cero.");
+            if (edit.Kind == OrderEditKind.Decrease)
+            {
+                if (existing == null || existing.Quantity < edit.Quantity)
+                    throw new ArgumentException("La reducción supera la cantidad actual. ¿Cuántas unidades deseas conservar?");
+                existing.Quantity -= edit.Quantity;
+                if (existing.Quantity == 0) result.Remove(existing);
+                continue;
+            }
             if (edit.Kind == OrderEditKind.Replace)
             {
                 var previous = result.SingleOrDefault(i => i.ProductId == edit.ReplacesProductId)
