@@ -121,11 +121,43 @@ public sealed class OfferingMentionResolver
         var exact = options.Where(o => o.Id == text || new[] { o.Name }.Concat(o.Aliases ?? []).Any(n => SpanishTextNormalizer.Normalize(n) == SpanishTextNormalizer.Normalize(text))).ToArray();
         var matches = (exact.Length > 0 ? exact : options.Where(o => new[] { o.Name }.Concat(o.Aliases ?? []).Any(Matches)))
             .DistinctBy(o => o.Id).ToArray();
+        // Commercial mentions may omit size/variant suffixes. Every supplied
+        // term still needs an ordered, distinct counterpart in an authorized
+        // name/alias. At most two single-character edits; short terms (including
+        // qualifiers such as "sin") must match exactly. Keep every collision.
+        if (matches.Length == 0 && words.Length <= 8 && text.Length <= 200)
+            matches = options.Where(o => new[] { o.Name }.Concat(o.Aliases ?? [])
+                .Any(n => CommercialSpelling(words, SpanishTextNormalizer.Terms(n)))).DistinctBy(o => o.Id).ToArray();
         return matches.Length switch {
             0 => SlotResolution<ResolvedBusinessEntity>.Missing(),
             1 => SlotResolution<ResolvedBusinessEntity>.Match(new(matches[0].Id, matches[0].Name, matches[0].LocationId), text, matches[0].Id),
             _ => SlotResolution<ResolvedBusinessEntity>.Ambiguous(matches.Select(o => new SlotCandidate<ResolvedBusinessEntity>(new(o.Id, o.Name, o.LocationId), text, EvidenceSource.LocalResolver, o.Id)), "MultipleEntities")
         };
+    }
+    private static bool CommercialSpelling(string[] source, string[] target)
+    {
+        if (target.Length > 32 || source.Length > target.Length) return false;
+        var costs = Enumerable.Repeat(3, source.Length + 1).ToArray(); costs[0] = 0;
+        foreach (var word in target)
+            for (var i = source.Length - 1; i >= 0; i--)
+            {
+                var edit = SameWord(source[i], word) ? 0 : OneEdit(source[i], word) ? 1 : 3;
+                costs[i + 1] = Math.Min(costs[i + 1], costs[i] + edit);
+            }
+        return costs[^1] <= 2;
+    }
+    private static bool OneEdit(string a, string b)
+    {
+        if (Math.Min(a.Length, b.Length) < 5 || Math.Abs(a.Length - b.Length) > 1) return false;
+        var x = 0; var y = 0; var edits = 0;
+        while (x < a.Length && y < b.Length)
+        {
+            if (a[x] == b[y]) { x++; y++; continue; }
+            if (++edits > 1) return false;
+            if (a.Length >= b.Length) x++;
+            if (b.Length >= a.Length) y++;
+        }
+        return edits + a.Length - x + b.Length - y <= 1;
     }
     private static IEnumerable<string> Forms(string word)
     {
@@ -134,5 +166,5 @@ public sealed class OfferingMentionResolver
         if (word.Length > 4 && word.EndsWith("es", StringComparison.Ordinal)) yield return word[..^2];
     }
     internal static bool SameWord(string a, string b) => Forms(a).Intersect(Forms(b), StringComparer.Ordinal).Any();
-    private static readonly HashSet<string> CommercialWords = new(["cuanto","cuesta","cuestan","cual","que","es","son","esos","estos","ese","esa","dos","tres","tengo","hay","disponible","disponibles","atienden","aqui","dura","duracion","precio","precios","diferencia","entre","compara","comparar","con","recomiendas","para","una","general","ofrecen","tienen"], StringComparer.Ordinal);
+    private static readonly HashSet<string> CommercialWords = new(["cuanto","cuesta","cuestan","cual","que","es","son","esos","estos","ese","esa","dos","tres","tengo","hay","disponible","disponibles","atienden","aqui","dura","duracion","precio","precios","diferencia","entre","compara","comparar","recomiendas","para","una","general","ofrecen","tienen"], StringComparer.Ordinal);
 }

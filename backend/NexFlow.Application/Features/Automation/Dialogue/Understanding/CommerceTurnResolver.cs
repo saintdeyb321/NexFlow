@@ -61,17 +61,52 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
                 OfferingQuery = Page(workspace, source, context, type, values, locationId, 0,
                     semantic.Question ?? OfferingQuestion.Facts) });
         }
+        if (semantic is { QueryKind: OfferingQueryKind.Specific, SearchTerm.Length: > 0, UseOfferingReference: false, RequiresClarification: false }
+            && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)
+        {
+            var intent = semantic.Intent;
+            if (AiIntentAccess.GetDeniedResponse(intent, modules) is { } specificDenied)
+                return new(DialogueAct.Information, new() { Intent = intent }, Response: specificDenied);
+            var type = intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE";
+            var acts = semantic.Evidence.Where(e => e.Slot == "Act").ToArray();
+            // SearchTerm is a proposal, not authority. Resolve only an entity
+            // fragment actually present in this message against this workspace.
+            var grounded = acts.Length == 1 && semantic.Act is DialogueAct.Information or DialogueAct.InformationalInterruption
+                && acts[0].NormalizedValue == semantic.Act.ToString() && AiEvidenceValidator.HasFragment(text, acts[0].Text)
+                && AiEvidenceValidator.HasFragment(text, semantic.SearchTerm);
+            string? locationId = null;
+            if (!string.IsNullOrWhiteSpace(semantic.Location))
+            {
+                var location = await slots.ResolveAsync(workspace, source, text, context, SlotResolutionPurpose.Information, new(true, false, false), ct);
+                location = AiEvidenceValidator.Validate(location, semantic, text);
+                if (!location.Location.TryGetValue(out var site))
+                    return new(DialogueAct.Information, new() { Intent = intent }, Response: "No pude identificar una sede autorizada en tu consulta. ¿Qué sede deseas consultar?");
+                locationId = site.Id;
+            }
+            var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, locationId, ct);
+            var values = type == "PRODUCT" ? data.Products : data.Services;
+            var match = grounded ? new OfferingMentionResolver().ResolveCommercial(semantic.SearchTerm, values.Select(v => v.Option).ToArray())
+                : SlotResolution<ResolvedBusinessEntity>.Missing();
+            var selected = match.TryGetValue(out var entity) ? values.Where(v => v.Id == entity.Id).ToArray() : [];
+            return new(context.CurrentGoal != null ? DialogueAct.InformationalInterruption : DialogueAct.Information,
+                new() { Intent = intent, QueryKind = OfferingQueryKind.Specific,
+                    OfferingQuery = new(workspace, source, context.StateVersion, type, semantic.Question ?? OfferingQuestion.Facts,
+                        Array.AsReadOnly(selected), false, locationId, selected.Length == 1 ? null : match.Status == ResolutionStatus.Ambiguous
+                            ? "Hay varias opciones: " + string.Join(", ", match.Candidates.Take(5).Select(c => c.Value.Name)) + ". ¿Cuál deseas consultar?"
+                            : "No identifiqué un producto o servicio inequívoco en tu mensaje. ¿Cuál deseas consultar?") });
+        }
         if (semantic is { UseOfferingReference: true, Question: not null, RequiresClarification: false }
             && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)
         {
             var type = semantic.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE";
             if (AiIntentAccess.GetDeniedResponse(semantic.Intent, modules) is { } referenceDenied)
                 return new(DialogueAct.Information, semantic, Response: referenceDenied);
-            var previousOffering = OfferingReference.Read(workspace, context);
+            var previousOffering = CurrentOfferingReference(workspace, context);
             var acts = semantic.Evidence.Where(e => e.Slot == "Act").ToArray();
             if (previousOffering?.Type != type || previousOffering.Broad || previousOffering.Ids.Length != 1 || acts.Length != 1
                 || clock == null || ConversationQuestion.Current(workspace, context, clock.UtcNow) == null
-                || acts[0].NormalizedValue != semantic.Act?.ToString() || !AiEvidenceValidator.HasFragment(text, acts[0].Text)) return null;
+                || acts[0].NormalizedValue != semantic.Act?.ToString() || !AiEvidenceValidator.HasFragment(text, acts[0].Text))
+                return new(DialogueAct.SemanticAmbiguity, new() { Intent = semantic.Intent }, Response: "No hay una referencia inequívoca vigente. ¿Qué producto o servicio deseas consultar?");
             var data = await slots.ReadCommerceAsync(workspace, context, type == "PRODUCT", type == "SERVICE", false, previousOffering.LocationId, ct);
             var found = data.Products.Concat(data.Services).Where(o => o.Type == type && o.Id == previousOffering.Ids[0]).ToArray();
             return new(DialogueAct.InformationalInterruption, new() { Intent = semantic.Intent,
@@ -137,7 +172,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
 
         // No catalog lookup is necessary for explicit submit/summary. OrderFlow revalidates it.
         if (submit || summary) return Order(submit ? OrderTurnKind.Submit : OrderTurnKind.Summary, []);
-        var reference = OfferingReference.Read(workspace, context);
+        var reference = CurrentOfferingReference(workspace, context);
         // Read-only catalog questions do not inherit a transactional filter.
         string? scope = readOnly ? null : context.SelectedLocationId ?? reference?.LocationId;
         string? selectedLocation = null;
@@ -205,7 +240,11 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             && !OrderMentionResolver.IsQuestion(text.Replace("?", "").Replace("¿", ""))) return null;
         if (dualCatalog && productMatches.Count == 0 && serviceMatches.Count == 0)
         {
-            var referenced = reference != null && reference.Ids.All(id => products.Concat(services).Any(o => o.Type == reference.Type && o.Id == id));
+            // Legacy envelopes without a question may still hint the type of a
+            // requested broad PDF. Revalidate every ID; never use that hint to
+            // select a specific entity, mutate a draft or authorize consent.
+            var catalogReference = reference ?? (context.CurrentQuestion == null ? OfferingReference.Read(workspace, context) : null);
+            var referenced = catalogReference != null && catalogReference.Ids.All(id => products.Concat(services).Any(o => o.Type == catalogReference.Type && o.Id == id));
             var bookingContext = context.CurrentGoal is "BOOKING" or "RESERVATION"
                 && services.Any(s => s.Id == context.SelectedServiceId);
             var orderContext = context.CurrentGoal == "ORDER" && context.OrderDraftItems.Count > 0
@@ -213,7 +252,7 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             if (!referenced && !bookingContext && !orderContext)
                 return new(DialogueAct.SemanticAmbiguity, new() { Intent = ConversationIntent.General }, Response: InformationalRequest.CatalogScopeQuestion,
                     Choices: InformationalRequest.CatalogScopeChoices);
-            wantsServices = referenced ? reference!.Type == "SERVICE" : bookingContext;
+            wantsServices = referenced ? catalogReference!.Type == "SERVICE" : bookingContext;
             wantsProducts = !wantsServices;
         }
         var broad = (catalogRequest || broadOfferings || words.Contains("catalogo"))
@@ -377,13 +416,18 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
     }
 
     private OfferingReference? CurrentPurchaseReference(Guid workspace, ConversationContextDto context)
+        => clock != null && ConversationQuestion.Current(workspace, context, clock.UtcNow) is { } question
+            && question.Intent is ConversationIntent.Order or ConversationIntent.ProductQuery
+            && CurrentOfferingReference(workspace, context) is { Type: "PRODUCT", Broad: false, Ids.Length: 1 } reference ? reference : null;
+
+    private OfferingReference? CurrentOfferingReference(Guid workspace, ConversationContextDto context)
     {
         if (clock == null || ConversationQuestion.Current(workspace, context, clock.UtcNow) is not { } question
-            || OfferingReference.Read(workspace, context) is not { Type: "PRODUCT", Broad: false, Ids.Length: 1 } reference) return null;
-        var factual = question is { Expected: ExpectedReply.Information, Intent: ConversationIntent.ProductQuery };
-        var draft = context.CurrentGoal == "ORDER" && question.Intent == ConversationIntent.Order
-            && context.OrderDraftItems.Any(i => i.ProductId == reference.Ids[0]);
-        return factual || draft ? reference : null;
+            || OfferingReference.Read(workspace, context) is not { } reference) return null;
+        var intent = reference.Type == "PRODUCT" ? ConversationIntent.ProductQuery : ConversationIntent.ServiceQuery;
+        return question is { Expected: ExpectedReply.Information } && question.Intent == intent
+            || reference.Type == "PRODUCT" && context.CurrentGoal == "ORDER" && question.Intent is ConversationIntent.Order or ConversationIntent.General
+                && reference.Ids.All(id => context.OrderDraftItems.Any(i => i.ProductId == id)) ? reference : null;
     }
 }
 

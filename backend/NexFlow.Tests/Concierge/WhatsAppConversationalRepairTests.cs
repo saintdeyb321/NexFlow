@@ -42,7 +42,7 @@ public sealed class WhatsAppConversationalRepairTests(ITestOutputHelper output)
         Evidence = [new("Act", text, act.ToString())]
     };
 
-    private async Task Speak(AssistantConversationTests.Fixture f, string text, string source, AiInterpretation? response = null)
+    internal async Task Speak(AssistantConversationTests.Fixture f, string text, string source, AiInterpretation? response = null)
     {
         var router = new Mock<IAiRouter>(MockBehavior.Strict);
         var json = JsonSerializer.Serialize(response ?? new() { Intent = ConversationIntent.General },

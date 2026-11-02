@@ -271,8 +271,9 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             if (!operationResolved)
                 local = await slots.ResolveAsync(workspace, request.MessageId, operationText, context, SlotResolutionPurpose.Reservation, new(true, true, false), ct);
             local = AiEvidenceValidator.Validate(local, interpretation, request.MessageText);
-            if (new[] { local.Location.Status, local.Service.Status, local.Date.Status, local.Time.Status }.Any(s => s == ResolutionStatus.Determined))
-                return PrepareBooking(local, DialogueAct.StartOperation, true, workspace, request.MessageId);
+            // Evidence-backed intent may prepare an empty draft and ask for its
+            // first missing field. Starting preparation never supplies consent.
+            return PrepareBooking(local, DialogueAct.StartOperation, true, workspace, request.MessageId);
         }
         // Informational interruptions never turn extracted entities into mutations of a business draft.
         if (interpretation.Directive == ConversationDirective.None && interpretation.Intent is ConversationIntent.ProductQuery
