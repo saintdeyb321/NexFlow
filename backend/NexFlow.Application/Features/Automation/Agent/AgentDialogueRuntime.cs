@@ -8,7 +8,7 @@ namespace NexFlow.Application.Features.Automation.Agent;
 
 public sealed class AgentDialogueRuntime(LlmFirstShadowAgent planner, IAgentTurnJournal journal,
     IContextRecoveryService contexts, IConversationRepository conversations, IEntitlementService entitlements,
-    IClock clock, IOptions<AgentDialogueOptions> options) : IExperimentalAgentRuntime
+    IClock clock, IOptions<AgentDialogueOptions> options, IAgentBookingDrafts? drafts = null) : IExperimentalAgentRuntime
 {
     public bool Handles(Guid workspace) => options.Value.Enabled && workspace != Guid.Empty
         && workspace == options.Value.SyntheticWorkspaceId && AgentExperimentScope.Current?.Workspace == workspace;
@@ -29,11 +29,21 @@ public sealed class AgentDialogueRuntime(LlmFirstShadowAgent planner, IAgentTurn
             calls = proposed.ModelCalls; toolCalls = proposed.ToolCalls;
             var modules = (await entitlements.GetAvailableModuleCodesAsync(request.WorkspaceId, ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!await Authorized(request, false, ct)) return AgentTurnResult.Rejected("DialogueDenied");
-            var realized = AgentResponseAuthority.Prepare(request, origin, proposed, modules, clock.UtcNow);
-            var prepared = await journal.CompleteAsync(request, begin.Lease, realized.Next, realized.Result, ct);
+            AgentDraftStage? staged = null;
+            if (proposed.Accepted && proposed.Proposal is { Decision: AgentDecision.PrepareReservation,
+                Conversation: { Goal: AgentCommunicativeGoal.BookingPreparation, NeedsClarification: false, Booking: { } patch } }) {
+                try {
+                    if (drafts == null) throw new InvalidOperationException("Preparation adapter unavailable.");
+                    staged = await drafts.StageAsync(request, origin, patch, Math.Max(0, 3 - toolCalls), ct);
+                    toolCalls += staged.ToolCalls;
+                } catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch { proposed = AgentTurnResult.Rejected("DraftValidationUnavailable", calls, watch.ElapsedMilliseconds); }
+            }
+            var realized = AgentResponseAuthority.Prepare(request, origin, proposed, modules, clock.UtcNow, staged);
+            var prepared = await journal.CompleteAsync(request, begin.Lease, realized.Next, realized.Result with { ToolCalls = toolCalls }, ct);
             var result = await Recover(request, prepared, ct);
             ConversationDiagnostics.Count("AgentDialogueResult", result.Outcome);
-            return result with { ModelCalls = proposed.ModelCalls, ToolCalls = proposed.ToolCalls, ElapsedMilliseconds = watch.ElapsedMilliseconds, Recovered = false };
+            return result with { ModelCalls = calls, ToolCalls = toolCalls, ElapsedMilliseconds = watch.ElapsedMilliseconds, Recovered = false };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch

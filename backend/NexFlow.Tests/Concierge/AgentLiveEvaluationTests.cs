@@ -33,7 +33,7 @@ public sealed class AgentLiveEvaluationTests
         var scenario = corpus.Conversations.Single(c => c.Id == Environment.GetEnvironmentVariable("NEXFLOW_LLM_LIVE_CASE"));
         var budget = new AgentEvaluationHttpBudget(
             int.Parse(Environment.GetEnvironmentVariable("NEXFLOW_LLM_MAX_HTTP")!),
-            long.Parse(Environment.GetEnvironmentVariable("NEXFLOW_LLM_MAX_TOKEN_RESERVATION")!));
+            long.Parse(Environment.GetEnvironmentVariable("NEXFLOW_LLM_MAX_TOKEN_RESERVATION")!), AgentHttpAttempt.FromEnvironment());
         var settings = new Dictionary<string, string?>();
         foreach (var name in new[] { "Groq", "Gemini" }) {
             var prefix = "NEXFLOW_TEST_" + name.ToUpperInvariant();
@@ -53,12 +53,15 @@ public sealed class AgentLiveEvaluationTests
             // No Plan()/scripted responses. Only authentic text goes to AiRouter.
             var result = await f.Turn(t.Text, t.ReplayOf ?? scenario.Id + "-" + i); var state = await f.Business.Context();
             var stateCorrect = state.CurrentGoal == t.Goal && state.PendingRecoveryAction == t.Pending;
-            var correct = stateCorrect && result.Proposal?.Decision == t.Decision;
+            var suppressed = t.Outcome == "NoExperimentalResponse" && result.Outcome == t.Outcome && state.Mode == "Human";
+            var correct = stateCorrect && (suppressed || result.Proposal?.Decision == t.Decision);
             if (!correct || f.Business.Bookings.Count + f.Business.Orders.Count + f.Business.Sent.Count != 0) failures.Add(scenario.Id + "/" + i);
-            rows.Add(new { Turn = i, Act = result.Proposal?.Decision.ToString(), ExpectedAct = t.Decision.ToString(), StateCorrect = stateCorrect,
-                PublicText = result.VerifiedText, result.Outcome, result.ModelCalls, result.ElapsedMilliseconds, result.ResponseValidation });
+            rows.Add(new { Turn = i, Act = result.Proposal?.Decision.ToString(), ExpectedAct = t.Decision.ToString(), StateCorrect = stateCorrect, ActCorrect = correct,
+                PublicText = result.VerifiedText, result.Outcome, result.ModelCalls, result.ElapsedMilliseconds,
+                ResponseValidation = suppressed ? "HumanSuppressed" : result.ResponseValidation,
+                CommercialEffects = f.Business.Bookings.Count + f.Business.Orders.Count, OutboundEffects = f.Business.Sent.Count });
         }
-        AgentConversationEvaluationTests.WriteReport("live-" + scenario.Id, new { CorpusSHA256 = hash, Mode = "live", Observations = rows,
+        AgentConversationEvaluationTests.WriteReport("live-" + scenario.Id, new { Version = 2, Case = scenario.Id, AttemptId = Environment.GetEnvironmentVariable("NEXFLOW_LLM_ATTEMPT_ID"), CorpusSHA256 = hash, Mode = "live", Observations = rows,
             HTTPAttempts = budget.Attempts, TokenReservation = budget.ReservedTokens, ReportedTokens = budget.ReportedTokens,
             UsageResponses = budget.UsageResponses, Requests = budget.Metadata, Failures = failures, HumanQuality = "BLOCKED",
             CommercialAcceptance = "NOT_CERTIFIED", Cost = "UNKNOWN_NoVerifiedTariff" });
@@ -68,7 +71,7 @@ public sealed class AgentLiveEvaluationTests
 
 // Test-runner budget, not production quota. Reservations are not refunded on
 // timeout/429; all primary/fallback requests share the same counter.
-internal sealed class AgentEvaluationHttpBudget(int maxAttempts, long maxReservedTokens)
+internal sealed class AgentEvaluationHttpBudget(int maxAttempts, long maxReservedTokens, AgentHttpAttempt? attempt = null)
 {
     private readonly object _sync = new();
     public int Attempts { get; private set; }
@@ -77,18 +80,25 @@ internal sealed class AgentEvaluationHttpBudget(int maxAttempts, long maxReserve
     public int UsageResponses { get; private set; }
     public List<object> Metadata { get; } = [];
     public HttpMessageHandler Handler(HttpMessageHandler? inner = null)
-        => new Guard(this, inner ?? new HttpClientHandler { AllowAutoRedirect = false });
-    private sealed class Guard(AgentEvaluationHttpBudget budget, HttpMessageHandler inner) : DelegatingHandler(inner)
+        => new Guard(this, inner ?? new HttpClientHandler { AllowAutoRedirect = false }, inner == null ? "ProviderHttp" : "InterceptedHttp");
+    private sealed class Guard(AgentEvaluationHttpBudget budget, HttpMessageHandler inner, string transport) : DelegatingHandler(inner)
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             if (maxInvalid(budget) || request.RequestUri is not { Scheme: "https", Host: "api.groq.com" or "generativelanguage.googleapis.com" })
                 throw new AiBudgetDeniedException("EvaluationConfiguration");
-            var size = request.Content == null ? 0 : (await request.Content.ReadAsByteArrayAsync(ct)).Length;
+            var body = request.Content == null ? [] : await request.Content.ReadAsByteArrayAsync(ct);
+            var size = body.Length;
+            var awaitModel = "UNKNOWN";
+            if (request.RequestUri.Host == "api.groq.com") {
+                try { using var json = JsonDocument.Parse(body); if (json.RootElement.TryGetProperty("model", out var model)) awaitModel = model.GetString() ?? "UNKNOWN"; }
+                catch (JsonException) { /* Missing metadata can never certify real NLU. */ }
+            } else awaitModel = Uri.UnescapeDataString(request.RequestUri.AbsolutePath.Split('/').Last().Split(':')[0]);
             var reserved = size + 1024L; // conservative byte bound, not a fabricated usage measurement
             lock (budget._sync) {
                 if (size > 32_000 || budget.Attempts >= budget.AttemptLimit || budget.ReservedTokens + reserved > budget.TokenLimit)
                     throw new AiBudgetDeniedException("EvaluationBudget");
+                budget.StartAttempt(transport == "ProviderHttp"); // Immediately before the first possible HTTP.
                 budget.Attempts++; budget.ReservedTokens += reserved;
             }
             var started = System.Diagnostics.Stopwatch.GetTimestamp(); int? status = null; long? tokens = null;
@@ -105,7 +115,8 @@ internal sealed class AgentEvaluationHttpBudget(int maxAttempts, long maxReserve
             } finally {
                 lock (budget._sync) {
                     if (tokens.HasValue) { budget.ReportedTokens = (budget.ReportedTokens ?? 0) + tokens; budget.UsageResponses++; }
-                    budget.Metadata.Add(new { Provider = request.RequestUri!.Host == "api.groq.com" ? "Groq" : "Gemini", Status = status,
+                    budget.Metadata.Add(new { Provider = request.RequestUri!.Host == "api.groq.com" ? "Groq" : "Gemini", Model = awaitModel,
+                        Transport = transport, Status = status,
                         ElapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds, ReservedTokens = reserved, ReportedTokens = tokens });
                 }
             }
@@ -114,4 +125,36 @@ internal sealed class AgentEvaluationHttpBudget(int maxAttempts, long maxReserve
     }
     private int AttemptLimit => maxAttempts;
     private long TokenLimit => maxReservedTokens;
+    private void StartAttempt(bool real)
+    {
+        if (real && attempt == null) throw new AiBudgetDeniedException("EvaluationClaimRequired");
+        attempt?.Start();
+    }
+}
+
+internal sealed class AgentHttpAttempt(string file, string identity)
+{
+    private readonly object _sync = new(); private bool _started;
+    public static AgentHttpAttempt FromEnvironment()
+    {
+        var id = Environment.GetEnvironmentVariable("NEXFLOW_LLM_ATTEMPT_ID") ?? "";
+        var path = Environment.GetEnvironmentVariable("NEXFLOW_LLM_CLAIM_FILE") ?? "";
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !Directory.Exists(Path.Combine(root.FullName, "backend", "NexFlow.Tests"))) root = root.Parent;
+        if (root == null || id.Length != 64 || !id.All(char.IsAsciiHexDigit)
+            || Path.GetFullPath(path) != Path.Combine(root.FullName, "backend", "TestResults", "llm-live-v2-" + id + ".json"))
+            throw new AiBudgetDeniedException("EvaluationClaimConfiguration");
+        return new(path, id);
+    }
+    public void Start()
+    {
+        lock (_sync) {
+            if (_started) return;
+            try {
+                using var fileStream = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                JsonSerializer.Serialize(fileStream, new { state = "Started", identity }); fileStream.Flush(flushToDisk: true);
+                _started = true;
+            } catch (IOException) { throw new AiBudgetDeniedException("EvaluationAlreadyStartedOrUncertain"); }
+        }
+    }
 }

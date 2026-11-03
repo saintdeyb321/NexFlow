@@ -71,17 +71,21 @@ internal sealed class AgentDialogueFixture
             f.Contexts, Conversations.Object, f.EntitlementReads.Object, f.Recovery, Clock, Microsoft.Extensions.Options.Options.Create(ShadowOptions),
             new FirestoreAgentEvaluationClaims(f.Firestore.Db, Clock));
         Journal = new(f.Firestore.Db, Clock);
-        Runtime = new(Shadow, Journal, f.Contexts, Conversations.Object, f.EntitlementReads.Object, Clock, Microsoft.Extensions.Options.Options.Create(Options));
+        Runtime = new(Shadow, Journal, f.Contexts, Conversations.Object, f.EntitlementReads.Object, Clock, Microsoft.Extensions.Options.Options.Create(Options),
+            new AgentBookingDrafts(new NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver(f.EntitlementReads.Object,
+                f.ProfileReads.Object, f.LocationReads.Object, f.OfferingReads.Object, Clock, new(), new(), new(), new(), new(),
+                NullLogger<NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver>.Instance),
+                f.OfferingReads.Object, f.EntitlementReads.Object, new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object, f.EngineReads.Object), Clock));
         return Runtime;
     }
     public AgentTurnRequest Request(string text, string source) => new(Business.Workspace, "chat", AssistantConversationTests.Fixture.Phone, source, text);
-    public void Plan(string text, AgentDecision decision, AgentReadKind? read = null, string? search = null)
+    public void Plan(string text, AgentDecision decision, AgentReadKind? read = null, string? search = null, AgentConversationPlan? conversation = null)
     {
         AgentProposal Response(JsonElement input, bool withTool) => new(decision, text, "Propuesta del modelo, jamás se publica directamente.",
             decision is AgentDecision.ProposeDiscardDraft or AgentDecision.RetainDraft
                 && input.GetProperty("Context").TryGetProperty("Question", out var q) && q.ValueKind == JsonValueKind.Object ? q.GetProperty("Id").GetString() : null,
             withTool ? [new(read!.Value, search)] : [], withTool ? [] : read.HasValue
-                && input.GetProperty("Reads")[0].GetProperty("Status").GetInt32() == (int)BusinessReadStatus.Found ? [0] : [], new(AgentOpening.None));
+                && input.GetProperty("Reads")[0].GetProperty("Status").GetInt32() == (int)BusinessReadStatus.Found ? [0] : [], new(AgentOpening.None), conversation);
         Script.Enqueue(input => Response(input, read.HasValue));
         if (read.HasValue) Script.Enqueue(input => Response(input, false));
     }

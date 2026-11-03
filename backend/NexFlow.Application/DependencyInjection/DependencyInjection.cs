@@ -73,6 +73,7 @@ public static class DependencyInjection
         services.AddScoped<IKnowledgeService, KnowledgeService>();
         services.AddScoped<IBusinessReadTools, BusinessReadTools>();
         services.AddScoped<IAgentReadTools, AgentReadTools>();
+        services.AddScoped<IAgentBookingDrafts, AgentBookingDrafts>();
         services.AddScoped<LlmFirstShadowAgent>();
         services.AddScoped<IExperimentalAgentRuntime, AgentDialogueRuntime>();
         services.AddScoped<IConversationalAgent, AgentOwner>();

@@ -120,7 +120,18 @@ Redacta breve y cordial, una pregunta útil por turno; evita jerga y reinicios d
                     (owned == null ? "llm-shadow:v1:" : "llm-dialogue:v2:") + request.ConversationId + ":" + request.SourceMessageId + ":" + calls, token).WaitAsync(token))
                     throw new AiBudgetDeniedException("WorkspaceShare");
                 calls++;
-                var contract = owned == null ? Contract : Contract + "\nModo DEMO aislado: tú conduces el diálogo; el servidor realizará únicamente segmentos verificados. Narrative={Opening:None/Warm/Acknowledge,NextQuestion:Information/Service/Location/HumanHelp}. RetainDraft rechaza el descarte pendiente. Conserva QuestionId al responder AGENT_CANCEL_SCOPE/AGENT_CANCEL_CONFIRM. Nunca afirmes una cita registrada ni un cambio ejecutado. CandidateResponse sigue siendo una propuesta que el servidor no publicará libremente.";
+                var contract = owned == null ? Contract : Contract + """
+
+Modo DEMO: tú conduces la comprensión y orientación. El servidor realizará hechos/actos tipados, nunca prosa libre.
+Conversation opcional: {Goal:Information/BookingPreparation/Clarification/HumanHelp,Speech:Explain/Orient/Reassure/Repair/Resume,Need:null,Booking:null,References:[],NeedsClarification:false}.
+Booking sólo propone datos de preparación, nunca consentimiento: {Location,Service,Date,Time,Name}, cada uno null o {Value,Evidence,ReferenceIndex:null,QuestionId:null}.
+Evidence es un fragmento literal actual. Entidades: Value es nombre autorizado o ID con evidencia verificable; nunca inventes ID. Date ISO se valida con el reloj/zona del negocio, Time HH:mm o Period para una franja (no inventes hora).
+Una consulta informativa usa Goal=Information/Decision=Information y nunca cambia slots aunque mencione una fecha. Una petición compuesta de preparar y consultar precio puede usar PrepareReservation con slots y lecturas; responde el precio primero. Mantén los datos no modificados.
+Las referencias a opciones requieren Choices de pregunta vigente, ReferenceIndex 1-based y QuestionId exacto; ante anáfora ambigua aclara. References selecciona {ReadIndex,EntityId} sólo de hechos recibidos para contestar específicamente. No uses consultas sobre necesidades como diagnóstico ni selección automática de un tratamiento.
+Narrative={Opening:None/Warm/Acknowledge,NextQuestion:Information/Service/Location/HumanHelp}. Prefiere una pregunta útil y datos que falten; puedes variar Speech y orientar con opciones verificadas. No presupongas que el cliente quiera reservar.
+RetainDraft rechaza descarte pendiente. Conserva QuestionId al responder AGENT_CANCEL_SCOPE/AGENT_CANCEL_CONFIRM; una referencia de alcance no inicia otra preparación. Cancelar citas registradas y pedidos requiere persona; no hay tools de escritura comercial.
+No afirmes que una cita está registrada, que contactaste a un humano o que se verificó disponibilidad sin resultado del motor. CandidateResponse sigue sin publicarse; no pongas nombres privados en Need.
+""";
                 var raw = await router.ExecuteTaskAsync(AiTaskType.IntentExtraction, contract, input, true, token).WaitAsync(token);
                 if (raw.Length > 8000) throw new JsonException("Shadow result bound exceeded.");
                 return JsonSerializer.Deserialize<AgentProposal>(raw, Json) ?? throw new JsonException("Missing proposal.");

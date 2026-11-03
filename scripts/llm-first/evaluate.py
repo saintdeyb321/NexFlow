@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+import evaluation_evidence as evidence
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT = ROOT / "backend/NexFlow.Tests/Concierge/AgentDevelopmentConversations.json"
@@ -19,6 +20,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="default; scripted interpretation, not NLU certification")
     mode.add_argument("--live", action="store_true", help="requires separate authorization, verified quota and synthetic credentials")
+    parser.add_argument("--dry-run", action="store_true", help="preflight only; no dotnet, marker or HTTP")
     parser.add_argument("--corpus", type=Path, default=DEFAULT)
     parser.add_argument("--sha256", help="required for external/sealed corpus and live evaluation")
     parser.add_argument("--output", type=Path, required=True, help="new directory; never overwrite evidence")
@@ -36,28 +38,36 @@ def main():
     corpus = json.loads(data)
     if not 1 <= len(corpus["Conversations"]) <= 60:
         parser.error("Invalid corpus size")
-    env = os.environ.copy()
+    if args.output.exists(): parser.error("Output already exists; preserve evidence and use a new directory")
+    env = os.environ.copy(); marker = None; attempt = None
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    revision = evidence.source_fingerprint(ROOT)
+    models = {p: env.get("NEXFLOW_TEST_" + p.upper() + "_MODEL", "UNKNOWN") for p in ("Groq", "Gemini")}
     # Never inherit a previous live authorization into an offline invocation.
     if not args.live:
         env.pop("NEXFLOW_LLM_LIVE_AUTHORIZED", None)
     else:
-        if env.get("NEXFLOW_LLM_LIVE_AUTHORIZED") != "1" or env.get("NEXFLOW_LLM_QUOTAS_VERIFIED") != "1":
+        if not args.dry_run and (env.get("NEXFLOW_LLM_LIVE_AUTHORIZED") != "1" or env.get("NEXFLOW_LLM_QUOTAS_VERIFIED") != "1"):
             parser.error("BLOCKED: explicit live authorization and verified quotas required")
         for provider in ("GROQ", "GEMINI"):
-            if not all(env.get(f"NEXFLOW_TEST_{provider}_{field}") for field in ("API_KEY", "MODEL")):
+            if not args.dry_run and not all(env.get(f"NEXFLOW_TEST_{provider}_{field}") for field in ("API_KEY", "MODEL")):
                 parser.error(f"BLOCKED: synthetic {provider} environment required; no settings fallback")
         if not args.case or args.case not in [c["Id"] for c in corpus["Conversations"]]:
             parser.error("--live requires --case from the sealed corpus")
         if not 1 <= args.max_http <= 12 or not 2048 <= args.max_token_reservation <= 100000:
             parser.error("Invalid bounded HTTP/token reservation")
-        # One permanent marker per corpus: uncertain live attempts are not silently rerun.
-        marker = ROOT / "backend/TestResults" / ("llm-live-" + digest + ".started")
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        with marker.open("x", encoding="utf-8") as f:
-            json.dump({"corpus_sha256": digest, "case": args.case, "max_http": args.max_http,
-                       "max_token_reservation": args.max_token_reservation}, f)
+        attempt = evidence.trial_identity(digest, args.case, sha, revision, models)
+        marker = ROOT / "backend/TestResults" / ("llm-live-v2-" + attempt + ".json")
+        if evidence.legacy_blocks(marker.parent, digest, args.case) or marker.exists():
+            parser.error("BLOCKED: prior terminal/uncertain trial; no automatic replay")
+        if not args.dry_run: marker.parent.mkdir(parents=True, exist_ok=True)
         env.update(NEXFLOW_LLM_LIVE_CASE=args.case, NEXFLOW_LLM_MAX_HTTP=str(args.max_http),
-                   NEXFLOW_LLM_MAX_TOKEN_RESERVATION=str(args.max_token_reservation))
+                   NEXFLOW_LLM_MAX_TOKEN_RESERVATION=str(args.max_token_reservation),
+                   NEXFLOW_LLM_ATTEMPT_ID=attempt, NEXFLOW_LLM_CLAIM_FILE=str(marker.resolve()))
+    if args.dry_run:
+        print(json.dumps({"state": "Preflight", "mode": "live" if args.live else "offline", "corpus_sha256": digest,
+            "case": args.case, "sha": sha, "revision": revision, "attempt_id": attempt, "models": models, "HTTP": 0,
+            "authorization": "SEPARATELY_REQUIRED" if args.live else "NOT_APPLICABLE"}, indent=2)); return 0
     args.output.mkdir(parents=True, exist_ok=False)
     env.update(NEXFLOW_LLM_CORPUS=str(args.corpus.resolve()), NEXFLOW_LLM_CORPUS_SHA256=digest,
                NEXFLOW_LLM_EVALUATION_OUTPUT=str(args.output.resolve()))
@@ -69,22 +79,48 @@ def main():
         command.append("--no-build")
     with (args.output / "identity.json").open("x", encoding="utf-8") as f:
         json.dump({"corpus_sha256": digest, "provenance": corpus["Provenance"], "mode": "live" if args.live else "offline",
-                   "command": command, "git_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()}, f, indent=2)
+                   "command": command, "git_sha": sha, "revision": revision, "attempt_id": attempt}, f, indent=2)
+    summary = {"corpus_sha256": digest, "result": "FAIL", "real_nlu": "UNVERIFIED" if args.live else "NOT_RUN", "human_quality": "BLOCKED", "modes": {}}
+    try:
+        return execute(args, corpus, digest, attempt, marker, models, env, command, summary)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, ET.ParseError, subprocess.TimeoutExpired) as error:
+        summary["result"] = "FAIL"; summary["error"] = type(error).__name__ + ": incomplete/invalid evidence; inspect local sanitized artifacts"
+        return 1
+    finally:
+        summary["claim_state"] = evidence.finalize_claim(marker, attempt, summary, args.output)
+        (args.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+
+def execute(args, corpus, digest, attempt, marker, models, env, command, summary):
     result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=600)
     (args.output / "console.log").write_text(result.stdout + result.stderr, encoding="utf-8")
     print(result.stdout, end="")
-    trx = ET.parse(args.output / "evaluation.trx").getroot()
-    counters = trx.find("./{*}ResultSummary/{*}Counters").attrib
     expected = 1 if args.live else len(corpus["Conversations"])
-    complete = (int(counters["executed"]) == expected == int(counters["passed"]) and int(counters["failed"]) == 0
-                and int(counters["notExecuted"]) == 0)
+    counters = evidence.read_trx(args.output / "evaluation.trx", expected)
+    complete = result.returncode == 0 and counters["failed"] == 0
+    summary["counts"] = counters
+    if args.live:
+        case = next(c for c in corpus["Conversations"] if c["Id"] == args.case)
+        report = json.loads((args.output / ("live-" + args.case + ".json")).read_text(encoding="utf-8"))
+        summary["live"], rows = evidence.live_report(report, case, digest, attempt, models)
+        evidence.require(marker.is_file() and json.loads(marker.read_text()).get("identity") == attempt, "Missing durable HTTP claim")
+        summary["result"] = "PASS" if complete and summary["live"]["observed_contract_pass"] else "FAIL"
+        summary["real_nlu"] = "OBSERVED_SYNTHETIC_SAMPLE_ONLY" if summary["result"] == "PASS" else "FAILED_OR_INCOMPLETE"
+        print(json.dumps(summary, indent=2))
+        return 0 if summary["result"] == "PASS" else 1
     report_paths = [args.output / (c["Id"] + ".json") for c in corpus["Conversations"]]
     if not args.live and not all(p.is_file() for p in report_paths):
         complete = False
     reports = [json.loads(p.read_text(encoding="utf-8")) for p in report_paths if p.is_file()]
+    for case, report in zip(corpus["Conversations"], reports):
+        evidence.require(report.get("CorpusSHA256", "").lower() == digest and report.get("Mode") == "offline" and report.get("ProviderHTTP") == 0, "Offline identity mismatch")
+        for mode in ("legacy", "shadow", "agent"):
+            observed = [r for r in report["Observations"] if r.get("Mode") == mode]
+            evidence.require(len(observed) == len(case["Turns"]) and sorted(r["Turn"] for r in observed) == list(range(len(observed)))
+                and all(r["Case"] == case["Id"] and evidence.number(r.get("ElapsedMs")) for r in observed), "Offline observations incomplete")
+        evidence.require(not report.get("Violations"), "Offline policy violations")
     rows = [row for report in reports for row in report["Observations"]]
-    summary = {"corpus_sha256": digest, "counts": counters, "result": "PASS" if result.returncode == 0 and complete else "FAIL",
-               "real_nlu": "NOT_RUN" if not args.live else "INSPECT_LIVE_REPORT", "human_quality": "BLOCKED", "modes": {}}
+    summary.update(counts=counters, result="PASS" if complete else "FAIL", real_nlu="NOT_RUN")
     for name in ("legacy", "shadow", "agent"):
         selected = [r for r in rows if r["Mode"] == name]
         if not selected:
@@ -95,8 +131,6 @@ def main():
             "commercial_effects": sum(r["CommercialEffects"] for r in selected), "repeated_response": sum(r["RepeatedResponse"] for r in selected),
             "p50_local_ms": times[math.ceil(len(times) * .5) - 1], "p95_local_ms": times[math.ceil(len(times) * .95) - 1],
             "provider_http": 0, "provider_tokens": None}
-    with (args.output / "summary.json").open("x", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
     if rows:
         with (args.output / "turns.csv").open("x", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)

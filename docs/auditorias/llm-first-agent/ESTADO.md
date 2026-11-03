@@ -1,6 +1,16 @@
 # LLM-first — Estado de continuidad
 
-## Estado vigente — Iteración 3, C/D/E completadas localmente; detener para auditoría
+## Estado vigente — Iteración 4, F verificada offline; G en curso
+
+2026-11-03. feature/llm-first-agent local y remoto verificados vía ls-remote: `e054223c1c105529f6779177e10c799e42ba6724`; main local/remoto `5f5ff850e31df3fa73cb2c7f02f65ba6081173c7`. Árbol inicial sólo especificación Iteración4 sin seguimiento, preservada. El cierre Iteración3 anterior describe el diff antes de su publicación posterior; no se reescribe como CI de e054223. Índice vacío; sin commit/push/merge/dispatch ni cambios de main.
+
+**F:** reproducidos reporte live omitido, PASS sin reporte, marcador global de corpus, bloqueo prematuro de preflight y excepción sin TRX. `backend/TestResults/LlmFirstIteration4_20261103/f-runner-red.log`:10 pruebas,4 fallos/2 errores (incluye subtests), preservado. Runner ahora exige live-<caso>.json, observaciones completas, TRX sin omisiones, correlación de corpus/caso/revisión/modelos y métricas HTTP/tokens respaldadas. Distingue ProviderHttp de InterceptedHttp. Marcador v2 por corpus+caso+SHA+huella de fuentes+modelos/ruta, sin claves; presupuesto no reabre intento. Se crea atómicamente en el guard C# inmediatamente antes del primer HTTP, no durante compilación/preflight. Terminal/Uncertain nunca se reabren; marcadores antiguos se conservan y bloquean su caso o todo el corpus si son ilegibles. Sin HTTP no se consume marcador. Dry-run sin efectos.
+
+`f-runner-green.log`:13/13 PASS (subprocess/observaciones fabricados,0 HTTP); `f-attempt-budget.trx`:5/5 PASS con archivos sintéticos y HTTP interceptado; `f-dry-run.json`:Preflight,0 HTTP. Comandos: `python -B scripts/llm-first/test_evaluate.py`; `dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore --disable-build-servers --tl:off -m:1 --filter "FullyQualifiedName~AgentHttpAttemptTests|FullyQualifiedName~AgentEvaluationBudgetTests" --logger "trx;LogFileName=f-attempt-budget.trx" --results-directory backend/TestResults/LlmFirstIteration4_20261103`; runner --live --dry-run con hash congelado, D01 y salida nueva. No ejecutar live sin autorización nueva/cuotas/modelos/presupuesto. Keys no leídas de appsettings/privados ni publicadas.
+
+Firestore Emulator **BLOCKED**, host no configurado. Conjunto independiente10–15 y rúbrica humana **PENDING**, propietario confirmó que no existen todavía. No se crea un corpus propio fingiendo independencia. NLU real **NOT_RUN**; cuotas/tokens realesUNKNOWN. Gate F offline PASS; sus gates externos se mantienen pendientes y permiten continuar G/H offline según la especificación. Sin fase I.
+
+## Registro histórico — Iteración 3, C/D/E completadas localmente
 
 **Checkpoint E/final:** `e-directed-final.trx`126/126 PASS; runner `offline-evaluation-final/evaluation.trx`40/40 PASS con399 turnos observados; gate vigente `current-iteration3.trx`2078/2078 PASS (una ejecución completa); histórico `historical-iteration3.trx`130/101/29,0 omisiones, validador oficial EXPECTED_HISTORICAL_INCOMPATIBILITIES exit0. Motivos y cuatro hashes congelados intactos; H06 exacto `H06/4/A: ReservationEffects`. Python preflight4/4 PASS. `dotnet build backend/backend.slnx --no-restore`:PASS,0 errores/0 warnings,5.23s. Sin frontend cambiado, no build frontend. Diff check PASS; índice vacío, main/HEAD sin mover.
 

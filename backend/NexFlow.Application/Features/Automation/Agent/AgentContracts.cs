@@ -24,6 +24,7 @@ public sealed record AgentTurnContext(Guid WorkspaceId, string ConversationId, s
     IReadOnlyList<AgentRecentTurn> RecentTurns, IReadOnlyList<string> Capabilities)
 {
     public string Language => "es-PE";
+    public IReadOnlyList<ConversationMenuOption> Choices { get; init; } = [];
     public static AgentTurnContext Capture(AgentTurnRequest request, ConversationContextDto state,
         IEnumerable<AgentRecentTurn> recent, IEnumerable<string> modules, DateTime now)
     {
@@ -38,7 +39,10 @@ public sealed record AgentTurnContext(Guid WorkspaceId, string ConversationId, s
             Array.AsReadOnly(recent.TakeLast(6).Select(t => new AgentRecentTurn(t.Role, t.Text[..Math.Min(t.Text.Length, 400)])).ToArray()),
             Array.AsReadOnly(modules.Select(m => m.ToUpperInvariant())
                 .Where(m => m is "SERVICES" or "CATALOG" or "LOCATIONS" or "BUSINESS_HOURS" or "FAQ" or "RESERVATIONS")
-                .Distinct().Order(StringComparer.Ordinal).ToArray()));
+                .Distinct().Order(StringComparer.Ordinal).ToArray())) {
+            Choices = question?.Expected == ExpectedReply.Selection && question.ConversationId == request.ConversationId
+                && state.RecoveryOptionsContext == "AGENT_OPTIONS" ? state.RecoveryOptions.Take(5).ToArray() : []
+        };
     }
 }
 
@@ -50,7 +54,8 @@ public enum AgentReadKind { Services, Products, Locations, Profile, Hours }
 public sealed record AgentToolCall(AgentReadKind Kind, string? Search = null, string? LocationId = null);
 public sealed record AgentToolResult(int Index, BusinessReadStatus Status, string Source, IReadOnlyList<VerifiedFact> Facts);
 public sealed record AgentProposal(AgentDecision Decision, string Evidence, string CandidateResponse,
-    string? QuestionId = null, AgentToolCall[]? Tools = null, int[]? FactReferences = null, AgentNarrative? Narrative = null);
+    string? QuestionId = null, AgentToolCall[]? Tools = null, int[]? FactReferences = null, AgentNarrative? Narrative = null,
+    AgentConversationPlan? Conversation = null);
 public sealed record AgentTurnResult(bool Accepted, string Outcome, AgentProposal? Proposal, IReadOnlyList<AgentToolResult> Reads,
     int ModelCalls, long ElapsedMilliseconds, AiFailureKind Failure = AiFailureKind.None,
     string? VerifiedText = null, bool Recovered = false, string? StatusExplanation = null, IReadOnlyList<string>? RequiredModules = null, int ToolCalls = 0)
