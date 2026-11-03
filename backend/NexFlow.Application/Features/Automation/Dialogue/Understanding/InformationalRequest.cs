@@ -16,6 +16,9 @@ internal static class InformationalRequest
         var normalized = SpanishTextNormalizer.Normalize(text);
         if (ShortcutTopic(normalized) is { } shortcut) return shortcut;
         var words = normalized.Split(' ');
+        // Business opening hours and a customer's appointment are different
+        // subjects. A compound appointment question needs contextual semantics.
+        var appointmentReference = words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "cita" or "citas");
         if (words.Contains("y") && words.Any(w => w is "producto" or "productos" or "servicio" or "servicios" or "pdf" or "catalogo")) return null;
         // Bounded read-only field request. Changes, private appointments, unknown
         // entities and mixed questions still require the existing policy/resolver.
@@ -27,7 +30,7 @@ internal static class InformationalRequest
         var hours = words.Any(w => w is "horario" or "horarios")
             && (words.Any(w => w is "que" or "cual" or "cuales" or "tienen" or "tiene" or "pregunte" or "dije" or "informacion")
                 || normalized.StartsWith("horario", StringComparison.Ordinal));
-        if (hours || normalized is "dias de atencion" or "cuando abren" or "cuando cierran" or "hasta que hora") return KnowledgeTopic.BusinessHours;
+        if (!appointmentReference && (hours || normalized is "dias de atencion" or "cuando abren" or "cuando cierran" or "hasta que hora")) return KnowledgeTopic.BusinessHours;
         if (words.Contains("informacion") && !words.Any(w => w is "producto" or "productos" or "servicio" or "servicios" or "pedido" or "pedidos" or "horario" or "horarios")
             && (!words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w == "cita") || normalized.Contains("no quiero", StringComparison.Ordinal)))
             return KnowledgeTopic.Profile;

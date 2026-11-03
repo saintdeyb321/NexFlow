@@ -88,12 +88,26 @@ public sealed class CommerceTurnResolver(IWorkspaceSlotResolver slots, OrderMent
             var match = grounded ? new OfferingMentionResolver().ResolveCommercial(semantic.SearchTerm, values.Select(v => v.Option).ToArray())
                 : SlotResolution<ResolvedBusinessEntity>.Missing();
             var selected = match.TryGetValue(out var entity) ? values.Where(v => v.Id == entity.Id).ToArray() : [];
+            // Semantic relevance may suggest information, never select a service
+            // for a reservation. The label and facts must exist in this catalog;
+            // the consumer's need must be a literal, evidence-backed fragment.
+            var suggestion = false;
+            if (selected.Length == 0 && match.Status != ResolutionStatus.Ambiguous && grounded && type == "SERVICE" && semantic.Service is { } label)
+            {
+                var spans = semantic.Evidence.Where(e => e.Slot == "Service").ToArray();
+                if (spans.Length == 1 && spans[0].NormalizedValue == label && AiEvidenceValidator.HasFragment(text, spans[0].Text))
+                {
+                    var candidates = values.Where(v => SpanishTextNormalizer.Normalize(v.Name) == SpanishTextNormalizer.Normalize(label)).ToArray();
+                    if (candidates.Length == 1) { selected = candidates; suggestion = true; }
+                }
+            }
             return new(context.CurrentGoal != null ? DialogueAct.InformationalInterruption : DialogueAct.Information,
                 new() { Intent = intent, QueryKind = OfferingQueryKind.Specific,
                     OfferingQuery = new(workspace, source, context.StateVersion, type, semantic.Question ?? OfferingQuestion.Facts,
                         Array.AsReadOnly(selected), false, locationId, selected.Length == 1 ? null : match.Status == ResolutionStatus.Ambiguous
                             ? "Hay varias opciones: " + string.Join(", ", match.Candidates.Take(5).Select(c => c.Value.Name)) + ". ¿Cuál deseas consultar?"
-                            : "No identifiqué un producto o servicio inequívoco en tu mensaje. ¿Cuál deseas consultar?") });
+                            : "No identifiqué un producto o servicio inequívoco en tu mensaje. ¿Cuál deseas consultar?", Suggested: suggestion,
+                        CanPrepareReservation: suggestion && modules.Contains("RESERVATIONS") && selected[0].RequiresReservation && selected[0].DurationMinutes >= 5) });
         }
         if (semantic is { UseOfferingReference: true, Question: not null, RequiresClarification: false }
             && semantic.Intent is ConversationIntent.ProductQuery or ConversationIntent.ServiceQuery)

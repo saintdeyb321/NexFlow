@@ -90,9 +90,10 @@ public sealed class Rc3Sprint2MenuTests
     [Fact]
     public async Task Current_page_numbering_and_replay_preserve_the_draft_without_committing_a_reservation()
     {
-        var f = new AssistantConversationTests.Fixture(8); await f.SeedDraft("RESERVATION"); var c = await f.Context(); c.CurrentStep = "COLLECT_SERVICE";
+        var f = new AssistantConversationTests.Fixture(8); await f.SeedDraft("RESERVATION"); var c = await f.Context(); c.CurrentStep = "COLLECT_SERVICE"; c.SelectedServiceId = null;
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, c, default);
-        await f.Turn("menú"); await f.Turn("ver más"); var page = await f.Context();
+        // Explicitly resume this picker; "menú" now opens global capabilities.
+        await f.Turn("continuemos"); await f.Turn("ver más"); var page = await f.Context();
         var selected = page.RecoveryOptions[1]; Assert.Equal(5, page.RecoveryOptionsOffset);
         var result = await Recover(f, page, "la segunda");
         Assert.Equal(selected.Key, result!.Interpretation!.Service); Assert.False(result.Interpretation.Confirmed);

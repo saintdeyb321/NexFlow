@@ -15,12 +15,14 @@ public class GeminiAiProvider : IAiProvider
     private readonly string _primaryModel;
     private readonly string _fallbackModel;
     private readonly ILogger<GeminiAiProvider> _logger;
+    private readonly IAiRequestAdmission? _admission;
     public AiProviderType ProviderType => AiProviderType.Gemini;
 
-    public GeminiAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiAiProvider> logger)
+    public GeminiAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiAiProvider> logger, IAiRequestAdmission? admission = null)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _admission = admission;
         _apiKey = configuration["Gemini:ApiKey"]?.Trim() ?? "";
 
         var rawModel = configuration["Gemini:Model"] ?? "";
@@ -122,10 +124,15 @@ public class GeminiAiProvider : IAiProvider
 
     private async Task<AiResponse> ExecuteRequestAsync(string modelName, string jsonPayload, CancellationToken cancellationToken)
     {
+        using var payload = JsonDocument.Parse(jsonPayload);
+        int? outputLimit = payload.RootElement.TryGetProperty("generationConfig", out var generation)
+            && generation.TryGetProperty("maxOutputTokens", out var limit) && limit.TryGetInt32(out var count) ? count : null;
+        if (_admission != null) await _admission.AdmitAsync(ProviderType, modelName, Encoding.UTF8.GetByteCount(jsonPayload), outputLimit, cancellationToken);
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(modelName)}:generateContent";
         using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
         using var response = await AiTelemetry.SendAsync(ProviderType, modelName != _primaryModel,
-            () => _httpClient.PostAsync(url, content, cancellationToken), _logger, cancellationToken);
+            () => _httpClient.PostAsync(url, content, cancellationToken), _logger, cancellationToken, modelName);
+        if (_admission != null) await _admission.ObserveAsync(ProviderType, modelName, response, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("Gemini API Error {StatusCode}.", response.StatusCode);
@@ -135,7 +142,7 @@ public class GeminiAiProvider : IAiProvider
         {
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var json = JsonDocument.Parse(responseString);
-            AiTelemetry.Usage(ProviderType, json.RootElement, _logger);
+            AiTelemetry.Usage(ProviderType, json.RootElement, _logger, modelName);
             if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("candidates", out var candidates) && candidates.ValueKind == JsonValueKind.Array
                 && candidates.GetArrayLength() > 0 && candidates[0].ValueKind == JsonValueKind.Object && candidates[0].TryGetProperty("content", out var candidate) && candidate.ValueKind == JsonValueKind.Object
                 && candidate.TryGetProperty("parts", out var parts) && parts.ValueKind == JsonValueKind.Array

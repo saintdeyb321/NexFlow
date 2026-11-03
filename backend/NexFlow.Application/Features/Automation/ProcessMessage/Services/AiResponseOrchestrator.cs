@@ -10,6 +10,7 @@ using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
+using Microsoft.Extensions.Options;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -35,14 +36,16 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IClock? _clock;
     private readonly IExistingReservationFlow? _existingReservations;
     private readonly ConversationFocusService? _focus;
+    private readonly AssistantRecoveryOptions _settings;
 
     public AiResponseOrchestrator(
         ITurnUnderstandingPipeline understanding, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger, IResponseComposer composer, IConversationRecoveryService? recovery = null, IClock? clock = null,
-        IExistingReservationFlow? existingReservations = null, ConversationFocusService? focus = null)
+        IExistingReservationFlow? existingReservations = null, ConversationFocusService? focus = null, IOptions<AssistantRecoveryOptions>? settings = null)
     {
+        _settings = settings?.Value ?? new();
         _understanding = understanding; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
         _supportFlow = supportFlow; _chatFlow = chatFlow;
@@ -68,7 +71,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         var context = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
         if (context.Mode == "Human" || conversation.Mode == ConversationMode.Human)
             throw new ConcurrencyException("Conversation is under human control; reload its state before processing.");
-        var activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var activeModules = _settings.EffectiveModules(workspaceId, await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken));
 
         var recoveredOrder = await _orderFlow.TryResumeAsync(workspaceId,normalizedPhone,conversation.Id,request.MessageId,context,cancellationToken);
         if (recoveredOrder != null)
@@ -116,7 +119,15 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         var latest = await _contextRecovery.GetOrRecoverContextAsync(workspaceId, normalizedPhone, cancellationToken);
         if (latest.Mode == "Human" || latest.StateVersion != context.StateVersion)
             throw new ConcurrencyException("Conversation changed during interpretation; reload before processing.");
-        activeModules = (await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        activeModules = _settings.EffectiveModules(workspaceId, await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken));
+        if (_settings.CommercePaused(workspaceId) && interpretation.Intent is ConversationIntent.Order or ConversationIntent.Request
+            && interpretation.Directive != ConversationDirective.CancelCurrentFlow)
+            return await SendText(SecretaryPresentation.InformationalCommerce);
+        if (interpretation.Directive == ConversationDirective.MainMenu && _recovery != null)
+        {
+            intent = ConversationIntent.General; expectedReply = ExpectedReply.Selection;
+            return await SendText(await _recovery.MainMenuAsync(workspaceId, context, activeModules, cancellationToken));
+        }
         if (_focus?.Enabled == true && interpretation.Directive == ConversationDirective.CancelCurrentFlow
             && (context.Focus?.Suspended != null || interpretation.DiscardScope != null))
             return await SendText(_focus.BeginDiscard(workspaceId, conversation.Id, request.MessageId, context, interpretation.DiscardScope));
@@ -223,6 +234,8 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
 
         if (interpretation.Directive == ConversationDirective.CancelCurrentFlow && _recovery != null)
         {
+            context.PendingReservationAfterDiscard = interpretation.NextReservation is { } next && next.WorkspaceId == workspaceId
+                && next.SourceMessageId == request.MessageId ? next with { ConversationId = conversation.Id } : null;
             var confirmation = await _recovery.RecoverAsync(workspaceId, normalizedPhone, conversation.Id, request with { MessageText = "cancelar" }, context, activeModules, cancellationToken);
             return await SendText(confirmation!.Response!);
         }
@@ -256,7 +269,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (interpretation.Intent == ConversationIntent.ProviderUnavailable || interpretation.Intent == ConversationIntent.RateLimited)
         {
             finalResponse = interpretation.Intent == ConversationIntent.RateLimited ? "Hemos alcanzado el límite temporal de consultas. Puedes intentar en un minuto o solicitar un asesor."
-                : "Podemos continuar con una consulta concreta o solicitar un asesor. ¿Qué información necesitas?";
+                : "No pude interpretar tu consulta en este momento. Puedes consultar información concreta o solicitar un asesor. ¿Qué necesitas?";
             if (context.CurrentGoal is "BOOKING" or "RESERVATION")
                 finalResponse = AiIntentAccess.GetDeniedResponse(ConversationIntent.Reservation, activeModules)
                     ?? await _bookingFlow.GetContinuationAsync(workspaceId, context, cancellationToken, concise: true);

@@ -75,6 +75,9 @@ public static class OfferingResponseFormatter
             text = "Puedo compartir los servicios registrados; no tengo una recomendación profesional validada.\n" + text;
         if (query.Question == OfferingQuestion.Comparison)
             text = "Estas son sus características registradas:\n" + text + "\nNo hay otras diferencias verificadas que pueda afirmar.";
+        if (query.Suggested) text = "En nuestro catálogo figura esta opción:\n\n" + text
+            + (query.CanPrepareReservation ? "\n\nPuedo contarte más o ayudarte a reservar una cita. ¿Qué prefieres?"
+                : "\n\nPuedo contarte más sobre esta opción. ¿Qué información necesitas?");
         return text;
     }
     public static string Money(string currency, long minorUnits, bool useSymbol = true) => $"{(useSymbol && currency == "PEN" ? "S/" : currency)} {(minorUnits / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";

@@ -206,11 +206,31 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
             && !string.IsNullOrWhiteSpace(actEvidence[0].Text) && actEvidence[0].Text.Length <= 300
             && AiEvidenceValidator.HasFragment(request.MessageText, actEvidence[0].Text)
             && actEvidence[0].NormalizedValue == interpretation.Act?.ToString();
+        if (backedAct && interpretation.Act == DialogueAct.Information && interpretation.Directive == ConversationDirective.MainMenu)
+            return new(DialogueAct.Information, new() { Intent = ConversationIntent.General, Directive = ConversationDirective.MainMenu }, true);
+        if (backedAct && interpretation.Act == DialogueAct.Information && interpretation.Directive == ConversationDirective.ProfessionalAvailability)
+            return new(DialogueAct.Information, new() { Intent = ConversationIntent.General }, true,
+                SecretaryPresentation.ProfessionalAvailability(modules.Contains("SERVICES") && modules.Contains("RESERVATIONS")));
+        if (backedAct && interpretation.Act == DialogueAct.OperationInformation && interpretation.Directive == ConversationDirective.ManageExistingReservation)
+            return new(DialogueAct.OperationInformation, new() { Intent = ConversationIntent.Reservation }, true, SecretaryPresentation.ExistingReservation);
         // A semantic discard only asks for a separate recovery decision. It must
         // precede generic negation handling and never supplies transaction consent.
         if (backedAct && interpretation.Act == DialogueAct.Cancellation
             && interpretation.Directive == ConversationDirective.CancelCurrentFlow)
+        {
+            if (interpretation.NextIntent == ConversationIntent.Reservation && context.CurrentGoal == "ORDER" && focus?.Enabled != true && context.Focus == null
+                && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
+            {
+                var fresh = await slots.ResolveAsync(workspace, request.MessageId, request.MessageText, new ConversationContextDto(),
+                    SlotResolutionPurpose.Reservation, new(false, false, false), ct);
+                fresh = AiEvidenceValidator.Validate(fresh, interpretation, request.MessageText);
+                interpretation.NextReservation = new(workspace, "", request.MessageId,
+                    local.Context.LocalBusinessNow.UtcDateTime.AddMinutes(10),
+                    fresh.Date.TryGetValue(out var date) ? date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null,
+                    fresh.Time.TryGetValue(out var time) && time.ExactTime.HasValue ? time.ExactTime.Value.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture) : null);
+            }
             return new(DialogueAct.Cancellation, interpretation, true);
+        }
         var informationSpans = (interpretation.Evidence ?? []).Where(e => e.Slot == "Information").ToArray();
         var informationSpan = interpretation.InformationalIntent == ConversationIntent.BusinessHours && informationSpans.Length == 1
             ? informationSpans[0] : null;
@@ -263,7 +283,7 @@ public sealed class TurnUnderstandingPipeline(IWorkspaceSlotResolver slots, Dial
         if (booking && backedAct && interpretation.Act == DialogueAct.Correction
             && interpretation.Intent == ConversationIntent.Reservation)
             return PrepareBooking(local, DialogueAct.Correction, true, workspace, request.MessageId);
-        if (interpretation.Intent == ConversationIntent.Reservation && backedAct && act == DialogueAct.SemanticAmbiguity && context.CurrentGoal == null
+        if (interpretation.Intent == ConversationIntent.Reservation && backedAct && act is DialogueAct.SemanticAmbiguity or DialogueAct.Information && context.CurrentGoal == null
             && !contradictory && !normalized.Split(' ').Contains("no") && interpretation.Act == DialogueAct.StartOperation)
         {
             // Semantic intent can start a draft; only licensed, reservable entities

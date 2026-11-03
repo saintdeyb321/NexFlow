@@ -85,6 +85,8 @@ public static class DependencyInjection
         services.AddHttpClient<IAiProvider, GeminiAiProvider>().RedactLoggedHeaders(static _ => true);
         services.AddHttpClient<IAiProvider, GroqAiProvider>().RedactLoggedHeaders(static _ => true);
         services.AddScoped<IAiRouter, AiRouter>();
+        services.AddOptions<AiQuotaOptions>().Bind(configuration.GetSection("AiQuota"));
+        services.AddScoped<IAiRequestAdmission, FirestoreAiRequestAdmission>();
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
         services.AddHostedService<OutboxProcessorWorker>();

@@ -263,8 +263,9 @@ public sealed class AssistantConversationTests
         public ConversationFocusService Focus { get; }
         private readonly AiResponseOrchestrator _orchestrator; private int _turn;
         public Fixture(int serviceCount = 2, bool conciergeCatalog = false, bool intelligentCommerce = false,
-            Func<Fixture, IExistingReservationFlow>? managementFactory = null, bool contextualFocus = false)
+            Func<Fixture, IExistingReservationFlow>? managementFactory = null, bool contextualFocus = false, bool informationalCommerce = false)
         {
+            var settings = Options.Create(new AssistantRecoveryOptions { InformationalCommerceWorkspaces = informationalCommerce ? [Workspace] : [] });
             var cache = new Mock<IConversationCache>();
             var clock = new Mock<IClock>(); clock.SetupGet(c => c.UtcNow).Returns(() => Now);
             Contexts = new ContextRecoveryService(cache.Object, new FirestoreConversationStateRepository(Firestore.Db), clock.Object);
@@ -326,7 +327,7 @@ public sealed class AssistantConversationTests
             orderRepo.Setup(o => o.CreateOrderAsync(Workspace, It.IsAny<OrderRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, OrderRecord r, CancellationToken _) => { foreach (var item in r.Items) { var product=Products.Single(p => p.Id == item.ProductId && p.IsActive); item.UnitPriceMinorUnits=product.PriceMinorUnits;item.Currency=product.Currency; }
                 r.Currency=r.Items.Select(i => i.Currency).Distinct().Count() == 1 ? r.Items[0].Currency : null;
                 r.TotalAmountMinorUnits=r.Currency == null ? null : r.Items.Sum(i => i.SubtotalMinorUnits); Orders.TryAdd(r.Id, r); return Orders[r.Id]; });
-            var order = new OrderFlow(orderRepo.Object, notifications, Contexts, offerings.Object, entitlements.Object, clock.Object, locations.Object);
+            var order = new OrderFlow(orderRepo.Object, notifications, Contexts, offerings.Object, entitlements.Object, clock.Object, locations.Object, settings);
             var interpreter = new Mock<IAiInterpreter>(MockBehavior.Strict);
             interpreter.Setup(i => i.InterpretAsync(Workspace, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<HashSet<string>>(), It.IsAny<CancellationToken>())).Returns(async () => { AiCalls++; if (DuringInterpretation != null) await DuringInterpretation(); if(InterpretationOverride!=null) return await InterpretationOverride(); return Interpretations.Count > 0 ? Interpretations.Dequeue() : new() { Intent = ConversationIntent.General }; });
             var outbound = new Mock<IOutboundMessageService>(MockBehavior.Strict);
@@ -342,12 +343,12 @@ public sealed class AssistantConversationTests
             support.Setup(s => s.ProcessAsync(Workspace, "chat", It.IsAny<CancellationToken>())).Returns(async () => { Handoffs++; var c = await Context(); c.Mode = "Human"; await Contexts.SaveContextAsync(Workspace, Phone, c, default); return "Un asesor continuará la conversación."; });
             var chat = new ChatFlow(knowledge.Object, entitlements.Object, new LocationResolverService(locations.Object), NullLogger<ChatFlow>.Instance, CatalogReads.Object, notifications,
                 offerings: offerings.Object, locations: locations.Object);
-            Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, Options.Create(new AssistantRecoveryOptions()), profiles.Object, knowledge.Object);
+            Recovery = new(Contexts, new FirestoreConversationStateRepository(Firestore.Db), offerings.Object, locations.Object, hours.Object, engine.Object, clock.Object, settings, profiles.Object, knowledge.Object);
             var slots = new WorkspaceSlotResolver(entitlements.Object, profiles.Object, locations.Object, offerings.Object, clock.Object,
                 new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);
             var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery, offerings.Object, intelligentCommerce ? new CommerceTurnResolver(slots, new OrderMentionResolver(), clock.Object) : null,
                 locationRepository: locations.Object, focus: Focus);
-            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, new RecordingComposer(new ResponseComposer(Wording.Object, entitlements.Object, Recovery, Options.Create(CompositionOptions)), Plans, Composed, () => DuringComposition), Recovery, clock.Object, managementFactory?.Invoke(this), Focus);
+            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, new RecordingComposer(new ResponseComposer(Wording.Object, entitlements.Object, Recovery, Options.Create(CompositionOptions)), Plans, Composed, () => DuringComposition), Recovery, clock.Object, managementFactory?.Invoke(this), Focus, settings);
             var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);
             guard.Setup(g => g.CheckMessageAsync(It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync((true, Workspace, Phone));
             var stateService = new Mock<IConversationStateService>(MockBehavior.Strict);

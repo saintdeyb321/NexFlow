@@ -5,6 +5,11 @@ namespace NexFlow.Application.Features.Automation.Dialogue.Composition;
 // Presentation of already verified data only: no lookups, transitions or consent.
 public static class SecretaryPresentation
 {
+    public const string InformationalCommerce = "Aquí puedes consultar los productos del catálogo, pero no enviamos pedidos ni solicitudes comerciales por este chat. No he cambiado tus solicitudes anteriores.\n\n¿Quieres ver productos o hablar con un asesor?";
+    public static string ProfessionalAvailability(bool canReadAvailability) => canReadAvailability
+        ? "Puedo revisar horarios de citas por sede y servicio, pero no tengo una agenda de profesionales ni sé qué doctor atenderá.\n\n¿Prefieres consultar un servicio o hablar con un asesor del negocio?"
+        : "Por este chat no puedo consultar una agenda de profesionales. Puedes escribir «asesor» para que el negocio te ayude.";
+    public const string ExistingReservation = "Si ya tienes una cita, necesitamos verificar a quién pertenece antes de cambiarla. No he modificado tu cita.\n\nEscribe «asesor» para que el negocio te ayude a revisarla.";
     private static string OperationName(OperationKind kind) => kind == OperationKind.Order ? "pedido" : "reserva";
     private static string Article(OperationKind kind) => kind == OperationKind.Order ? "el" : "la";
     private static string Saved(OperationKind kind, bool sentence = false)
@@ -29,7 +34,7 @@ public static class SecretaryPresentation
     public const string ConfirmReservation = "¿Confirmas la reserva o prefieres cambiar algún dato? Puedes responder «Sí», «No» o indicar el cambio.";
 
     public static string AskTime(bool period = false) => period
-        ? "¿Qué hora te acomoda dentro de esa franja? Puedes decir, por ejemplo, «a las cuatro de la tarde»; comprobaré ese horario."
+        ? "¿Qué hora prefieres dentro de esa franja? Indica la hora; comprobaré si está disponible."
         : "¿Qué horario te acomoda para atenderte? Puedes decir «a las cuatro de la tarde» o indicar otra hora; comprobaré su disponibilidad.";
 
     public static string Locations(IEnumerable<string> names, string question)

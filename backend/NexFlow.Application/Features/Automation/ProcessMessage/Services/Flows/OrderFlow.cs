@@ -13,6 +13,7 @@ using NexFlow.Application.Features.Notifications;
 using NexFlow.Application.Features.Orders.DTOs;
 using NexFlow.Domain.Enums;
 using NexFlow.Domain.Exceptions;
+using Microsoft.Extensions.Options;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services.Flows;
 
@@ -24,7 +25,8 @@ public interface IOrderFlow
 }
 
 public sealed class OrderFlow(IOrderRepository orders, INotificationService notifications, IContextRecoveryService contexts,
-    IOfferingService offerings, IEntitlementService entitlements, IClock? clock = null, ILocationRepository? locations = null) : IOrderFlow
+    IOfferingService offerings, IEntitlementService entitlements, IClock? clock = null, ILocationRepository? locations = null,
+    IOptions<AssistantRecoveryOptions>? settings = null) : IOrderFlow
 {
     public async Task<string?> TryResumeAsync(Guid workspaceId, string phone, string conversationId, string sourceMessageId, ConversationContextDto context, CancellationToken ct)
     {
@@ -61,6 +63,7 @@ public sealed class OrderFlow(IOrderRepository orders, INotificationService noti
         ResponsePlan Plan(string text, OperationStatus status = OperationStatus.Collecting, OrderDraftMerger.Quote? quote = null) => new(workspaceId,sourceMessageId,context.StateVersion,
             ConversationIntent.Order,act,status,quote?.Facts ?? [],[],[],null,quote?.Currency,null,text);
         if (await TryResumeAsync(workspaceId,phone,conversationId,sourceMessageId,context,ct) is { } replay) return Plan(replay,OperationStatus.Succeeded);
+        if (settings?.Value.CommercePaused(workspaceId) == true) return Plan(SecretaryPresentation.InformationalCommerce, OperationStatus.Denied);
         var modules = (await entitlements.GetAvailableModuleCodesAsync(workspaceId,ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (AiIntentAccess.GetDeniedResponse(ConversationIntent.Order,modules) is { } denied)
         {

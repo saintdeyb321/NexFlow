@@ -13,6 +13,7 @@ public class ConversationContextDto
     public bool RecoveryHasMore { get; set; }
     public int ClarificationAttempts { get; set; }
     public string? PendingRecoveryAction { get; set; }
+    public ReservationPreparationContinuation? PendingReservationAfterDiscard { get; set; }
     // Expiry of a draft-versus-registered reference question, independent of incidental information turns.
     public DateTime? PendingReferenceExpiresAt { get; set; }
     public string? RecoveryLastMessageId { get; set; }
@@ -75,6 +76,10 @@ public class OrderDraftItem
     public string ProductName { get; set; } = string.Empty;
     public int Quantity { get; set; } = 1;
 }
+
+// Backend-validated preparation only, within the existing CAS document. Never consent.
+public sealed record ReservationPreparationContinuation(Guid WorkspaceId, string ConversationId, string SourceMessageId,
+    DateTime ExpiresAt, string? Date, string? Time);
 
 public interface IConversationCache
 {

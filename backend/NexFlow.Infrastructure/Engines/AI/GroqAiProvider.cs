@@ -15,12 +15,14 @@ public class GroqAiProvider : IAiProvider
     private readonly string _apiKey;
     private readonly string _model;
     private readonly ILogger<GroqAiProvider> _logger;
+    private readonly IAiRequestAdmission? _admission;
     public AiProviderType ProviderType => AiProviderType.Groq;
 
-    public GroqAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GroqAiProvider> logger)
+    public GroqAiProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GroqAiProvider> logger, IAiRequestAdmission? admission = null)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _admission = admission;
         _apiKey = configuration["Groq:ApiKey"]?.Trim() ?? "";
         _model = configuration["Groq:Model"]?.Trim() ?? "";
 
@@ -59,8 +61,10 @@ public class GroqAiProvider : IAiProvider
 
         try
         {
+            if (_admission != null) await _admission.AdmitAsync(ProviderType, _model, Encoding.UTF8.GetByteCount(jsonPayload), 1024, cancellationToken);
             using var response = await AiTelemetry.SendAsync(ProviderType, false,
-                () => _httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken), _logger, cancellationToken);
+                () => _httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", content, cancellationToken), _logger, cancellationToken, _model);
+            if (_admission != null) await _admission.ObserveAsync(ProviderType, _model, response, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -72,7 +76,7 @@ public class GroqAiProvider : IAiProvider
 
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var json = JsonDocument.Parse(responseString);
-            AiTelemetry.Usage(ProviderType, json.RootElement, _logger);
+            AiTelemetry.Usage(ProviderType, json.RootElement, _logger, _model);
             if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("choices", out var choices)
                 && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0 && choices[0].ValueKind == JsonValueKind.Object
                 && choices[0].TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object

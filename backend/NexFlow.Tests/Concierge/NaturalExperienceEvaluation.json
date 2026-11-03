@@ -1,0 +1,182 @@
+[
+  {
+    "id": "menu-1",
+    "kind": "menu",
+    "text": "Llévame a las opciones de inicio"
+  },
+  {
+    "id": "menu-2",
+    "kind": "menu",
+    "text": "Muéstrame otra vez el menú principal"
+  },
+  {
+    "id": "menu-3",
+    "kind": "menu",
+    "text": "Regresemos al inicio, por favor"
+  },
+  {
+    "id": "menu-4",
+    "kind": "menu",
+    "text": "No busco tratamientos; llévame al menú"
+  },
+  {
+    "id": "menu-5",
+    "kind": "menu",
+    "text": "Enséñame las opciones principales"
+  },
+  {
+    "id": "professional-1",
+    "kind": "professional",
+    "text": "¿Con qué especialista puedo atenderme mañana?"
+  },
+  {
+    "id": "professional-2",
+    "kind": "professional",
+    "text": "¿Quién estará de turno por la tarde?"
+  },
+  {
+    "id": "professional-3",
+    "kind": "professional",
+    "text": "Quisiera saber qué odontólogo está libre"
+  },
+  {
+    "id": "professional-4",
+    "kind": "professional",
+    "text": "¿El doctor puede recibirme el viernes?"
+  },
+  {
+    "id": "professional-5",
+    "kind": "professional",
+    "text": "¿Tienen una doctora que atienda a las diez?"
+  },
+  {
+    "id": "manage-1",
+    "kind": "manage",
+    "text": "Necesito mover la hora que ya acordamos"
+  },
+  {
+    "id": "manage-2",
+    "kind": "manage",
+    "text": "La cita que confirmé quiero pasarla a más tarde"
+  },
+  {
+    "id": "manage-3",
+    "kind": "manage",
+    "text": "Deseo reprogramar mi atención anterior"
+  },
+  {
+    "id": "manage-4",
+    "kind": "manage",
+    "text": "¿Cómo cambio el horario de la cita que tengo?"
+  },
+  {
+    "id": "manage-5",
+    "kind": "manage",
+    "text": "Mi atención ya estaba reservada y quiero otro día"
+  },
+  {
+    "id": "start-1",
+    "kind": "start",
+    "text": "Quisiera que me separen una cita"
+  },
+  {
+    "id": "start-2",
+    "kind": "start",
+    "text": "Quero reservar para atenderme"
+  },
+  {
+    "id": "start-3",
+    "kind": "start",
+    "text": "Necesito empezar a agendar mi visita"
+  },
+  {
+    "id": "start-4",
+    "kind": "start",
+    "text": "Me gustaría coordinar una nueva atención"
+  },
+  {
+    "id": "start-5",
+    "kind": "start",
+    "text": "Ayúdame a preparar una cita"
+  },
+  {
+    "id": "capability-1",
+    "kind": "capability",
+    "text": "¿En qué consiste hacer una reserva?"
+  },
+  {
+    "id": "capability-2",
+    "kind": "capability",
+    "text": "Solo consulto cómo se pide una cita"
+  },
+  {
+    "id": "capability-3",
+    "kind": "capability",
+    "text": "¿Puedo saber qué datos piden para reservar?"
+  },
+  {
+    "id": "capability-4",
+    "kind": "capability",
+    "text": "Cuéntame el proceso antes de agendar"
+  },
+  {
+    "id": "capability-5",
+    "kind": "capability",
+    "text": "¿Qué tendría que hacer para sacar una cita?"
+  },
+  {
+    "id": "ambiguous-1",
+    "kind": "ambiguous",
+    "text": "No sé si quiero una cita o solo preguntar"
+  },
+  {
+    "id": "ambiguous-2",
+    "kind": "ambiguous",
+    "text": "Tal vez lo haga, todavía no decidí"
+  },
+  {
+    "id": "ambiguous-3",
+    "kind": "ambiguous",
+    "text": "¿Eso significa que tendría que reservar?"
+  },
+  {
+    "id": "ambiguous-4",
+    "kind": "ambiguous",
+    "text": "Quisiera pensarlo antes de elegir"
+  },
+  {
+    "id": "ambiguous-5",
+    "kind": "ambiguous",
+    "text": "No estoy pidiendo que confirmen nada"
+  },
+  {
+    "id": "explore-1",
+    "kind": "explore",
+    "text": "Busco una valoración de mis dientes",
+    "fragment": "valoración de mis dientes"
+  },
+  {
+    "id": "explore-2",
+    "kind": "explore",
+    "text": "Quiero que revisen mi salud bucal",
+    "fragment": "revisen mi salud bucal"
+  },
+  {
+    "id": "explore-3",
+    "kind": "explore",
+    "text": "Necesito una consulta odontolójica",
+    "fragment": "consulta odontolójica"
+  },
+  {
+    "id": "explore-4",
+    "kind": "explore",
+    "text": "Me interesa una evaluación dental",
+    "fragment": "evaluación dental"
+  },
+  {
+    "id": "explore-5",
+    "kind": "explore",
+    "text": "¿Me orientan para una revisión odontológica?",
+    "fragment": "revisión odontológica"
+  }
+]

@@ -97,6 +97,7 @@ public class BookingFlow : IBookingFlow
         context.TargetDate = null; context.TargetTime = null;
         context.MissingFields.Clear(); context.LastQuestion = null;
         context.PendingCustomerName = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Clear(); context.PreferredTime = null;
+        context.RealCustomerName = null;
     }
 
     private static void UpdateStep(ConversationContextDto context)
@@ -775,14 +776,16 @@ public class RequestFlow : IRequestFlow
     private readonly IRequestService _requestService;
     private readonly IHumanHandoffService _handoffService;
 
-    public RequestFlow(IRequestService requestService, IHumanHandoffService handoffService)
+    public RequestFlow(IRequestService requestService, IHumanHandoffService handoffService, Microsoft.Extensions.Options.IOptions<AssistantRecoveryOptions>? settings = null)
     {
-        _requestService = requestService; _handoffService = handoffService;
+        _requestService = requestService; _handoffService = handoffService; _settings = settings?.Value ?? new();
     }
+    private readonly AssistantRecoveryOptions _settings;
 
     public async Task<string> ProcessAsync(Guid workspaceId, string phone, string messageText, string conversationId, string sourceMessageId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceMessageId);
+        if (_settings.CommercePaused(workspaceId)) return SecretaryPresentation.InformationalCommerce;
         var type = RequestType.Support;
         var title = "Solicitud de Atención";
         var lowerText = messageText.ToLowerInvariant();
@@ -852,6 +855,7 @@ public class ChatFlow : IChatFlow
 
         if (interpretation.OfferingQuery is { } query)
         {
+            query = query with { CanPrepareReservation = query.CanPrepareReservation && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES") };
             if (query.WorkspaceId != workspaceId || query.Type != (interpretation.Intent == ConversationIntent.ProductQuery ? "PRODUCT" : "SERVICE"))
                 throw new InvalidOperationException("Offering query workspace/type mismatch.");
             var body = OfferingResponseFormatter.Format(query);

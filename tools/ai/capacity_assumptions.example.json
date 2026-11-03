@@ -1,0 +1,18 @@
+{
+  "messages_per_conversation": 12,
+  "input_tokens_p50": 1800,
+  "input_tokens_p95": 2700,
+  "output_tokens_p50": 150,
+  "output_tokens_p95": 300,
+  "token_source": "ASSUMPTION_NOT_PROVIDER_MEASUREMENT",
+  "retry_rate": 0.05,
+  "fallback_rate": 0.1,
+  "peak_day_fraction": 0.2,
+  "peak_minutes": 10,
+  "safety_margin": 0.3,
+  "pricing_mode": "free",
+  "providers": {
+    "groq": { "rpm": null, "rpd": null, "tpm": null, "tpd": null, "source": "UNKNOWN", "paid_usd_per_million": null },
+    "gemini": { "rpm": null, "rpd": null, "tpm": null, "tpd": null, "source": "UNKNOWN", "paid_usd_per_million": null }
+  }
+}

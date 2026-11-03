@@ -41,7 +41,7 @@ public sealed record VerifiedOffering(string Id, string Name, string? Descriptio
 public sealed record OfferingQueryPlan(Guid WorkspaceId, string SourceMessageId, string? StateVersion,
     string Type, OfferingQuestion Question, ReadOnlyCollection<VerifiedOffering> Offerings, bool Broad,
     string? LocationId = null, string? Clarification = null, int PageOffset = 0, int TotalCount = 0, string? PageFingerprint = null,
-    bool PageRestarted = false);
+    bool PageRestarted = false, bool Suggested = false, bool CanPrepareReservation = false);
 public sealed record CommerceCatalog(Guid WorkspaceId, string? StateVersion, ReadOnlyCollection<VerifiedOffering> Products,
     ReadOnlyCollection<VerifiedOffering> Services, ReadOnlyCollection<BusinessEntityOption> Locations);
 

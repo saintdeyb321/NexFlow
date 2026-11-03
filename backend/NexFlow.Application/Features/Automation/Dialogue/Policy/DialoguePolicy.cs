@@ -37,10 +37,12 @@ public sealed class DialoguePolicy
         // A negated clause requires semantic scope; extracted nouns must not start an operation.
         if (words.Contains("no") && !normalized.Contains("no se como", StringComparison.Ordinal)) return DialogueAct.SemanticAmbiguity;
         if (HasContradictoryGoals(normalized)) return DialogueAct.SemanticAmbiguity;
-        var reservationMention = words.Any(w => w.StartsWith("reserv", StringComparison.Ordinal) || w is "agendar" or "cita");
+        // A reference to something already reserved is not a command to start.
+        var reservationMention = words.Any(w => w.TrimEnd('s') is "reserva" or "reservar" or "agendar" or "cita");
+        var correction = words.Any(w => w.StartsWith("cambi", StringComparison.Ordinal) || w is "mejor" or "otra" or "otro" or "corregir");
+        if (reservationMention && !booking && correction) return DialogueAct.SemanticAmbiguity;
         var instruction = IsProcedureQuestion(normalized);
         if (reservationMention && (instruction || OrderMentionResolver.IsQuestion(text))) return DialogueAct.OperationInformation;
-        var correction = words.Any(w => w.StartsWith("cambi", StringComparison.Ordinal) || w is "mejor" or "otra" or "otro" or "corregir");
         if (booking && correction) return DialogueAct.Correction;
         var question = words.Any(w => w is "cuanto" or "precio" or "cuesta" or "donde" or "horario" or "horarios" or "duracion" or "como" or "que" or "cual");
         if (question) return booking ? DialogueAct.InformationalInterruption : DialogueAct.Information;

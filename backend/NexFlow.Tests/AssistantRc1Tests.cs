@@ -35,7 +35,8 @@ public sealed class AssistantRc1Tests
         var f = new AssistantConversationTests.Fixture(); await f.SeedDraft("RESERVATION");
         var c = await f.Context(); c.CurrentStep = "COLLECT_LOCATION"; c.SelectedLocationId = null; c.SelectedServiceId = null;
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, c, default);
-        await f.Turn("menú"); await f.Turn("1");
+        // Main menu is global; resuming asks the current reservation picker.
+        await f.Turn("continuemos"); await f.Turn("1");
         var text = f.Sent.Values.Last().Content;
         Assert.Equal(1, text.Split("Servicio A").Length - 1); Assert.Equal(1, text.Split("Servicio B").Length - 1);
         Assert.DoesNotContain("• ", text); Assert.Contains("1. Servicio A", text); Assert.Equal("COLLECT_SERVICE", (await f.Context()).CurrentStep);
@@ -69,9 +70,9 @@ public sealed class AssistantRc1Tests
     public async Task Changing_menu_context_cannot_inherit_another_menus_offset()
     {
         var f = new AssistantConversationTests.Fixture(8); await f.Turn("menú"); await f.Turn("ver más");
-        var c = await f.Context(); c.CurrentGoal = "RESERVATION"; c.CurrentStep = "COLLECT_SERVICE"; c.SelectedLocationId = "sede-a";
+        var c = await f.Context(); c.CurrentGoal = "RESERVATION"; c.CurrentStep = "COLLECT_SERVICE"; c.SelectedLocationId = "sede-a"; c.SelectedServiceId = null;
         await f.Contexts.SaveContextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, c, default);
-        await f.Turn("menú"); Assert.Equal("service-2", (await f.Context()).RecoveryOptions[0].Key);
+        await f.Turn("continuemos"); Assert.Equal("service-2", (await f.Context()).RecoveryOptions[0].Key);
         Assert.Equal(0, (await f.Context()).RecoveryOptionsOffset);
     }
 

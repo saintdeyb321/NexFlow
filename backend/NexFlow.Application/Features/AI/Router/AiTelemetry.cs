@@ -14,12 +14,20 @@ public static class AiTelemetry
     public const string MeterName = "NexFlow.Ai";
     private sealed record Context(Guid? Workspace, AiTaskType Task);
     private static readonly AsyncLocal<Context?> Current = new();
+    public static Guid? Workspace => Current.Value?.Workspace;
     private static readonly Meter Meter = new(MeterName, "1.0");
     private static readonly Counter<long> Attempts = Meter.CreateCounter<long>("nexflow.ai.http.attempts");
+    private static readonly Counter<long> Admissions = Meter.CreateCounter<long>("nexflow.ai.admissions");
+    public static void Admission(AiProviderType provider, string model, string outcome)
+    {
+        try { Admissions.Add(1, new TagList { { "provider", provider.ToString() }, { "model", model }, { "outcome", outcome } }); }
+        catch { /* Diagnostics cannot affect admission. */ }
+    }
     private static readonly Histogram<double> Duration = Meter.CreateHistogram<double>("nexflow.ai.http.duration", "ms");
     private static readonly Counter<long> Tokens = Meter.CreateCounter<long>("nexflow.ai.tokens");
     private static readonly Counter<long> UsageReports = Meter.CreateCounter<long>("nexflow.ai.usage.reports");
     private static readonly Histogram<long> InputCharacters = Meter.CreateHistogram<long>("nexflow.ai.input.characters", "characters");
+    private static readonly Histogram<double> Limits = Meter.CreateHistogram<double>("nexflow.ai.provider.remaining");
 
     public static void InterpretationInput(int contract, int context, int message, ILogger logger)
     {
@@ -43,12 +51,18 @@ public static class AiTelemetry
     }
 
     public static async Task<HttpResponseMessage> SendAsync(AiProviderType provider, bool alternateModel,
-        Func<Task<HttpResponseMessage>> send, ILogger logger, CancellationToken ct)
+        Func<Task<HttpResponseMessage>> send, ILogger logger, CancellationToken ct, string? model = null)
     {
         var started = Stopwatch.GetTimestamp(); var outcome = "Network"; int? status = null;
         try
         {
             var response = await send(); status = (int)response.StatusCode;
+            try {
+                foreach (var header in new[] { (Name: "x-ratelimit-remaining-requests", Kind: "Requests"), (Name: "x-ratelimit-remaining-tokens", Kind: "Tokens") })
+                    if (response.Headers.TryGetValues(header.Name, out var values) && double.TryParse(values.FirstOrDefault(),
+                        System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var remaining) && double.IsFinite(remaining) && remaining >= 0)
+                        Limits.Record(remaining, new TagList { { "provider", provider.ToString() }, { "model", model ?? "Unknown" }, { "kind", header.Kind } });
+            } catch { /* Headers are optional diagnostics, never secrets or quota authority. */ }
             outcome = response.IsSuccessStatusCode ? "Success" : status == 429 ? "RateLimit" : status is 401 or 403 or 404 ? "Configuration" : status >= 500 ? "Unavailable" : "Rejected";
             return response;
         }
@@ -58,7 +72,7 @@ public static class AiTelemetry
             try
             {
                 var task = Current.Value?.Task.ToString() ?? "Unscoped"; var role = alternateModel ? "Alternate" : "Primary";
-                var tags = new TagList { { "provider", provider.ToString() }, { "task", task }, { "role", role }, { "outcome", outcome } };
+                var tags = new TagList { { "provider", provider.ToString() }, { "model", model ?? "Unknown" }, { "task", task }, { "role", role }, { "outcome", outcome } };
                 var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 Attempts.Add(1, tags); Duration.Record(elapsed, tags);
                 logger.LogInformation("AiHttpAttempt Provider={Provider} Task={Task} Role={Role} Outcome={Outcome} Status={Status} ElapsedMs={ElapsedMs} WorkspaceKey={WorkspaceKey}",
@@ -68,7 +82,7 @@ public static class AiTelemetry
         }
     }
 
-    public static void Usage(AiProviderType provider, JsonElement root, ILogger logger)
+    public static void Usage(AiProviderType provider, JsonElement root, ILogger logger, string? model = null)
     {
         try
         {
@@ -85,7 +99,7 @@ public static class AiTelemetry
             var available = input.HasValue || output.HasValue || total.HasValue;
             UsageReports.Add(1, new TagList { { "provider", provider.ToString() }, { "task", task }, { "available", available } });
             foreach (var item in new[] { (Kind: "Input", Value: input), (Kind: "Output", Value: output), (Kind: "Total", Value: total) })
-                if (item.Value.HasValue) Tokens.Add(item.Value.Value, new TagList { { "provider", provider.ToString() }, { "task", task }, { "kind", item.Kind } });
+                if (item.Value.HasValue) Tokens.Add(item.Value.Value, new TagList { { "provider", provider.ToString() }, { "model", model ?? "Unknown" }, { "task", task }, { "kind", item.Kind } });
             logger.LogInformation("AiUsage Provider={Provider} Task={Task} Available={Available} InputTokens={InputTokens} OutputTokens={OutputTokens} TotalTokens={TotalTokens} WorkspaceKey={WorkspaceKey}",
                 provider, task, available, input, output, total, WorkspaceKey());
         }

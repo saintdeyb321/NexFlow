@@ -25,6 +25,7 @@ public sealed record RecoveryDecision(string? Response = null, AiInterpretation?
     ExpectedReply Expected = ExpectedReply.Information);
 public interface IConversationRecoveryService
 {
+    Task<string> MainMenuAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
     Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation, ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct);
     Task<RecoveryDecision> ClarifyAsync(Guid workspace, string phone, string source, ConversationContextDto context, HashSet<string> modules, string introduction, CancellationToken ct, bool contextual = false, IReadOnlyList<ConversationMenuOption>? choices = null);
     Task<string> DecorateAsync(Guid workspace, string phone, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null);
@@ -36,6 +37,11 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
     IClock clock, IOptions<AssistantRecoveryOptions> options, IBusinessProfileRepository profiles, IKnowledgeService knowledge,
     ILogger<ConversationRecoveryService>? logger = null) : IConversationRecoveryService
 {
+    public Task<string> MainMenuAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
+    {
+        context.Information = null; context.LastIntent = null; context.RecoveryOptionsOffset = 0;
+        return PrepareOptionsAsync(workspace, context, modules, "¿Cómo puedo ayudarte?", ct, root: true);
+    }
     private AssistantRecoveryOptions Limits => options.Value;
     public static string Normalize(string text) => string.Join(' ', new string(text.Normalize(NormalizationForm.FormD)
         .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
@@ -62,6 +68,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
     public async Task<RecoveryDecision?> RecoverAsync(Guid workspace, string phone, string conversation,
         ProcessIncomingMessageCommand request, ConversationContextDto context, HashSet<string> modules, CancellationToken ct)
     {
+        modules = Limits.EffectiveModules(workspace, modules);
         var expiredDraft = !string.IsNullOrWhiteSpace(context.CurrentGoal) && context.LastUpdated < clock.UtcNow.AddHours(-Limits.ContextExpiryHours);
         if (context.RecoveryLastMessageId == request.MessageId)
             return new(context.RecoveryLastResponse, context.RecoveryLastInterpretation == null ? null : JsonSerializer.Deserialize<AiInterpretation>(context.RecoveryLastInterpretation),
@@ -232,6 +239,7 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             && ConversationConfirmation.IsNegative(request.MessageText))
         {
             context.PendingRecoveryAction = null;
+            context.PendingReservationAfterDiscard = null;
             return await Remember("No he confirmado la operación. Conservamos el borrador; indica qué deseas corregir o escribe cancelar para descartarlo.");
         }
         if ((context.CurrentStep == "CONFIRM" || context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true || context.PendingRecoveryAction is "CANCEL" or "EXPIRE")
@@ -269,15 +277,22 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
             }
             if (ConversationConfirmation.IsAffirmative(request.MessageText))
             {
+                var next = context.PendingReservationAfterDiscard;
+                context.PendingReservationAfterDiscard = null;
                 context.CurrentGoal = null; context.CurrentStep = null; context.SelectedServiceId = null; context.SelectedLocationId = null;
                 context.TargetDate = null; context.TargetTime = null; context.OrderDraftItems.Clear(); context.MissingFields.Clear(); context.LastQuestion = null;
                 context.ReservationCommitSourceMessageId = null; context.RecoveryOptionsOffset = 0; context.RecoveryOptionsContext = null;
                 context.PendingCustomerName = null; context.PendingServiceIds.Clear(); context.PendingDialogueSlots.Clear(); context.PreferredTime = null;
+                context.RealCustomerName = null;
                 context.PendingRecoveryAction = null; context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
+                if (next != null && next.WorkspaceId == workspace && next.ConversationId == conversation && next.ExpiresAt > clock.UtcNow
+                    && question?.SourceMessageId == next.SourceMessageId && question.Expected == ExpectedReply.RecoveryDecision
+                    && context.Focus == null && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
+                    return await RememberInterpretation(new() { Intent = ConversationIntent.Reservation, Date = next.Date, Time = next.Time });
                 return await Remember(booking ? "He descartado esta reserva en preparación. No se ha cancelado ninguna reserva registrada."
                     : "He descartado únicamente el borrador. No se ha cancelado ninguna reserva ni pedido registrado.", DialogueAct.Cancellation, OperationStatus.Cancelled);
             }
-            if (No(text)) { context.PendingRecoveryAction = null; return await Remember(Continuation(context)); }
+            if (No(text)) { context.PendingRecoveryAction = null; context.PendingReservationAfterDiscard = null; return await Remember(Continuation(context)); }
             return await Remember(booking ? "¿Deseas dejar esta reserva en preparación? Responde sí o no. Para hablar con una persona escribe asesor."
                 : "Confirma si deseas descartar el borrador: responde sí o no. Para hablar con una persona escribe asesor.");
         }
@@ -341,10 +356,12 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         if (text is "adios" or "chau" or "hasta luego" or "gracias" or "muchas gracias")
             return await Remember("¡Gracias por escribirnos! " + (string.IsNullOrEmpty(context.CurrentGoal) ? "Aquí estaremos cuando necesites información del negocio." : Continuation(context)));
         if (text is "quiero informacion" or "informacion" or "ayudame" or "ayuda" or "que ofrecen" or "menu" or "opciones" || InformationalRequest.Menu(text))
-        { context.RecoveryOptionsOffset = 0; return await Menu("Estas son las opciones disponibles:"); }
+        { return await Remember(await MainMenuAsync(workspace, context, modules, ct), expected: ExpectedReply.Selection); }
         if (text is "ver mas" or "mas opciones" or "otros servicios")
         {
             if (context.RecoveryOptionsContext == Fingerprint(context) && context.RecoveryHasMore) context.RecoveryOptionsOffset += 5;
+            if (context.RecoveryOptions.Count > 0 && context.RecoveryOptions.All(o => o.Kind == "Action"))
+                return await Remember(await PrepareOptionsAsync(workspace, context, modules, "Estas son las opciones disponibles:", ct, root: true), expected: ExpectedReply.Selection);
             return await Menu("Estas son las opciones disponibles:");
         }
         if (context.CurrentGoal == "ORDER" && context.CurrentStep?.StartsWith("ORDER_CONFIRM:", StringComparison.Ordinal) == true && ConversationConfirmation.IsAffirmative(request.MessageText)) return null;
@@ -370,7 +387,8 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
                     context.RecoveryOptions.Count == 0 ? "Necesito una respuesta concreta para el paso actual." : "Necesito que elijas una opción de la lista actual.", ct);
             var selected = context.RecoveryOptions[index - 1];
             var catalogChoice = context.RecoveryOptions.All(o => o.Kind == "Action" && o.Key is "ProductQuery" or "ServiceQuery");
-            var available = await BuildOptions(workspace, context, modules, ct, paginate: !catalogChoice, catalogOnly: catalogChoice);
+            var available = await BuildOptions(workspace, context, modules, ct, paginate: !catalogChoice, catalogOnly: catalogChoice,
+                root: !catalogChoice && context.RecoveryOptions.All(o => o.Kind == "Action"));
             if (!available.Any(o => o.Key == selected.Key && o.Kind == selected.Kind)) return await Menu("Esa opción ya no está disponible. Elige una de estas:");
             context.RecoveryOptions.Clear(); context.ClarificationAttempts = 0;
             var interpretation = new AiInterpretation { Intent = selected.Kind == "Action" ? Enum.Parse<ConversationIntent>(selected.Key) : ConversationIntent.Reservation,
@@ -546,10 +564,10 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return decorated;
     }
 
-    private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, bool replacePicker = false, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null)
+    private async Task<string> PrepareOptionsAsync(Guid workspace, ConversationContextDto context, HashSet<string> modules, string response, CancellationToken ct, bool replacePicker = false, IReadOnlyList<ConversationMenuOption>? verifiedChoices = null, bool root = false)
     {
         if (context.RecoveryOptionsContext != Fingerprint(context)) context.RecoveryOptionsOffset = 0;
-        var available = verifiedChoices?.ToList() ?? await BuildOptions(workspace, context, modules, ct, paginate: false);
+        var available = verifiedChoices?.ToList() ?? await BuildOptions(workspace, context, modules, ct, paginate: false, root: root);
         context.RecoveryHasMore = context.RecoveryOptionsOffset + 5 < available.Count;
         context.RecoveryOptions = available.Skip(context.RecoveryOptionsOffset).Take(5).ToList();
         context.RecoveryOptionsContext = Fingerprint(context);
@@ -583,10 +601,11 @@ public sealed class ConversationRecoveryService(IContextRecoveryService contexts
         return string.Join("\n", parts);
     }
 
-    private async Task<List<ConversationMenuOption>> BuildOptions(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct, bool paginate = true, bool catalogOnly = false)
+    private async Task<List<ConversationMenuOption>> BuildOptions(Guid workspace, ConversationContextDto context, HashSet<string> modules, CancellationToken ct, bool paginate = true, bool catalogOnly = false, bool root = false)
     {
+        modules = Limits.EffectiveModules(workspace, modules);
         var result = new List<ConversationMenuOption>();
-        if (!catalogOnly && context.CurrentGoal is "RESERVATION" or "BOOKING" && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
+        if (!root && !catalogOnly && context.CurrentGoal is "RESERVATION" or "BOOKING" && modules.Contains("RESERVATIONS") && modules.Contains("SERVICES"))
         {
             if (context.CurrentStep == "COLLECT_LOCATION") result.AddRange((await locations.GetLocationsAsync(workspace, ct)).Where(l => l.Id != null).OrderBy(l => l.Name).ThenBy(l => l.Id).Select(l => new ConversationMenuOption(l.Id!, l.Name, "Location")));
             else if (context.CurrentStep == "COLLECT_SERVICE" && context.SelectedLocationId != null)
