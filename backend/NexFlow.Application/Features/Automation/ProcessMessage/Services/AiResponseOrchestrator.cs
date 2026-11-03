@@ -11,6 +11,7 @@ using NexFlow.Application.Features.Automation.Dialogue.Composition;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Policy;
 using Microsoft.Extensions.Options;
+using NexFlow.Application.Features.Automation.Agent;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage.Services;
 
@@ -37,15 +38,18 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly IExistingReservationFlow? _existingReservations;
     private readonly ConversationFocusService? _focus;
     private readonly AssistantRecoveryOptions _settings;
+    private readonly IExperimentalAgentRuntime? _experiment;
 
     public AiResponseOrchestrator(
         ITurnUnderstandingPipeline understanding, IEntitlementService entitlementService,
         IBookingFlow bookingFlow, IRequestFlow requestFlow, IOrderFlow orderFlow, ISupportFlow supportFlow, IChatFlow chatFlow,
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger, IResponseComposer composer, IConversationRecoveryService? recovery = null, IClock? clock = null,
-        IExistingReservationFlow? existingReservations = null, ConversationFocusService? focus = null, IOptions<AssistantRecoveryOptions>? settings = null)
+        IExistingReservationFlow? existingReservations = null, ConversationFocusService? focus = null, IOptions<AssistantRecoveryOptions>? settings = null,
+        IExperimentalAgentRuntime? experiment = null)
     {
         _settings = settings?.Value ?? new();
+        _experiment = experiment;
         _understanding = understanding; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
         _supportFlow = supportFlow; _chatFlow = chatFlow;
@@ -85,6 +89,14 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
                     replay, SenderType.AI, request.MessageId, cancellationToken);
         }
 
+        if (_experiment?.Handles(workspaceId) == true)
+        {
+            var evaluated = await _experiment.HandleAsync(new(workspaceId, conversation.Id, normalizedPhone, request.MessageId, request.MessageText), cancellationToken);
+            AgentExperimentScope.Current!.Results.Add(evaluated);
+            // Explicit harness interception: no outbox, provider or Sent assertion.
+            return new MessageRecord { Id = "agent-preview:" + request.MessageId, Content = evaluated.VerifiedText ?? evaluated.StatusExplanation ?? "",
+                Direction = "outbound", Sender = SenderType.AI, Status = MessageStatus.Pending };
+        }
         if (_existingReservations != null)
         {
             var managed = await _existingReservations.TryHandleAsync(workspaceId, normalizedPhone, request, context, activeModules, cancellationToken);

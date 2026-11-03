@@ -9,6 +9,7 @@ using NexFlow.Application.Features.Knowledge;
 using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Domain.Enums;
+using NexFlow.Application.Features.Automation.Agent;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
@@ -24,6 +25,7 @@ public class ProcessIncomingMessageCommandHandler
     private readonly IOutboundMessageService _outboundMessageService;
     private readonly ILogger<ProcessIncomingMessageCommandHandler> _logger;
     private readonly IClock? _clock;
+    private readonly IExperimentalAgentRuntime? _experiment;
 
     public ProcessIncomingMessageCommandHandler(
         IIncomingMessageGuard guard,
@@ -34,7 +36,7 @@ public class ProcessIncomingMessageCommandHandler
         ILogger<ProcessIncomingMessageCommandHandler> logger,
         IContextRecoveryService contextRecovery,
         ILocationRepository locationRepo,
-        IEntitlementService entitlementService, IClock? clock = null)
+        IEntitlementService entitlementService, IClock? clock = null, IExperimentalAgentRuntime? experiment = null)
     {
         _guard = guard;
         _stateService = stateService;
@@ -46,6 +48,7 @@ public class ProcessIncomingMessageCommandHandler
         _locationRepo = locationRepo;
         _entitlementService = entitlementService;
         _clock = clock;
+        _experiment = experiment;
     }
 
     public Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
@@ -67,6 +70,12 @@ public class ProcessIncomingMessageCommandHandler
         var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
         Trace(stateResult.Record.Mode == ConversationMode.Human ? "HumanControl" : stateResult.ShouldAiRespond ? "AutomaticResponseRequired" : "NoAutomaticResponse", guardResult.WorkspaceId);
 
+        if (!request.FromMe && request.Kind == IncomingMessageKind.Text && stateResult.ShouldAiRespond
+            && stateResult.Record.Mode == ConversationMode.Automatic && _experiment?.Handles(guardResult.WorkspaceId) == true)
+        {
+            await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
+            return Result.Success(); // Only reachable inside a trusted synthetic harness scope.
+        }
         if (stateResult.FastReply != null)
         {
             // 🔥 SPRINT 02: Inyectamos request.MessageId como clave de idempotencia

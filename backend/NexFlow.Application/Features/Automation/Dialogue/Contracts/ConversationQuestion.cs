@@ -77,12 +77,15 @@ public sealed record ConversationQuestion(string QuestionId, Guid WorkspaceId, s
         ExpectedReply.Selection => "Elige una opción de la lista vigente.",
         ExpectedReply.RecoveryDecision => "Confirma o rechaza la decisión pendiente sobre el borrador.",
         ExpectedReply.DiscardDrafts => "Decide el alcance del descarte de borradores; no autoriza ninguna transacción.",
-        ExpectedReply.RequestedData => state.CurrentStep switch {
+        ExpectedReply.RequestedData => RequestedDataPrompt(state),
+        _ => "¿Qué dato necesitas precisar en la consulta informativa?"
+    };
+
+    public static string RequestedDataPrompt(ConversationContextDto state) => state.CurrentStep switch {
             "COLLECT_LOCATION" => "¿En qué sede deseas reservar?", "COLLECT_SERVICE" => "¿Qué servicio deseas reservar?",
             "COLLECT_DATE" => "¿Para qué fecha?", "COLLECT_TIME" => "¿Qué hora prefieres?",
             "ORDER_COLLECT_ITEMS" => "¿Qué productos y cantidades deseas solicitar?",
-            "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre y apellido?", _ => "¿Qué dato deseas aportar al borrador?" },
-        _ => "¿Qué dato necesitas precisar en la consulta informativa?"
+            "COLLECT_CUSTOMERNAME" => "¿Cuál es tu nombre y apellido?", _ => "¿Qué dato deseas aportar al borrador?"
     };
 }
 

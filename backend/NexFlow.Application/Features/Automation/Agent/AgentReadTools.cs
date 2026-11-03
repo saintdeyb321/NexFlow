@@ -12,6 +12,7 @@ public sealed class AgentReadTools(IBusinessReadTools tools) : IAgentReadTools
         var turn = tools.Open(workspace); var results = new List<AgentToolResult>();
         foreach (var call in calls)
         {
+            NexFlow.Application.Features.Automation.ProcessMessage.Services.ConversationDiagnostics.Count("AgentRead", call.Kind.ToString());
             var topic = call.Kind switch {
                 AgentReadKind.Services => KnowledgeTopic.Services, AgentReadKind.Products => KnowledgeTopic.Products,
                 AgentReadKind.Locations => KnowledgeTopic.Locations, AgentReadKind.Profile => KnowledgeTopic.Profile,
@@ -21,8 +22,14 @@ public sealed class AgentReadTools(IBusinessReadTools tools) : IAgentReadTools
                 || call.LocationId != null && result.LocationId != call.LocationId
                 || result.Facts.Any(f => f.Sensitive || f.Source != NexFlow.Application.Features.Automation.Dialogue.Contracts.VerifiedFactSource.BusinessRepository))
                 throw new InvalidOperationException("Read provenance mismatch.");
-            results.Add(new(results.Count, result.Status, result.Source,
-                result.Status == BusinessReadStatus.Found ? result.Facts : []));
+            var facts = result.Status == BusinessReadStatus.Found ? result.Facts : [];
+            if (result.Status == BusinessReadStatus.Found && result.Knowledge is { } knowledge) {
+                if (topic == KnowledgeTopic.Locations && knowledge.References.Count > 0) facts = knowledge.References.Select(l => new NexFlow.Application.Features.Automation.Dialogue.Contracts.VerifiedFact(
+                    "LocationName", l.Name, NexFlow.Application.Features.Automation.Dialogue.Contracts.VerifiedFactSource.BusinessRepository, l.Id)).ToArray();
+                if (topic == KnowledgeTopic.Profile && knowledge.Profile is { } profile) facts = [new("BusinessName", profile.Name,
+                    NexFlow.Application.Features.Automation.Dialogue.Contracts.VerifiedFactSource.BusinessRepository)];
+            }
+            results.Add(new(results.Count, result.Status, result.Source, facts));
         }
         return results.AsReadOnly();
     }

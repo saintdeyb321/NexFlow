@@ -12,6 +12,7 @@
     <EmbeddedResource Include="Concierge/CommercialCertificationCorpus.json" />
     <EmbeddedResource Include="Concierge/QualityHoldout61.json" />
     <EmbeddedResource Include="Concierge/NaturalExperienceEvaluation.json" />
+    <EmbeddedResource Include="Concierge/AgentDevelopmentConversations.json" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

@@ -238,6 +238,7 @@ public sealed class AssistantConversationTests
         public Dictionary<string, Reservation> Bookings { get; } = new(); public Dictionary<string, OrderRecord> Orders { get; } = new();
         public Dictionary<string, MessageRecord> Sent { get; } = new(); public List<(Guid Workspace, KnowledgeTopic Topic)> FactualQueries { get; } = new();
         public int AiCalls { get; private set; } public int Handoffs { get; private set; }
+        public Mock<IConversationStateService> StateReads { get; private set; } = null!;
         public Func<Task>? DuringInterpretation { get; set; }
         public Func<Task<AiInterpretation>>? InterpretationOverride { get; set; }
         public Func<Task>? DuringComposition { get; set; }
@@ -263,7 +264,8 @@ public sealed class AssistantConversationTests
         public ConversationFocusService Focus { get; }
         private readonly AiResponseOrchestrator _orchestrator; private int _turn;
         public Fixture(int serviceCount = 2, bool conciergeCatalog = false, bool intelligentCommerce = false,
-            Func<Fixture, IExistingReservationFlow>? managementFactory = null, bool contextualFocus = false, bool informationalCommerce = false)
+            Func<Fixture, IExistingReservationFlow>? managementFactory = null, bool contextualFocus = false, bool informationalCommerce = false,
+            Func<Fixture, NexFlow.Application.Features.Automation.Agent.IExperimentalAgentRuntime>? experimentFactory = null)
         {
             var settings = Options.Create(new AssistantRecoveryOptions { InformationalCommerceWorkspaces = informationalCommerce ? [Workspace] : [] });
             var cache = new Mock<IConversationCache>();
@@ -348,14 +350,16 @@ public sealed class AssistantConversationTests
                 new(), new(), new(), new(), new(), NullLogger<WorkspaceSlotResolver>.Instance);
             var pipeline = new TurnUnderstandingPipeline(slots, new DialoguePolicy(), interpreter.Object, Recovery, offerings.Object, intelligentCommerce ? new CommerceTurnResolver(slots, new OrderMentionResolver(), clock.Object) : null,
                 locationRepository: locations.Object, focus: Focus);
-            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, new RecordingComposer(new ResponseComposer(Wording.Object, entitlements.Object, Recovery, Options.Create(CompositionOptions)), Plans, Composed, () => DuringComposition), Recovery, clock.Object, managementFactory?.Invoke(this), Focus, settings);
+            var experiment = experimentFactory?.Invoke(this);
+            _orchestrator = new(new RecordingPipeline(pipeline, Understood), entitlements.Object, booking, Mock.Of<IRequestFlow>(MockBehavior.Strict), order, support.Object, chat, Contexts, outbound.Object, NullLogger<AiResponseOrchestrator>.Instance, new RecordingComposer(new ResponseComposer(Wording.Object, entitlements.Object, Recovery, Options.Create(CompositionOptions)), Plans, Composed, () => DuringComposition), Recovery, clock.Object, managementFactory?.Invoke(this), Focus, settings, experiment);
             var guard = new Mock<IIncomingMessageGuard>(MockBehavior.Strict);
             guard.Setup(g => g.CheckMessageAsync(It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync((true, Workspace, Phone));
             var stateService = new Mock<IConversationStateService>(MockBehavior.Strict);
+            StateReads = stateService;
             stateService.Setup(s => s.ProcessStateAsync(Workspace, Phone, It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(async () => { var state = await Context(); return (state.Mode != "Human", new ConversationRecord { Id = "chat", Mode = state.Mode == "Human" ? ConversationMode.Human : ConversationMode.Automatic }, (string?)null); });
             Handler = new(guard.Object, stateService.Object, _orchestrator, knowledge.Object, outbound.Object,
-                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object, clock.Object);
+                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object, clock.Object, experiment);
         }
         public Task<ConversationContextDto> Context() => Contexts.GetOrRecoverContextAsync(Workspace, Phone, default);
         public void UseCatalogKnowledge()
