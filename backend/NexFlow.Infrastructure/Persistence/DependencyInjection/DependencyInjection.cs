@@ -62,6 +62,7 @@ public static class DependencyInjection
             services.AddScoped<IConsumerIdentityRepository, FirestoreConsumerIdentityRepository>();
             services.AddScoped<IConversationRepository, FirestoreConversationRepository>();
             services.AddScoped<IConversationStateRepository, FirestoreConversationStateRepository>();
+            services.AddScoped<NexFlow.Application.Features.Automation.Agent.IAgentEvaluationClaims, FirestoreAgentEvaluationClaims>();
 
             services.AddScoped<IRequestRepository, FirestoreRequestRepository>();
             services.AddScoped<ITenantCleanupService, FirestoreTenantCleanupService>();
@@ -86,6 +87,7 @@ public static class DependencyInjection
         services.AddHttpClient<IAiProvider, GroqAiProvider>().RedactLoggedHeaders(static _ => true);
         services.AddScoped<IAiRouter, AiRouter>();
         services.AddOptions<AiQuotaOptions>().Bind(configuration.GetSection("AiQuota"));
+        services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentShadowOptions>().Bind(configuration.GetSection("AgentShadow"));
         services.AddScoped<IAiRequestAdmission, FirestoreAiRequestAdmission>();
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();

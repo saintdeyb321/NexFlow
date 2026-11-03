@@ -23,6 +23,7 @@ using NexFlow.Application.Features.SuperAdmin.Licenses;
 using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 using NexFlow.Application.Features.SuperAdmin.Workspaces;
 using NexFlow.Application.Services;
+using NexFlow.Application.Features.Automation.Agent;
 
 namespace NexFlow.Application.DependencyInjection;
 
@@ -71,6 +72,8 @@ public static class DependencyInjection
         services.AddScoped<DeleteClientCommandHandler>();
         services.AddScoped<IKnowledgeService, KnowledgeService>();
         services.AddScoped<IBusinessReadTools, BusinessReadTools>();
+        services.AddScoped<IAgentReadTools, AgentReadTools>();
+        services.AddScoped<IConversationalAgent, LlmFirstShadowAgent>();
         services.AddScoped<IOfferingService, OfferingService>();
         services.AddScoped<IAiInterpreter, AiInterpreter>();
         services.AddScoped<ILocationAvailabilityService, LocationAvailabilityService>();
