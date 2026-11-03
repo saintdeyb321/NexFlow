@@ -91,7 +91,9 @@ public class GeminiAiProvider : IAiProvider
         var payload = new Dictionary<string, object>
         {
             { "system_instruction", new { parts = new[] { new { text = safeSystemPrompt } } } },
-            { "contents", payloadContents }
+            { "contents", payloadContents },
+            // Every supported mode needs a finite output bound before quota admission.
+            { "generationConfig", new { maxOutputTokens = 1024 } }
         };
 
         // 🔥 SPRINT 8: Aplicación estricta de JSON Mode si es requerido

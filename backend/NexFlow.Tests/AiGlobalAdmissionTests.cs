@@ -39,7 +39,7 @@ public sealed class AiGlobalAdmissionTests
             using var scope = AiTelemetry.Begin(workspace, AiTaskType.IntentExtraction);
             await Admission().AdmitAsync(AiProviderType.Groq, "test-model", 100, 1024, default);
         }
-        public string Path => "ai-provider-budgets/" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("Groq:synthetic-account")));
+        public string Path => "ai-provider-budgets/" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{Pool.Provider}:{Pool.Key}")));
     }
 
     [Theory]
@@ -108,6 +108,7 @@ public sealed class AiGlobalAdmissionTests
         f.Now = f.Now.AddSeconds(31);
         Assert.Equal("ok", await router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "contract", "synthetic", true, default));
         groq.Protected().Verify("SendAsync", Times.Exactly(2), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+        Assert.Equal(2, (await ReadBudget(f.Store, f.Path)).GetProperty("DailyRequests").GetInt64());
         static HttpResponseMessage RateLimited() { var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
             response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(30)); return response; }
     }
@@ -148,5 +149,111 @@ public sealed class AiGlobalAdmissionTests
         await f.HandleTurn("menú", "menu"); Assert.Equal(1, f.AiCalls);
         Assert.NotEmpty((await f.Context()).RecoveryOptions); Assert.Empty(f.Orders); Assert.Empty(f.Bookings);
         http.Protected().Verify("SendAsync", Times.Never(), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    [InlineData("chat")]
+    public async Task Gemini_bounds_each_supported_mode_before_admission_without_forcing_json(string mode)
+    {
+        var f = new Fixture(); f.Pool.Provider = AiProviderType.Gemini; f.Pool.Models = ["gemini-test"];
+        using var scope = AiTelemetry.Begin(Guid.NewGuid(), AiTaskType.ResponseComposition);
+        var http = new Mock<HttpMessageHandler>(MockBehavior.Strict); string? sent = null;
+        http.Protected().Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Returns(async (HttpRequestMessage request, CancellationToken ct) => {
+                sent = await request.Content!.ReadAsStringAsync(ct);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"verified\"}]}}]}") };
+            });
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
+            ["Gemini:ApiKey"] = "synthetic", ["Gemini:Model"] = "gemini-test"
+        }).Build();
+        var provider = new GeminiAiProvider(new(http.Object), config, NullLogger<GeminiAiProvider>.Instance, f.Admission());
+        var result = mode == "chat" ? (await provider.GenerateChatResponseAsync("contract", [new("user", "synthetic")])).Text
+            : await provider.GenerateTextAsync("contract", "synthetic", mode == "json");
+        Assert.Equal("verified", result);
+        using var body = System.Text.Json.JsonDocument.Parse(sent!);
+        var generation = body.RootElement.GetProperty("generationConfig");
+        Assert.Equal(1024, generation.GetProperty("maxOutputTokens").GetInt32());
+        Assert.Equal(mode == "json", generation.TryGetProperty("responseMimeType", out _));
+        Assert.Equal(1, (await ReadBudget(f.Store, f.Path)).GetProperty("DailyRequests").GetInt64());
+        http.Protected().Verify("SendAsync", Times.Once(), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("RPM")]
+    [InlineData("RPD")]
+    [InlineData("TPM")]
+    [InlineData("TPD")]
+    [InlineData("reset")]
+    public async Task Incomplete_quota_configuration_never_calls_http_or_claims_quota_exhaustion(string missing)
+    {
+        var f = new Fixture();
+        switch (missing) { case "RPM": f.Pool.RequestsPerMinute = null; break; case "RPD": f.Pool.RequestsPerDay = null; break;
+            case "TPM": f.Pool.TokensPerMinute = null; break; case "TPD": f.Pool.TokensPerDay = null; break; case "reset": f.Pool.ResetTimeZone = ""; break; }
+        using var scope = AiTelemetry.Begin(Guid.NewGuid(), AiTaskType.IntentExtraction);
+        var http = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
+            ["Groq:ApiKey"] = "synthetic", ["Groq:Model"] = "test-model"
+        }).Build();
+        var provider = new GroqAiProvider(new(http.Object), config, NullLogger<GroqAiProvider>.Instance, f.Admission());
+        var error = await Assert.ThrowsAsync<AiBudgetDeniedException>(() => provider.GenerateTextAsync("contract", "synthetic", true));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, error.StatusCode); Assert.Equal(0, f.Store.CommitRpcCalls);
+        http.Protected().Verify("SendAsync", Times.Never(), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Conservative_small_account_share_can_admit_zero_requests_and_never_bypasses_its_limit()
+    {
+        // Synthetic numbers, not a claim about either provider's free tier.
+        var f = new Fixture(); f.Pool.RequestsPerMinute = 30; f.Pool.TokensPerMinute = 8000;
+        f.Pool.SafetyMargin = .3; f.Pool.WorkspaceShare = .1;
+        var denied = await Assert.ThrowsAsync<AiBudgetDeniedException>(() => f.Admit(Guid.NewGuid()));
+        Assert.Equal(HttpStatusCode.TooManyRequests, denied.StatusCode);
+        Assert.False((await f.Store.Db.Document(f.Path).GetSnapshotAsync()).Exists);
+        f.Pool.TokenReservationPerAttempt = 3200; // Envelope fits, but the tenant share still does not.
+        denied = await Assert.ThrowsAsync<AiBudgetDeniedException>(() => f.Admit(Guid.NewGuid()));
+        Assert.Equal(HttpStatusCode.TooManyRequests, denied.StatusCode);
+        Assert.False((await f.Store.Db.Document(f.Path).GetSnapshotAsync()).Exists);
+    }
+
+    [Theory]
+    [InlineData("exhausted")]
+    [InlineData("429")]
+    [InlineData("timeout")]
+    public async Task Router_uses_only_a_funded_fallback_and_charges_each_actual_attempt_once(string failure)
+    {
+        var f = new Fixture(); f.Pool.RequestsPerMinute = 2;
+        var other = new AiQuotaPool { Provider = AiProviderType.Gemini, Key = "synthetic-project", Models = ["gemini-test"],
+            ResetTimeZone = "UTC", RequestsPerMinute = 2, RequestsPerDay = 100, TokensPerMinute = 100_000,
+            TokensPerDay = 1_000_000, TokenReservationPerAttempt = 10_000, SafetyMargin = 0, WorkspaceShare = .5 };
+        f.Options.Pools.Add(other); var workspace = Guid.NewGuid();
+        using var scope = AiTelemetry.Begin(workspace, AiTaskType.IntentExtraction);
+        if (failure == "exhausted") await f.Admit(workspace);
+        var groq = new Mock<HttpMessageHandler>(MockBehavior.Strict); var gemini = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        if (failure == "timeout") groq.Protected().Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>()).ThrowsAsync(new TimeoutException());
+        if (failure == "429") groq.Protected().Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(() => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        gemini.Protected().Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"verified\"}]}}]}") });
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
+            ["Groq:ApiKey"] = "synthetic", ["Groq:Model"] = "test-model", ["Gemini:ApiKey"] = "synthetic", ["Gemini:Model"] = "gemini-test"
+        }).Build();
+        var router = new AiRouter([new GroqAiProvider(new(groq.Object), config, NullLogger<GroqAiProvider>.Instance, f.Admission()),
+            new GeminiAiProvider(new(gemini.Object), config, NullLogger<GeminiAiProvider>.Instance, f.Admission())], NullLogger<AiRouter>.Instance);
+        Assert.Equal("verified", await router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "contract", "synthetic", true, default));
+        // No budget remains for this workspace: retrying does not dispatch or charge either provider again.
+        await Assert.ThrowsAsync<AiBudgetDeniedException>(() => router.ExecuteTaskAsync(AiTaskType.IntentExtraction, "contract", "synthetic", true, default));
+        groq.Protected().Verify("SendAsync", failure == "exhausted" ? Times.Never() : Times.Once(), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+        gemini.Protected().Verify("SendAsync", Times.Once(), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+        var otherPath = "ai-provider-budgets/" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("Gemini:synthetic-project")));
+        Assert.Equal(1, (await ReadBudget(f.Store, f.Path)).GetProperty("DailyRequests").GetInt64());
+        Assert.Equal(1, (await ReadBudget(f.Store, otherPath)).GetProperty("DailyRequests").GetInt64());
+    }
+
+    private static async Task<System.Text.Json.JsonElement> ReadBudget(InMemoryFirestore store, string path)
+    {
+        var json = (await store.Db.Document(path).GetSnapshotAsync()).GetValue<string>("budgetJson");
+        using var budget = System.Text.Json.JsonDocument.Parse(json); return budget.RootElement.Clone();
     }
 }
