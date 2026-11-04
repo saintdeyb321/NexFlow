@@ -1,6 +1,20 @@
 # LLM-first — Estado de continuidad
 
-## Estado vigente — guardia de reinicio sobre5d26b7, revisión local completa
+## Estado vigente — continuación de certificación sobre cb14cb6
+
+2026-11-04, America/Lima. HEAD local/origin/remoto feature **cb14cb65d485220af73a5ab1a500387d6fab7e53**; main **5f5ff850e31df3fa73cb2c7f02f65ba6081173c7** intacta,6 commits adelante. Árbol/índice/untracked iniciales vacíos. REST Actions:0 runs para cb14. El parche de manifiesto/DI/validador YA está publicado; no se repitió ni se modificó código, tests o workflows.
+
+Informe vigente: **CERTIFICACION_SHA_CB14_CONTINUACION.md**. Los16 archivos de código/tooling del parche y el índice completo de evidencias anteriores coinciden por SHA256. TRX previos revalidados (sin nueva ejecución .NET):95 dirigidas,2154/2154 vigente, histórico130/101/29 exacto, H06/4/A: ReservationEffects; build previo íntegro. No atribuir esos tests/build a CI de cb14. Ahora se ejecutaron33 pruebas Python existentes (20 runner/custodia+9 G8+4 evidencia journal),4 YAML y11 segmentos Python parseados; PowerShell syntaxPASS. Nuevos metadatos/logs en `backend/TestResults/LlmFirstCb14Continuation_20261104/`, anteriores intactos. Build y suites C# NOT_RUN: auditoría sin parche de código.
+
+Holdout/rúbrica siguen rastreados y EXPOSED, confirmados sólo por metadatos; NO abiertos, leídos, copiados, hasheados ni retirados. Procedimiento owner-only: respaldo con script existente, confirmar integridad/ACL y autorización, luego **git rm --cached** de las dos rutas para mantener copias locales. Sustituye el git rm sin --cached de la documentación histórica; no reescribir historia. No ejecutado. Reemplazo nuevo privado por evaluador independiente PENDIENTE.
+
+No bypass nuevo encontrado en las rutas del encargo. Riesgo de pérdida de TODAS las fuentes de identidad y rollback antiguo requiere admisión externa; constancias O01–O10 preparadas y todas **BLOCKED_OPERATOR_ATTESTATION**. Ningún acceso al destino. Cuatro workflows deben certificar el mismo SHA final, journal con EmulatorOnly y método exacto PASS; ARM64 sin retención de imagen salvo autorización de cuota/coste.
+
+Ensayo real BLOCKED: sin nuevo holdout/autorización/modelos/cuotas. Limitación de evidencia del arnés señalada: live report registra acto/texto/booleanos/HTTP pero no herramientas/hechos/snapshots completos (`AgentLiveEvaluationTests.cs:54–67`). Cerrar captura aislada verificable antes del primer gasto; no fingir que existe, no reescribir el agente.0 llamadas IA/WhatsApp. P0 histórico ABIERTO.
+
+OFFLINE_GO=GO sólo revisión/congelación; PROVIDER_EVAL_GO=NO_GO/BLOCKED; DEMO_DEPLOY_GO=NO_GO/BLOCKED_OPERATOR_ATTESTATION; COMMERCIAL_GO=NO_GO. Cambios de esta sesión:3 documentos únicamente. Diff checkPASS, índice sin cambios; no commit/push/dispatch/despliegue/migración/Oracle. Próximo paso exacto del propietario: revisar paquete, autorizar custodia y retirada del índice, publicar sólo lo aprobado y congelar SHA; autorizar/iniciar cuatro CI de ese SHA. Atestación y ensayo son aprobaciones separadas. **Detenido, sin nueva fase.**
+
+## Registro anterior — guardia de reinicio sobre5d26b7, antes de publicar cb14cb6
 
 2026-11-03. HEAD local/origin/remoto feature **5d26b7c73e7ed46823bf49f45e3bbeecb5b9bdc5**; main **5f5ff850e31df3fa73cb2c7f02f65ba6081173c7** intacta,5 commits de diferencia. REST Actions filtrado por5d26b7: **0 runs**. Índice inicial vacío; especificación del propietario untracked conservada. El singleton de la revisión anterior YA estaba publicado; no se repitió ese parche.
 
