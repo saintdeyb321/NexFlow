@@ -51,6 +51,7 @@ public enum AgentOpening { None, Warm, Acknowledge }
 public enum AgentNextQuestion { Information, Service, Location, HumanHelp }
 public sealed record AgentNarrative(AgentOpening Opening = AgentOpening.None, AgentNextQuestion? NextQuestion = null);
 public enum AgentReadKind { Services, Products, Locations, Profile, Hours }
+public enum AgentHandoffState { None, Requested, Persisted, Notified, Completed }
 public sealed record AgentToolCall(AgentReadKind Kind, string? Search = null, string? LocationId = null);
 public sealed record AgentToolResult(int Index, BusinessReadStatus Status, string Source, IReadOnlyList<VerifiedFact> Facts);
 public sealed record AgentProposal(AgentDecision Decision, string Evidence, string CandidateResponse,
@@ -58,7 +59,8 @@ public sealed record AgentProposal(AgentDecision Decision, string Evidence, stri
     AgentConversationPlan? Conversation = null);
 public sealed record AgentTurnResult(bool Accepted, string Outcome, AgentProposal? Proposal, IReadOnlyList<AgentToolResult> Reads,
     int ModelCalls, long ElapsedMilliseconds, AiFailureKind Failure = AiFailureKind.None,
-    string? VerifiedText = null, bool Recovered = false, string? StatusExplanation = null, IReadOnlyList<string>? RequiredModules = null, int ToolCalls = 0)
+    string? VerifiedText = null, bool Recovered = false, string? StatusExplanation = null, IReadOnlyList<string>? RequiredModules = null, int ToolCalls = 0,
+    AgentHandoffState Handoff = AgentHandoffState.None)
 {
     // Free wording is evaluated, never certified by another LLM or sent to a consumer.
     public bool Publishable => !string.IsNullOrWhiteSpace(VerifiedText);

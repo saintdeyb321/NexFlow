@@ -37,6 +37,7 @@ public class OutboundMessageService : IOutboundMessageService
     private static string GetKey(Guid workspaceId, SenderType sender, string source) => $"{workspaceId:N}:{sender}:{source}:response:1";
     private static string GetDocumentKey(Guid workspaceId, string source, string scope) => $"{workspaceId:N}:{SenderType.AI}:{source}:response:document:{scope}:1";
     private static string GetId(string key) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
+    public static string ResponseId(Guid workspace, SenderType sender, string source) => GetId(GetKey(workspace, sender, source));
 
     public async Task<bool> TryResumeResponseAsync(Guid workspaceId, string sourceInboundMessageId, CancellationToken ct)
     {

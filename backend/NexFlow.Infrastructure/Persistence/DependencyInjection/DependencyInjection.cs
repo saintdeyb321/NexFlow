@@ -2,6 +2,7 @@ using Google.Cloud.Firestore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NexFlow.Application.Abstractions;
 using NexFlow.Application.Abstractions.Cache;
 using NexFlow.Application.Abstractions.Integrations;
@@ -26,8 +27,11 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        services.TryAddScoped<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>(p => NexFlow.Application.Features.Automation.Agent.AgentDemoPolicy.Live(
+            p.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<NexFlow.Application.Features.Automation.Agent.AgentDemoOptions>>()));
         // 1. Base de Datos Relacional
-        services.AddDbContext<NexFlowDbContext>(options => options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
+        services.AddDbContext<NexFlowDbContext>((provider, options) => options.UseNpgsql(configuration.GetConnectionString("DefaultConnection"))
+            .AddInterceptors(new DemoReservationWriteInterceptor(provider.GetRequiredService<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>())));
         services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<NexFlowDbContext>());
 
         // 2. Repositorios (PostgreSQL)
@@ -90,6 +94,7 @@ public static class DependencyInjection
         services.AddOptions<AiQuotaOptions>().Bind(configuration.GetSection("AiQuota"));
         services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentShadowOptions>().Bind(configuration.GetSection("AgentShadow"));
         services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentDialogueOptions>().Bind(configuration.GetSection("AgentDialogue"));
+        services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentDemoOptions>().Bind(configuration.GetSection("AgentDemo"));
         services.AddScoped<IAiRequestAdmission, FirestoreAiRequestAdmission>();
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();
@@ -118,7 +123,9 @@ public static class DependencyInjection
         services.AddHttpClient<IEvolutionConnectionService, EvolutionConnectionService>().RedactLoggedHeaders(static _ => true);
 
         //notificacion
-        services.AddScoped<IOrderRepository, FirestoreOrderRepository>();
+        services.AddScoped<FirestoreOrderRepository>();
+        services.AddScoped<IOrderRepository>(p => new NexFlow.Application.Features.Automation.Agent.DemoOrderRepository(
+            p.GetRequiredService<FirestoreOrderRepository>(), p.GetRequiredService<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>()));
 
         services.AddScoped<INotificationRepository, NotificationRepository>();
 

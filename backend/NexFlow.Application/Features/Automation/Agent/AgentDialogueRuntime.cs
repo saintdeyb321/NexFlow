@@ -8,10 +8,11 @@ namespace NexFlow.Application.Features.Automation.Agent;
 
 public sealed class AgentDialogueRuntime(LlmFirstShadowAgent planner, IAgentTurnJournal journal,
     IContextRecoveryService contexts, IConversationRepository conversations, IEntitlementService entitlements,
-    IClock clock, IOptions<AgentDialogueOptions> options, IAgentBookingDrafts? drafts = null) : IExperimentalAgentRuntime
+    IClock clock, IOptions<AgentDialogueOptions> options, IAgentBookingDrafts? drafts = null, IAgentDemoPolicy? demo = null) : IExperimentalAgentRuntime
 {
-    public bool Handles(Guid workspace) => options.Value.Enabled && workspace != Guid.Empty
-        && workspace == options.Value.SyntheticWorkspaceId && AgentExperimentScope.Current?.Workspace == workspace;
+    public bool Handles(Guid workspace) => workspace != Guid.Empty && (options.Value.Enabled
+        && workspace == options.Value.SyntheticWorkspaceId && AgentExperimentScope.Current?.Workspace == workspace
+        || AgentDemoScope.Current is { } authorized && authorized.Workspace == workspace && demo?.Allows(workspace, authorized.Instance, authorized.Phone) == true);
 
     public async Task<AgentTurnResult> HandleAsync(AgentTurnRequest request, CancellationToken ct)
     {

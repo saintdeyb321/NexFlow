@@ -32,7 +32,10 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         // 1. Registrar Servicios de Dominio y Motores
-        services.AddScoped<IReservationEngine, NexFlow.Application.Engines.Reservation.ReservationEngine>();
+        services.AddScoped<NexFlow.Application.Engines.Reservation.ReservationEngine>();
+        services.AddScoped<IAgentDemoPolicy>(p => AgentDemoPolicy.Live(p.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AgentDemoOptions>>()));
+        services.AddOptions<AgentDemoOptions>();
+        services.AddScoped<IReservationEngine>(p => new DemoReservationEngine(p.GetRequiredService<NexFlow.Application.Engines.Reservation.ReservationEngine>(), p.GetRequiredService<IAgentDemoPolicy>()));
         services.AddScoped<IEntitlementService, EntitlementService>();
 
         // 2. Registrar Handlers de Casos de Uso (Commands/Queries)
@@ -76,6 +79,7 @@ public static class DependencyInjection
         services.AddScoped<IAgentBookingDrafts, AgentBookingDrafts>();
         services.AddScoped<LlmFirstShadowAgent>();
         services.AddScoped<IExperimentalAgentRuntime, AgentDialogueRuntime>();
+        services.AddScoped<IAgentDemoChannel, AgentDemoChannel>();
         services.AddScoped<IConversationalAgent, AgentOwner>();
         services.AddScoped<IOfferingService, OfferingService>();
         services.AddScoped<IAiInterpreter, AiInterpreter>();

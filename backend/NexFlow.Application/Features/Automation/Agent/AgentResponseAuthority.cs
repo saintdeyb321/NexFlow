@@ -21,6 +21,9 @@ public static class AgentResponseAuthority
         var plan = proposal.Proposal;
         if (plan.Conversation is { } conversation && (!Enum.IsDefined(conversation.Goal) || !Enum.IsDefined(conversation.Speech)
             || conversation.Need?.Length > 200 || conversation.References?.Length > 5)) return (AgentSafeReplies.Failure("ConversationPlanRejected"), null);
+        if (plan.Conversation?.References?.Any(r => r.ReadIndex < 0 || r.ReadIndex >= proposal.Reads.Count
+            || !(plan.FactReferences ?? []).Contains(r.ReadIndex) || !proposal.Reads[r.ReadIndex].Facts.Any(f => f.EntityId == r.EntityId)) == true)
+            return (AgentSafeReplies.Failure("FactReferenceRejected"), null);
         if (plan.Conversation?.NeedsClarification == true || plan.Decision == AgentDecision.PrepareReservation
             && plan.Conversation is { Goal: not AgentCommunicativeGoal.BookingPreparation }) plan = plan with { Decision = AgentDecision.Clarify };
         if (plan.Narrative is { } narrative && (!Enum.IsDefined(narrative.Opening)
@@ -77,7 +80,7 @@ public static class AgentResponseAuthority
                     return (AgentSafeReplies.Failure("DiscardDecisionRejected"), null);
                 next.PendingRecoveryAction = null; text = "Conservamos tu preparación. ¿Qué te gustaría consultar o ajustar?"; break;
             case AgentDecision.HumanAssistance:
-                next.Mode = "Human"; next.HandoffAt = now; next.HandoffReason = "CustomerRequested";
+                next.Mode = "Human"; next.HandoffAt = now; next.HandoffReason = "AgentHandoffRequested";
                 if (next.PendingRecoveryAction is "AGENT_CANCEL_SCOPE" or "AGENT_CANCEL_CONFIRM") next.PendingRecoveryAction = null;
                 text = "Puedes recibir ayuda de una persona del negocio. Conservamos lo que estabas preparando."; break;
             default:
@@ -88,7 +91,7 @@ public static class AgentResponseAuthority
                     if (index < 0 || index >= proposal.Reads.Count) return (AgentSafeReplies.Failure("FactReferenceRejected"), null);
                     var read = proposal.Reads[index];
                     if (read.Status != BusinessReadStatus.Found) return (AgentSafeReplies.Failure("ReadUnavailable"), null);
-                    var selected = SelectFacts(plan, read); var block = selected == null ? null : Facts(selected);
+                    var selected = SelectFacts(plan, read); var block = selected == null ? null : Facts(selected, plan.Conversation?.Speech == AgentSpeechAct.Orient);
                     if (block == null) return (AgentSafeReplies.Failure("UnsafeFactShape"), null);
                     paragraphs.Add(block);
                 }
@@ -100,12 +103,12 @@ public static class AgentResponseAuthority
                 keepQuestion = origin.PendingRecoveryAction is "AGENT_CANCEL_SCOPE" or "AGENT_CANCEL_CONFIRM";
                 if (!keepQuestion && plan.Conversation is { Speech: AgentSpeechAct.Orient, Goal: AgentCommunicativeGoal.Information or AgentCommunicativeGoal.Clarification }
                     && refs.Length == 1 && proposal.Reads[refs[0]] is { Source: "Services" or "Locations" } offered) {
-                    var names = offered.Facts.Where(f => (f.Key is "Offering" or "LocationName") && f.EntityId != null).Take(5).ToArray();
+                    var names = SelectFacts(plan, offered)!.Facts.Where(f => (f.Key is "Offering" or "LocationName") && f.EntityId != null).Take(5).ToArray();
                     if (names.Length > 0) {
                         next.RecoveryOptions = names.Select(f => new ConversationMenuOption(f.EntityId!, f.Value,
                             offered.Source == "Services" ? "AGENT_SERVICE" : "AGENT_LOCATION")).ToList();
                         next.RecoveryOptionsContext = "AGENT_OPTIONS"; expected = ExpectedReply.Selection;
-                        text = string.Join("\n\n", paragraphs) + "\n\n" + Choices(next.RecoveryOptions) + "\n\n¿Sobre cuál te gustaría continuar?";
+                        text = string.Join("\n\n", paragraphs) + "\n\n¿Sobre cuál te gustaría continuar?";
                     }
                 }
                 break;
@@ -128,7 +131,8 @@ public static class AgentResponseAuthority
         var required = proposal.Reads.Where((_, i) => (plan.FactReferences ?? []).Contains(i)).Select(r => r.Source switch {
             "Services" => "SERVICES", "Products" => "CATALOG", "Locations" => "LOCATIONS", "BusinessHours" => "BUSINESS_HOURS", _ => ""
         }).Where(s => s.Length > 0).Distinct();
-        return (proposal with { Proposal = sanitized, Reads = [], VerifiedText = text, RequiredModules = required.ToArray() }, next);
+        return (proposal with { Proposal = sanitized, Reads = [], VerifiedText = text, RequiredModules = required.ToArray(),
+            Handoff = plan.Decision == AgentDecision.HumanAssistance ? AgentHandoffState.Requested : AgentHandoffState.None }, next);
     }
 
     public static string FailureText(string outcome) => outcome switch {
@@ -163,7 +167,7 @@ public static class AgentResponseAuthority
         _ => booking ? "¿Qué servicio necesitas para tu cita?" : "¿Qué te gustaría consultar ahora?"
     };
     private static bool Label(string value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 160 && !value.Any(char.IsControl);
-    private static string? Facts(AgentToolResult read)
+    private static string? Facts(AgentToolResult read, bool numbered = false)
     {
         if (read.Facts.Any(f => f.Source != VerifiedFactSource.BusinessRepository || f.Sensitive)) return null;
         if (read.Source is "Services" or "Products") {
@@ -173,7 +177,7 @@ public static class AgentResponseAuthority
                 if (group.Key == null || names.Length != 1 || prices.Length != 1 || currencies.Length != 1 || !Label(names[0].Value)
                     || !long.TryParse(prices[0].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var price) || price < 0
                     || currencies[0].Value.Length != 3 || !currencies[0].Value.All(char.IsAsciiLetter)) return null;
-                blocks.Add("«" + names[0].Value + "»\n" + OfferingResponseFormatter.Money(currencies[0].Value, price));
+                blocks.Add((numbered ? (blocks.Count + 1) + ". " : "") + "«" + names[0].Value + "»\n" + OfferingResponseFormatter.Money(currencies[0].Value, price));
             }
             return blocks.Count is > 0 and <= 5 ? string.Join("\n\n", blocks)
                 + (read.Source == "Products" ? "\nFigurar en el catálogo no confirma stock físico; el negocio debe verificarlo." : "\nSon opciones de catálogo; no es un diagnóstico ni confirma disponibilidad para una cita.") : null;
@@ -181,7 +185,7 @@ public static class AgentResponseAuthority
         if (read.Source is "Profile" or "Locations") {
             var key = read.Source == "Profile" ? "BusinessName" : "LocationName";
             var values = read.Facts.Where(f => f.Key == key).ToArray();
-            return values.Length is > 0 and <= 5 && values.All(f => Label(f.Value)) ? "Información registrada:\n" + string.Join("\n", values.Select(f => "• «" + f.Value + "»")) : null;
+            return values.Length is > 0 and <= 5 && values.All(f => Label(f.Value)) ? "Información registrada:\n" + string.Join("\n", values.Select((f, i) => (numbered ? (i + 1) + ". " : "• ") + "«" + f.Value + "»")) : null;
         }
         if (read.Source == "BusinessHours" && read.Facts.Count == 1 && read.Facts[0].Key == "BusinessHours"
             && read.Facts[0].Value.Length <= 1500) return "Horario registrado por el negocio:\n" + read.Facts[0].Value;

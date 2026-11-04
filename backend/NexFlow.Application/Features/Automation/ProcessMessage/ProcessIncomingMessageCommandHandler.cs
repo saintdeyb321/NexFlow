@@ -26,6 +26,8 @@ public class ProcessIncomingMessageCommandHandler
     private readonly ILogger<ProcessIncomingMessageCommandHandler> _logger;
     private readonly IClock? _clock;
     private readonly IExperimentalAgentRuntime? _experiment;
+    private readonly IAgentDemoPolicy? _demoPolicy;
+    private readonly IAgentDemoChannel? _demoChannel;
 
     public ProcessIncomingMessageCommandHandler(
         IIncomingMessageGuard guard,
@@ -36,7 +38,8 @@ public class ProcessIncomingMessageCommandHandler
         ILogger<ProcessIncomingMessageCommandHandler> logger,
         IContextRecoveryService contextRecovery,
         ILocationRepository locationRepo,
-        IEntitlementService entitlementService, IClock? clock = null, IExperimentalAgentRuntime? experiment = null)
+        IEntitlementService entitlementService, IClock? clock = null, IExperimentalAgentRuntime? experiment = null,
+        IAgentDemoPolicy? demoPolicy = null, IAgentDemoChannel? demoChannel = null)
     {
         _guard = guard;
         _stateService = stateService;
@@ -49,6 +52,7 @@ public class ProcessIncomingMessageCommandHandler
         _entitlementService = entitlementService;
         _clock = clock;
         _experiment = experiment;
+        _demoPolicy = demoPolicy; _demoChannel = demoChannel;
     }
 
     public Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
@@ -61,7 +65,14 @@ public class ProcessIncomingMessageCommandHandler
         // Reactions/key/protocol events are durable input, not consumer questions or human takeovers.
         if (request.Kind == IncomingMessageKind.Control) { Trace("ControlEvent", guardResult.WorkspaceId); return Result.Success(); }
 
-        if (!request.FromMe && await _outboundMessageService.TryResumeResponseAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken))
+        var protectedDemo = !request.FromMe && _demoPolicy?.Protects(guardResult.WorkspaceId) == true;
+        if (protectedDemo) {
+            if (_demoPolicy?.Allows(guardResult.WorkspaceId, request.InstanceName, guardResult.NormalizedPhone) != true) return Result.Success();
+            if (_demoChannel == null) throw new InvalidOperationException("DEMO channel is unavailable; legacy fallback is forbidden.");
+            var recovered = await _demoChannel.ResumeAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
+            if (recovered != null) { EnsureOutboundFinalized(recovered); return Result.Success(); }
+        }
+        if (!request.FromMe && !protectedDemo && await _outboundMessageService.TryResumeResponseAsync(guardResult.WorkspaceId, request.MessageId, cancellationToken))
         {
             Trace("ExistingDurableResponse", guardResult.WorkspaceId);
             return Result.Success();
@@ -69,6 +80,14 @@ public class ProcessIncomingMessageCommandHandler
 
         var stateResult = await _stateService.ProcessStateAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken);
         Trace(stateResult.Record.Mode == ConversationMode.Human ? "HumanControl" : stateResult.ShouldAiRespond ? "AutomaticResponseRequired" : "NoAutomaticResponse", guardResult.WorkspaceId);
+
+        if (protectedDemo && request.Kind == IncomingMessageKind.Text) {
+            if (stateResult.ShouldAiRespond && stateResult.Record.Mode == ConversationMode.Automatic) {
+                var response = await _aiOrchestrator.RespondAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, stateResult.Record, cancellationToken);
+                EnsureOutboundFinalized(response);
+            }
+            return Result.Success();
+        }
 
         if (!request.FromMe && request.Kind == IncomingMessageKind.Text && stateResult.ShouldAiRespond
             && stateResult.Record.Mode == ConversationMode.Automatic && _experiment?.Handles(guardResult.WorkspaceId) == true)

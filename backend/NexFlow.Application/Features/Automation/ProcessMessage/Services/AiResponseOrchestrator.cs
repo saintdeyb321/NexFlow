@@ -39,6 +39,7 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
     private readonly ConversationFocusService? _focus;
     private readonly AssistantRecoveryOptions _settings;
     private readonly IExperimentalAgentRuntime? _experiment;
+    private readonly IAgentDemoChannel? _demo;
 
     public AiResponseOrchestrator(
         ITurnUnderstandingPipeline understanding, IEntitlementService entitlementService,
@@ -46,10 +47,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         IContextRecoveryService contextRecovery, IOutboundMessageService outboundMessageService,
         ILogger<AiResponseOrchestrator> logger, IResponseComposer composer, IConversationRecoveryService? recovery = null, IClock? clock = null,
         IExistingReservationFlow? existingReservations = null, ConversationFocusService? focus = null, IOptions<AssistantRecoveryOptions>? settings = null,
-        IExperimentalAgentRuntime? experiment = null)
+        IExperimentalAgentRuntime? experiment = null, IAgentDemoChannel? demo = null)
     {
         _settings = settings?.Value ?? new();
         _experiment = experiment;
+        _demo = demo;
         _understanding = understanding; _entitlementService = entitlementService;
         _bookingFlow = bookingFlow; _requestFlow = requestFlow; _orderFlow = orderFlow;
         _supportFlow = supportFlow; _chatFlow = chatFlow;
@@ -76,6 +78,11 @@ public sealed class AiResponseOrchestrator : IAiResponseOrchestrator
         if (context.Mode == "Human" || conversation.Mode == ConversationMode.Human)
             throw new ConcurrencyException("Conversation is under human control; reload its state before processing.");
         var activeModules = _settings.EffectiveModules(workspaceId, await _entitlementService.GetAvailableModuleCodesAsync(workspaceId, cancellationToken));
+
+        // A kill/revocation between ingress and orchestration must fail closed,
+        // never fall through to legacy recovery or linguistic decisions.
+        if (_demo?.Protects(workspaceId) == true)
+            return await _demo.RespondAsync(workspaceId, normalizedPhone, request, conversation, cancellationToken);
 
         var recoveredOrder = await _orderFlow.TryResumeAsync(workspaceId,normalizedPhone,conversation.Id,request.MessageId,context,cancellationToken);
         if (recoveredOrder != null)

@@ -50,7 +50,7 @@ Redacta breve y cordial, una pregunta útil por turno; evita jerga y reinicios d
         }
         if (request.WorkspaceId == Guid.Empty || (owned == null
             ? !options.Value.Enabled || request.WorkspaceId != options.Value.SyntheticWorkspaceId
-            : AgentExperimentScope.Current?.Workspace != request.WorkspaceId || clock.UtcNow >= owned.Deadline))
+            : !OwnedScope(request) || clock.UtcNow >= owned.Deadline))
             return Reject("ShadowDisabled");
         if (string.IsNullOrWhiteSpace(request.Text) || request.Text.Length > 2000 || string.IsNullOrWhiteSpace(request.SourceMessageId)
             || request.SourceMessageId.Length > 200 || string.IsNullOrWhiteSpace(request.ClientKey) || string.IsNullOrWhiteSpace(request.ConversationId))
@@ -139,7 +139,7 @@ No afirmes que una cita está registrada, que contactaste a un humano o que se v
             async Task<bool> Current()
             {
                 if (owned == null ? !options.Value.Enabled || options.Value.SyntheticWorkspaceId != request.WorkspaceId
-                    : AgentExperimentScope.Current?.Workspace != request.WorkspaceId || clock.UtcNow >= owned.Deadline) return false;
+                    : !OwnedScope(request) || clock.UtcNow >= owned.Deadline) return false;
                 var latest = await contexts.GetOrRecoverContextAsync(request.WorkspaceId, request.ClientKey, token).WaitAsync(token);
                 var currentConversation = await conversations.GetConversationAsync(request.WorkspaceId, request.ConversationId, token).WaitAsync(token);
                 return latest.Mode != "Human" && latest.StateVersion == snapshot.StateVersion
@@ -167,4 +167,6 @@ No afirmes que una cita está registrada, que contactaste a un humano o que se v
             return Reject(outcome, failure);
         }
     }
+    private static bool OwnedScope(AgentTurnRequest r) => AgentExperimentScope.Current?.Workspace == r.WorkspaceId
+        || AgentDemoScope.Current is { } scope && scope.Workspace == r.WorkspaceId && scope.Phone == r.ClientKey;
 }

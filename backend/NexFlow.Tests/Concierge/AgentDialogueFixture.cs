@@ -10,6 +10,10 @@ using NexFlow.Application.Features.Automation.Conversations;
 using NexFlow.Application.Features.Knowledge;
 using NexFlow.Infrastructure.Persistence.Firestore;
 using NexFlow.Domain.Enums;
+using NexFlow.Application.Abstractions.Integrations;
+using NexFlow.Application.Features.Notifications;
+using NexFlow.Application.Features.Automation.ProcessMessage.Services;
+using Google.Cloud.Firestore;
 
 namespace NexFlow.Tests.Concierge;
 
@@ -30,11 +34,21 @@ internal sealed class AgentDialogueFixture
     public IClock Clock { get; private set; } = null!;
     public AgentShadowOptions ShadowOptions { get; } = new();
     private readonly IAiRouter? _external;
+    private readonly bool _demoMode;
+    public AgentDemoOptions DemoOptions { get; } = new();
+    public AgentDemoPolicy DemoPolicy { get; }
+    public FirestoreConversationRepository? DemoRepository { get; private set; }
+    public IAgentDemoChannel? DemoChannel { get; private set; }
+    public int WireCalls { get; private set; }
+    public List<string> WireTexts { get; } = [];
+    public bool FailAfterWire { get; set; }
+    public Func<Task>? BeforeWire { get; set; }
 
-    public AgentDialogueFixture(IAiRouter? external = null)
+    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false)
     {
-        _external = external;
-        Business = new(conciergeCatalog: true, intelligentCommerce: true, experimentFactory: Configure);
+        _external = external; _demoMode = demoChannel; DemoPolicy = new(Microsoft.Extensions.Options.Options.Create(DemoOptions));
+        Business = new(conciergeCatalog: true, intelligentCommerce: true, experimentFactory: Configure,
+            demoFactory: demoChannel ? ConfigureChannel : null, demoPolicy: demoChannel ? DemoPolicy : null);
         Business.Now = new(2026, 11, 3, 15, 0, 0, DateTimeKind.Utc);
         Business.Services[0].Name = "Evaluación odontológica"; Business.Services[0].PriceMinorUnits = 6000;
         Business.Services[1].Name = "Extracción dental"; Business.Services[1].PriceMinorUnits = 9000;
@@ -56,6 +70,17 @@ internal sealed class AgentDialogueFixture
     {
         Options.SyntheticWorkspaceId = f.Workspace;
         var clock = new Mock<IClock>(); clock.SetupGet(c => c.UtcNow).Returns(() => f.Now); Clock = clock.Object;
+        if (_demoMode) {
+            Options.Enabled = false; DemoOptions.Enabled = true; DemoOptions.WorkspaceId = f.Workspace;
+            DemoOptions.InstanceName = "instance"; DemoOptions.TestPhones = [AssistantConversationTests.Fixture.Phone];
+            DemoOptions.OperatorAuthorization = "SYNTHETIC_DEMO_NO_COMMERCIAL_WRITES";
+            f.Firestore.Seed($"workspaces/{f.Workspace}/conversations/chat", new Dictionary<string, Google.Cloud.Firestore.V1.Value> {
+                ["consumerPhone"] = new() { StringValue = AssistantConversationTests.Fixture.Phone }, ["channel"] = new() { StringValue = "whatsapp" },
+                ["mode"] = new() { StringValue = "Automatic" }, ["status"] = new() { StringValue = "open" },
+                ["startedAt"] = new() { TimestampValue = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow) },
+                ["lastMessageAt"] = new() { TimestampValue = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow) } });
+            DemoRepository = new(f.Firestore.Db);
+        }
         Conversations.Setup(c => c.GetConversationAsync(f.Workspace, "chat", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ConversationRecord { Id = "chat", ConsumerPhone = AssistantConversationTests.Fixture.Phone, Mode = ConversationMode.Automatic });
         Conversations.Setup(c => c.HasUnconfirmedOutboundAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<CancellationToken>())).ReturnsAsync(false);
@@ -68,15 +93,29 @@ internal sealed class AgentDialogueFixture
                 return JsonSerializer.Serialize(Script.Dequeue()(json.RootElement), new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } });
             });
         Shadow = new(Router.Object, new AgentReadTools(new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object)),
-            f.Contexts, Conversations.Object, f.EntitlementReads.Object, f.Recovery, Clock, Microsoft.Extensions.Options.Options.Create(ShadowOptions),
+            f.Contexts, DemoRepository ?? (IConversationRepository)Conversations.Object, f.EntitlementReads.Object, f.Recovery, Clock, Microsoft.Extensions.Options.Options.Create(ShadowOptions),
             new FirestoreAgentEvaluationClaims(f.Firestore.Db, Clock));
         Journal = new(f.Firestore.Db, Clock);
-        Runtime = new(Shadow, Journal, f.Contexts, Conversations.Object, f.EntitlementReads.Object, Clock, Microsoft.Extensions.Options.Options.Create(Options),
+        Runtime = new(Shadow, Journal, f.Contexts, DemoRepository ?? (IConversationRepository)Conversations.Object, f.EntitlementReads.Object, Clock, Microsoft.Extensions.Options.Options.Create(Options),
             new AgentBookingDrafts(new NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver(f.EntitlementReads.Object,
                 f.ProfileReads.Object, f.LocationReads.Object, f.OfferingReads.Object, Clock, new(), new(), new(), new(), new(),
                 NullLogger<NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver>.Instance),
-                f.OfferingReads.Object, f.EntitlementReads.Object, new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object, f.EngineReads.Object), Clock));
+                f.OfferingReads.Object, f.EntitlementReads.Object, new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object, f.EngineReads.Object), Clock), _demoMode ? DemoPolicy : null);
         return Runtime;
+    }
+    private IAgentDemoChannel ConfigureChannel(AssistantConversationTests.Fixture f)
+    {
+        var gateway = new Mock<IMessageGateway>(MockBehavior.Strict);
+        gateway.Setup(g => g.SendTextAsync(f.Workspace, AssistantConversationTests.Fixture.Phone, It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid _, string _, string content, string _, Func<CancellationToken, Task> starting, CancellationToken ct) => {
+                if (BeforeWire != null) await BeforeWire(); await starting(ct); WireCalls++; WireTexts.Add(content);
+                if (FailAfterWire) throw new TimeoutException("Synthetic uncertain transport"); return "synthetic-provider-" + WireCalls;
+            });
+        var outbound = new OutboundMessageService(DemoRepository!, gateway.Object, Mock.Of<INotificationService>(), NullLogger<OutboundMessageService>.Instance);
+        DemoChannel = new AgentDemoChannel(DemoPolicy, Runtime, Journal, DemoRepository!, f.Contexts, f.EntitlementReads.Object,
+            outbound, new HumanHandoffService(DemoRepository!, f.Contexts));
+        return DemoChannel;
     }
     public AgentTurnRequest Request(string text, string source) => new(Business.Workspace, "chat", AssistantConversationTests.Fixture.Phone, source, text);
     public void Plan(string text, AgentDecision decision, AgentReadKind? read = null, string? search = null, AgentConversationPlan? conversation = null)

@@ -15,7 +15,7 @@ public sealed class FirestoreAgentTurnJournal(FirestoreDb db, IClock clock) : IA
 {
     private sealed record Stored(int Version, string Fingerprint, string Fence, AgentJournalStatus Status,
         string? OriginVersion, string OriginFingerprint, string? AppliedVersion, DateTime Deadline,
-        DateTime RetainUntil, AgentTurnResult? Result);
+        DateTime RetainUntil, AgentTurnResult? Result, bool PayloadCleared = false);
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static string Identity(AgentTurnRequest r) => Hash(JsonSerializer.Serialize(new { r.WorkspaceId, r.ConversationId, r.SourceMessageId, r.ClientKey, r.Text }));
     private DocumentReference Reference(AgentTurnRequest r) => db.Collection("workspaces").Document(r.WorkspaceId.ToString())
@@ -29,6 +29,32 @@ public sealed class FirestoreAgentTurnJournal(FirestoreDb db, IClock clock) : IA
     private static AgentJournalEntry View(Stored value, bool owned = false) => new(value.Status,
         owned ? new("", value.Fingerprint, value.Fence, value.OriginVersion, value.OriginFingerprint, value.Deadline) : null,
         value.Result, value.AppliedVersion ?? value.OriginVersion);
+
+    // Trusted maintenance entry, no worker/API or automatic real-store invocation.
+    // Bounded scan also covers older receipts without a newly indexed TTL field.
+    public async Task<(int Cleared, string? NextCursor)> CompactBatchAsync(Guid workspace, string? cursor, int limit, CancellationToken ct)
+    {
+        if (workspace == Guid.Empty || AgentExperimentScope.Current?.Workspace != workspace || limit is < 1 or > 100
+            || cursor != null && (cursor.Length != 64 || !cursor.All(char.IsAsciiHexDigit)))
+            throw new ArgumentException("Only scoped synthetic journal maintenance is allowed.");
+        Query query = db.Collection("workspaces").Document(workspace.ToString()).Collection("agentTurnResults").OrderBy(FieldPath.DocumentId);
+        if (cursor != null) query = query.StartAfter(cursor);
+        var page = await query.Limit(limit).GetSnapshotAsync(ct); var cleared = 0;
+        foreach (var document in page.Documents) {
+            var changed = await db.RunTransactionAsync(async tx => {
+                var current = await tx.GetSnapshotAsync(document.Reference, ct); if (!current.Exists) return false;
+                var value = Load(current);
+                if (value.PayloadCleared || value.Status == AgentJournalStatus.Started && clock.UtcNow < value.Deadline
+                    || value.Status != AgentJournalStatus.Started && clock.UtcNow < value.RetainUntil) return false;
+                // Preserve identity/fence and the claim forever; no replay re-admission.
+                tx.Set(document.Reference, Fields(value with { Status = AgentJournalStatus.Failed, PayloadCleared = true,
+                    Result = AgentSafeReplies.Failure(value.Status == AgentJournalStatus.Started ? "Abandoned" : "ResultExpired") }));
+                return true;
+            }, cancellationToken: ct);
+            if (changed) cleared++;
+        }
+        return (cleared, page.Documents.Count == limit ? page.Documents.Last().Id : null);
+    }
 
     public Task<AgentJournalEntry> ObserveAsync(AgentTurnRequest request, CancellationToken ct)
         => db.RunTransactionAsync(async tx => {
