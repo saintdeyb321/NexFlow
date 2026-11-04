@@ -26,6 +26,7 @@ public sealed class AgentDemoSafetyTests
             OperatorAuthorization = "SYNTHETIC_DEMO_NO_COMMERCIAL_WRITES", TestPhones = ["+51999999999"] };
         var monitor = new Mock<IOptionsMonitor<AgentDemoOptions>>(); monitor.SetupGet(m => m.CurrentValue).Returns(() => current);
         var services = new ServiceCollection().AddApplication(); services.AddSingleton(monitor.Object);
+        services.AddSingleton(new AgentProtectionIdentity(workspace, Guid.NewGuid(), new string('A', 64)));
         using var provider = services.BuildServiceProvider();
         IAgentDemoPolicy original;
         using (var first = provider.CreateScope()) {
@@ -53,6 +54,7 @@ public sealed class AgentDemoSafetyTests
         var monitor = new Mock<IOptionsMonitor<AgentDemoOptions>>();
         monitor.SetupGet(m => m.CurrentValue).Returns(() => current);
         var services = new ServiceCollection().AddApplication();
+        services.AddSingleton(new AgentProtectionIdentity(workspace, Guid.NewGuid(), new string('A', 64)));
         services.AddSingleton(Options.Create(current)); services.AddSingleton(monitor.Object);
         using var provider = services.BuildServiceProvider(); using var scope = provider.CreateScope();
         var policy = scope.ServiceProvider.GetRequiredService<IAgentDemoPolicy>();

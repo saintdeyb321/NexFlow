@@ -25,7 +25,10 @@ class EvaluationPreflightTests(unittest.TestCase):
     def test_live_requires_explicit_authorization_before_creating_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "output"
-            result = self.invoke("--live", "--sha256", hashlib.sha256(CORPUS.read_bytes()).hexdigest(), "--output", str(target))
+            corpus = Path(directory) / "synthetic.json"
+            corpus.write_text(json.dumps({"Provenance": "synthetic protocol fixture", "Conversations": [{"Id": "synthetic", "Turns": []}]}))
+            result = self.invoke("--live", "--corpus", str(corpus), "--sha256", hashlib.sha256(corpus.read_bytes()).hexdigest(), "--output", str(target),
+                "--case", "synthetic", "--max-http", "2", "--max-token-reservation", "4096")
             self.assertEqual(2, result.returncode)
             self.assertIn("explicit live authorization", result.stderr)
             self.assertFalse(target.exists())
@@ -57,14 +60,14 @@ class LiveEvidenceContractTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         spec = importlib.util.spec_from_file_location("llm_evaluate", RUNNER)
         self.runner = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.runner)
-        self.root = Path(self.temp.name); self.runner.ROOT = self.root
-        self.corpus = self.root / "corpus.json"
+        self.root = Path(self.temp.name) / "repository"; self.root.mkdir(); self.runner.ROOT = self.root
+        private = Path(self.temp.name) / "private"; private.mkdir(); self.corpus = private / "corpus.json"
         self.corpus.write_text(json.dumps({"Version": 1, "Provenance": "synthetic protocol fixture, not NLU",
             "Conversations": [{"Id": name, "Category": "protocol", "InitialDraft": False,
                 "Turns": [{"Text": "Consulta sintética", "Decision": "Information"} for _ in range(3)]}
                 for name in ("D01", "D02")]}), encoding="utf-8")
         self.digest = hashlib.sha256(self.corpus.read_bytes()).hexdigest()
-        self.env = {"NEXFLOW_LLM_LIVE_AUTHORIZED": "1", "NEXFLOW_LLM_QUOTAS_VERIFIED": "1",
+        self.env = {"NEXFLOW_LLM_LIVE_AUTHORIZED": "1", "NEXFLOW_LLM_QUOTAS_VERIFIED": "1", "NEXFLOW_LLM_PRIVATE_CORPUS_APPROVED": "1",
             "NEXFLOW_TEST_GROQ_API_KEY": "synthetic-not-a-key", "NEXFLOW_TEST_GEMINI_API_KEY": "synthetic-not-a-key",
             "NEXFLOW_TEST_GROQ_MODEL": "groq-synthetic", "NEXFLOW_TEST_GEMINI_MODEL": "gemini-synthetic"}
         self.calls = 0; self.missing = False; self.partial = False; self.no_http = False; self.omitted = False
@@ -99,10 +102,11 @@ class LiveEvidenceContractTests(unittest.TestCase):
             (folder / ("live-" + case + ".json")).write_text(json.dumps(report), encoding="utf-8")
         return subprocess.CompletedProcess(command, 0, "synthetic subprocess; HTTP=0", "")
 
-    def invoke(self, case="D01", output="out"):
+    def invoke(self, case="D01", output="out", budget=True):
         target = self.root / output
         args = [str(RUNNER), "--live", "--no-build", "--corpus", str(self.corpus), "--sha256", self.digest,
             "--case", case, "--output", str(target)]
+        if budget: args += ["--max-http", "2", "--max-token-reservation", "4096"]
         with patch.dict(os.environ, self.env, clear=True), patch.object(sys, "argv", args), \
              patch.object(self.runner.subprocess, "check_output", return_value="e" * 40 + "\n"), \
              patch.object(self.runner.subprocess, "run", side_effect=self.fake_process), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -110,6 +114,26 @@ class LiveEvidenceContractTests(unittest.TestCase):
             except SystemExit as ex: result = ex.code
             except FileExistsError: result = 2
             return result, json.loads((target / "summary.json").read_text()) if (target / "summary.json").exists() else None
+
+    def test_live_rejects_repository_corpus_before_reading_it(self):
+        self.corpus = self.root / "do-not-open.json"
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("Repository corpus must not be opened")):
+            self.assertEqual(2, self.invoke()[0])
+        self.assertEqual(0, self.calls)
+
+    def test_live_refuses_exposed_digest_even_if_copied_outside_repository(self):
+        # Synthetic digest only: never read or use the public holdout as a fixture.
+        with patch.object(self.runner, "EXPOSED_CORPUS_DIGESTS", {self.digest}, create=True):
+            self.assertEqual(2, self.invoke()[0])
+        self.assertEqual(0, self.calls)
+
+    def test_live_requires_new_private_corpus_approval(self):
+        self.env.pop("NEXFLOW_LLM_PRIVATE_CORPUS_APPROVED")
+        self.assertEqual(2, self.invoke()[0]); self.assertEqual(0, self.calls)
+        self.assertFalse((self.root / "out").exists())
+
+    def test_live_requires_explicit_HTTP_and_token_budget(self):
+        self.assertEqual(2, self.invoke(budget=False)[0]); self.assertEqual(0, self.calls)
 
     def test_live_report_name_and_actual_usage_are_included(self):
         code, summary = self.invoke(); self.assertEqual(0, code)

@@ -1,6 +1,24 @@
 # LLM-first — Estado de continuidad
 
-## Estado vigente — certificación pre-DEMO sobre6bba4c4; P1 corregido local, recertificación pendiente
+## Estado vigente — guardia de reinicio sobre5d26b7, revisión local completa
+
+2026-11-03. HEAD local/origin/remoto feature **5d26b7c73e7ed46823bf49f45e3bbeecb5b9bdc5**; main **5f5ff850e31df3fa73cb2c7f02f65ba6081173c7** intacta,5 commits de diferencia. REST Actions filtrado por5d26b7: **0 runs**. Índice inicial vacío; especificación del propietario untracked conservada. El singleton de la revisión anterior YA estaba publicado; no se repitió ese parche.
+
+Se reprodujeron2 fallos entre reinicios/DI nuevos: identidad dinámica omitida libera tenant; identidad cambiada no aborta. Ahora manifiesto persistente independiente+SHA256, `NexFlowHost__Role=Demo`, validación síncrona al inicio de AddInfrastructure, antes de SDK/workers, y AgentProtectionIdentity inmutable. Sin AgentDemo dinámico sigue protegido; identidad discordante/manifiesto ausente/pin inválido abortan. Escritores de reservas, pedidos y EF sync/async bloqueados tras recrear host; ingreso real del handler no cae a legacy. Otros tenants mantienen motores. No nuevo store ni schema.
+
+**Límite operativo aún NO_GO:** eliminar simultáneamente marca DEMO, manifiesto/pin y toda configuración DEMO es indistinguible de un host Legacy válido. Exigir atestación independiente obligatoria del despliegue y montaje read-only en cada réplica; rollback antiguo sólo con ingreso/consumidores DEMO aislados. No certificado en servidor. No equiparar pruebas DI con arranque Linux o rollback real.
+
+Evidencia nueva `backend/TestResults/LlmFirstDurableGuard_20261103/`: restart-red.trx2/0/2; final dirigidas95/95; G8 vigente **2154/2154**,0 omitidas; histórico **130/101/29** con inventario/motivos/hashes exactos, H06/4/A: ReservationEffects;9 tests G8 Python+17 runner+3 custodia+4 integración=33 PASS. Build `dotnet build backend/backend.slnx --no-restore` exit0,0 errores/0 advertencias incremental;3 warnings antiguos en recompilación previa sin cambios ajenos. YAML4/4 y11 segmentos Python, script PowerShell parseado, diff checkPASS. No se suman dirigidos al vigente. Todos los TRX anteriores preservados; no nuevo CI aprobado.
+
+Los dos archivos holdout/rúbrica están **publicados y EXPOSED**, confirmados sólo por nombres del árbol Git, NO abiertos/leídos/hasheados/copiados/borrados. No son benchmark ciego. `.gitignore` y `Backup-ExposedEvaluation.ps1` preparan custodia/retiro normal por propietario; originales intactos. Reemplazo externo privado aún PENDIENTE; no lo crea Codex. Runner live ahora exige corpus externo nuevo+hash, rechaza digest expuesto y ruta del repo antes de leer, aprobación independiente, una conversación y presupuestos explícitos. Sus4 pruebas nuevas fueron rojas antes del cambio; ninguna llamada real.
+
+Sólo workflow PostgreSQL/Firestore modificado: exige PASS único del método completo AgentJournalEmulatorTests; antes podía aceptar37 PASS sin ese caso, reproducido con TRX sintético. Otros3 workflows sin cambios, todos preparados para el MISMO SHA futuro autorizado. Journal con emulador real, Redis/PG, ARM64, montaje/rollback, proveedores y WhatsApp: NOT_RUN/BLOCKED.
+
+Informe vigente: **CIERRE_GUARDIA_REINICIO_Y_RELEASE.md**; RELEASE_CANDIDATE actualizado. Candidata **5d26b7+diff local sin commit**, sin nuevo SHA/digest. OFFLINE_GO=GO local condicionado a sus límites; PROVIDER_EVAL_GO/DEMO_DEPLOY_GO/COMMERCIAL_GO=NO_GO. P0 histórico ABIERTO. Detenido para auditoría, sin commit/push/dispatch/Oracle/migraciones/proveedores. Próximo: propietario aprueba custodia y retiro normal de expuestos, revisa/publica archivos explícitos y autoriza cuatro CI del nuevo SHA; luego atestación del entorno y evaluación privada autorizada. No repetir fases A–K.
+
+## Registro anterior — certificación pre-DEMO sobre6bba4c4, antes de publicación5d26b7
+
+Lo siguiente conserva la evidencia histórica. Sus afirmaciones de corpus privado/untracked y HEAD6bba4c4 quedaron superadas por la publicación5d26b7; no son el estado vigente.
 
 HEAD/origin/remoto feature6bba4c4d86ac5bd0a5dbb3c6476916fbb5b238dd; main5f5ff850e31df3fa73cb2c7f02f65ba6081173c7 intacta. F–K fue publicado por el propietario después del checkpoint de abajo. Inicio rastreado limpio; untracked del propietario: corpus independiente12, rúbrica y auditoría de certificación. Corpus/rúbrica **no abiertos ni leídos**; hash comunicado A64059637C90E802F7A4692BF3B4BED38CF9070D16BC0F0F7E8C8EFEA33549B5, no calculado por Codex. Propietario debe custodiarlos fuera del repo antes de publicar.
 

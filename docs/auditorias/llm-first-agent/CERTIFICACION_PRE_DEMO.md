@@ -1,5 +1,7 @@
 # Certificación pre-DEMO LLM-first — 2026-11-03
 
+> **INFORME HISTÓRICO SUPERADO.** Describe6bba4c4+parche antes de publicación5d26b7. Los archivos antes privados fueron publicados: EXPOSED, no benchmark ciego. El singleton ya está publicado; la nueva guardia de reinicio y sus resultados sobre5d26b7+diff local se documentan en `CIERRE_GUARDIA_REINICIO_Y_RELEASE.md`. No usar los números, la identidad ni las afirmaciones de privacidad de abajo como certificación vigente.
+
 ## 1. Identidad y alcance evaluados
 
 Rama local `feature/llm-first-agent`. HEAD, origin/feature y remoto por `git ls-remote` coinciden en **6bba4c4d86ac5bd0a5dbb3c6476916fbb5b238dd**. main local/origin/remoto permanece en **5f5ff850e31df3fa73cb2c7f02f65ba6081173c7**. Cuatro commits de diferencia frente a main. Inicio: sin cambios rastreados ni staged; tres archivos del propietario sin seguimiento: auditoría de certificación, corpus externo y rúbrica. Conservados.

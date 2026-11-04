@@ -27,8 +27,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        // Synchronous bootstrap: fail before any SDK client or worker registration.
+        var protection = NexFlow.Infrastructure.Configuration.AgentHostProtection.Load(configuration);
+        services.Replace(ServiceDescriptor.Singleton(protection));
         services.TryAddSingleton<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>(p => NexFlow.Application.Features.Automation.Agent.AgentDemoPolicy.Live(
-            p.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<NexFlow.Application.Features.Automation.Agent.AgentDemoOptions>>()));
+            p.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<NexFlow.Application.Features.Automation.Agent.AgentDemoOptions>>(),
+            p.GetRequiredService<NexFlow.Application.Features.Automation.Agent.AgentProtectionIdentity>()));
         // 1. Base de Datos Relacional
         services.AddDbContext<NexFlowDbContext>((provider, options) => options.UseNpgsql(configuration.GetConnectionString("DefaultConnection"))
             .AddInterceptors(new DemoReservationWriteInterceptor(provider.GetRequiredService<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>())));

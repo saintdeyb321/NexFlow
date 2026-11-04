@@ -59,7 +59,9 @@ jobs:
           dotnet build backend/backend.slnx --no-restore
           dotnet build backend/NexFlow.Tests/NexFlow.Tests.csproj --no-restore
       - name: Verify strict G8 evidence validator
-        run: python -B -m unittest discover -s .github/workflows -p test_g8_certification.py
+        run: |
+          python -B -m unittest discover -s .github/workflows -p test_g8_certification.py
+          python -B -m unittest discover -s .github/workflows -p test_integration_evidence.py
       - name: Current baseline and local safety contract (at least 1491, zero omissions)
         run: python -B .github/workflows/g8_certification.py run current --trx artifacts/rc3/unit.trx
       - name: Preserve and verify the exact frozen historical incompatibilities
@@ -74,14 +76,7 @@ jobs:
           'dotnet test backend/NexFlow.Tests/NexFlow.Tests.csproj --no-build --no-restore --filter Category=Integration --logger "trx;LogFileName=integration.trx" --results-directory artifacts/rc3'
       - name: Reject missing or skipped integration evidence
         if: success()
-        shell: python
-        run: |
-          import xml.etree.ElementTree as ET
-          root = ET.parse('artifacts/rc3/integration.trx').getroot()
-          counters = root.find('.//{*}Counters')
-          assert counters is not None
-          assert int(counters.attrib['total']) >= 37, 'RC3 and commercial integration tests were not discovered'
-          assert counters.attrib['total'] == counters.attrib['executed'] == counters.attrib['passed'], 'No skipped/failed integration is certifiable'
+        run: python -B .github/workflows/verify_integration_evidence.py artifacts/rc3/integration.trx
       - name: Record release identity without configuration payloads
         if: always()
         shell: python

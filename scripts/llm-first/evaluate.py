@@ -13,6 +13,9 @@ import evaluation_evidence as evidence
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT = ROOT / "backend/NexFlow.Tests/Concierge/AgentDevelopmentConversations.json"
+# Publicly exposed evaluation identity supplied by the owner. Metadata only;
+# never open the public file or accept an external copy as a blind benchmark.
+EXPOSED_CORPUS_DIGESTS = {"a64059637c90e802f7a4692bf3b4bed38cf9070d16bc0f0f7e8c8efea33549b5"}
 
 
 def main():
@@ -25,12 +28,22 @@ def main():
     parser.add_argument("--sha256", help="required for external/sealed corpus and live evaluation")
     parser.add_argument("--output", type=Path, required=True, help="new directory; never overwrite evidence")
     parser.add_argument("--case", help="live: one complete conversation, never entire corpus by default")
-    parser.add_argument("--max-http", type=int, default=12)
-    parser.add_argument("--max-token-reservation", type=int, default=30000)
+    parser.add_argument("--max-http", type=int, help="live: explicit shared budget, 1..12")
+    parser.add_argument("--max-token-reservation", type=int, help="live: explicit shared token reservation, 2048..100000")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
+    if args.live:
+        # Resolve symlinks as well; reject before reading repository content.
+        if args.corpus.resolve().is_relative_to(ROOT.resolve()):
+            parser.error("BLOCKED: live requires a new private corpus outside the repository")
+        if not args.sha256 or len(args.sha256) != 64 or any(c not in "0123456789abcdefABCDEF" for c in args.sha256):
+            parser.error("A frozen external/live corpus requires --sha256 (64 hexadecimal digits)")
+        if args.max_http is None or args.max_token_reservation is None:
+            parser.error("BLOCKED: explicit --max-http and --max-token-reservation required")
     data = args.corpus.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
+    if args.live and digest in EXPOSED_CORPUS_DIGESTS:
+        parser.error("BLOCKED: exposed evaluation material cannot certify blind understanding")
     if (args.corpus.resolve() != DEFAULT.resolve() or args.live) and not args.sha256:
         parser.error("A frozen external/live corpus requires --sha256 before evaluation")
     if args.sha256 and digest.lower() != args.sha256.lower():
@@ -49,6 +62,8 @@ def main():
     else:
         if not args.dry_run and (env.get("NEXFLOW_LLM_LIVE_AUTHORIZED") != "1" or env.get("NEXFLOW_LLM_QUOTAS_VERIFIED") != "1"):
             parser.error("BLOCKED: explicit live authorization and verified quotas required")
+        if not args.dry_run and env.get("NEXFLOW_LLM_PRIVATE_CORPUS_APPROVED") != "1":
+            parser.error("BLOCKED: independent approval of a NEW private corpus required")
         for provider in ("GROQ", "GEMINI"):
             if not args.dry_run and not all(env.get(f"NEXFLOW_TEST_{provider}_{field}") for field in ("API_KEY", "MODEL")):
                 parser.error(f"BLOCKED: synthetic {provider} environment required; no settings fallback")

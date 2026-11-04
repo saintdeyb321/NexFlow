@@ -56,3 +56,9 @@ Thumbs.db
 
 # Firebase local deployment cache is generated, not release source.
 frontend/.firebase/
+
+# Independent evaluation material belongs outside this public repository.
+# Ignore rules do not remove files already tracked; owner must retire those.
+/NEXFLOW_EVALUACION_HOLDOUT_*.json
+/NEXFLOW_RUBRICA_HUMANA_HOLDOUT_*.md
+/private-evaluations/

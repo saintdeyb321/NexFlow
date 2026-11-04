@@ -36,7 +36,7 @@ internal sealed class AgentDialogueFixture
     private readonly IAiRouter? _external;
     private readonly bool _demoMode;
     public AgentDemoOptions DemoOptions { get; } = new();
-    public AgentDemoPolicy DemoPolicy { get; }
+    public IAgentDemoPolicy DemoPolicy { get; }
     public FirestoreConversationRepository? DemoRepository { get; private set; }
     public IAgentDemoChannel? DemoChannel { get; private set; }
     public int WireCalls { get; private set; }
@@ -44,9 +44,9 @@ internal sealed class AgentDialogueFixture
     public bool FailAfterWire { get; set; }
     public Func<Task>? BeforeWire { get; set; }
 
-    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false)
+    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false, IAgentDemoPolicy? demoPolicy = null)
     {
-        _external = external; _demoMode = demoChannel; DemoPolicy = new(Microsoft.Extensions.Options.Options.Create(DemoOptions));
+        _external = external; _demoMode = demoChannel; DemoPolicy = demoPolicy ?? new AgentDemoPolicy(Microsoft.Extensions.Options.Options.Create(DemoOptions));
         Business = new(conciergeCatalog: true, intelligentCommerce: true, experimentFactory: Configure,
             demoFactory: demoChannel ? ConfigureChannel : null, demoPolicy: demoChannel ? DemoPolicy : null);
         Business.Now = new(2026, 11, 3, 15, 0, 0, DateTimeKind.Utc);
