@@ -45,23 +45,30 @@ public sealed class AgentLiveEvaluationTests
         using var groq = new HttpClient(budget.Handler()); using var gemini = new HttpClient(budget.Handler());
         var router = new AiRouter([new GroqAiProvider(groq, config, NullLogger<GroqAiProvider>.Instance),
             new GeminiAiProvider(gemini, config, NullLogger<GeminiAiProvider>.Instance)], NullLogger<AiRouter>.Instance);
-        var f = new AgentDialogueFixture(router); if (scenario.InitialDraft) await f.Business.SeedDraft("RESERVATION");
+        var trace = new AgentEvaluationTrace(AssistantConversationTests.Fixture.Phone,
+            settings["Groq:ApiKey"], settings["Gemini:ApiKey"]);
+        var f = new AgentDialogueFixture(router, evidence: trace); if (scenario.InitialDraft) await f.Business.SeedDraft("RESERVATION");
         var rows = new List<object>(); var failures = new List<string>();
         for (var i = 0; i < scenario.Turns.Length; i++) {
             var t = scenario.Turns[i]; f.Business.Now = f.Business.Now.AddMinutes(t.AdvanceMinutes);
             if (t.RemoveModule != null) f.Business.Modules.Remove(t.RemoveModule);
+            var before = trace.Context(f.Business.Workspace, await f.Business.Context(), f.Business.Now); var start = trace.Position;
+            var httpStart = budget.Attempts;
             // No Plan()/scripted responses. Only authentic text goes to AiRouter.
             var result = await f.Turn(t.Text, t.ReplayOf ?? scenario.Id + "-" + i); var state = await f.Business.Context();
+            var after = trace.Context(f.Business.Workspace, state, f.Business.Now);
             var stateCorrect = state.CurrentGoal == t.Goal && state.PendingRecoveryAction == t.Pending;
             var suppressed = t.Outcome == "NoExperimentalResponse" && result.Outcome == t.Outcome && state.Mode == "Human";
             var correct = stateCorrect && (suppressed || result.Proposal?.Decision == t.Decision);
             if (!correct || f.Business.Bookings.Count + f.Business.Orders.Count + f.Business.Sent.Count != 0) failures.Add(scenario.Id + "/" + i);
             rows.Add(new { Turn = i, Act = result.Proposal?.Decision.ToString(), ExpectedAct = t.Decision.ToString(), StateCorrect = stateCorrect, ActCorrect = correct,
-                PublicText = result.VerifiedText, result.Outcome, result.ModelCalls, result.ElapsedMilliseconds,
+                PublicText = trace.PublicText(result), result.Outcome, result.ModelCalls, result.ElapsedMilliseconds,
+                Trace = trace.Turn(t.Text, before, after, result, start),
+                HTTPStart = httpStart, HTTPCount = budget.Attempts - httpStart,
                 ResponseValidation = suppressed ? "HumanSuppressed" : result.ResponseValidation,
                 CommercialEffects = f.Business.Bookings.Count + f.Business.Orders.Count, OutboundEffects = f.Business.Sent.Count });
         }
-        AgentConversationEvaluationTests.WriteReport("live-" + scenario.Id, new { Version = 2, Case = scenario.Id, AttemptId = Environment.GetEnvironmentVariable("NEXFLOW_LLM_ATTEMPT_ID"), CorpusSHA256 = hash, Mode = "live", Observations = rows,
+        AgentConversationEvaluationTests.WriteReport("live-" + scenario.Id, new { Version = 3, Case = scenario.Id, AttemptId = Environment.GetEnvironmentVariable("NEXFLOW_LLM_ATTEMPT_ID"), CorpusSHA256 = hash, Mode = "live", Observations = rows,
             HTTPAttempts = budget.Attempts, TokenReservation = budget.ReservedTokens, ReportedTokens = budget.ReportedTokens,
             UsageResponses = budget.UsageResponses, Requests = budget.Metadata, Failures = failures, HumanQuality = "BLOCKED",
             CommercialAcceptance = "NOT_CERTIFIED", Cost = "UNKNOWN_NoVerifiedTariff" });

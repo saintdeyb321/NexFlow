@@ -43,10 +43,11 @@ internal sealed class AgentDialogueFixture
     public List<string> WireTexts { get; } = [];
     public bool FailAfterWire { get; set; }
     public Func<Task>? BeforeWire { get; set; }
+    public AgentEvaluationTrace? Evidence { get; }
 
-    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false, IAgentDemoPolicy? demoPolicy = null)
+    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false, IAgentDemoPolicy? demoPolicy = null, AgentEvaluationTrace? evidence = null)
     {
-        _external = external; _demoMode = demoChannel; DemoPolicy = demoPolicy ?? new AgentDemoPolicy(Microsoft.Extensions.Options.Options.Create(DemoOptions));
+        _external = external; _demoMode = demoChannel; Evidence = evidence; DemoPolicy = demoPolicy ?? new AgentDemoPolicy(Microsoft.Extensions.Options.Options.Create(DemoOptions));
         Business = new(conciergeCatalog: true, intelligentCommerce: true, experimentFactory: Configure,
             demoFactory: demoChannel ? ConfigureChannel : null, demoPolicy: demoChannel ? DemoPolicy : null);
         Business.Now = new(2026, 11, 3, 15, 0, 0, DateTimeKind.Utc);
@@ -87,12 +88,20 @@ internal sealed class AgentDialogueFixture
         Conversations.Setup(c => c.GetMessagesAsync(f.Workspace, "chat", 6, It.IsAny<CancellationToken>(), null, null)).ReturnsAsync(() => History.TakeLast(6).ToArray());
         Router.Setup(r => r.ExecuteTaskAsync(AiTaskType.IntentExtraction, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
             .Returns(async (AiTaskType task, string system, string input, bool jsonMode, CancellationToken token) => {
-                Inputs.Add(input); if (DuringModel != null) await DuringModel();
-                if (_external != null) return await _external.ExecuteTaskAsync(task, system, input, jsonMode, token);
-                using var json = JsonDocument.Parse(input);
-                return JsonSerializer.Serialize(Script.Dequeue()(json.RootElement), new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } });
+                Inputs.Add(input); var observed = Evidence?.BeginModel(input);
+                try {
+                    if (DuringModel != null) await DuringModel();
+                    string response;
+                    if (_external != null) response = await _external.ExecuteTaskAsync(task, system, input, jsonMode, token);
+                    else { using var json = JsonDocument.Parse(input); response = JsonSerializer.Serialize(Script.Dequeue()(json.RootElement), new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } }); }
+                    if (observed.HasValue) Evidence!.CompleteModel(observed.Value, response);
+                    return response;
+                } catch { if (observed.HasValue) Evidence!.FailModel(observed.Value); throw; }
             });
-        Shadow = new(Router.Object, new AgentReadTools(new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object)),
+        IBusinessReadTools readTools = new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object);
+        IBusinessReadTools draftReads = new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object, f.EngineReads.Object);
+        if (Evidence != null) { readTools = Evidence.Observe(readTools); draftReads = Evidence.Observe(draftReads); }
+        Shadow = new(Router.Object, new AgentReadTools(readTools),
             f.Contexts, DemoRepository ?? (IConversationRepository)Conversations.Object, f.EntitlementReads.Object, f.Recovery, Clock, Microsoft.Extensions.Options.Options.Create(ShadowOptions),
             new FirestoreAgentEvaluationClaims(f.Firestore.Db, Clock));
         Journal = new(f.Firestore.Db, Clock);
@@ -100,7 +109,7 @@ internal sealed class AgentDialogueFixture
             new AgentBookingDrafts(new NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver(f.EntitlementReads.Object,
                 f.ProfileReads.Object, f.LocationReads.Object, f.OfferingReads.Object, Clock, new(), new(), new(), new(), new(),
                 NullLogger<NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver>.Instance),
-                f.OfferingReads.Object, f.EntitlementReads.Object, new BusinessReadTools(f.KnowledgeReads.Object, f.EntitlementReads.Object, f.EngineReads.Object), Clock), _demoMode ? DemoPolicy : null);
+                f.OfferingReads.Object, f.EntitlementReads.Object, draftReads, Clock), _demoMode ? DemoPolicy : null);
         return Runtime;
     }
     private IAgentDemoChannel ConfigureChannel(AssistantConversationTests.Fixture f)

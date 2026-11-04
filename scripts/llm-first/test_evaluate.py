@@ -17,6 +17,14 @@ RUNNER = Path(__file__).with_name("evaluate.py")
 CORPUS = RUNNER.parents[2] / "backend/NexFlow.Tests/Concierge/AgentDevelopmentConversations.json"
 
 
+def synthetic_trace(calls=1):
+    state = dict.fromkeys("Goal Step VersionHash PendingAction LocationId ServiceId Date Time Question".split())
+    state.update(Mode="Automatic", HasPatientName=False)
+    return {"SyntheticOnly": True, "InputText": "Consulta sintética", "InputSha256": hashlib.sha256("Consulta sintética".encode()).hexdigest(),
+        "Before": dict(state), "After": dict(state), "ModelDecisions": [{"Phase": "Decision", "Outcome": "Parsed", "Decision": "Information", "Tools": []} for _ in range(calls)],
+        "ExecutedTools": [], "ResultReads": [], "FactReferences": [], "Recovered": False, "ToolCalls": 0, "Failure": "None"}
+
+
 class EvaluationPreflightTests(unittest.TestCase):
     def invoke(self, *arguments):
         env = {k: v for k, v in os.environ.items() if not k.startswith("NEXFLOW_")}
@@ -93,12 +101,13 @@ class LiveEvidenceContractTests(unittest.TestCase):
             observations = [{"Turn": i, "Act": "Information", "ExpectedAct": "Information", "StateCorrect": True,
                 "ActCorrect": True, "PublicText": "Respuesta sintética", "Outcome": "DialoguePlan", "ModelCalls": 1 if i == 0 else 0,
                 "ElapsedMilliseconds": 12, "ResponseValidation": "ServerRealizedVerifiedSegments", "CommercialEffects": 0,
-                "OutboundEffects": 0} for i in range(1 if self.partial else 3)]
-            report = {"Version": 2, "Case": case, "CorpusSHA256": self.digest, "AttemptId": env.get("NEXFLOW_LLM_ATTEMPT_ID"),
+                "OutboundEffects": 0, "Trace": synthetic_trace(1 if i == 0 else 0), "HTTPStart": 0 if i == 0 else 1, "HTTPCount": 1 if i == 0 else 0} for i in range(1 if self.partial else 3)]
+            report = {"Version": 3, "Case": case, "CorpusSHA256": self.digest, "AttemptId": env.get("NEXFLOW_LLM_ATTEMPT_ID"),
                 "Mode": "live", "Observations": observations, "HTTPAttempts": 1, "TokenReservation": 2000,
                 "ReportedTokens": 42, "UsageResponses": 1, "Requests": [{"Provider": "Groq", "Model": "groq-synthetic",
                     "Transport": "ProviderHttp", "Status": 200, "ElapsedMs": 12, "ReservedTokens": 2000, "ReportedTokens": 42}],
                 "Failures": [], "HumanQuality": "BLOCKED", "CommercialAcceptance": "NOT_CERTIFIED"}
+            self.report = report
             (folder / ("live-" + case + ".json")).write_text(json.dumps(report), encoding="utf-8")
         return subprocess.CompletedProcess(command, 0, "synthetic subprocess; HTTP=0", "")
 
@@ -141,6 +150,46 @@ class LiveEvidenceContractTests(unittest.TestCase):
         self.assertEqual(["Groq"], summary["live"]["providers_observed"])
         self.assertEqual("BLOCKED", summary["human_quality"])
 
+    def test_live_report_without_decisions_reads_or_context_is_not_certifiable(self):
+        import evaluation_evidence as evidence
+        report = {"Version": 2, "Case": "D01", "Mode": "live", "CorpusSHA256": self.digest, "AttemptId": "attempt",
+            "Observations": [{"Turn": i, "ElapsedMilliseconds": 1, "ModelCalls": 1, "StateCorrect": True, "ActCorrect": True,
+                "CommercialEffects": 0, "OutboundEffects": 0, "ResponseValidation": "ServerRealizedVerifiedSegments"} for i in range(3)],
+            "HTTPAttempts": 1, "UsageResponses": 0, "ReportedTokens": None, "TokenReservation": 1000, "Failures": [],
+            "Requests": [{"Provider": "Groq", "Model": "groq-synthetic", "Transport": "ProviderHttp", "Status": 200,
+                "ElapsedMs": 1, "ReservedTokens": 1000, "ReportedTokens": None}]}
+        with self.assertRaisesRegex(ValueError, "trace|Trace|Version"):
+            evidence.live_report(report, json.loads(self.corpus.read_text())["Conversations"][0], self.digest, "attempt", {"Groq": "groq-synthetic"})
+
+    def test_missing_trace_components_or_invented_replay_work_never_pass(self):
+        import evaluation_evidence as evidence
+        self.assertEqual(0, self.invoke()[0]); case = json.loads(self.corpus.read_text())["Conversations"][0]
+        for field in ("Before", "After", "ModelDecisions", "ExecutedTools", "ResultReads", "InputSha256"):
+            with self.subTest(field=field):
+                report = json.loads(json.dumps(self.report)); del report["Observations"][0]["Trace"][field]
+                with self.assertRaisesRegex(ValueError, "trace"):
+                    evidence.live_report(report, case, self.digest, report["AttemptId"], {"Groq": "groq-synthetic"})
+        self.report["Observations"][0]["Trace"]["Recovered"] = True
+        with self.assertRaisesRegex(ValueError, "Replay"):
+            evidence.live_report(self.report, case, self.digest, self.report["AttemptId"], {"Groq": "groq-synthetic"})
+
+    def test_private_fields_contacts_and_sensitive_facts_are_rejected_independently(self):
+        import evaluation_evidence as evidence
+        self.assertEqual(0, self.invoke()[0]); case = json.loads(self.corpus.read_text())["Conversations"][0]
+        for kind in ("extra-field", "contact", "formatted-contact", "sensitive-fact", "unverified-fact", "HTTP-gap"):
+            with self.subTest(kind=kind):
+                report = json.loads(json.dumps(self.report)); trace = report["Observations"][0]["Trace"]
+                if kind == "extra-field": trace["Before"]["PatientName"] = "do-not-export"
+                elif kind == "contact": trace["InputText"] = "+51987654321"
+                elif kind == "formatted-contact": trace["InputText"] = "+51 987 654 321"
+                elif kind == "HTTP-gap": report["Observations"][0]["HTTPStart"] = 2
+                else:
+                    trace["ExecutedTools"] = [{"Kind": "Services", "Status": "Found" if kind == "sensitive-fact" else "Denied", "Error": None,
+                        "SensitiveFactsOmitted": 1 if kind == "sensitive-fact" else 0,
+                        "Facts": [{"Key": "Price", "Value": "6000", "Source": "BusinessRepository", "EntityId": "synthetic"}]}]
+                with self.assertRaises(ValueError):
+                    evidence.live_report(report, case, self.digest, report["AttemptId"], {"Groq": "groq-synthetic"})
+
     def test_missing_or_partial_live_report_never_passes(self):
         for kind in ("missing", "partial"):
             with self.subTest(kind=kind):
@@ -177,9 +226,10 @@ class LiveEvidenceContractTests(unittest.TestCase):
 
     def test_provider_model_and_transport_are_checked_independently(self):
         import evaluation_evidence as evidence
-        report = {"Version": 2, "Case": "D01", "Mode": "live", "CorpusSHA256": self.digest, "AttemptId": "attempt",
+        report = {"Version": 3, "Case": "D01", "Mode": "live", "CorpusSHA256": self.digest, "AttemptId": "attempt",
             "Observations": [{"Turn": i, "ElapsedMilliseconds": 1, "ModelCalls": 1, "StateCorrect": True, "ActCorrect": True,
-                "CommercialEffects": 0, "OutboundEffects": 0, "ResponseValidation": "ServerRealizedVerifiedSegments"} for i in range(3)],
+                "CommercialEffects": 0, "OutboundEffects": 0, "ResponseValidation": "ServerRealizedVerifiedSegments", "Trace": synthetic_trace(),
+                "HTTPStart": 0 if i == 0 else 1, "HTTPCount": 1 if i == 0 else 0} for i in range(3)],
             "HTTPAttempts": 1, "UsageResponses": 0, "ReportedTokens": None, "TokenReservation": 1000, "Failures": [],
             "Requests": [{"Provider": "Groq", "Model": "groq-synthetic", "Transport": "InterceptedHttp", "Status": 200,
                 "ElapsedMs": 1, "ReservedTokens": 1000, "ReportedTokens": None}]}
