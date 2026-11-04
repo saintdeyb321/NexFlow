@@ -20,16 +20,29 @@ public interface IAgentDemoPolicy
 public sealed class AgentDemoPolicy : IAgentDemoPolicy
 {
     private readonly Func<AgentDemoOptions> _current;
+    private readonly HashSet<Guid> _protectedWorkspaces = [];
+    private Guid? _initialWorkspace;
+    private bool _identityChanged;
     public AgentDemoPolicy(IOptions<AgentDemoOptions> options) : this(() => options.Value) { }
     private AgentDemoPolicy(Func<AgentDemoOptions> current) => _current = current;
     public static AgentDemoPolicy Live(IOptionsMonitor<AgentDemoOptions> options) => new(() => options.CurrentValue);
-    // Protection remains when Enabled is killed. Remove the protected workspace
-    // only through a separate operator decision, never from a customer turn.
-    public bool Protects(Guid workspace) => workspace != Guid.Empty && workspace == _current().WorkspaceId;
-    public bool Allows(Guid workspace, string instance, string phone)
+    // Monotonic for this host lifetime. A reload cannot release a previously
+    // protected tenant. Identity drift kills dialogue until a reviewed restart.
+    private (AgentDemoOptions Options, bool Protected, bool Stable) Snapshot(Guid workspace)
     {
         var current = _current();
-        return workspace != Guid.Empty && workspace == current.WorkspaceId && current.Enabled
+        lock (_protectedWorkspaces) {
+            _initialWorkspace ??= current.WorkspaceId;
+            if (current.WorkspaceId != Guid.Empty) _protectedWorkspaces.Add(current.WorkspaceId);
+            _identityChanged |= current.WorkspaceId != _initialWorkspace.Value;
+            return (current, workspace != Guid.Empty && _protectedWorkspaces.Contains(workspace), !_identityChanged);
+        }
+    }
+    public bool Protects(Guid workspace) => Snapshot(workspace).Protected;
+    public bool Allows(Guid workspace, string instance, string phone)
+    {
+        var (current, protects, stable) = Snapshot(workspace);
+        return protects && stable && workspace == current.WorkspaceId && current.Enabled
             && current.OperatorAuthorization == "SYNTHETIC_DEMO_NO_COMMERCIAL_WRITES"
             && !string.IsNullOrWhiteSpace(current.InstanceName) && instance == current.InstanceName
             && current.TestPhones is { Length: > 0 and <= 5 } && current.TestPhones.Contains(phone, StringComparer.Ordinal)

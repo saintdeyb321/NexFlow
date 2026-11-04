@@ -1,6 +1,14 @@
 # LLM-first — Estado de continuidad
 
-## Estado vigente — cierre F–K local completado; OFFLINE_GO; externos bloqueados
+## Estado vigente — certificación pre-DEMO sobre6bba4c4; P1 corregido local, recertificación pendiente
+
+HEAD/origin/remoto feature6bba4c4d86ac5bd0a5dbb3c6476916fbb5b238dd; main5f5ff850e31df3fa73cb2c7f02f65ba6081173c7 intacta. F–K fue publicado por el propietario después del checkpoint de abajo. Inicio rastreado limpio; untracked del propietario: corpus independiente12, rúbrica y auditoría de certificación. Corpus/rúbrica **no abiertos ni leídos**; hash comunicado A64059637C90E802F7A4692BF3B4BED38CF9070D16BC0F0F7E8C8EFEA33549B5, no calculado por Codex. Propietario debe custodiarlos fuera del repo antes de publicar.
+
+Informe actual: `CERTIFICACION_PRE_DEMO.md`. P1 reproducido2 FAIL: omitir/cambiar WorkspaceId liberaba protección entre scopes. Corregido con política singleton/identidades monotónicas por host y bloqueo ante deriva; tres archivos backend y tres tests cambiados, no prompts ni motores. No conserva identidades entre reinicios: requiere configuración invariable e ingreso aislado verificados por operador. Remoto6bba4c4 no incluye este parche, falta nuevo SHA.
+
+Evidencia nueva LlmFirstPreDemo_20261103: dirigidos69/69; vigente2128/2128; histórico130/101/29 exacto, cero omisiones; build0 errores/0 advertencias incremental, diff checkPASS; YAML4/4 y12 scripts Python embebidos válidos. GitHub REST devuelve0 runs para6bba4c4; no dispatch. Firestore Emulator no configurado; no IA/proveedores/WhatsApp/Oracle/Docker/migraciones. OFFLINE_GO=GO sólo árbol parcheado; PROVIDER_EVAL_GO/DEMO_DEPLOY_GO/COMMERCIAL_GO=NO_GO por gates externos/autoridad/P0. No repetir A–K. Detenido para revisión; próximo: propietario aprueba/publica nuevo SHA y autoriza cuatro workflows del mismo commit; ensayo sellado sólo después con permiso específico.
+
+## Registro anterior — cierre F–K antes de publicar6bba4c4
 
 Reanudación publicada por el propietario: HEAD/ref feature `f537ceea9dae400d6e04f2da1916f0747a4beea0`; main local/ref `5f5ff850e31df3fa73cb2c7f02f65ba6081173c7`. Inicio sin staged/unstaged; sólo plan maestro F–K untracked, preservado. El bloqueo anterior de revisión automática fue de ejecución, no un test fallido; la ejecución volvió a estar disponible. No commit/push/merge ni cambios de main.
 

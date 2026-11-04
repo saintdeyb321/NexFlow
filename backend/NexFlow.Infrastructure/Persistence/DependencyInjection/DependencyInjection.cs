@@ -27,7 +27,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        services.TryAddScoped<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>(p => NexFlow.Application.Features.Automation.Agent.AgentDemoPolicy.Live(
+        services.TryAddSingleton<NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy>(p => NexFlow.Application.Features.Automation.Agent.AgentDemoPolicy.Live(
             p.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<NexFlow.Application.Features.Automation.Agent.AgentDemoOptions>>()));
         // 1. Base de Datos Relacional
         services.AddDbContext<NexFlowDbContext>((provider, options) => options.UseNpgsql(configuration.GetConnectionString("DefaultConnection"))

@@ -17,6 +17,33 @@ namespace NexFlow.Tests.Concierge;
 
 public sealed class AgentDemoSafetyTests
 {
+    [Theory]
+    [InlineData(false)][InlineData(true)]
+    public void Workspace_identity_reload_cannot_release_the_previous_tenant_in_a_new_DI_scope(bool replaced)
+    {
+        var workspace = Guid.NewGuid(); var next = replaced ? Guid.NewGuid() : Guid.Empty;
+        AgentDemoOptions current = new() { WorkspaceId = workspace, Enabled = true, InstanceName = "isolated-demo",
+            OperatorAuthorization = "SYNTHETIC_DEMO_NO_COMMERCIAL_WRITES", TestPhones = ["+51999999999"] };
+        var monitor = new Mock<IOptionsMonitor<AgentDemoOptions>>(); monitor.SetupGet(m => m.CurrentValue).Returns(() => current);
+        var services = new ServiceCollection().AddApplication(); services.AddSingleton(monitor.Object);
+        using var provider = services.BuildServiceProvider();
+        IAgentDemoPolicy original;
+        using (var first = provider.CreateScope()) {
+            original = first.ServiceProvider.GetRequiredService<IAgentDemoPolicy>();
+            Assert.True(original.Allows(workspace, "isolated-demo", "+51999999999"));
+        }
+        current = new() { WorkspaceId = next, Enabled = false };
+        using var second = provider.CreateScope(); var policy = second.ServiceProvider.GetRequiredService<IAgentDemoPolicy>();
+        Assert.True(policy.Protects(workspace)); Assert.Same(original, policy);
+        Assert.Throws<DomainException>(() => policy.DemandCommercialWrites(workspace));
+        Assert.False(policy.Allows(workspace, "isolated-demo", "+51999999999"));
+        if (next != Guid.Empty) { Assert.True(policy.Protects(next)); Assert.Throws<DomainException>(() => policy.DemandCommercialWrites(next)); }
+        // Restoring a drifted identity cannot silently re-arm the channel.
+        current = new() { WorkspaceId = workspace, Enabled = true, InstanceName = "isolated-demo",
+            OperatorAuthorization = "SYNTHETIC_DEMO_NO_COMMERCIAL_WRITES", TestPhones = ["+51999999999"] };
+        Assert.False(policy.Allows(workspace, "isolated-demo", "+51999999999"));
+    }
+
     [Fact]
     public void Registered_policy_observes_a_reloaded_kill_switch_without_reopening_commercial_writes()
     {

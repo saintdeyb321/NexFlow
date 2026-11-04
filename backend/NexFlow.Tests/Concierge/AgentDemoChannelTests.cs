@@ -88,7 +88,7 @@ public sealed class AgentDemoChannelTests
     }
 
     [Theory]
-    [InlineData("module")][InlineData("human")]
+    [InlineData("module")][InlineData("human")][InlineData("context")]
     public async Task Prepared_but_unsent_facts_are_not_delivered_after_revocation_or_manual_takeover(string change)
     {
         var f = new AgentDialogueFixture(demoChannel: true); f.Plan("Ver servicios", AgentDecision.Information, AgentReadKind.Services);
@@ -96,8 +96,12 @@ public sealed class AgentDemoChannelTests
         await Assert.ThrowsAsync<IOException>(() => Turn(f, "Ver servicios", "late-policy"));
         f.Business.Firestore.BeforeCommit = null;
         if (change == "module") f.Business.Modules.Remove("SERVICES");
-        else await new NexFlow.Application.Features.Automation.Conversations.HumanHandoffService(f.DemoRepository!, f.Business.Contexts)
+        else if (change == "human") await new NexFlow.Application.Features.Automation.Conversations.HumanHandoffService(f.DemoRepository!, f.Business.Contexts)
             .EscalateToHumanAsync(f.Business.Workspace, "chat", HandoffReason.ManualIntervention, default);
+        else {
+            var context = await f.Business.Context(); context.TargetDate = "2026-11-09";
+            await f.Business.Contexts.SaveContextAsync(f.Business.Workspace, AssistantConversationTests.Fixture.Phone, context, default);
+        }
         await Assert.ThrowsAsync<ConcurrencyException>(() => Turn(f, "Ver servicios", "late-policy"));
         Assert.Equal(2, f.Inputs.Count); Assert.Equal(0, f.WireCalls); NoBusiness(f);
     }
