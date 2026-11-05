@@ -99,8 +99,24 @@ public sealed class AgentBookingDrafts(IWorkspaceSlotResolver slots, IOfferingSe
         SlotResolution<ResolvedBusinessEntity> Reference(AgentSlotCandidate? candidate, string kind, SlotResolution<ResolvedBusinessEntity> literal,
             IReadOnlyList<BusinessEntityOption> authorized)
         {
-            if (candidate?.ReferenceIndex == null) return literal;
+            if (candidate == null) return literal;
             var question = ConversationQuestion.Current(request.WorkspaceId, origin, clock.UtcNow);
+            if (candidate.ReferenceIndex == null) {
+                if (literal.Status == ResolutionStatus.Determined || candidate.QuestionId == null) return literal;
+                // Natural references are preparation only, backed by an actual
+                // V2 publication and a unique currently authorized entity of this
+                // field. The original user evidence is preserved, never fabricated.
+                if (question?.ConversationId != request.ConversationId || question.QuestionId != candidate.QuestionId
+                    || question.Expected is not (ExpectedReply.Information or ExpectedReply.RequestedData)
+                    || origin.AgentV2?.QuestionSourceMessageId != question.SourceMessageId)
+                    return SlotResolution<ResolvedBusinessEntity>.Invalid("StaleConversationReference");
+                var referenceKind = kind == "AGENT_SERVICE" ? "Service" : "Location";
+                var ids = (origin.AgentV2.EntityReferences ?? []).Where(r => r.Kind == referenceKind).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+                var referenced = authorized.Where(e => ids.Contains(e.Id)).DistinctBy(e => e.Id).ToArray();
+                if (referenced.Length != 1 || referenced[0].Id != candidate.Value) return SlotResolution<ResolvedBusinessEntity>.Invalid("AmbiguousConversationReference");
+                var entity = referenced[0];
+                return SlotResolution<ResolvedBusinessEntity>.Match(new(entity.Id, entity.Name, entity.LocationId), candidate.Evidence, entity.Id, EvidenceSource.ValidatedLlm);
+            }
             var options = origin.RecoveryOptions;
             if (question is not { Expected: ExpectedReply.Selection } || question.ConversationId != request.ConversationId
                 || question.QuestionId != candidate.QuestionId || origin.RecoveryOptionsContext != "AGENT_OPTIONS"

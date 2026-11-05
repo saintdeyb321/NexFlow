@@ -62,21 +62,26 @@ public sealed class AgentV2Tools(IBusinessReadTools reads, IOfferingService offe
                 var data = await reads.ReadAsync(reads.Open(request.WorkspaceId), new AvailabilityRead(Text(call.Arguments, "locationId") ?? "", Text(call.Arguments, "serviceId") ?? "", day.ToDateTime(TimeOnly.MinValue), time), ct);
                 return Result(call, data, request.WorkspaceId, ["SERVICES", "RESERVATIONS"], "Availability");
             }));
-            var slot = new { type = "object", properties = new { Value = new { type = "string", maxLength = 160 }, Evidence = new { type = "string", maxLength = 300 } }, required = new[] { "Value", "Evidence" }, additionalProperties = false };
+            var slot = new { type = "object", properties = new { Value = new { type = "string", maxLength = 160 }, Evidence = new { type = "string", maxLength = 300 },
+                QuestionId = new { type = "string", maxLength = 80 } }, required = new[] { "Value", "Evidence" }, additionalProperties = false };
             var schema = JsonSerializer.SerializeToElement(new { type = "object", properties = new { Location = slot, Service = slot, Date = slot, Time = slot, Name = slot }, additionalProperties = false });
             registered.Add("prepare_appointment", new(new("prepare_appointment", "Reversible preparation only, never consent or booking creation", schema), ["SERVICES", "RESERVATIONS"], async (call, state, ct) => {
                 Check(call.Arguments, "Location", "Service", "Date", "Time", "Name");
                 var patch = JsonSerializer.Deserialize<AgentBookingPatch>(call.Arguments, Json) ?? throw new ArgumentException("Invalid preparation.");
                 var staged = await drafts.StageAsync(request, state, patch, 0, ct);
-                return new(call.Id, call.Name, staged.Clarification == null ? "PreparedOnly" : "Clarification", [], ["SERVICES", "RESERVATIONS"], staged.Context);
+                var status = staged.Clarification == null ? "Datos validados para la preparación; no hay una reserva registrada."
+                    : staged.Clarification;
+                return new(call.Id, call.Name, staged.Clarification == null ? "PreparedOnly" : "Clarification",
+                    [new(call.Id + ":0", "PreparationStatus", status, "BackendDecision")], ["SERVICES", "RESERVATIONS"], staged.Context);
             }));
         }
         if (configuration.CapabilityPacks.Contains("accommodation", StringComparer.Ordinal) && modules.Contains("SERVICES") && configuration.RoomTypeServiceIds.Length > 0) {
             registered.Add("search_room_types", new(new("search_room_types", "Configured room types from SERVICES; no room-night inventory or tariff calculation", Schema()), ["SERVICES"], async (call, _, ct) => {
                 Check(call.Arguments);
                 var types = (await offerings.GetServicesAsync(request.WorkspaceId, null, null, ct)).Where(s => s.IsActive && configuration.RoomTypeServiceIds.Contains(s.Id, StringComparer.Ordinal)).Take(5).ToArray();
-                var facts = types.SelectMany(s => new[] { ("RoomType", s.Name, s.Id), ("ListedPriceMinorUnits", s.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), s.Id), ("Currency", s.Currency, s.Id) })
-                    .Select((f, i) => new AgentV2Fact(call.Id + ":" + i, f.Item1, f.Item2, "BusinessRepository", f.Item3)).ToArray();
+                var facts = types.SelectMany(s => new[] { ("RoomType", s.Name, s.Id), ("ListedPriceMinorUnits", s.PriceMinorUnits.ToString(CultureInfo.InvariantCulture), s.Id), ("Currency", s.Currency, s.Id),
+                    ("OfferingPrice", s.Name + ": " + s.Currency + " " + (s.PriceMinorUnits / 100m).ToString("0.00", CultureInfo.InvariantCulture), s.Id) })
+                    .Select((f, i) => new AgentV2Fact(call.Id + ":" + i, f.Item1, f.Item2, "BusinessRepository", f.Item3, "RoomType")).ToArray();
                 return new(call.Id, call.Name, facts.Length == 0 ? "NotFound" : "Found", facts, ["SERVICES"]);
             }));
             Read("get_stay_rules", "Only policies actually present in authorized FAQs", KnowledgeTopic.Faqs, "FAQ");
@@ -89,6 +94,12 @@ public sealed class AgentV2Tools(IBusinessReadTools reads, IOfferingService offe
         var facts = result.Status == BusinessReadStatus.Found ? result.Facts.Select(f => new { f.Key, f.Value, Source = f.Source.ToString(), f.EntityId }).ToList() : [];
         if (result.Status == BusinessReadStatus.Found && source == "Locations" && result.Knowledge is { } knowledge)
             facts.AddRange(knowledge.References.Take(5).Select(r => new { Key = "Location", Value = r.Name, Source = "BusinessRepository", EntityId = (string?)r.Id }));
-        return new(call.Id, call.Name, result.Status.ToString(), facts.Select((f, i) => new AgentV2Fact(call.Id + ":" + i, f.Key, f.Value, f.Source, f.EntityId)).ToArray(), modules);
+        if (result.Status == BusinessReadStatus.Found && result.Knowledge is { } catalogue)
+            foreach (var offering in catalogue.Offerings) {
+                facts.Add(new { Key = "OfferingPrice", Value = offering.Name + ": " + offering.Currency + " " + (offering.PriceMinorUnits / 100m).ToString("0.00", CultureInfo.InvariantCulture), Source = "BusinessRepository", EntityId = (string?)offering.Id });
+                if (!string.IsNullOrWhiteSpace(offering.Description)) facts.Add(new { Key = "OfferingDescription", Value = offering.Name + ": " + offering.Description, Source = "BusinessRepository", EntityId = (string?)offering.Id });
+            }
+        var entityKind = source switch { "Services" or "Availability" => "Service", "Products" => "Product", "Locations" => "Location", _ => null };
+        return new(call.Id, call.Name, result.Status.ToString(), facts.Select((f, i) => new AgentV2Fact(call.Id + ":" + i, f.Key, f.Value, f.Source, f.EntityId, entityKind)).ToArray(), modules);
     }
 }

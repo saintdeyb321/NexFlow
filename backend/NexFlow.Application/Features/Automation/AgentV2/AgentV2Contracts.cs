@@ -17,17 +17,22 @@ public sealed class AgentV2Workspace
     // Explicit mapping of existing SERVICES records to room types, never invented inventory.
     public string[] RoomTypeServiceIds { get; set; } = [];
 }
-public sealed record AgentV2Memory(int Revision, string Goal, string[] ReferencedEntities);
+public sealed record AgentV2EntityReference(string Kind, string Id);
+public sealed record AgentV2Memory(int Revision, string Goal, string[] ReferencedEntities, string? QuestionSourceMessageId = null,
+    AgentV2EntityReference[]? EntityReferences = null);
 public sealed record AgentV2ToolCall(string Id, string Name, JsonElement Arguments);
 public sealed record AgentV2Answer(string Text, string[] FactIds);
 public sealed record AgentV2ModelTurn(AgentV2ToolCall[] Calls, AgentV2Answer? Answer, string Goal = "Information");
-public sealed record AgentV2Fact(string Id, string Key, string Value, string Source, string? EntityId = null);
+public sealed record AgentV2Fact(string Id, string Key, string Value, string Source, string? EntityId = null, string? EntityKind = null);
 public sealed record AgentV2ToolResult(string CallId, string Name, string Status, IReadOnlyList<AgentV2Fact> Facts,
     string[] RequiredModules, ConversationContextDto? Prepared = null);
 public sealed record AgentV2ToolDefinition(string Name, string Description, JsonElement Parameters);
 public sealed record AgentV2Verification(bool Accepted, string Reason, string? Text = null);
+public sealed record AgentV2ReviewedStatement(string Text, string Kind, string[] FactIds);
+public sealed record AgentV2SemanticReview(string Decision, AgentV2ReviewedStatement[] Statements);
 public sealed record AgentV2Observation(string Engine, string Build, int Revision, string Stage, string Outcome, int ModelCalls, int ToolCalls, string? Tool = null);
-public sealed record AgentV2Evaluation(AgentTurnResult Durable, AgentV2Answer? ProposedAnswer, IReadOnlyList<AgentV2Observation> Trace);
+public sealed record AgentV2Evaluation(AgentTurnResult Durable, AgentV2Answer? ProposedAnswer, IReadOnlyList<AgentV2Observation> Trace,
+    IReadOnlyList<AgentV2ToolResult>? Tools = null);
 
 public interface IAgentV2Ingress
 {
@@ -40,4 +45,6 @@ public interface IAgentV2Runtime : IExperimentalAgentRuntime
 public interface IAgentV2AnswerVerifier
 {
     AgentV2Verification Verify(AgentV2Answer answer, IReadOnlyList<AgentV2Fact> facts);
+    Task<AgentV2Verification> VerifyAsync(AgentV2Answer answer, IReadOnlyList<AgentV2Fact> facts,
+        Func<string, string, CancellationToken, Task<string>> semanticReview, CancellationToken ct);
 }

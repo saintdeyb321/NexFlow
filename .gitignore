@@ -61,4 +61,6 @@ frontend/.firebase/
 # Ignore rules do not remove files already tracked; owner must retire those.
 /NEXFLOW_EVALUACION_HOLDOUT_*.json
 /NEXFLOW_RUBRICA_HUMANA_HOLDOUT_*.md
+/NEXFLOW_HOLDOUT_PRIVADO_*.json
+/NEXFLOW_RUBRICA_PRIVADA_*.md
 /private-evaluations/

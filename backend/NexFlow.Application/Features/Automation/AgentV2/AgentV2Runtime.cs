@@ -35,9 +35,13 @@ errores de escritura e interrupciones usando datos del negocio; pregunta si hay 
 Tools contiene el único registro autorizado: no hay SQL, acceso a archivos ni herramientas de confirmación.
 Workspace lo fija el servidor. Una preparación no es consentimiento ni reserva registrada.
 Devuelve JSON estricto: {"Calls":[{"Id":"t1","Name":"nombre registrado","Arguments":{}}],"Answer":null,"Goal":"Information"}.
-O termina con {"Calls":[],"Answer":{"Text":"respuesta natural propuesta","FactIds":["t1:0"]},"Goal":"Information"}.
+O termina con {"Calls":[],"Answer":{"Text":"redacción natural con {{t1:0}}","FactIds":["t1:0"]},"Goal":"Information"}.
+Escribe tú el mensaje y la pregunta; usa {{id}} para los hechos sin copiar cifras/nombres fuera del anclaje.
+El backend sustituye anclajes con valores verificados; precio usa OfferingPrice, nunca PriceMinorUnits ni Currency sueltos.
+No envíes todo el catálogo para una duda concreta. Oriéntate por las descripciones y pide aclaración sin diagnosticar.
+Para referencias a entidades ya mencionadas, prepare_appointment admite QuestionId vigente, Value=ID y Evidence literal del mensaje actual; no inventes evidencia ni conviertas una referencia ambigua en elección.
 Goal: Information, BookingPreparation, Clarification o HumanHelp. Usa IDs devueltos, nunca los inventes.
-Cada turno admite hasta3 tools y3 llamadas de modelo. Primero consulta los datos necesarios, luego responde.
+Cada turno admite hasta3 tools y3 llamadas de diálogo, más una revisión separada. Primero consulta, luego responde.
 No presentes un catálogo publicado como stock, ni una consulta de slots como una cita creada.
 La respuesta natural será evaluada independientemente: tu propia lista de citas no la certifica.
 """;
@@ -48,10 +52,12 @@ La respuesta natural será evaluada independientemente: tu propia lista de citas
     public async Task<AgentV2Evaluation> EvaluateAsync(AgentTurnRequest request, CancellationToken ct)
     {
         var events = new List<AgentV2Observation>(); var calls = 0; var toolCount = 0; AgentV2Answer? candidate = null;
+        var reads = new List<AgentV2ToolResult>();
         var watch = Stopwatch.StartNew();
         options.CurrentValue.Workspaces.TryGetValue(request.WorkspaceId, out var configuration);
         var revision = configuration?.Revision ?? 0;
-        AgentV2Evaluation Wrap(AgentTurnResult result) => new(result with { ModelCalls = calls, ToolCalls = toolCount, ElapsedMilliseconds = watch.ElapsedMilliseconds }, candidate, events.ToArray());
+        AgentV2Evaluation Wrap(AgentTurnResult result) => new(result with { ModelCalls = calls, ToolCalls = toolCount, ElapsedMilliseconds = watch.ElapsedMilliseconds }, candidate, events.ToArray(),
+            reads.Select(r => r with { Prepared = null }).ToArray());
         void Trace(string stage, string outcome, string? tool = null)
         {
             events.Add(new("AgentV2", Build, revision, stage, outcome, calls, toolCount, tool));
@@ -76,13 +82,13 @@ La respuesta natural será evaluada independientemente: tu propia lista de citas
                 .Where(m => m.Kind == MessageKind.Text && m.Timestamp <= clock.UtcNow && m.ExternalMessageId != request.SourceMessageId
                     && m.Sender is SenderType.Consumer or SenderType.AI).TakeLast(4)
                 .Select(m => new { Role = m.Sender == SenderType.Consumer ? "user" : "assistant", Text = m.Content[..Math.Min(250, m.Content.Length)] }).ToArray();
-            var reads = new List<AgentV2ToolResult>(); var facts = new List<AgentV2Fact>(); var required = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var facts = new List<AgentV2Fact>(); var required = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var ids = new HashSet<string>(StringComparer.Ordinal); var next = JsonSerializer.Deserialize<ConversationContextDto>(JsonSerializer.Serialize(origin))!;
             var goal = "Information"; var handoff = false;
             for (var round = 0; round < 3; round++) {
                 if (!await Authorized(false)) throw new InvalidOperationException("Authorization changed.");
                 if (!await budget.AcquireAiAsync(request.WorkspaceId, request.ClientKey, $"agentv2:v1:{request.ConversationId}:{request.SourceMessageId}:{round}", token))
-                    throw new AiBudgetDeniedException("WorkspaceShare");
+                    return await BudgetDenied();
                 var question = ConversationQuestion.Current(request.WorkspaceId, next, clock.UtcNow);
                 if (question?.ConversationId != request.ConversationId) question = null;
                 var input = JsonSerializer.Serialize(new {
@@ -90,7 +96,8 @@ La respuesta natural será evaluada independientemente: tu propia lista de citas
                         AvailableModules = modules.Order().ToArray(), UnavailableCapabilities = new[] { "room_night_inventory", "physical_stock", "confirm_booking", "confirm_order", "payments" } },
                     Memory = next.AgentV2, Draft = new { next.CurrentGoal, next.CurrentStep, next.SelectedServiceId, next.PendingServiceIds, next.SelectedLocationId, next.TargetDate, next.TargetTime,
                         HasPatientName = !string.IsNullOrWhiteSpace(next.RealCustomerName), Question = question == null ? null : new { question.QuestionId,
-                            Expected = question.Expected.ToString(), Prompt = question.LinguisticQuestion(next) } },
+                            Expected = question.Expected.ToString(), Prompt = next.AgentV2?.QuestionSourceMessageId == question.SourceMessageId && !string.IsNullOrEmpty(next.LastQuestion)
+                                ? next.LastQuestion[^Math.Min(500, next.LastQuestion.Length)..] : question.LinguisticQuestion(next) } },
                     Recent = history, Message = request.Text, Tools = registry.Values.Select(t => t.Definition).ToArray(),
                     Results = reads.Select(r => new { r.CallId, r.Name, r.Status, r.Facts }).ToArray() });
                 if (input.Length > 24000) throw new InvalidOperationException("Bounded context exceeded.");
@@ -110,6 +117,12 @@ La respuesta natural será evaluada independientemente: tu propia lista de citas
                     if (tool.Modules.Any(m => !currentModules.Contains(m))) throw new InvalidOperationException("Tool revoked.");
                     toolCount++; var read = await tool.Execute(call, next, token);
                     if (read.Prepared != null) next = read.Prepared;
+                    var localized = read.Facts.Select(f => f.Key == "AvailableStartUtc" && DateTime.TryParse(f.Value, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var instant) && instant.Kind == DateTimeKind.Utc
+                            ? f with { Key = "AvailableAppointment", Value = TimeZoneInfo.ConvertTimeFromUtc(instant, TimeZoneInfo.FindSystemTimeZoneById(profile.TimeZone))
+                                .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + " (" + profile.TimeZone + "), disponible al consultar; todavía no reservada." }
+                            : f).ToArray();
+                    read = read with { Facts = localized };
                     reads.Add(read); facts.AddRange(read.Facts); required.UnionWith(read.RequiredModules); Trace("Tool", read.Status, call.Name);
                     if (call.Name == "handoff" && next.Mode == "Human") {
                         handoff = true; goal = "HumanHelp";
@@ -120,14 +133,47 @@ La respuesta natural será evaluada independientemente: tu propia lista de citas
             }
             if (candidate == null || candidate.FactIds == null) throw new JsonException("No bounded final answer.");
             if (!await Authorized(false) || !modules.SetEquals(await entitlements.GetAvailableModuleCodesAsync(request.WorkspaceId, token))) throw new InvalidOperationException("Capabilities changed.");
-            var verdict = verifier.Verify(candidate, facts); Trace("Answer", verdict.Reason);
-            next.AgentV2 = new(revision, goal, facts.Where(f => f.EntityId != null).Select(f => f.EntityId!).Distinct().Take(5).ToArray());
+            var verdict = await verifier.VerifyAsync(candidate, facts, async (system, input, reviewToken) => {
+                if (!await Authorized(false)) throw new InvalidOperationException("Review authorization changed.");
+                if (!await budget.AcquireAiAsync(request.WorkspaceId, request.ClientKey, $"agentv2:v1:{request.ConversationId}:{request.SourceMessageId}:review", reviewToken))
+                    throw new AiBudgetDeniedException("WorkspaceShare");
+                calls++; Trace("Review", "Started");
+                using var telemetry = AiTelemetry.Begin(request.WorkspaceId, AiTaskType.ResponseComposition);
+                using var parsed = JsonDocument.Parse(input);
+                var reviewContext = JsonSerializer.Serialize(new { Review = parsed.RootElement, AllowedTools = registry.Keys.ToArray() });
+                return await router.ExecuteTaskAsync(AiTaskType.ResponseComposition, system, reviewContext, true, reviewToken).WaitAsync(reviewToken);
+            }, token);
+            Trace("Answer", verdict.Reason);
+            if (!await Authorized(false) || !modules.SetEquals(await entitlements.GetAvailableModuleCodesAsync(request.WorkspaceId, token))) throw new InvalidOperationException("Authorization changed during review.");
+            var publishedFacts = verdict.Accepted ? facts.Where(f => candidate.FactIds.Contains(f.Id, StringComparer.Ordinal)) : FallbackFacts(facts, candidate.FactIds);
+            var previousReferences = origin.AgentV2?.QuestionSourceMessageId != null ? origin.AgentV2.EntityReferences ?? [] : [];
+            var references = publishedFacts.Where(f => f.EntityId != null && f.EntityKind != null).Select(f => new AgentV2EntityReference(f.EntityKind!, f.EntityId!))
+                .Concat(previousReferences).Distinct().Take(5).ToArray();
+            next.AgentV2 = new(revision, goal, references.Select(r => r.Id).Distinct(StringComparer.Ordinal).ToArray(), request.SourceMessageId, references);
             // An unverified candidate is NEVER public, journaled as text, or replaced by a legacy flow.
             var durable = verdict.Accepted ? new AgentTurnResult(true, "AgentV2Verified", null, [], calls, watch.ElapsedMilliseconds,
                 VerifiedText: verdict.Text, RequiredModules: required.ToArray(), ToolCalls: toolCount, Handoff: handoff ? AgentHandoffState.Requested : AgentHandoffState.None)
-                : AgentSafeReplies.Failure("AgentV2AnswerUnverified", "Necesito comprobar esa respuesta antes de publicarla. No he registrado ninguna operación comercial.");
+                : AgentSafeReplies.Failure("AgentV2AnswerUnverified", UsefulFallback(facts, candidate.FactIds));
+            if (!handoff) ConversationQuestion.Remember(request.WorkspaceId, request.SourceMessageId, next,
+                goal == "BookingPreparation" ? ExpectedReply.RequestedData : ExpectedReply.Information,
+                goal == "BookingPreparation" ? ConversationIntent.Reservation : ConversationIntent.General,
+                durable.VerifiedText!, clock.UtcNow, request.ConversationId);
             var completed = await journal.CompleteAsync(request, entry.Lease, next, durable, token);
             return Wrap((await Recover(completed)) with { Recovered = false });
+
+            async Task<AgentV2Evaluation> BudgetDenied() {
+                Trace("Budget", "Denied");
+                if (!await Authorized(false)) return Wrap(AgentTurnResult.Rejected("AgentV2Denied"));
+                // Preserve the original draft, not partially staged changes from
+                // an unfinished model loop. Same journal/CAS; no quota refund/retry.
+                var preserved = JsonSerializer.Deserialize<ConversationContextDto>(JsonSerializer.Serialize(origin))!;
+                preserved.AgentV2 ??= new(revision, "Clarification", []);
+                preserved.AgentV2 = preserved.AgentV2 with { QuestionSourceMessageId = request.SourceMessageId };
+                var failed = AgentSafeReplies.Failure("AgentV2BudgetDenied", "Llegamos al límite temporal de consultas. Conservamos lo que estabas preparando; puedes volver a preguntar en un momento. No he registrado ninguna operación comercial.");
+                ConversationQuestion.Remember(request.WorkspaceId, request.SourceMessageId, preserved, ExpectedReply.Information,
+                    ConversationIntent.General, failed.VerifiedText!, clock.UtcNow, request.ConversationId);
+                return Wrap((await Recover(await journal.CompleteAsync(request, entry.Lease!, preserved, failed, token))) with { Recovered = false });
+            }
 
             async Task<bool> Authorized(bool human, bool ownHandoff = false) {
                 if (!Handles(request.WorkspaceId) || human && !ownHandoff || !options.CurrentValue.Workspaces.TryGetValue(request.WorkspaceId, out var current) || current.Revision != revision) return false;
@@ -162,4 +208,13 @@ La respuesta natural será evaluada independientemente: tu propia lista de citas
         }
     }
     private static string Hash(string input) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
+    private static IEnumerable<AgentV2Fact> FallbackFacts(IReadOnlyList<AgentV2Fact> facts, string[] requested)
+        => facts.Where(f => requested.Contains(f.Id, StringComparer.Ordinal)
+            && f.Key is "OfferingPrice" or "Offering" or "RoomType" or "Location" or "AvailableAppointment" or "PreparationStatus").Take(2);
+    private static string UsefulFallback(IReadOnlyList<AgentV2Fact> facts, string[] requested)
+    {
+        var selected = FallbackFacts(facts, requested).Select(f => f.Value).ToArray();
+        return selected.Length == 0 ? "No pude comprobar la respuesta completa. ¿Qué dato del negocio quieres que revise? No he registrado operaciones comerciales."
+            : "Puedo confirmar estos datos del negocio:\n\n" + string.Join("\n", selected) + "\n\n¿Qué te gustaría precisar? Todavía no he registrado ninguna operación comercial.";
+    }
 }

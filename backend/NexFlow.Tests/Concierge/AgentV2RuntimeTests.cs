@@ -242,15 +242,17 @@ public sealed class AgentV2RuntimeTests
         Assert.Equal(accepted, verdict.Accepted);
     }
 
-    [Fact]
-    public async Task Exclusive_Groq_trial_has_no_fallback_on_429_for_conversation_tasks()
+    [Theory]
+    [InlineData(AiTaskType.ComplexChat)]
+    [InlineData(AiTaskType.ResponseComposition)]
+    public async Task Exclusive_Groq_trial_has_no_fallback_on_429_for_conversation_tasks(AiTaskType task)
     {
         var groq = new Mock<IAiProvider>(MockBehavior.Strict); var gemini = new Mock<IAiProvider>(MockBehavior.Strict);
         groq.SetupGet(p => p.ProviderType).Returns(AiProviderType.Groq); gemini.SetupGet(p => p.ProviderType).Returns(AiProviderType.Gemini);
         groq.Setup(p => p.GenerateTextAsync("contract", "message", true, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("synthetic", null, HttpStatusCode.TooManyRequests));
         var router = new AiRouter([groq.Object, gemini.Object], NullLogger<AiRouter>.Instance, AiProviderType.Groq);
-        await Assert.ThrowsAsync<HttpRequestException>(() => router.ExecuteTaskAsync(AiTaskType.ComplexChat, "contract", "message", true, default));
+        await Assert.ThrowsAsync<HttpRequestException>(() => router.ExecuteTaskAsync(task, "contract", "message", true, default));
         groq.Verify(p => p.GenerateTextAsync("contract", "message", true, It.IsAny<CancellationToken>()), Times.Once);
         gemini.Verify(p => p.GenerateTextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -268,7 +270,10 @@ public sealed class AgentV2RuntimeTests
         internal AgentV2Ingress? Ingress { get; }
         internal Queue<Func<JsonElement, Task<string>>> Script { get; } = [];
         internal List<string> Inputs { get; } = [];
+        internal Queue<Func<JsonElement, Task<string>>> ReviewScript { get; } = [];
+        internal List<string> ReviewInputs { get; } = [];
         internal Func<Task>? BeforeModel { get; set; }
+        internal Func<Task>? BeforeReview { get; set; }
         internal Case(string pack = "appointments", IAiRouter? external = null, bool channel = false)
         {
             var ingress = new Mock<IAgentV2Ingress>();
@@ -287,6 +292,12 @@ public sealed class AgentV2RuntimeTests
                     if (external != null) return await external.ExecuteTaskAsync(task, system, input, json, ct);
                     using var parsed = JsonDocument.Parse(input); return await Script.Dequeue()(parsed.RootElement);
                 });
+            router.Setup(r => r.ExecuteTaskAsync(AiTaskType.ResponseComposition, It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+                .Returns(async (AiTaskType task, string system, string input, bool json, CancellationToken ct) => {
+                    ReviewInputs.Add(input); if (BeforeReview != null) await BeforeReview();
+                    if (external != null) return await external.ExecuteTaskAsync(task, system, input, json, ct);
+                    using var parsed = JsonDocument.Parse(input); return await ReviewScript.Dequeue()(parsed.RootElement);
+                });
             Runtime = new(router.Object, new AgentV2Tools(new BusinessReadTools(F.Business.KnowledgeReads.Object, F.Business.EntitlementReads.Object, F.Business.EngineReads.Object),
                 F.Business.OfferingReads.Object, F.BookingDrafts, F.Clock), new AgentV2AnswerVerifier(), F.Journal, F.Business.Contexts,
                 F.DemoRepository ?? (IConversationRepository)F.Conversations.Object, F.Business.EntitlementReads.Object, F.Business.ProfileReads.Object, F.Business.Recovery, F.DemoPolicy,
@@ -296,6 +307,29 @@ public sealed class AgentV2RuntimeTests
         }
         internal void Call(string name, object args) => Script.Enqueue(_ => Task.FromResult(JsonSerializer.Serialize(new AgentV2ModelTurn([new("r", name, JsonSerializer.SerializeToElement(args))], null))));
         internal void Answer(string text, string[] facts) => Script.Enqueue(_ => Task.FromResult(JsonSerializer.Serialize(new AgentV2ModelTurn([], new(text, facts)))));
+        // These helpers inject both model outputs. They exercise publication
+        // authority, never certify a real model's semantic judgement.
+        internal void NaturalRead(string name, Func<JsonElement[], AgentV2Answer> answer)
+        {
+            Call(name, new { });
+            Script.Enqueue(input => Task.FromResult(JsonSerializer.Serialize(new AgentV2ModelTurn([],
+                answer(input.GetProperty("Results")[0].GetProperty("Facts").EnumerateArray().ToArray())))));
+        }
+        internal void InjectSupportedReview() => ReviewScript.Enqueue(input => {
+            var draft = input.GetProperty("Review").GetProperty("Draft").GetString()!;
+            var ids = System.Text.RegularExpressions.Regex.Matches(draft, @"\{\{([A-Za-z0-9_:-]+)\}\}")
+                .Select(m => m.Groups[1].Value).Distinct().ToArray();
+            return Task.FromResult(JsonSerializer.Serialize(new AgentV2SemanticReview("Supported", [new(draft, ids.Length == 0 ? "Question" : "Fact", ids)])));
+        });
+        internal async Task<AgentV2Evaluation> ConversationalTurn(string text, string source)
+        {
+            var response = await Turn(text, source);
+            if (!F.History.Any(m => m.ExternalMessageId == source)) {
+                F.History.Add(new() { Sender = SenderType.Consumer, Content = text, ExternalMessageId = source, Timestamp = F.Business.Now });
+                if (response.Durable.Publishable) F.History.Add(new() { Sender = SenderType.AI, Content = response.Durable.VerifiedText!, Timestamp = F.Business.Now });
+            }
+            return response;
+        }
         internal void Read(string name)
         {
             Call(name, new { }); Script.Enqueue(input => {
