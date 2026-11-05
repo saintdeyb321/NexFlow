@@ -10,6 +10,7 @@ using NexFlow.Application.Features.Automation.Dialogue.Understanding;
 using NexFlow.Application.Features.Automation.Dialogue.Contracts;
 using NexFlow.Domain.Enums;
 using NexFlow.Application.Features.Automation.Agent;
+using NexFlow.Application.Features.Automation.AgentV2;
 
 namespace NexFlow.Application.Features.Automation.ProcessMessage;
 
@@ -28,6 +29,7 @@ public class ProcessIncomingMessageCommandHandler
     private readonly IExperimentalAgentRuntime? _experiment;
     private readonly IAgentDemoPolicy? _demoPolicy;
     private readonly IAgentDemoChannel? _demoChannel;
+    private readonly IAgentV2Ingress? _agentV2;
 
     public ProcessIncomingMessageCommandHandler(
         IIncomingMessageGuard guard,
@@ -39,7 +41,7 @@ public class ProcessIncomingMessageCommandHandler
         IContextRecoveryService contextRecovery,
         ILocationRepository locationRepo,
         IEntitlementService entitlementService, IClock? clock = null, IExperimentalAgentRuntime? experiment = null,
-        IAgentDemoPolicy? demoPolicy = null, IAgentDemoChannel? demoChannel = null)
+        IAgentDemoPolicy? demoPolicy = null, IAgentDemoChannel? demoChannel = null, IAgentV2Ingress? agentV2 = null)
     {
         _guard = guard;
         _stateService = stateService;
@@ -53,6 +55,7 @@ public class ProcessIncomingMessageCommandHandler
         _clock = clock;
         _experiment = experiment;
         _demoPolicy = demoPolicy; _demoChannel = demoChannel;
+        _agentV2 = agentV2;
     }
 
     public Task<Result> Handle(ProcessIncomingMessageCommand request, CancellationToken cancellationToken)
@@ -64,6 +67,8 @@ public class ProcessIncomingMessageCommandHandler
         if (!guardResult.IsValid) { Trace("GuardRejected", guardResult.WorkspaceId); return Result.Success(); }
         // Reactions/key/protocol events are durable input, not consumer questions or human takeovers.
         if (request.Kind == IncomingMessageKind.Control) { Trace("ControlEvent", guardResult.WorkspaceId); return Result.Success(); }
+        if (!request.FromMe && _agentV2 != null && await _agentV2.TryHandleAsync(guardResult.WorkspaceId, guardResult.NormalizedPhone, request, cancellationToken))
+            return Result.Success(); // Engine selection precedes every legacy linguistic decision.
 
         var protectedDemo = !request.FromMe && _demoPolicy?.Protects(guardResult.WorkspaceId) == true;
         if (protectedDemo) {

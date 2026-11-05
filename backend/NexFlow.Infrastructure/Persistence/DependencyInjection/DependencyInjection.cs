@@ -99,6 +99,7 @@ public static class DependencyInjection
         services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentShadowOptions>().Bind(configuration.GetSection("AgentShadow"));
         services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentDialogueOptions>().Bind(configuration.GetSection("AgentDialogue"));
         services.AddOptions<NexFlow.Application.Features.Automation.Agent.AgentDemoOptions>().Bind(configuration.GetSection("AgentDemo"));
+        services.AddOptions<NexFlow.Application.Features.Automation.AgentV2.AgentV2Options>().Bind(configuration.GetSection("AgentV2"));
         services.AddScoped<IAiRequestAdmission, FirestoreAiRequestAdmission>();
 
         services.AddScoped<IOutboxRepository, PostgresOutboxRepository>();

@@ -39,17 +39,20 @@ internal sealed class AgentDialogueFixture
     public IAgentDemoPolicy DemoPolicy { get; }
     public FirestoreConversationRepository? DemoRepository { get; private set; }
     public IAgentDemoChannel? DemoChannel { get; private set; }
+    public IOutboundMessageService? DemoOutbound { get; private set; }
     public int WireCalls { get; private set; }
     public List<string> WireTexts { get; } = [];
     public bool FailAfterWire { get; set; }
     public Func<Task>? BeforeWire { get; set; }
     public AgentEvaluationTrace? Evidence { get; }
+    public IAgentBookingDrafts BookingDrafts { get; private set; } = null!;
 
-    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false, IAgentDemoPolicy? demoPolicy = null, AgentEvaluationTrace? evidence = null)
+    public AgentDialogueFixture(IAiRouter? external = null, bool demoChannel = false, IAgentDemoPolicy? demoPolicy = null, AgentEvaluationTrace? evidence = null,
+        Func<AssistantConversationTests.Fixture, NexFlow.Application.Features.Automation.AgentV2.IAgentV2Ingress>? agentV2Factory = null)
     {
         _external = external; _demoMode = demoChannel; Evidence = evidence; DemoPolicy = demoPolicy ?? new AgentDemoPolicy(Microsoft.Extensions.Options.Options.Create(DemoOptions));
         Business = new(conciergeCatalog: true, intelligentCommerce: true, experimentFactory: Configure,
-            demoFactory: demoChannel ? ConfigureChannel : null, demoPolicy: demoChannel ? DemoPolicy : null);
+            demoFactory: demoChannel ? ConfigureChannel : null, demoPolicy: demoChannel ? DemoPolicy : null, agentV2Factory: agentV2Factory);
         Business.Now = new(2026, 11, 3, 15, 0, 0, DateTimeKind.Utc);
         Business.Services[0].Name = "Evaluación odontológica"; Business.Services[0].PriceMinorUnits = 6000;
         Business.Services[1].Name = "Extracción dental"; Business.Services[1].PriceMinorUnits = 9000;
@@ -105,11 +108,12 @@ internal sealed class AgentDialogueFixture
             f.Contexts, DemoRepository ?? (IConversationRepository)Conversations.Object, f.EntitlementReads.Object, f.Recovery, Clock, Microsoft.Extensions.Options.Options.Create(ShadowOptions),
             new FirestoreAgentEvaluationClaims(f.Firestore.Db, Clock));
         Journal = new(f.Firestore.Db, Clock);
-        Runtime = new(Shadow, Journal, f.Contexts, DemoRepository ?? (IConversationRepository)Conversations.Object, f.EntitlementReads.Object, Clock, Microsoft.Extensions.Options.Options.Create(Options),
-            new AgentBookingDrafts(new NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver(f.EntitlementReads.Object,
+        BookingDrafts = new AgentBookingDrafts(new NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver(f.EntitlementReads.Object,
                 f.ProfileReads.Object, f.LocationReads.Object, f.OfferingReads.Object, Clock, new(), new(), new(), new(), new(),
                 NullLogger<NexFlow.Application.Features.Automation.Dialogue.Understanding.WorkspaceSlotResolver>.Instance),
-                f.OfferingReads.Object, f.EntitlementReads.Object, draftReads, Clock), _demoMode ? DemoPolicy : null);
+                f.OfferingReads.Object, f.EntitlementReads.Object, draftReads, Clock);
+        Runtime = new(Shadow, Journal, f.Contexts, DemoRepository ?? (IConversationRepository)Conversations.Object, f.EntitlementReads.Object, Clock, Microsoft.Extensions.Options.Options.Create(Options),
+            BookingDrafts, _demoMode ? DemoPolicy : null);
         return Runtime;
     }
     private IAgentDemoChannel ConfigureChannel(AssistantConversationTests.Fixture f)
@@ -122,6 +126,7 @@ internal sealed class AgentDialogueFixture
                 if (FailAfterWire) throw new TimeoutException("Synthetic uncertain transport"); return "synthetic-provider-" + WireCalls;
             });
         var outbound = new OutboundMessageService(DemoRepository!, gateway.Object, Mock.Of<INotificationService>(), NullLogger<OutboundMessageService>.Instance);
+        DemoOutbound = outbound;
         DemoChannel = new AgentDemoChannel(DemoPolicy, Runtime, Journal, DemoRepository!, f.Contexts, f.EntitlementReads.Object,
             outbound, new HumanHandoffService(DemoRepository!, f.Contexts));
         return DemoChannel;

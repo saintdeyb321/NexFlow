@@ -20,18 +20,20 @@ public class AiRouter : IAiRouter
 {
     private readonly IEnumerable<IAiProvider> _providers;
     private readonly ILogger<AiRouter> _logger;
+    private readonly AiProviderType? _exclusiveProvider;
 
-    public AiRouter(IEnumerable<IAiProvider> providers, ILogger<AiRouter> logger)
+    public AiRouter(IEnumerable<IAiProvider> providers, ILogger<AiRouter> logger, AiProviderType? exclusiveProvider = null)
     {
         _providers = providers;
         _logger = logger;
+        _exclusiveProvider = exclusiveProvider; // Explicit isolated evaluation only; production default is unchanged.
     }
 
     public async Task<string> ExecuteTaskAsync(AiTaskType taskType, string systemPrompt, string userPrompt, bool useJsonMode, CancellationToken ct)
     {
         using var taskScope = AiTelemetry.TaskScope(taskType);
         // 🔥 SPRINT 10: Enrutamiento seguro por Enum, inmune a refactorizaciones de clases
-        IAiProvider primaryProvider = taskType == AiTaskType.IntentExtraction
+        IAiProvider primaryProvider = _exclusiveProvider.HasValue ? GetProvider(_exclusiveProvider.Value) : taskType == AiTaskType.IntentExtraction
             ? GetProvider(AiProviderType.Groq)
             : GetProvider(AiProviderType.Gemini);
 
@@ -43,7 +45,7 @@ public class AiRouter : IAiRouter
                 provider: primaryProvider.ProviderType.ToString(), reason: "Primary");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception ex) when (IsTransientError(ex))
+        catch (Exception ex) when (!_exclusiveProvider.HasValue && IsTransientError(ex))
         {
             var fallbackProvider = GetProvider(taskType == AiTaskType.IntentExtraction ? AiProviderType.Gemini : AiProviderType.Groq);
             // 🔥 SPRINT 10: Solo ejecutamos Fallback si el error es transitorio (caída temporal)

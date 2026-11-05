@@ -25,6 +25,7 @@ using NexFlow.Application.Features.SuperAdmin.ProvisionClient;
 using NexFlow.Application.Features.SuperAdmin.Workspaces;
 using NexFlow.Application.Services;
 using NexFlow.Application.Features.Automation.Agent;
+using NexFlow.Application.Features.Automation.AgentV2;
 
 namespace NexFlow.Application.DependencyInjection;
 
@@ -83,6 +84,11 @@ public static class DependencyInjection
         services.AddScoped<LlmFirstShadowAgent>();
         services.AddScoped<IExperimentalAgentRuntime, AgentDialogueRuntime>();
         services.AddScoped<IAgentDemoChannel, AgentDemoChannel>();
+        services.AddOptions<AgentV2Options>();
+        services.AddScoped<AgentV2Tools>();
+        services.AddScoped<IAgentV2AnswerVerifier, AgentV2AnswerVerifier>();
+        services.AddScoped<IAgentV2Runtime, AgentV2Runtime>();
+        services.AddScoped<IAgentV2Ingress, AgentV2Ingress>();
         services.AddScoped<IConversationalAgent, AgentOwner>();
         services.AddScoped<IOfferingService, OfferingService>();
         services.AddScoped<IAiInterpreter, AiInterpreter>();

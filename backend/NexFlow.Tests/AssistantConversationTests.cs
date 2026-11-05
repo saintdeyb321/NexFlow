@@ -267,7 +267,8 @@ public sealed class AssistantConversationTests
             Func<Fixture, IExistingReservationFlow>? managementFactory = null, bool contextualFocus = false, bool informationalCommerce = false,
             Func<Fixture, NexFlow.Application.Features.Automation.Agent.IExperimentalAgentRuntime>? experimentFactory = null,
             Func<Fixture, NexFlow.Application.Features.Automation.Agent.IAgentDemoChannel>? demoFactory = null,
-            NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy? demoPolicy = null)
+            NexFlow.Application.Features.Automation.Agent.IAgentDemoPolicy? demoPolicy = null,
+            Func<Fixture, NexFlow.Application.Features.Automation.AgentV2.IAgentV2Ingress>? agentV2Factory = null)
         {
             var settings = Options.Create(new AssistantRecoveryOptions { InformationalCommerceWorkspaces = informationalCommerce ? [Workspace] : [] });
             var cache = new Mock<IConversationCache>();
@@ -362,7 +363,7 @@ public sealed class AssistantConversationTests
             stateService.Setup(s => s.ProcessStateAsync(Workspace, Phone, It.IsAny<ProcessIncomingMessageCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(async () => { var state = await Context(); return (state.Mode != "Human", new ConversationRecord { Id = "chat", Mode = state.Mode == "Human" ? ConversationMode.Human : ConversationMode.Automatic }, (string?)null); });
             Handler = new(guard.Object, stateService.Object, _orchestrator, knowledge.Object, outbound.Object,
-                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object, clock.Object, experiment, demoPolicy, demoChannel);
+                NullLogger<ProcessIncomingMessageCommandHandler>.Instance, Contexts, locations.Object, entitlements.Object, clock.Object, experiment, demoPolicy, demoChannel, agentV2Factory?.Invoke(this));
         }
         public Task<ConversationContextDto> Context() => Contexts.GetOrRecoverContextAsync(Workspace, Phone, default);
         public void UseCatalogKnowledge()
